@@ -1,4 +1,4 @@
-package ru.bitcoin.node.merkle;
+package ru.bitcoin.node.cryoto.merkle;
 
 import org.junit.jupiter.api.Test;
 import ru.bitcoin.node.common.bytes.ByteUtils;

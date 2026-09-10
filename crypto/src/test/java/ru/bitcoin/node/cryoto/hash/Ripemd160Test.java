@@ -1,22 +1,22 @@
-package ru.bitcoin.node.hash;
+package ru.bitcoin.node.cryoto.hash;
 
 import org.junit.jupiter.api.Test;
 import ru.bitcoin.node.common.bytes.HexUtils;
-import ru.bitcoin.node.crypto.hash.Sha256;
+import ru.bitcoin.node.crypto.hash.Ripemd160;
 
 import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-class Sha256Test {
+class Ripemd160Test {
 
     @Test
     void shouldHashEmptyData() {
-        byte[] hash = Sha256.hash(new byte[0]);
+        byte[] hash =
+                Ripemd160.hash(new byte[0]);
 
         assertEquals(
-                "e3b0c44298fc1c149afbf4c8996fb924" +
-                        "27ae41e4649b934ca495991b7852b855",
+                "9c1185a5c5e9fc54612808977ee8f548b2258d31",
                 HexUtils.encode(hash)
         );
     }
@@ -24,11 +24,12 @@ class Sha256Test {
     @Test
     void shouldHashAbc() {
         byte[] hash =
-                Sha256.hash("abc".getBytes(StandardCharsets.UTF_8));
+                Ripemd160.hash(
+                        "abc".getBytes(StandardCharsets.UTF_8)
+                );
 
         assertEquals(
-                "ba7816bf8f01cfea414140de5dae2223" +
-                        "b00361a396177a9cb410ff61f20015ad",
+                "8eb208f7e05d987a9b044a8e98c6b087f15a0bfc",
                 HexUtils.encode(hash)
         );
     }

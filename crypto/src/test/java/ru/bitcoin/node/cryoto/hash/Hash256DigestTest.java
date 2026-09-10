@@ -1,4 +1,4 @@
-package ru.bitcoin.node.hash;
+package ru.bitcoin.node.cryoto.hash;
 
 import org.junit.jupiter.api.Test;
 import ru.bitcoin.node.common.types.Hash256;
