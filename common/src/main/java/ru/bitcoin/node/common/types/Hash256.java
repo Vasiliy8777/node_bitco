@@ -1,5 +1,6 @@
 package ru.bitcoin.node.common.types;
 
+import ru.bitcoin.node.common.bytes.ByteUtils;
 import ru.bitcoin.node.common.bytes.HexUtils;
 
 import java.util.Arrays;
@@ -57,5 +58,19 @@ public final class Hash256 {
     @Override
     public int hashCode() {
         return Arrays.hashCode(bytes);
+    }
+
+    public static Hash256 fromDisplayHex(String hex) {
+        return new Hash256(
+                ByteUtils.reverse(
+                        HexUtils.decode(hex)
+                )
+        );
+    }
+
+    public String toDisplayHex() {
+        return HexUtils.encode(
+                ByteUtils.reverse(bytes)
+        );
     }
 }
