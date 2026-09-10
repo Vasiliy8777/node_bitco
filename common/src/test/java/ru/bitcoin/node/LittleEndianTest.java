@@ -1,6 +1,7 @@
-package ru.bitcoin.node.common.bytes;
+package ru.bitcoin.node;
 
 import org.junit.jupiter.api.Test;
+import ru.bitcoin.node.common.bytes.LittleEndian;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;

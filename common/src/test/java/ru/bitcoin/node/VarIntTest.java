@@ -1,7 +1,8 @@
-package ru.bitcoin.node.common.encoding;
+package ru.bitcoin.node;
 
 import org.junit.jupiter.api.Test;
 import ru.bitcoin.node.common.bytes.HexUtils;
+import ru.bitcoin.node.common.encoding.VarInt;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 

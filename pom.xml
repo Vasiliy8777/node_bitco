@@ -31,12 +31,6 @@
         <netty.version>4.1.137.Final</netty.version>
         <bouncycastle.version>1.83</bouncycastle.version>
     </properties>
-    <dependencies>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-autoconfigure</artifactId>
-        </dependency>
-    </dependencies>
 
     <modules>
         <module>common</module>
@@ -72,12 +66,6 @@
                 <groupId>org.bouncycastle</groupId>
                 <artifactId>bcprov-jdk18on</artifactId>
                 <version>${bouncycastle.version}</version>
-            </dependency>
-
-            <dependency>
-                <groupId>org.junit.jupiter</groupId>
-                <artifactId>junit-jupiter</artifactId>
-                <scope>test</scope>
             </dependency>
 
         </dependencies>

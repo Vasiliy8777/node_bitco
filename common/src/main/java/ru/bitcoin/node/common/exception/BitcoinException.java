@@ -1,4 +1,4 @@
-package ru.bitcoin.node.common.bytes.exception;
+package ru.bitcoin.node.common.exception;
 
 public class BitcoinException extends RuntimeException {
 
