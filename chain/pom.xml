@@ -16,4 +16,29 @@
 
     <artifactId>chain</artifactId>
 
+    <dependencies>
+        <dependency>
+            <groupId>ru.bitcoin.mining</groupId>
+            <artifactId>common</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>ru.bitcoin.mining</groupId>
+            <artifactId>consensus</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>ru.bitcoin.mining</groupId>
+            <artifactId>storage</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>ru.bitcoin.mining</groupId>
+            <artifactId>protocol</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+    </dependencies>
 </project>

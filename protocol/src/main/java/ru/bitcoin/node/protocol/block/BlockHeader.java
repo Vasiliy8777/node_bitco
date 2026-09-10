@@ -5,6 +5,8 @@ import ru.bitcoin.node.common.types.UInt32;
 import ru.bitcoin.node.crypto.hash.Hash256Digest;
 import ru.bitcoin.node.protocol.serialization.BlockHeaderSerializer;
 
+import java.util.Objects;
+
 public final class BlockHeader {
 
     public static final int SERIALIZED_SIZE = 80;
@@ -89,6 +91,38 @@ public final class BlockHeader {
     public Hash256 hash() {
         return Hash256Digest.hash(
                 BlockHeaderSerializer.serialize(this)
+        );
+    }
+
+    @Override
+    public boolean equals(Object o) {
+
+        if (this == o) {
+            return true;
+        }
+
+        if (!(o instanceof BlockHeader that)) {
+            return false;
+        }
+
+        return version == that.version
+                && previousBlockHash.equals(that.previousBlockHash)
+                && merkleRoot.equals(that.merkleRoot)
+                && timestamp.equals(that.timestamp)
+                && bits.equals(that.bits)
+                && nonce.equals(that.nonce);
+    }
+
+    @Override
+    public int hashCode() {
+
+        return Objects.hash(
+                version,
+                previousBlockHash,
+                merkleRoot,
+                timestamp,
+                bits,
+                nonce
         );
     }
 }
