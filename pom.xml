@@ -20,7 +20,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
         <spring-boot.version>4.1.1</spring-boot.version>
-        <rocksdb.version>10.5.1</rocksdb.version>
+        <rocksdb.version>10.2.1</rocksdb.version>
         <netty.version>4.1.137.Final</netty.version>
         <bouncycastle.version>1.83</bouncycastle.version>
     </properties>

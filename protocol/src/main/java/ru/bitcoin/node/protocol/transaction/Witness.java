@@ -57,4 +57,49 @@ public final class Witness {
 
         return Collections.unmodifiableList(copy);
     }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+
+        if (!(o instanceof Witness witness)) {
+            return false;
+        }
+
+        if (items.size()
+                != witness.items.size()) {
+            return false;
+        }
+
+        for (int i = 0;
+             i < items.size();
+             i++) {
+
+            if (!java.util.Arrays.equals(
+                    items.get(i),
+                    witness.items.get(i)
+            )) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    @Override
+    public int hashCode() {
+        int result = 1;
+
+        for (byte[] item : items) {
+            result =
+                    31 * result
+                            + java.util.Arrays.hashCode(
+                            item
+                    );
+        }
+
+        return result;
+    }
 }

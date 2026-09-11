@@ -50,4 +50,24 @@ public final class Block {
     public Hash256 hash() {
         return header.hash();
     }
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+
+        if (!(o instanceof Block block)) {
+            return false;
+        }
+
+        return header.equals(block.header)
+                && transactions.equals(block.transactions);
+    }
+
+    @Override
+    public int hashCode() {
+        int result = header.hashCode();
+        result = 31 * result + transactions.hashCode();
+        return result;
+    }
 }

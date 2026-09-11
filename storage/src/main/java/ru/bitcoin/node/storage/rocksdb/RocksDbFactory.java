@@ -1,4 +1,4 @@
-package ru.bitcoin.minig.node.storage.rocksdb;
+package ru.bitcoin.node.storage.rocksdb;
 
 public class RocksDbFactory {
 }

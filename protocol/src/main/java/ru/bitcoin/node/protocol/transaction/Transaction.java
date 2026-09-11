@@ -89,4 +89,28 @@ public final class Transaction {
                 TransactionSerializer.serialize(this)
         );
     }
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+
+        if (!(o instanceof Transaction transaction)) {
+            return false;
+        }
+
+        return version == transaction.version
+                && inputs.equals(transaction.inputs)
+                && outputs.equals(transaction.outputs)
+                && lockTime.equals(transaction.lockTime);
+    }
+
+    @Override
+    public int hashCode() {
+        int result = Integer.hashCode(version);
+        result = 31 * result + inputs.hashCode();
+        result = 31 * result + outputs.hashCode();
+        result = 31 * result + lockTime.hashCode();
+        return result;
+    }
 }

@@ -76,4 +76,51 @@ public final class TxIn {
     public Witness witness() {
         return witness;
     }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+
+        if (!(o instanceof TxIn txIn)) {
+            return false;
+        }
+
+        return previousOutput.equals(
+                txIn.previousOutput
+        )
+                && java.util.Arrays.equals(
+                scriptSig,
+                txIn.scriptSig
+        )
+                && sequence.equals(
+                txIn.sequence
+        )
+                && witness.equals(
+                txIn.witness
+        );
+    }
+
+    @Override
+    public int hashCode() {
+        int result =
+                previousOutput.hashCode();
+
+        result =
+                31 * result
+                        + java.util.Arrays.hashCode(
+                        scriptSig
+                );
+
+        result =
+                31 * result
+                        + sequence.hashCode();
+
+        result =
+                31 * result
+                        + witness.hashCode();
+
+        return result;
+    }
 }
