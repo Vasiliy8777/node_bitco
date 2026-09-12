@@ -11,11 +11,11 @@ public final class TxOut {
             long value,
             byte[] scriptPubKey
     ) {
-        if (value < 0) {
+        /*if (value < 0) {
             throw new IllegalArgumentException(
                     "Transaction output value cannot be negative"
             );
-        }
+        }*/
 
         if (scriptPubKey == null) {
             throw new IllegalArgumentException(

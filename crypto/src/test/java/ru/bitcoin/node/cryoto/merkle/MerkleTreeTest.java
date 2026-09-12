@@ -4,12 +4,13 @@ import org.junit.jupiter.api.Test;
 import ru.bitcoin.node.common.bytes.ByteUtils;
 import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.crypto.hash.Hash256Digest;
+import ru.bitcoin.node.crypto.merkle.MerkleRootResult;
 import ru.bitcoin.node.crypto.merkle.MerkleTree;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.*;
 
 class MerkleTreeTest {
 
@@ -110,5 +111,68 @@ class MerkleTreeTest {
                 );
 
         assertEquals(expected, actual);
+    }
+    @Test
+    void shouldNotReportMutationForNormalOddNumberOfHashes() {
+
+        Hash256 a =
+                Hash256.fromDisplayHex(
+                        "11".repeat(32)
+                );
+
+        Hash256 b =
+                Hash256.fromDisplayHex(
+                        "22".repeat(32)
+                );
+
+        Hash256 c =
+                Hash256.fromDisplayHex(
+                        "33".repeat(32)
+                );
+
+        MerkleRootResult result =
+                MerkleTree.calculateRootWithMutation(
+                        List.of(
+                                a,
+                                b,
+                                c
+                        )
+                );
+
+        assertFalse(
+                result.mutated()
+        );
+    }
+    @Test
+    void shouldReportMutationForDuplicatePair() {
+
+        Hash256 a =
+                Hash256.fromDisplayHex(
+                        "11".repeat(32)
+                );
+
+        Hash256 b =
+                Hash256.fromDisplayHex(
+                        "22".repeat(32)
+                );
+
+        Hash256 c =
+                Hash256.fromDisplayHex(
+                        "33".repeat(32)
+                );
+
+        MerkleRootResult result =
+                MerkleTree.calculateRootWithMutation(
+                        List.of(
+                                a,
+                                b,
+                                c,
+                                c
+                        )
+                );
+
+        assertTrue(
+                result.mutated()
+        );
     }
 }

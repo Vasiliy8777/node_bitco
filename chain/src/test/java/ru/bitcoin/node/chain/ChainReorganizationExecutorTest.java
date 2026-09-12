@@ -6,6 +6,7 @@ import ru.bitcoin.node.chain.storage.RocksDbChainTransitionStorage;
 import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.common.types.UInt32;
 import ru.bitcoin.node.protocol.block.BlockHeader;
+import ru.bitcoin.node.protocol.network.NetworkParametersRegistry;
 import ru.bitcoin.node.storage.block.RocksDbBlockIndexStore;
 import ru.bitcoin.node.storage.block.RocksDbBlockStore;
 import ru.bitcoin.node.storage.block.StoredBlockIndex;
@@ -112,18 +113,22 @@ class ChainReorganizationExecutorTest {
                             transitionStorage
                     );
 
+            StoredBlockIndexLookup blockIndexLookup =
+                    new StoredBlockIndexLookup(
+                            blockIndexStore
+                    );
+
             ChainReorganizationExecutor executor =
                     new ChainReorganizationExecutor(
                             blockStore,
                             undoStore,
                             utxoStore,
-                            transitionManager
+                            transitionManager,
+                            NetworkParametersRegistry.regtest(),
+                            blockIndexLookup
                     );
 
-            /*assertThrows(
-                    IllegalStateException.class,
-                    () -> executor.execute(update)
-            );*/
+
             IllegalStateException exception =
                     assertThrows(
                             IllegalStateException.class,

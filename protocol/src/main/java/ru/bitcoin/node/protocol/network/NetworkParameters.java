@@ -6,6 +6,9 @@ import java.math.BigInteger;
 
 public final class NetworkParameters {
 
+    private final long csvHeight;
+    private final long bip34Height;
+    private final long subsidyHalvingInterval;
     private final BitcoinNetwork network;
     private final long magic;
     private final int defaultPort;
@@ -18,6 +21,7 @@ public final class NetworkParameters {
     private final long targetTimespanSeconds;
 
     private final boolean allowMinDifficultyBlocks;
+    private final boolean enforceBip94;
     private final boolean noRetargeting;
 
     public NetworkParameters(
@@ -28,12 +32,32 @@ public final class NetworkParameters {
             BigInteger powLimit,
             long targetSpacingSeconds,
             long targetTimespanSeconds,
+            long subsidyHalvingInterval,
+            long bip34Height,
+            long csvHeight,
             boolean allowMinDifficultyBlocks,
+            boolean enforceBip94,
             boolean noRetargeting
     ) {
+
         if (network == null) {
             throw new IllegalArgumentException(
                     "network must not be null"
+            );
+        }
+        if (csvHeight < 0) {
+            throw new IllegalArgumentException(
+                    "csvHeight must not be negative"
+            );
+        }
+        if (bip34Height < 0) {
+            throw new IllegalArgumentException(
+                    "bip34Height must not be negative"
+            );
+        }
+        if (subsidyHalvingInterval <= 0) {
+            throw new IllegalArgumentException(
+                    "subsidyHalvingInterval must be positive"
             );
         }
 
@@ -75,7 +99,11 @@ public final class NetworkParameters {
         this.targetSpacingSeconds = targetSpacingSeconds;
         this.targetTimespanSeconds = targetTimespanSeconds;
         this.allowMinDifficultyBlocks = allowMinDifficultyBlocks;
+        this.enforceBip94 = enforceBip94;
         this.noRetargeting = noRetargeting;
+        this.subsidyHalvingInterval = subsidyHalvingInterval;
+        this.bip34Height = bip34Height;
+        this.csvHeight = csvHeight;
     }
 
     public BitcoinNetwork network() {
@@ -116,8 +144,22 @@ public final class NetworkParameters {
         return allowMinDifficultyBlocks;
     }
 
+    public boolean enforceBip94() {
+        return enforceBip94;
+    }
+
     public boolean noRetargeting() {
         return noRetargeting;
+    }
+
+    public long subsidyHalvingInterval() {
+        return subsidyHalvingInterval;
+    }
+    public long bip34Height() {
+        return bip34Height;
+    }
+    public long csvHeight() {
+        return csvHeight;
     }
 }
 

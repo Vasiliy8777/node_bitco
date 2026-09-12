@@ -65,6 +65,10 @@ public final class NetworkParametersRegistry {
                 MAIN_POW_LIMIT,
                 TARGET_SPACING,
                 TARGET_TIMESPAN,
+                210_000L,
+                227_931L,
+                419_328L,
+                false,
                 false,
                 false
         );
@@ -81,7 +85,11 @@ public final class NetworkParametersRegistry {
                 MAIN_POW_LIMIT,
                 TARGET_SPACING,
                 TARGET_TIMESPAN,
+                210_000L,
+                21_111L,
+                770_112L,
                 true,
+                false,
                 false
         );
     }
@@ -98,6 +106,10 @@ public final class NetworkParametersRegistry {
                 MAIN_POW_LIMIT,
                 TARGET_SPACING,
                 TARGET_TIMESPAN,
+                210_000L,
+                1L,
+                1L,
+                false,
                 false,
                 false
         );
@@ -115,7 +127,11 @@ public final class NetworkParametersRegistry {
                 REGTEST_POW_LIMIT,
                 TARGET_SPACING,
                 TARGET_TIMESPAN,
+                150L,
+                1L,
+                1L,
                 true,
+                false,
                 true
         );
     }

@@ -14,6 +14,25 @@ public final class BlockSerializer {
     public static byte[] serialize(
             Block block
     ) {
+        return serialize(
+                block,
+                true
+        );
+    }
+
+    public static byte[] serializeLegacy(
+            Block block
+    ) {
+        return serialize(
+                block,
+                false
+        );
+    }
+
+    private static byte[] serialize(
+            Block block,
+            boolean includeWitness
+    ) {
         if (block == null) {
             throw new IllegalArgumentException(
                     "block must not be null"
@@ -38,10 +57,17 @@ public final class BlockSerializer {
         for (Transaction transaction
                 : block.transactions()) {
 
-            out.writeBytes(
-                    TransactionSerializer.serialize(
+            byte[] serializedTransaction =
+                    includeWitness
+                            ? TransactionSerializer.serialize(
                             transaction
                     )
+                            : TransactionSerializer.serializeLegacy(
+                            transaction
+                    );
+
+            out.writeBytes(
+                    serializedTransaction
             );
         }
 

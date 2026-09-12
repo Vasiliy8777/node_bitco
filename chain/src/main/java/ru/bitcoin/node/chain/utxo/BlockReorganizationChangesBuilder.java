@@ -1,6 +1,10 @@
 package ru.bitcoin.node.chain.utxo;
 
+import ru.bitcoin.node.chain.AncestorMedianTimePastResolver;
+import ru.bitcoin.node.chain.BlockIndex;
+import ru.bitcoin.node.chain.BlockIndexLookup;
 import ru.bitcoin.node.common.types.Hash256;
+import ru.bitcoin.node.protocol.network.NetworkParameters;
 import ru.bitcoin.node.storage.undo.BlockUndoData;
 import ru.bitcoin.node.storage.utxo.UtxoStore;
 
@@ -16,7 +20,9 @@ public final class BlockReorganizationChangesBuilder {
     public static BlockReorganizationChanges build(
             List<BlockToDisconnect> disconnectBlocks,
             List<BlockToConnect> connectBlocks,
-            UtxoStore utxoStore
+            UtxoStore utxoStore,
+            NetworkParameters networkParameters,
+            BlockIndexLookup blockIndexLookup
     ) {
         if (disconnectBlocks == null) {
             throw new IllegalArgumentException(
@@ -24,6 +30,16 @@ public final class BlockReorganizationChangesBuilder {
             );
         }
 
+        if (networkParameters == null) {
+            throw new IllegalArgumentException(
+                    "networkParameters must not be null"
+            );
+        }
+        if (blockIndexLookup == null) {
+            throw new IllegalArgumentException(
+                    "blockIndexLookup must not be null"
+            );
+        }
         if (connectBlocks == null) {
             throw new IllegalArgumentException(
                     "connectBlocks must not be null"
@@ -87,18 +103,54 @@ public final class BlockReorganizationChangesBuilder {
         for (BlockToConnect blockToConnect
                 : connectBlocks) {
 
-            BlockUndoData undoData =
-                    BlockConnectChangesBuilder.apply(
-                            blockToConnect.block(),
-                            blockToConnect.height(),
-                            overlay
-                    );
-
             Hash256 blockHash =
                     blockToConnect
                             .block()
                             .header()
                             .hash();
+
+            BlockIndex candidateIndex =
+                    blockIndexLookup.find(
+                            blockHash
+                    );
+
+            if (candidateIndex == null) {
+                throw new IllegalStateException(
+                        "BlockIndex not found for candidate block: "
+                                + blockHash.toDisplayHex()
+                );
+            }
+
+            if (candidateIndex.height()
+                    != blockToConnect.height()) {
+
+                throw new IllegalStateException(
+                        "Candidate BlockIndex height mismatch. "
+                                + "Block: "
+                                + blockHash.toDisplayHex()
+                                + ", expected height: "
+                                + blockToConnect.height()
+                                + ", actual height: "
+                                + candidateIndex.height()
+                );
+            }
+
+            AncestorMedianTimePastResolver medianTimePastResolver =
+                    new AncestorMedianTimePastResolver(
+                            candidateIndex,
+                            blockIndexLookup
+                    );
+
+            BlockUndoData undoData =
+                    BlockConnectChangesBuilder.apply(
+                            blockToConnect.block(),
+                            blockToConnect.height(),
+                            blockToConnect.lockTimeCutoff(),
+                            blockToConnect.previousMedianTimePast(),
+                            overlay,
+                            networkParameters,
+                            medianTimePastResolver
+                    );
 
             if (connectedUndo.put(
                     blockHash,

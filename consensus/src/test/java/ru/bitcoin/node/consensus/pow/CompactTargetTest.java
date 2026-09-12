@@ -41,4 +41,36 @@ class CompactTargetTest {
                 bits
         );
     }
+    @Test
+    void shouldEncodeRegtestPowLimit() {
+
+        BigInteger powLimit =
+                new BigInteger(
+                        "7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+                        16
+                );
+
+        assertEquals(
+                0x207fffffL,
+                CompactTarget.encode(
+                        powLimit
+                )
+        );
+    }
+    @Test
+    void shouldEncodeMainnetPowLimit() {
+
+        BigInteger powLimit =
+                new BigInteger(
+                        "00000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+                        16
+                );
+
+        assertEquals(
+                0x1d00ffffL,
+                CompactTarget.encode(
+                        powLimit
+                )
+        );
+    }
 }

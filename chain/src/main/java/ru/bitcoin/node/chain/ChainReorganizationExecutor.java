@@ -4,7 +4,9 @@ import ru.bitcoin.node.chain.utxo.BlockReorganizationChanges;
 import ru.bitcoin.node.chain.utxo.BlockReorganizationChangesBuilder;
 import ru.bitcoin.node.chain.utxo.BlockToConnect;
 import ru.bitcoin.node.chain.utxo.BlockToDisconnect;
+import ru.bitcoin.node.consensus.transaction.LockTimeCutoff;
 import ru.bitcoin.node.protocol.block.Block;
+import ru.bitcoin.node.protocol.network.NetworkParameters;
 import ru.bitcoin.node.storage.block.BlockStore;
 import ru.bitcoin.node.storage.undo.BlockUndoData;
 import ru.bitcoin.node.storage.undo.UndoStore;
@@ -15,23 +17,36 @@ import java.util.List;
 
 public final class ChainReorganizationExecutor {
 
+    private final BlockIndexLookup blockIndexLookup;
     private final BlockStore blockStore;
     private final UndoStore undoStore;
     private final UtxoStore utxoStore;
     private final ChainTransitionManager transitionManager;
+    private final NetworkParameters networkParameters;
 
     public ChainReorganizationExecutor(
             BlockStore blockStore,
             UndoStore undoStore,
             UtxoStore utxoStore,
-            ChainTransitionManager transitionManager
+            ChainTransitionManager transitionManager,
+            NetworkParameters networkParameters,
+            BlockIndexLookup blockIndexLookup
     ) {
         if (blockStore == null) {
             throw new IllegalArgumentException(
                     "blockStore must not be null"
             );
         }
-
+        if (blockIndexLookup == null) {
+            throw new IllegalArgumentException(
+                    "blockIndexLookup must not be null"
+            );
+        }
+        if (networkParameters == null) {
+            throw new IllegalArgumentException(
+                    "networkParameters must not be null"
+            );
+        }
         if (undoStore == null) {
             throw new IllegalArgumentException(
                     "undoStore must not be null"
@@ -49,11 +64,12 @@ public final class ChainReorganizationExecutor {
                     "transitionManager must not be null"
             );
         }
-
+        this.blockIndexLookup = blockIndexLookup;
         this.blockStore = blockStore;
         this.undoStore = undoStore;
         this.utxoStore = utxoStore;
         this.transitionManager = transitionManager;
+        this.networkParameters = networkParameters;
     }
 
     public void execute(
@@ -96,7 +112,9 @@ public final class ChainReorganizationExecutor {
                 BlockReorganizationChangesBuilder.build(
                         disconnectBlocks,
                         connectBlocks,
-                        utxoStore
+                        utxoStore,
+                        networkParameters,
+                        blockIndexLookup
                 );
 
         /*
@@ -206,15 +224,60 @@ public final class ChainReorganizationExecutor {
                     block,
                     index
             );
+            long blockTimestamp =
+                    block.header()
+                            .timestamp()
+                            .value();
+
+            long previousMedianTimePast =
+                    0L;
+
+            if (index.height()
+                    >= networkParameters.csvHeight()) {
+
+                if (index.height() == 0) {
+                    throw new IllegalStateException(
+                            "BIP113 cannot require previous MTP for genesis block"
+                    );
+                }
+
+                BlockIndex parent =
+                        blockIndexLookup.find(
+                                index.previousBlockHash()
+                        );
+
+                if (parent == null) {
+                    throw new IllegalStateException(
+                            "Parent BlockIndex not found while calculating "
+                                    + "lock-time cutoff for block: "
+                                    + index.hash().toDisplayHex()
+                    );
+                }
+
+                previousMedianTimePast =
+                        MedianTimePast.calculate(
+                                parent,
+                                blockIndexLookup
+                        );
+            }
+
+            long lockTimeCutoff =
+                    LockTimeCutoff.calculate(
+                            index.height(),
+                            blockTimestamp,
+                            previousMedianTimePast,
+                            networkParameters
+                    );
 
             result.add(
                     new BlockToConnect(
                             block,
-                            index.height()
+                            index.height(),
+                            lockTimeCutoff,
+                            previousMedianTimePast
                     )
             );
         }
-
         return List.copyOf(result);
     }
 

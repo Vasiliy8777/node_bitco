@@ -7,7 +7,78 @@ public final class NextWorkRequired {
 
     private NextWorkRequired() {
     }
+    public static UInt32 calculate(
+            long nextHeight,
+            UInt32 previousBits,
+            UInt32 firstBlockBits,
+            long firstBlockTimestamp,
+            long previousBlockTimestamp,
+            NetworkParameters parameters
+    ) {
+        if (previousBits == null) {
+            throw new IllegalArgumentException(
+                    "previousBits must not be null"
+            );
+        }
 
+        if (firstBlockBits == null) {
+            throw new IllegalArgumentException(
+                    "firstBlockBits must not be null"
+            );
+        }
+
+        if (parameters == null) {
+            throw new IllegalArgumentException(
+                    "parameters must not be null"
+            );
+        }
+
+        if (nextHeight < 0) {
+            throw new IllegalArgumentException(
+                    "nextHeight must not be negative"
+            );
+        }
+
+        if (parameters.noRetargeting()) {
+            return previousBits;
+        }
+
+        int interval =
+                parameters
+                        .difficultyAdjustmentInterval();
+
+        if (nextHeight % interval != 0) {
+            return previousBits;
+        }
+
+        long actualTimespan =
+                previousBlockTimestamp
+                        - firstBlockTimestamp;
+
+        /*
+         * BIP94:
+         *
+         * На Testnet4 при retarget базовая difficulty
+         * берётся из первого блока периода.
+         *
+         * На остальных сетях — из последнего.
+         */
+        UInt32 baseBits =
+                parameters.enforceBip94()
+                        ? firstBlockBits
+                        : previousBits;
+
+        long nextBits =
+                DifficultyAdjustment.calculateNextBits(
+                        baseBits.value(),
+                        actualTimespan,
+                        parameters
+                );
+
+        return new UInt32(
+                nextBits
+        );
+    }
     public static UInt32 calculate(
             long nextHeight,
             UInt32 previousBits,
