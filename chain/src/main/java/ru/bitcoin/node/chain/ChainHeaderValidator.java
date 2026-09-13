@@ -1,9 +1,11 @@
 package ru.bitcoin.node.chain;
 
 import ru.bitcoin.node.common.types.UInt32;
+import ru.bitcoin.node.consensus.block.BlockHeaderValidationException;
 import ru.bitcoin.node.consensus.block.BlockHeaderValidator;
 import ru.bitcoin.node.consensus.pow.CompactTarget;
 import ru.bitcoin.node.consensus.pow.NextWorkRequired;
+import ru.bitcoin.node.consensus.time.AdjustedTime;
 import ru.bitcoin.node.protocol.block.BlockHeader;
 import ru.bitcoin.node.protocol.network.NetworkParameters;
 
@@ -16,11 +18,18 @@ public final class ChainHeaderValidator {
             BlockHeader header,
             BlockIndex parent,
             BlockIndexLookup lookup,
-            NetworkParameters parameters
+            NetworkParameters parameters,
+            AdjustedTime adjustedTime
     ) {
         if (header == null) {
             throw new IllegalArgumentException(
                     "header must not be null"
+            );
+        }
+
+        if (adjustedTime == null) {
+            throw new IllegalArgumentException(
+                    "adjustedTime must not be null"
             );
         }
 
@@ -60,6 +69,11 @@ public final class ChainHeaderValidator {
                         parent.height(),
                         1L
                 );
+        validateBlockVersion(
+                header,
+                nextHeight,
+                parameters
+        );
 
         long medianTimePast =
                 MedianTimePast.calculate(
@@ -80,6 +94,7 @@ public final class ChainHeaderValidator {
                 header,
                 expectedBits,
                 medianTimePast,
+                adjustedTime.currentTimeSeconds(),
                 parameters
         );
     }
@@ -236,7 +251,68 @@ public final class ChainHeaderValidator {
         return parent.header()
                 .bits();
     }
+    static void validateBlockVersion(
+            BlockHeader header,
+            long blockHeight,
+            NetworkParameters parameters
+    ) {
+        if (header == null) {
+            throw new IllegalArgumentException(
+                    "header must not be null"
+            );
+        }
 
+        if (blockHeight < 0) {
+            throw new IllegalArgumentException(
+                    "blockHeight must not be negative"
+            );
+        }
+
+        if (parameters == null) {
+            throw new IllegalArgumentException(
+                    "parameters must not be null"
+            );
+        }
+
+        /*
+         * BIP34:
+         * после activation height требуется
+         * nVersion >= 2.
+         */
+        if (blockHeight >= parameters.bip34Height()
+                && header.version() < 2) {
+
+            throw new BlockHeaderValidationException(
+                    "Block version must be >= 2 after BIP34 activation"
+            );
+        }
+
+        /*
+         * BIP66:
+         * после activation height требуется
+         * nVersion >= 3.
+         */
+        if (blockHeight >= parameters.bip66Height()
+                && header.version() < 3) {
+
+            throw new BlockHeaderValidationException(
+                    "Block version must be >= 3 after BIP66 activation"
+            );
+        }
+
+        /*
+         * BIP65:
+         * после activation height требуется
+         * nVersion >= 4.
+         */
+        if (blockHeight >= parameters.bip65Height()
+                && header.version() < 4) {
+
+            throw new BlockHeaderValidationException(
+                    "Block version must be >= 4 after BIP65 activation"
+            );
+        }
+    }
     private static BlockIndex ancestorAtHeight(
             BlockIndex start,
             long targetHeight,

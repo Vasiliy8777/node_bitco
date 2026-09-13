@@ -20,6 +20,7 @@ class NextWorkRequiredTest {
                 18444,
                 NetworkParametersRegistry.regtest()
                         .genesisBlockHash(),
+                NetworkParametersRegistry.regtest().bip16ExceptionBlockHash(),
                 new BigInteger(
                         "7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
                         16
@@ -29,8 +30,10 @@ class NextWorkRequiredTest {
                 NetworkParametersRegistry.regtest()
                         .subsidyHalvingInterval(),
                 NetworkParametersRegistry.regtest().bip34Height(),
-                NetworkParametersRegistry.regtest()
-                        .csvHeight(),
+                NetworkParametersRegistry.regtest().bip66Height(),
+                NetworkParametersRegistry.regtest().bip65Height(),
+                NetworkParametersRegistry.regtest().csvHeight(),
+                NetworkParametersRegistry.regtest().segwitHeight(),
                 true,
                 enforceBip94,
                 false
@@ -134,6 +137,7 @@ class NextWorkRequiredTest {
                 NextWorkRequired.calculate(
                         1000,
                         previousBits,
+                        previousBits,
                         0,
                         0,
                         parameters
@@ -160,6 +164,7 @@ class NextWorkRequiredTest {
         UInt32 result =
                 NextWorkRequired.calculate(
                         2016,
+                        previousBits,
                         previousBits,
                         0,
                         targetTimespan / 2,
@@ -191,6 +196,7 @@ class NextWorkRequiredTest {
         UInt32 result =
                 NextWorkRequired.calculate(
                         2016,
+                        previousBits,
                         previousBits,
                         0,
                         1,

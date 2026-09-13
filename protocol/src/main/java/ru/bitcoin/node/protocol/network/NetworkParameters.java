@@ -5,14 +5,16 @@ import ru.bitcoin.node.common.types.Hash256;
 import java.math.BigInteger;
 
 public final class NetworkParameters {
-
+    private final long segwitHeight;
+    private final long bip66Height;
+    private final long bip65Height;
     private final long csvHeight;
     private final long bip34Height;
     private final long subsidyHalvingInterval;
     private final BitcoinNetwork network;
     private final long magic;
     private final int defaultPort;
-
+    private final Hash256 bip16ExceptionBlockHash;
     private final Hash256 genesisBlockHash;
 
     private final BigInteger powLimit;
@@ -29,16 +31,37 @@ public final class NetworkParameters {
             long magic,
             int defaultPort,
             Hash256 genesisBlockHash,
+            Hash256 bip16ExceptionBlockHash,
             BigInteger powLimit,
             long targetSpacingSeconds,
             long targetTimespanSeconds,
             long subsidyHalvingInterval,
             long bip34Height,
+            long bip66Height,
+            long bip65Height,
             long csvHeight,
+            long segwitHeight,
             boolean allowMinDifficultyBlocks,
             boolean enforceBip94,
             boolean noRetargeting
     ) {
+        if (segwitHeight < 0) {
+            throw new IllegalArgumentException(
+                    "segwitHeight must not be negative"
+            );
+        }
+
+        if (bip66Height < 0) {
+            throw new IllegalArgumentException(
+                    "bip66Height must not be negative"
+            );
+        }
+
+        if (bip65Height < 0) {
+            throw new IllegalArgumentException(
+                    "bip65Height must not be negative"
+            );
+        }
 
         if (network == null) {
             throw new IllegalArgumentException(
@@ -103,7 +126,11 @@ public final class NetworkParameters {
         this.noRetargeting = noRetargeting;
         this.subsidyHalvingInterval = subsidyHalvingInterval;
         this.bip34Height = bip34Height;
+        this.bip66Height = bip66Height;
+        this.bip65Height = bip65Height;
         this.csvHeight = csvHeight;
+        this.bip16ExceptionBlockHash = bip16ExceptionBlockHash;
+        this.segwitHeight = segwitHeight;
     }
 
     public BitcoinNetwork network() {
@@ -160,6 +187,20 @@ public final class NetworkParameters {
     }
     public long csvHeight() {
         return csvHeight;
+    }
+    public long bip66Height() {
+        return bip66Height;
+    }
+
+    public long bip65Height() {
+        return bip65Height;
+    }
+
+    public Hash256 bip16ExceptionBlockHash() {
+        return bip16ExceptionBlockHash;
+    }
+    public long segwitHeight() {
+        return segwitHeight;
     }
 }
 

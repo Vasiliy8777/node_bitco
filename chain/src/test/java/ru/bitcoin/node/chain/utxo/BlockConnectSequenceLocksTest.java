@@ -17,6 +17,8 @@ import ru.bitcoin.node.protocol.transaction.OutPoint;
 import ru.bitcoin.node.protocol.transaction.Transaction;
 import ru.bitcoin.node.protocol.transaction.TxIn;
 import ru.bitcoin.node.protocol.transaction.TxOut;
+import ru.bitcoin.node.script.Opcode;
+import ru.bitcoin.node.script.ScriptNumber;
 import ru.bitcoin.node.storage.utxo.StoredUtxo;
 import ru.bitcoin.node.storage.utxo.UtxoStore;
 
@@ -907,5 +909,296 @@ class BlockConnectSequenceLocksTest {
                     outPoint
             );
         }
+    }
+    private static byte[] csvScript(
+            long requiredSequence
+    ) {
+        byte[] encoded =
+                ScriptNumber.encode(
+                        requiredSequence
+                );
+
+        byte[] script =
+                new byte[
+                        1
+                                + encoded.length
+                                + 3
+                        ];
+
+        int offset = 0;
+
+        /*
+         * <requiredSequence>
+         */
+        script[offset++] =
+                (byte) encoded.length;
+
+        System.arraycopy(
+                encoded,
+                0,
+                script,
+                offset,
+                encoded.length
+        );
+
+        offset += encoded.length;
+
+        /*
+         * CSV operand не удаляет.
+         *
+         * <N> CSV DROP TRUE
+         */
+        script[offset++] =
+                (byte) Opcode.OP_CHECKSEQUENCEVERIFY;
+
+        script[offset++] =
+                (byte) Opcode.OP_DROP;
+
+        script[offset] =
+                (byte) Opcode.OP_1;
+
+        return script;
+    }
+    @Test
+    void shouldRejectWhenCsvScriptPassesButBip68IsNotYetSatisfied() {
+
+        TestUtxoStore utxoStore =
+                new TestUtxoStore();
+
+        OutPoint previousOutput =
+                outPoint("88");
+
+        /*
+         * Locking script требует минимум:
+         *
+         * sequence >= 10
+         */
+        utxoStore.save(
+                previousOutput,
+                new StoredUtxo(
+                        10_000L,
+                        csvScript(10L),
+                        100L,
+                        false
+                )
+        );
+
+        /*
+         * input.nSequence = 15
+         *
+         * BIP112:
+         * 15 >= 10 -> OK.
+         *
+         * Но BIP68 использует именно 15.
+         */
+        Transaction transaction =
+                transaction(
+                        previousOutput,
+                        15L,
+                        9_000L
+                );
+
+        /*
+         * BIP68:
+         *
+         * minimumHeight =
+         *     100 + 15 - 1
+         *   = 114
+         *
+         * Для candidate height=114:
+         *
+         * 114 < 114 == false
+         *
+         * Поэтому транзакция ещё НЕ final
+         * по relative sequence lock.
+         */
+        Block block =
+                block(
+                        114L,
+                        Hash256.fromDisplayHex(
+                                "00".repeat(32)
+                        ),
+                        1_700_000_000L,
+                        List.of(
+                                coinbase(114L),
+                                transaction
+                        )
+                );
+
+        AncestorMedianTimePastResolver resolver =
+                simpleResolver(
+                        block,
+                        114L
+                );
+
+        assertThrows(
+                TransactionValidationException.class,
+                () ->
+                        BlockConnectChangesBuilder.build(
+                                block,
+                                114L,
+                                1_700_000_000L,
+                                0L,
+                                utxoStore,
+                                NetworkParametersRegistry.regtest(),
+                                resolver
+                        )
+        );
+    }
+    @Test
+    void shouldAcceptWhenBothCsvScriptAndBip68AreSatisfied() {
+
+        TestUtxoStore utxoStore =
+                new TestUtxoStore();
+
+        OutPoint previousOutput =
+                outPoint("99");
+
+        utxoStore.save(
+                previousOutput,
+                new StoredUtxo(
+                        10_000L,
+                        csvScript(10L),
+                        100L,
+                        false
+                )
+        );
+
+        Transaction transaction =
+                transaction(
+                        previousOutput,
+                        15L,
+                        9_000L
+                );
+
+        /*
+         * BIP112:
+         *
+         * required = 10
+         * sequence = 15
+         *
+         * 15 >= 10 -> OK
+         *
+         *
+         * BIP68:
+         *
+         * minimumHeight =
+         *     100 + 15 - 1
+         *   = 114
+         *
+         * candidate height = 115
+         *
+         * 114 < 115 -> OK
+         */
+        Block block =
+                block(
+                        115L,
+                        Hash256.fromDisplayHex(
+                                "00".repeat(32)
+                        ),
+                        1_700_000_000L,
+                        List.of(
+                                coinbase(115L),
+                                transaction
+                        )
+                );
+
+        AncestorMedianTimePastResolver resolver =
+                simpleResolver(
+                        block,
+                        115L
+                );
+
+        assertDoesNotThrow(
+                () ->
+                        BlockConnectChangesBuilder.build(
+                                block,
+                                115L,
+                                1_700_000_000L,
+                                0L,
+                                utxoStore,
+                                NetworkParametersRegistry.regtest(),
+                                resolver
+                        )
+        );
+    }
+    @Test
+    void shouldRejectWhenBip68PassesButCsvScriptRequirementFails() {
+
+        TestUtxoStore utxoStore =
+                new TestUtxoStore();
+
+        OutPoint previousOutput =
+                outPoint("aa");
+
+        /*
+         * Script требует sequence >= 20.
+         */
+        utxoStore.save(
+                previousOutput,
+                new StoredUtxo(
+                        10_000L,
+                        csvScript(20L),
+                        100L,
+                        false
+                )
+        );
+
+        /*
+         * Но transaction использует sequence=15.
+         *
+         * Для BIP68 это совершенно допустимое
+         * значение, если candidate block достаточно новый.
+         *
+         * Для BIP112:
+         *
+         * 15 < 20 -> FAIL.
+         */
+        Transaction transaction =
+                transaction(
+                        previousOutput,
+                        15L,
+                        9_000L
+                );
+
+        /*
+         * BIP68 уже выполнен:
+         *
+         * minimumHeight = 114
+         *
+         * 114 < 200 -> true.
+         */
+        Block block =
+                block(
+                        200L,
+                        Hash256.fromDisplayHex(
+                                "00".repeat(32)
+                        ),
+                        1_700_000_000L,
+                        List.of(
+                                coinbase(200L),
+                                transaction
+                        )
+                );
+
+        AncestorMedianTimePastResolver resolver =
+                simpleResolver(
+                        block,
+                        200L
+                );
+
+        assertThrows(
+                TransactionValidationException.class,
+                () ->
+                        BlockConnectChangesBuilder.build(
+                                block,
+                                200L,
+                                1_700_000_000L,
+                                0L,
+                                utxoStore,
+                                NetworkParametersRegistry.regtest(),
+                                resolver
+                        )
+        );
     }
 }

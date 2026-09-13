@@ -1,6 +1,7 @@
 package ru.bitcoin.node.protocol.serialization.network;
 
 import org.junit.jupiter.api.Test;
+import ru.bitcoin.node.protocol.network.NetworkParameters;
 import ru.bitcoin.node.protocol.network.NetworkParametersRegistry;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -53,6 +54,32 @@ public class NetworkParametersRegistryTest {
                 1L,
                 NetworkParametersRegistry.regtest()
                         .csvHeight()
+        );
+    }
+    @Test
+    void shouldExposeCorrectTestnetActivationHeights() {
+
+        NetworkParameters parameters =
+                NetworkParametersRegistry.testnet();
+
+        assertEquals(
+                21_111L,
+                parameters.bip34Height()
+        );
+
+        assertEquals(
+                330_776L,
+                parameters.bip66Height()
+        );
+
+        assertEquals(
+                581_885L,
+                parameters.bip65Height()
+        );
+
+        assertEquals(
+                770_112L,
+                parameters.csvHeight()
         );
     }
 

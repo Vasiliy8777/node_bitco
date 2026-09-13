@@ -6,6 +6,7 @@ import ru.bitcoin.node.common.types.UInt32;
 import ru.bitcoin.node.consensus.block.BlockHeaderValidationException;
 import ru.bitcoin.node.consensus.pow.CompactTarget;
 import ru.bitcoin.node.consensus.pow.ProofOfWork;
+import ru.bitcoin.node.consensus.time.AdjustedTime;
 import ru.bitcoin.node.protocol.block.BlockHeader;
 import ru.bitcoin.node.protocol.network.NetworkParameters;
 import ru.bitcoin.node.protocol.network.NetworkParametersRegistry;
@@ -18,6 +19,8 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class ChainHeaderValidatorTest {
 
+    private static final AdjustedTime TEST_TIME =
+            () -> 1_800_000_000L;
     private static final NetworkParameters REGTEST =
             NetworkParametersRegistry.regtest();
     private static final NetworkParameters REAL_TESTNET =
@@ -29,6 +32,7 @@ class ChainHeaderValidatorTest {
                     0x0709110BL,
                     18333,
                     REAL_TESTNET.genesisBlockHash(),
+                    REAL_TESTNET.bip16ExceptionBlockHash(),
                     new BigInteger(
                             "00000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
                             16
@@ -37,7 +41,10 @@ class ChainHeaderValidatorTest {
                     14L * 24L * 60L * 60L,
                     REAL_TESTNET.subsidyHalvingInterval(),
                     REAL_TESTNET.bip34Height(),
+                    REAL_TESTNET.bip66Height(),
+                    REAL_TESTNET.bip65Height(),
                     REAL_TESTNET.csvHeight(),
+                    REAL_TESTNET.segwitHeight(),
                     true,
                     false,
                     false
@@ -92,7 +99,8 @@ class ChainHeaderValidatorTest {
                         candidate,
                         parent,
                         indexes::get,
-                        REGTEST
+                        REGTEST,
+                        TEST_TIME
                 )
         );
     }
@@ -127,7 +135,8 @@ class ChainHeaderValidatorTest {
                         candidate,
                         parent,
                         indexes::get,
-                        REGTEST
+                        REGTEST,
+                        TEST_TIME
                 )
         );
     }
@@ -160,7 +169,8 @@ class ChainHeaderValidatorTest {
                         candidate,
                         parent,
                         indexes::get,
-                        REGTEST
+                        REGTEST,
+                        TEST_TIME
                 )
         );
     }
@@ -197,7 +207,7 @@ class ChainHeaderValidatorTest {
 
             BlockHeader header =
                     new BlockHeader(
-                            1,
+                            4,
                             previousBlockHash,
                             Hash256.fromDisplayHex(
                                     "11".repeat(32)

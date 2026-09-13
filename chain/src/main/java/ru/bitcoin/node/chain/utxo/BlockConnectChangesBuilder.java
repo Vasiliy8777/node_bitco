@@ -4,6 +4,7 @@ import ru.bitcoin.node.chain.AncestorMedianTimePastResolver;
 import ru.bitcoin.node.common.types.UInt32;
 import ru.bitcoin.node.consensus.block.*;
 import ru.bitcoin.node.consensus.money.Money;
+import ru.bitcoin.node.consensus.script.ConsensusScriptFlags;
 import ru.bitcoin.node.consensus.transaction.*;
 import ru.bitcoin.node.protocol.block.Block;
 import ru.bitcoin.node.protocol.network.NetworkParameters;
@@ -151,12 +152,21 @@ public final class BlockConnectChangesBuilder {
                 new ArrayList<>();
 
         long totalFees = 0L;
+
         boolean enforceBip30 =
                 Bip30.shouldEnforce(
                         blockHeight,
                         block.header().hash(),
                         networkParameters
                 );
+
+        int scriptVerifyFlags =
+                ConsensusScriptFlags.forBlock(
+                        blockHeight,
+                        block.header().hash(),
+                        networkParameters
+                );
+
         for (int transactionIndex = 0;
              transactionIndex < transactions.size();
              transactionIndex++) {
@@ -217,6 +227,22 @@ public final class BlockConnectChangesBuilder {
                             networkParameters
                     );
                 }
+
+                /*
+                 * Все referenced UTXO существуют, contextual
+                 * value/maturity validation уже выполнена,
+                 * BIP68 также подтверждён.
+                 *
+                 * Overlay пока НЕ мутирован.
+                 *
+                 * Поэтому каждый input теперь должен доказать
+                 * право потратить соответствующий UTXO.
+                 */
+                InputScriptValidator.validateAll(
+                        transaction,
+                        utxoView,
+                        scriptVerifyFlags
+                );
 
                 try {
                     totalFees =

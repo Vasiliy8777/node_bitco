@@ -62,12 +62,19 @@ public final class NetworkParametersRegistry {
                 Hash256.fromDisplayHex(
                         "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f"
                 ),
+                Hash256.fromDisplayHex(
+                        "00000000000002dc756eebf4f49723ed"
+                                + "8d30cc28a5f108eb94b1ba88ac4f9c22"
+                ),
                 MAIN_POW_LIMIT,
                 TARGET_SPACING,
                 TARGET_TIMESPAN,
                 210_000L,
                 227_931L,
+                363_725L,
+                388_381L,
                 419_328L,
+                481_824L,
                 false,
                 false,
                 false
@@ -82,12 +89,19 @@ public final class NetworkParametersRegistry {
                 Hash256.fromDisplayHex(
                         "000000000933ea01ad0ee984209779baae8c49c7b00203cc83f10bfa6c712f72"
                 ),
+                Hash256.fromDisplayHex(
+                        "00000000dd30457c001f4095d208cc12"
+                                + "96b0eed002427aa599874af7a432b105"
+                ),
                 MAIN_POW_LIMIT,
                 TARGET_SPACING,
                 TARGET_TIMESPAN,
                 210_000L,
                 21_111L,
+                330_776L,
+                581_885L,
                 770_112L,
+                834_624L,
                 true,
                 false,
                 false
@@ -103,10 +117,14 @@ public final class NetworkParametersRegistry {
                         "00000008819873e925422c1ff0f99f7c" +
                                 "6a0a92672c4b4f75eaa8bdfc22f4b9f9"
                 ),
+                null,
                 MAIN_POW_LIMIT,
                 TARGET_SPACING,
                 TARGET_TIMESPAN,
                 210_000L,
+                1L,
+                1L,
+                1L,
                 1L,
                 1L,
                 false,
@@ -124,12 +142,16 @@ public final class NetworkParametersRegistry {
                         "0f9188f13cb7b2c71f2a335e3a4fc328" +
                                 "bf5beb436012afca590b1a11466e2206"
                 ),
+                null,
                 REGTEST_POW_LIMIT,
                 TARGET_SPACING,
                 TARGET_TIMESPAN,
                 150L,
                 1L,
                 1L,
+                1L,
+                1L,
+                0L,
                 true,
                 false,
                 true

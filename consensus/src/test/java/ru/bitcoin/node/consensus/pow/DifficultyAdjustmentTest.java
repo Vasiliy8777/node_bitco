@@ -158,4 +158,82 @@ class DifficultyAdjustmentTest {
                 result
         );
     }
+    @Test
+    void shouldUseExactMinimumTimespanBoundary() {
+
+        NetworkParameters parameters =
+                NetworkParametersRegistry.mainnet();
+
+        BigInteger previousTarget =
+                CompactTarget.decode(
+                        0x1C0FFFF0L
+                );
+
+        long minimumTimespan =
+                parameters.targetTimespanSeconds() / 4L;
+
+        BigInteger result =
+                DifficultyAdjustment.calculateNextTarget(
+                        previousTarget,
+                        minimumTimespan,
+                        parameters
+                );
+
+        assertEquals(
+                previousTarget.divide(
+                        BigInteger.valueOf(4L)
+                ),
+                result
+        );
+    }
+
+    @Test
+    void shouldUseExactMaximumTimespanBoundary() {
+
+        NetworkParameters parameters =
+                NetworkParametersRegistry.mainnet();
+
+        BigInteger previousTarget =
+                CompactTarget.decode(
+                        0x1C0FFFF0L
+                );
+
+        long maximumTimespan =
+                parameters.targetTimespanSeconds() * 4L;
+
+        BigInteger result =
+                DifficultyAdjustment.calculateNextTarget(
+                        previousTarget,
+                        maximumTimespan,
+                        parameters
+                );
+
+        assertEquals(
+                previousTarget.multiply(
+                        BigInteger.valueOf(4L)
+                ),
+                result
+        );
+    }
+    @Test
+    void targetShouldNeverExceedPowLimit() {
+
+        NetworkParameters parameters =
+                NetworkParametersRegistry.mainnet();
+
+        BigInteger previousTarget =
+                parameters.powLimit();
+
+        BigInteger result =
+                DifficultyAdjustment.calculateNextTarget(
+                        previousTarget,
+                        parameters.targetTimespanSeconds() * 4L,
+                        parameters
+                );
+
+        assertEquals(
+                parameters.powLimit(),
+                result
+        );
+    }
 }

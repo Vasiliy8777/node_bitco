@@ -6,7 +6,8 @@ import ru.bitcoin.node.protocol.block.BlockHeader;
 import ru.bitcoin.node.protocol.network.NetworkParameters;
 
 public final class BlockHeaderValidator {
-
+    public static final long MAX_FUTURE_BLOCK_TIME_SECONDS =
+            2L * 60L * 60L;
     private BlockHeaderValidator() {
     }
 
@@ -14,8 +15,20 @@ public final class BlockHeaderValidator {
             BlockHeader header,
             UInt32 expectedBits,
             long medianTimePast,
+            long adjustedTimeSeconds,
             NetworkParameters parameters
     ) {
+        if (medianTimePast < 0) {
+            throw new IllegalArgumentException(
+                    "medianTimePast must not be negative"
+            );
+        }
+
+        if (adjustedTimeSeconds < 0) {
+            throw new IllegalArgumentException(
+                    "adjustedTimeSeconds must not be negative"
+            );
+        }
         if (header == null) {
             throw new IllegalArgumentException(
                     "header must not be null"
@@ -45,6 +58,35 @@ public final class BlockHeaderValidator {
             throw new BlockHeaderValidationException(
                     "Block timestamp must be greater than "
                             + "median time past"
+            );
+        }
+        long maximumAllowedTimestamp;
+
+        try {
+            maximumAllowedTimestamp =
+                    Math.addExact(
+                            adjustedTimeSeconds,
+                            MAX_FUTURE_BLOCK_TIME_SECONDS
+                    );
+        } catch (ArithmeticException e) {
+            throw new IllegalArgumentException(
+                    "adjustedTimeSeconds is too large",
+                    e
+            );
+        }
+
+        /*
+         * Bitcoin accepts timestamp exactly at:
+         *
+         * adjustedTime + 2 hours
+         *
+         * and rejects only strictly greater values.
+         */
+        if (header.timestamp().value()
+                > maximumAllowedTimestamp) {
+
+            throw new BlockHeaderValidationException(
+                    "Block timestamp is too far in the future"
             );
         }
 

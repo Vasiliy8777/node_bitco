@@ -14,7 +14,8 @@ class BlockHeaderValidatorTest {
 
     private static final NetworkParameters REGTEST =
             NetworkParametersRegistry.regtest();
-
+    private static final long ADJUSTED_TIME =
+            1_700_000_000L;
     private static BlockHeader regtestGenesis() {
         return new BlockHeader(
                 1,
@@ -42,6 +43,7 @@ class BlockHeaderValidatorTest {
                         header,
                         new UInt32(0x207fffffL),
                         1296688601L,
+                        ADJUSTED_TIME,
                         REGTEST
                 )
         );
@@ -59,6 +61,7 @@ class BlockHeaderValidatorTest {
                         header,
                         new UInt32(0x207fffffL),
                         header.timestamp().value(),
+                        ADJUSTED_TIME,
                         REGTEST
                 )
         );
@@ -76,6 +79,7 @@ class BlockHeaderValidatorTest {
                         header,
                         new UInt32(0x207fffffL),
                         header.timestamp().value() + 1,
+                        ADJUSTED_TIME,
                         REGTEST
                 )
         );
@@ -93,6 +97,7 @@ class BlockHeaderValidatorTest {
                         header,
                         new UInt32(0x1d00ffffL),
                         1296688601L,
+                        ADJUSTED_TIME,
                         REGTEST
                 )
         );
@@ -141,6 +146,54 @@ class BlockHeaderValidatorTest {
                         header,
                         veryHardBits,
                         1296688601L,
+                        ADJUSTED_TIME,
+                        REGTEST
+                )
+        );
+    }
+    @Test
+    void shouldAcceptTimestampExactlyTwoHoursInFuture() {
+
+        long adjustedTime =
+                regtestGenesis()
+                        .timestamp()
+                        .value()
+                        - BlockHeaderValidator
+                        .MAX_FUTURE_BLOCK_TIME_SECONDS;
+
+        BlockHeader header =
+                regtestGenesis();
+
+        assertDoesNotThrow(
+                () -> BlockHeaderValidator.validate(
+                        header,
+                        new UInt32(0x207fffffL),
+                        header.timestamp().value() - 1,
+                        adjustedTime,
+                        REGTEST
+                )
+        );
+    }
+
+    @Test
+    void shouldRejectTimestampMoreThanTwoHoursInFuture() {
+
+        BlockHeader header =
+                regtestGenesis();
+
+        long adjustedTime =
+                header.timestamp().value()
+                        - BlockHeaderValidator
+                        .MAX_FUTURE_BLOCK_TIME_SECONDS
+                        - 1L;
+
+        assertThrows(
+                BlockHeaderValidationException.class,
+                () -> BlockHeaderValidator.validate(
+                        header,
+                        new UInt32(0x207fffffL),
+                        header.timestamp().value() - 1,
+                        adjustedTime,
                         REGTEST
                 )
         );
