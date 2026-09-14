@@ -43,6 +43,10 @@ public final class ScriptPubKeyClassifier {
             return ScriptPubKeyType.MULTISIG;
         }
 
+        if (isBareMultisig(scriptPubKey)) {
+            return ScriptPubKeyType.MULTISIG;
+        }
+
         if (isNullData(scriptPubKey)) {
             return ScriptPubKeyType.NULL_DATA;
         }

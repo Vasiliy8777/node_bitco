@@ -202,4 +202,158 @@ public final class TransactionValidator {
             }
         }
     }
+
+    public static void validate(
+            Transaction transaction,
+            UtxoView utxoView,
+            int scriptVerifyFlags
+    ) {
+        /*
+         * Сначала всегда выполняются проверки,
+         * не зависящие от состояния UTXO.
+         */
+        validateBasic(
+                transaction
+        );
+
+        if (utxoView == null) {
+            throw new IllegalArgumentException(
+                    "utxoView must not be null"
+            );
+        }
+
+        /*
+         * Coinbase не тратит предыдущие UTXO.
+         *
+         * Для неё contextual input validation
+         * здесь не выполняется.
+         */
+        if (transaction.isCoinbase()) {
+            return;
+        }
+
+        long totalInputValue =
+                calculateInputValue(
+                        transaction,
+                        utxoView
+                );
+
+        long totalOutputValue =
+                calculateOutputValue(
+                        transaction
+                );
+
+        /*
+         * Обычная транзакция не может создать
+         * больше bitcoin, чем она получила
+         * из потраченных UTXO.
+         *
+         * Разница:
+         *
+         * totalInputValue - totalOutputValue
+         *
+         * является transaction fee.
+         */
+        if (totalInputValue < totalOutputValue) {
+            throw new TransactionValidationException(
+                    "Transaction spends more than its inputs"
+            );
+        }
+
+        /*
+         * После проверки существования UTXO
+         * и денежных ограничений проверяем
+         * scriptSig / scriptPubKey / witness
+         * каждого входа.
+         */
+        InputScriptValidator.validateAll(
+                transaction,
+                utxoView,
+                scriptVerifyFlags
+        );
+    }
+
+    private static long calculateInputValue(
+            Transaction transaction,
+            UtxoView utxoView
+    ) {
+        long total =
+                0L;
+
+        for (TxIn input :
+                transaction.inputs()) {
+
+            UtxoEntry utxo =
+                    utxoView.find(
+                                    input.previousOutput()
+                            )
+                            .orElseThrow(
+                                    () ->
+                                            new TransactionValidationException(
+                                                    "Missing or already spent UTXO: "
+                                                            + input.previousOutput()
+                                            )
+                            );
+
+            long amount =
+                    utxo.amount();
+
+            if (amount < 0) {
+                throw new TransactionValidationException(
+                        "UTXO amount must not be negative"
+                );
+            }
+
+            if (amount > Money.MAX_MONEY) {
+                throw new TransactionValidationException(
+                        "UTXO amount exceeds MAX_MONEY"
+                );
+            }
+
+            try {
+                total =
+                        Math.addExact(
+                                total,
+                                amount
+                        );
+            } catch (ArithmeticException e) {
+                throw new TransactionValidationException(
+                        "Transaction input total overflow"
+                );
+            }
+
+            if (total > Money.MAX_MONEY) {
+                throw new TransactionValidationException(
+                        "Transaction input total exceeds MAX_MONEY"
+                );
+            }
+        }
+
+        return total;
+    }
+    private static long calculateOutputValue(
+            Transaction transaction
+    ) {
+        long total =
+                0L;
+
+        for (TxOut output :
+                transaction.outputs()) {
+
+            try {
+                total =
+                        Math.addExact(
+                                total,
+                                output.value()
+                        );
+            } catch (ArithmeticException e) {
+                throw new TransactionValidationException(
+                        "Transaction output total overflow"
+                );
+            }
+        }
+
+        return total;
+    }
+
 }
