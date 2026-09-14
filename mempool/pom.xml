@@ -21,6 +21,18 @@
             <version>0.0.1-SNAPSHOT</version>
             <scope>compile</scope>
         </dependency>
+
+        <dependency>
+            <groupId>ru.bitcoin.mining</groupId>
+            <artifactId>script</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>ru.bitcoin.mining</groupId>
+            <artifactId>consensus</artifactId>
+            <version>${project.version}</version>
+        </dependency>
     </dependencies>
 
 </project>

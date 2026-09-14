@@ -1,8 +1,7 @@
-package ru.bitcoin.node.cryoto.hash;
+package ru.bitcoin.node.crypto.hash;
 
 import org.junit.jupiter.api.Test;
 import ru.bitcoin.node.common.bytes.HexUtils;
-import ru.bitcoin.node.crypto.hash.Hash160;
 import ru.bitcoin.node.crypto.secp256k1.PrivateKey;
 import ru.bitcoin.node.crypto.secp256k1.PublicKey;
 import ru.bitcoin.node.crypto.secp256k1.Secp256k1;

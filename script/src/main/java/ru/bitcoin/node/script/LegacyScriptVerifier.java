@@ -131,17 +131,28 @@ public final class LegacyScriptVerifier {
             );
 
             /*
-             * Обычная legacy проверка.
+             * scriptPubKey обязан завершиться true.
              */
             if (!isTrueTop(machine)) {
                 return false;
             }
 
             /*
-             * Если это не P2SH — на этом всё.
+             * Для обычного legacy spend это уже
+             * окончательный stack.
+             *
+             * CLEANSTACK требует:
+             *
+             * stack.size() == 1
+             * &&
+             * единственный элемент == true
              */
             if (!verifyP2sh) {
-                return true;
+
+                return isValidFinalStack(
+                        machine,
+                        flags
+                );
             }
 
             /*
@@ -180,13 +191,14 @@ public final class LegacyScriptVerifier {
             );
 
             /*
-             * 5. redeemScript также обязан
-             * завершиться true.
+             * 5. redeemScript обязан завершиться true.
              *
-             * CLEANSTACK здесь НЕ требуем.
+             * Это окончательный stack P2SH execution,
+             * поэтому именно здесь применяется CLEANSTACK.
              */
-            return isTrueTop(
-                    stackAfterScriptSig
+            return isValidFinalStack(
+                    stackAfterScriptSig,
+                    flags
             );
 
         } catch (ScriptExecutionException
@@ -194,6 +206,44 @@ public final class LegacyScriptVerifier {
 
             return false;
         }
+    }
+
+    private static boolean isValidFinalStack(
+            ScriptMachine machine,
+            int flags
+    ) {
+
+        /*
+         * Сначала обычное Bitcoin Script правило:
+         *
+         * stack не пустой
+         * и верхний элемент == true.
+         */
+        if (!isTrueTop(machine)) {
+            return false;
+        }
+
+        /*
+         * Без CLEANSTACK дополнительные
+         * элементы ниже top разрешены.
+         */
+        if (!ScriptVerifyFlags.has(
+                flags,
+                ScriptVerifyFlags.CLEANSTACK
+        )) {
+
+            return true;
+        }
+
+        /*
+         * CLEANSTACK:
+         *
+         * после полного выполнения script path
+         * должен остаться ровно один элемент.
+         *
+         * Его true уже проверен выше.
+         */
+        return machine.size() == 1;
     }
 
     public static boolean verifyP2shOuter(

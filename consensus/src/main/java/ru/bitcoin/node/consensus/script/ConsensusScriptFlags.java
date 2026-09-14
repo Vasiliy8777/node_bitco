@@ -6,6 +6,11 @@ import ru.bitcoin.node.script.ScriptVerifyFlags;
 
 public final class ConsensusScriptFlags {
 
+    private static final Hash256 MAINNET_TAPROOT_EXCEPTION =
+            Hash256.fromDisplayHex(
+                    "0000000000000000000f14c35b2d841e986ab5441de8c585d5ffe55ea1e395ad"
+            );
+
     private ConsensusScriptFlags() {
     }
 
@@ -30,6 +35,22 @@ public final class ConsensusScriptFlags {
             throw new IllegalArgumentException(
                     "networkParameters must not be null"
             );
+        }
+
+        /*
+         * Historical mainnet script-flags exception.
+         *
+         * Bitcoin Core возвращает для этого блока
+         * ровно P2SH | WITNESS.
+         *
+         * Это не Taproot activation height.
+         * Это конкретный historical exception block.
+         */
+        if (MAINNET_TAPROOT_EXCEPTION.equals(
+                blockHash
+        )) {
+            return ScriptVerifyFlags.P2SH
+                    | ScriptVerifyFlags.WITNESS;
         }
 
         int flags =
@@ -83,14 +104,21 @@ public final class ConsensusScriptFlags {
             flags |=
                     ScriptVerifyFlags.CHECKSEQUENCEVERIFY;
         }
+
         /*
-         * BIP141 / SegWit.
+         * BIP141 + BIP147.
+         *
+         * NULLDUMMY активировался тем же
+         * SegWit deployment.
          */
         if (blockHeight
                 >= networkParameters.segwitHeight()) {
 
             flags |=
                     ScriptVerifyFlags.WITNESS;
+
+            flags |=
+                    ScriptVerifyFlags.NULLDUMMY;
         }
 
         return flags;

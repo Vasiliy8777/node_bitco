@@ -1,11 +1,9 @@
-package ru.bitcoin.node.cryoto.merkle;
+package ru.bitcoin.node.crypto.merkle;
 
 import org.junit.jupiter.api.Test;
 import ru.bitcoin.node.common.bytes.ByteUtils;
 import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.crypto.hash.Hash256Digest;
-import ru.bitcoin.node.crypto.merkle.MerkleRootResult;
-import ru.bitcoin.node.crypto.merkle.MerkleTree;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;

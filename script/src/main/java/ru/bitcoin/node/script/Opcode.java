@@ -1,9 +1,28 @@
 package ru.bitcoin.node.script;
 
 public final class Opcode {
+    public static final int OP_RESERVED1 = 0x89;
 
+    public static final int OP_RESERVED2 = 0x8a;
     public static final int OP_0 = 0x00;
-
+    public static final int OP_VER = 0x62;
+    public static final int OP_VERIF = 0x65;
+    public static final int OP_VERNOTIF = 0x66;
+    public static final int OP_CAT = 0x7e;
+    public static final int OP_SUBSTR = 0x7f;
+    public static final int OP_LEFT = 0x80;
+    public static final int OP_RIGHT = 0x81;
+    public static final int OP_INVERT = 0x83;
+    public static final int OP_AND = 0x84;
+    public static final int OP_OR = 0x85;
+    public static final int OP_XOR = 0x86;
+    public static final int OP_2MUL = 0x8d;
+    public static final int OP_2DIV =  0x8e;
+    public static final int OP_MUL = 0x95;
+    public static final int OP_DIV = 0x96;
+    public static final int OP_MOD = 0x97;
+    public static final int OP_LSHIFT = 0x98;
+    public static final int OP_RSHIFT = 0x99;
     /*
      * 0x01..0x4b:
      *
@@ -68,12 +87,15 @@ public final class Opcode {
     public static final int OP_SWAP = 0x7c;
     public static final int OP_TUCK = 0x7d;
 
+    public static final int OP_SIZE = 0x82;
+
     public static final int OP_EQUAL = 0x87;
     public static final int OP_EQUALVERIFY = 0x88;
 
     public static final int OP_1ADD = 0x8b;
     public static final int OP_1SUB = 0x8c;
 
+    public static final int OP_ABS = 0x90;
     public static final int OP_NOT = 0x91;
     public static final int OP_0NOTEQUAL = 0x92;
 
@@ -115,6 +137,7 @@ public final class Opcode {
     public static final int OP_NOP8 = 0xb7;
     public static final int OP_NOP9 = 0xb8;
     public static final int OP_NOP10 = 0xb9;
+    public static final int OP_NEGATE = 0x8f;
 
     private Opcode() {
     }

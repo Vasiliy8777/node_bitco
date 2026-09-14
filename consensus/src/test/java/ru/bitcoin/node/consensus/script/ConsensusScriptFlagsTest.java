@@ -619,5 +619,164 @@ class ConsensusScriptFlagsTest {
                 )
         );
     }
+    @Test
+    void nullDummyMustActivateWithSegwitOnMainnet() {
+
+        NetworkParameters mainnet =
+                NetworkParametersRegistry.mainnet();
+
+        Hash256 ordinaryHash =
+                Hash256.fromDisplayHex(
+                        "11".repeat(32)
+                );
+
+        int before =
+                ConsensusScriptFlags.forBlock(
+                        481_823L,
+                        ordinaryHash,
+                        mainnet
+                );
+
+        int active =
+                ConsensusScriptFlags.forBlock(
+                        481_824L,
+                        ordinaryHash,
+                        mainnet
+                );
+
+        assertFalse(
+                ScriptVerifyFlags.has(
+                        before,
+                        ScriptVerifyFlags.NULLDUMMY
+                )
+        );
+
+        assertTrue(
+                ScriptVerifyFlags.has(
+                        active,
+                        ScriptVerifyFlags.NULLDUMMY
+                )
+        );
+    }
+    @Test
+    void nullDummyMustActivateWithSegwitOnTestnet() {
+
+        NetworkParameters testnet =
+                NetworkParametersRegistry.testnet();
+
+        Hash256 ordinaryHash =
+                Hash256.fromDisplayHex(
+                        "22".repeat(32)
+                );
+
+        int before =
+                ConsensusScriptFlags.forBlock(
+                        834_623L,
+                        ordinaryHash,
+                        testnet
+                );
+
+        int active =
+                ConsensusScriptFlags.forBlock(
+                        834_624L,
+                        ordinaryHash,
+                        testnet
+                );
+
+        assertFalse(
+                ScriptVerifyFlags.has(
+                        before,
+                        ScriptVerifyFlags.NULLDUMMY
+                )
+        );
+
+        assertTrue(
+                ScriptVerifyFlags.has(
+                        active,
+                        ScriptVerifyFlags.NULLDUMMY
+                )
+        );
+    }
+    @Test
+    void nullDummyMustBeActiveFromGenesisOnRegtest() {
+
+        NetworkParameters regtest =
+                NetworkParametersRegistry.regtest();
+
+        int flags =
+                ConsensusScriptFlags.forBlock(
+                        0L,
+                        Hash256.fromDisplayHex(
+                                "33".repeat(32)
+                        ),
+                        regtest
+                );
+
+        assertTrue(
+                ScriptVerifyFlags.has(
+                        flags,
+                        ScriptVerifyFlags.WITNESS
+                )
+        );
+
+        assertTrue(
+                ScriptVerifyFlags.has(
+                        flags,
+                        ScriptVerifyFlags.NULLDUMMY
+                )
+        );
+    }
+    @Test
+    void mainnetTaprootExceptionMustUseExactHistoricalFlags() {
+
+        NetworkParameters mainnet =
+                NetworkParametersRegistry.mainnet();
+
+        Hash256 exceptionHash =
+                Hash256.fromDisplayHex(
+                        "0000000000000000000f14c35b2d841e986ab5441de8c585d5ffe55ea1e395ad"
+                );
+
+        int flags =
+                ConsensusScriptFlags.forBlock(
+                        709_632L,
+                        exceptionHash,
+                        mainnet
+                );
+
+        assertEquals(
+                ScriptVerifyFlags.P2SH
+                        | ScriptVerifyFlags.WITNESS,
+                flags
+        );
+
+        assertFalse(
+                ScriptVerifyFlags.has(
+                        flags,
+                        ScriptVerifyFlags.NULLDUMMY
+                )
+        );
+
+        assertFalse(
+                ScriptVerifyFlags.has(
+                        flags,
+                        ScriptVerifyFlags.DERSIG
+                )
+        );
+
+        assertFalse(
+                ScriptVerifyFlags.has(
+                        flags,
+                        ScriptVerifyFlags.CHECKLOCKTIMEVERIFY
+                )
+        );
+
+        assertFalse(
+                ScriptVerifyFlags.has(
+                        flags,
+                        ScriptVerifyFlags.CHECKSEQUENCEVERIFY
+                )
+        );
+    }
 
 }

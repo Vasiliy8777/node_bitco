@@ -175,4 +175,90 @@ public final class ScriptNumber {
 
         return result;
     }
+    public static boolean isMinimallyEncoded(
+            byte[] value
+    ) {
+        if (value == null) {
+            throw new IllegalArgumentException(
+                    "value must not be null"
+            );
+        }
+
+        /*
+         * Empty vector является минимальным zero.
+         */
+        if (value.length == 0) {
+            return true;
+        }
+
+        /*
+         * Если последний байт без sign-bit равен 0,
+         * возможно, имеется лишний байт.
+         *
+         * Примеры неминимальных значений:
+         *
+         * 00       -> zero должен быть empty
+         * 80       -> negative zero должен быть empty
+         * 01 00    -> 1 должен быть 01
+         * 01 80    -> -1 должен быть 81
+         */
+        int last =
+                Byte.toUnsignedInt(
+                        value[value.length - 1]
+                );
+
+        if ((last & 0x7f) == 0) {
+
+            /*
+             * Один байт 00 или 80 всегда лишний.
+             */
+            if (value.length == 1) {
+                return false;
+            }
+
+            /*
+             * Дополнительный 00/80 нужен только тогда,
+             * когда у предыдущего байта установлен sign bit.
+             *
+             * Например:
+             *
+             * 80 00 = +128   -> minimal
+             * 80 80 = -128   -> minimal
+             */
+            int previous =
+                    Byte.toUnsignedInt(
+                            value[value.length - 2]
+                    );
+
+            if ((previous & 0x80) == 0) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+    public static long decode(
+            byte[] value,
+            int maxNumSize,
+            boolean requireMinimal
+    ) {
+        if (value == null) {
+            throw new IllegalArgumentException(
+                    "value must not be null"
+            );
+        }
+
+        if (requireMinimal
+                && !isMinimallyEncoded(value)) {
+
+            throw new ScriptExecutionException(
+                    "Non-minimally encoded Script number"
+            );
+        }
+
+        return decode(
+                value,
+                maxNumSize
+        );
+    }
 }

@@ -1,8 +1,7 @@
-package ru.bitcoin.node.cryoto.hash;
+package ru.bitcoin.node.crypto.hash;
 
 import org.junit.jupiter.api.Test;
 import ru.bitcoin.node.common.types.Hash256;
-import ru.bitcoin.node.crypto.hash.Hash256Digest;
 
 import java.nio.charset.StandardCharsets;
 

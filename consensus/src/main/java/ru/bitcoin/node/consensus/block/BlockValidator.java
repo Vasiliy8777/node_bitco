@@ -92,10 +92,6 @@ public final class BlockValidator {
         validateMerkleRoot(
                 block
         );
-
-        validateMerkleRoot(
-                block
-        );
     }
 
     private static void validateMerkleRoot(

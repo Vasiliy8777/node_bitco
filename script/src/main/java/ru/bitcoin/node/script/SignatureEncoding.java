@@ -29,6 +29,27 @@ public final class SignatureEncoding {
     private SignatureEncoding() {
     }
 
+    public static boolean isCompressedPublicKeyEncoding(
+            byte[] publicKey
+    ) {
+        if (publicKey == null) {
+            throw new IllegalArgumentException(
+                    "publicKey must not be null"
+            );
+        }
+
+        if (publicKey.length != 33) {
+            return false;
+        }
+
+        int prefix =
+                Byte.toUnsignedInt(
+                        publicKey[0]
+                );
+
+        return prefix == 0x02
+                || prefix == 0x03;
+    }
     public static boolean isValidDerEncoding(
             byte[] signatureWithHashType
     ) {
@@ -359,6 +380,68 @@ public final class SignatureEncoding {
 
             throw new ScriptExecutionException(
                     "Undefined signature hash type"
+            );
+        }
+    }
+
+    public static void validatePublicKey(
+            byte[] publicKey,
+            int flags,
+            SignatureVersion signatureVersion
+    ) {
+        if (publicKey == null) {
+            throw new IllegalArgumentException(
+                    "publicKey must not be null"
+            );
+        }
+
+        if (signatureVersion == null) {
+            throw new IllegalArgumentException(
+                    "signatureVersion must not be null"
+            );
+        }
+
+        /*
+         * STRICTENC разрешает:
+         *
+         * compressed:
+         * 02/03 + 32 bytes
+         *
+         * uncompressed:
+         * 04 + 64 bytes
+         */
+        if (ScriptVerifyFlags.has(
+                flags,
+                ScriptVerifyFlags.STRICTENC
+        )
+                && !isStrictPublicKeyEncoding(
+                publicKey
+        )) {
+
+            throw new ScriptExecutionException(
+                    "Non-canonical public key encoding"
+            );
+        }
+
+        /*
+         * WITNESS_PUBKEYTYPE применяется только
+         * к SegWit v0 script execution.
+         *
+         * Для legacy этот policy flag ничего
+         * дополнительно не запрещает.
+         */
+        if (signatureVersion
+                == SignatureVersion.WITNESS_V0
+                && ScriptVerifyFlags.has(
+                flags,
+                ScriptVerifyFlags.WITNESS_PUBKEYTYPE
+        )
+                && !isCompressedPublicKeyEncoding(
+                publicKey
+        )) {
+
+            throw new ScriptExecutionException(
+                    "WITNESS_PUBKEYTYPE requires compressed public key"
             );
         }
     }

@@ -226,6 +226,12 @@ public final class InputScriptValidator {
         byte[] emptyScriptSig =
                 new byte[0];
 
+        /*
+         * Witness v0:
+         *
+         * 20 bytes -> P2WPKH
+         * 32 bytes -> P2WSH
+         */
         if (witnessProgram.version() == 0) {
 
             if (witnessProgram.isP2wpkh()) {
@@ -276,6 +282,10 @@ public final class InputScriptValidator {
                 return;
             }
 
+            /*
+             * Witness v0 допускает только
+             * program length 20 или 32.
+             */
             throw new TransactionValidationException(
                     "Invalid wrapped witness v0 program length for input "
                             + inputIndex
@@ -285,12 +295,31 @@ public final class InputScriptValidator {
         }
 
         /*
-         * Unknown/upgradable witness versions.
+         * Witness versions 1..16 пока являются
+         * upgradable witness versions.
          *
-         * Exact P2SH scriptSig serialization
-         * has already been checked above.
+         * На consensus-уровне они принимаются,
+         * если для конкретной версии ещё не
+         * активировано отдельное правило.
+         *
+         * Standard policy может их запрещать.
+         */
+        if (ScriptVerifyFlags.has(
+                scriptVerifyFlags,
+                ScriptVerifyFlags.DISCOURAGE_UPGRADABLE_WITNESS_PROGRAM
+        )) {
+
+            throw new ScriptExecutionException(
+                    "Discouraged upgradable witness program"
+            );
+        }
+
+        /*
+         * Unknown witness version:
+         * consensus-valid.
          */
     }
+
     private static void validateNativeWitnessProgram(
             Transaction transaction,
             int inputIndex,
@@ -299,6 +328,21 @@ public final class InputScriptValidator {
             WitnessProgram witnessProgram,
             int scriptVerifyFlags
     ) {
+
+        /*
+         * Любой native witness program
+         * требует пустой scriptSig.
+         *
+         * Это относится не только к v0,
+         * но и к unknown witness versions.
+         */
+        if (input.scriptSig().length != 0) {
+
+            throw new TransactionValidationException(
+                    "Native witness program requires empty scriptSig for input "
+                            + inputIndex
+            );
+        }
 
         /*
          * Witness version 0 currently defines:
@@ -370,19 +414,30 @@ public final class InputScriptValidator {
         /*
          * Witness versions 1..16:
          *
-         * При одном только WITNESS consensus flag
-         * они являются зарезервированными версиями
-         * и не исполняются как legacy script.
+         * Пока отдельные semantics для версии
+         * не активированы, consensus разрешает
+         * такие witness programs для forward
+         * compatibility.
          *
-         * Позже для v1 добавим отдельный TAPROOT flag
-         * и BIP341/BIP342 validation.
+         * Standard policy может их запрещать.
          */
-        if (input.scriptSig().length != 0) {
-            throw new TransactionValidationException(
-                    "Native witness program requires empty scriptSig for input "
-                            + inputIndex
+        if (ScriptVerifyFlags.has(
+                scriptVerifyFlags,
+                ScriptVerifyFlags.DISCOURAGE_UPGRADABLE_WITNESS_PROGRAM
+        )) {
+
+            throw new ScriptExecutionException(
+                    "Discouraged upgradable witness program"
             );
         }
+
+        /*
+         * Unknown/upgradable witness version:
+         * consensus-valid.
+         *
+         * Позже v1 будет перенаправлен в
+         * BIP341/BIP342 Taproot validation.
+         */
     }
 
     private static TransactionValidationException

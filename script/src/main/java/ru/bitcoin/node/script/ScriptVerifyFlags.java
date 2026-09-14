@@ -51,6 +51,49 @@ public final class ScriptVerifyFlags {
      */
     public static final int WITNESS =
             1 << 6;
+    /*
+     * BIP147 / NULLDUMMY.
+     *
+     * Исторический дополнительный dummy-элемент,
+     * потребляемый OP_CHECKMULTISIG,
+     * при активном флаге обязан быть пустым.
+     */
+    public static final int NULLDUMMY =
+            1 << 7;
+    /*
+     * Require minimal encoding for:
+     *
+     * 1. executed push operations;
+     * 2. stack elements interpreted as Script numbers.
+     *
+     * Это standardness/policy flag, а не отдельная
+     * историческая consensus activation.
+     */
+    public static final int MINIMALDATA =
+            1 << 8;
+    public static final int MINIMALIF =
+            1 << 9;
+    public static final int NULLFAIL =
+            1 << 10;
+    public static final int CLEANSTACK =
+            1 << 11;
+    public static final int DISCOURAGE_UPGRADABLE_NOPS =
+            1 << 12;
+    public static final int WITNESS_PUBKEYTYPE =
+            1 << 13;
+    public static final int DISCOURAGE_UPGRADABLE_WITNESS_PROGRAM =
+            1 << 14;
+    /*
+     * Policy rule:
+     *
+     * legacy signature checking must not modify
+     * scriptCode through historical FindAndDelete.
+     *
+     * Для WITNESS_V0 этот flag не применяется,
+     * потому что BIP143 не использует FindAndDelete.
+     */
+    public static final int CONST_SCRIPTCODE =
+            1 << 15;
 
     private ScriptVerifyFlags() {
     }
