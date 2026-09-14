@@ -3,16 +3,17 @@ package ru.bitcoin.node.consensus.transaction;
 import org.junit.jupiter.api.Test;
 import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.common.types.UInt32;
+import ru.bitcoin.node.consensus.money.Money;
 import ru.bitcoin.node.protocol.transaction.OutPoint;
 import ru.bitcoin.node.protocol.transaction.Transaction;
 import ru.bitcoin.node.protocol.transaction.TxIn;
 import ru.bitcoin.node.protocol.transaction.TxOut;
+import ru.bitcoin.node.script.ScriptVerifyFlags;
 
 import java.util.List;
 import java.util.Optional;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class ContextualTransactionValidatorTest {
     @Test
@@ -228,6 +229,535 @@ public class ContextualTransactionValidatorTest {
                         transaction,
                         200,
                         utxoView
+                );
+
+        assertEquals(
+                1_000L,
+                result.fee()
+        );
+    }
+    @Test
+    void shouldAcceptValidTransactionWithUtxoContext() {
+
+        TxIn input =
+                input(
+                        "11",
+                        0
+                );
+
+        Transaction transaction =
+                transaction(
+                        List.of(
+                                input
+                        ),
+                        List.of(
+                                new TxOut(
+                                        1_000L,
+                                        new byte[]{0x51}
+                                )
+                        )
+                );
+
+        UtxoView utxoView =
+                requestedOutPoint -> {
+
+                    if (!requestedOutPoint.equals(
+                            input.previousOutput()
+                    )) {
+                        return Optional.empty();
+                    }
+
+                    return Optional.of(
+                            new UtxoEntry(
+                                    2_000L,
+                                    new byte[]{0x51},
+                                    100L,
+                                    false
+                            )
+                    );
+                };
+
+        assertDoesNotThrow(
+                () -> TransactionValidator.validate(
+                        transaction,
+                        utxoView,
+                        ScriptVerifyFlags.NONE
+                )
+        );
+    }
+    @Test
+    void shouldRejectTransactionWithMissingUtxo() {
+
+        Transaction transaction =
+                transaction(
+                        List.of(
+                                input(
+                                        "11",
+                                        0
+                                )
+                        ),
+                        List.of(
+                                new TxOut(
+                                        1_000L,
+                                        new byte[]{0x51}
+                                )
+                        )
+                );
+
+        UtxoView utxoView =
+                requestedOutPoint ->
+                        Optional.empty();
+
+        assertThrows(
+                TransactionValidationException.class,
+                () -> TransactionValidator.validate(
+                        transaction,
+                        utxoView,
+                        ScriptVerifyFlags.NONE
+                )
+        );
+    }
+    @Test
+    void shouldRejectTransactionWhenOutputsExceedInputs() {
+
+        TxIn input =
+                input(
+                        "11",
+                        0
+                );
+
+        Transaction transaction =
+                transaction(
+                        List.of(
+                                input
+                        ),
+                        List.of(
+                                new TxOut(
+                                        2_000L,
+                                        new byte[]{0x51}
+                                )
+                        )
+                );
+
+        UtxoView utxoView =
+                requestedOutPoint -> {
+
+                    if (!requestedOutPoint.equals(
+                            input.previousOutput()
+                    )) {
+                        return Optional.empty();
+                    }
+
+                    return Optional.of(
+                            new UtxoEntry(
+                                    1_000L,
+                                    new byte[]{0x51},
+                                    100L,
+                                    false
+                            )
+                    );
+                };
+
+        assertThrows(
+                TransactionValidationException.class,
+                () -> TransactionValidator.validate(
+                        transaction,
+                        utxoView,
+                        ScriptVerifyFlags.NONE
+                )
+        );
+    }
+    @Test
+    void shouldAcceptTransactionWhenInputsEqualOutputs() {
+
+        TxIn input =
+                input(
+                        "11",
+                        0
+                );
+
+        Transaction transaction =
+                transaction(
+                        List.of(
+                                input
+                        ),
+                        List.of(
+                                new TxOut(
+                                        1_000L,
+                                        new byte[]{0x51}
+                                )
+                        )
+                );
+
+        UtxoView utxoView =
+                requestedOutPoint -> {
+
+                    if (!requestedOutPoint.equals(
+                            input.previousOutput()
+                    )) {
+                        return Optional.empty();
+                    }
+
+                    return Optional.of(
+                            new UtxoEntry(
+                                    1_000L,
+                                    new byte[]{0x51},
+                                    100L,
+                                    false
+                            )
+                    );
+                };
+
+        assertDoesNotThrow(
+                () -> TransactionValidator.validate(
+                        transaction,
+                        utxoView,
+                        ScriptVerifyFlags.NONE
+                )
+        );
+    }
+    @Test
+    void shouldRejectUtxoAmountAboveMaxMoney() {
+
+        TxIn input =
+                input(
+                        "11",
+                        0
+                );
+
+        Transaction transaction =
+                transaction(
+                        List.of(
+                                input
+                        ),
+                        List.of(
+                                new TxOut(
+                                        1_000L,
+                                        new byte[]{0x51}
+                                )
+                        )
+                );
+
+        UtxoView utxoView =
+                requestedOutPoint -> {
+
+                    if (!requestedOutPoint.equals(
+                            input.previousOutput()
+                    )) {
+                        return Optional.empty();
+                    }
+
+                    return Optional.of(
+                            new UtxoEntry(
+                                    Money.MAX_MONEY + 1,
+                                    new byte[]{0x51},
+                                    100L,
+                                    false
+                            )
+                    );
+                };
+
+        assertThrows(
+                TransactionValidationException.class,
+                () -> TransactionValidator.validate(
+                        transaction,
+                        utxoView,
+                        ScriptVerifyFlags.NONE
+                )
+        );
+    }
+    @Test
+    void shouldRejectTotalInputAmountAboveMaxMoney() {
+
+        TxIn firstInput =
+                input(
+                        "11",
+                        0
+                );
+
+        TxIn secondInput =
+                input(
+                        "22",
+                        0
+                );
+
+        Transaction transaction =
+                transaction(
+                        List.of(
+                                firstInput,
+                                secondInput
+                        ),
+                        List.of(
+                                new TxOut(
+                                        1_000L,
+                                        new byte[]{0x51}
+                                )
+                        )
+                );
+
+        UtxoView utxoView =
+                requestedOutPoint -> {
+
+                    if (requestedOutPoint.equals(
+                            firstInput.previousOutput()
+                    )) {
+                        return Optional.of(
+                                new UtxoEntry(
+                                        Money.MAX_MONEY,
+                                        new byte[]{0x51},
+                                        100L,
+                                        false
+                                )
+                        );
+                    }
+
+                    if (requestedOutPoint.equals(
+                            secondInput.previousOutput()
+                    )) {
+                        return Optional.of(
+                                new UtxoEntry(
+                                        1L,
+                                        new byte[]{0x51},
+                                        100L,
+                                        false
+                                )
+                        );
+                    }
+
+                    return Optional.empty();
+                };
+
+        assertThrows(
+                TransactionValidationException.class,
+                () -> TransactionValidator.validate(
+                        transaction,
+                        utxoView,
+                        ScriptVerifyFlags.NONE
+                )
+        );
+    }
+    @Test
+    void shouldRejectTransactionWhenInputScriptValidationFails() {
+
+        TxIn input =
+                input(
+                        "11",
+                        0
+                );
+
+        Transaction transaction =
+                transaction(
+                        List.of(
+                                input
+                        ),
+                        List.of(
+                                new TxOut(
+                                        1_000L,
+                                        new byte[]{0x51}
+                                )
+                        )
+                );
+
+        UtxoView utxoView =
+                requestedOutPoint -> {
+
+                    if (!requestedOutPoint.equals(
+                            input.previousOutput()
+                    )) {
+                        return Optional.empty();
+                    }
+
+                    return Optional.of(
+                            new UtxoEntry(
+                                    2_000L,
+
+                                    /*
+                                     * OP_0.
+                                     *
+                                     * Legacy script leaves false
+                                     * on the stack.
+                                     */
+                                    new byte[]{0x00},
+
+                                    100L,
+                                    false
+                            )
+                    );
+                };
+
+        assertThrows(
+                TransactionValidationException.class,
+                () -> TransactionValidator.validate(
+                        transaction,
+                        utxoView,
+                        ScriptVerifyFlags.NONE
+                )
+        );
+    }
+    @Test
+    void shouldAcceptCoinbaseWithoutUtxoLookup() {
+
+        Transaction transaction =
+                new Transaction(
+                        1,
+                        List.of(
+                                new TxIn(
+                                        OutPoint.coinbase(),
+                                        new byte[]{
+                                                0x01,
+                                                0x01
+                                        },
+                                        TxIn.FINAL_SEQUENCE
+                                )
+                        ),
+                        List.of(
+                                new TxOut(
+                                        5_000L,
+                                        new byte[]{0x51}
+                                )
+                        ),
+                        new UInt32(0)
+                );
+
+        UtxoView utxoView =
+                requestedOutPoint -> {
+                    throw new AssertionError(
+                            "Coinbase validation must not access UTXO view"
+                    );
+                };
+
+        assertDoesNotThrow(
+                () -> TransactionValidator.validate(
+                        transaction,
+                        utxoView,
+                        ScriptVerifyFlags.NONE
+                )
+        );
+    }
+    private static Transaction transaction(
+            List<TxIn> inputs,
+            List<TxOut> outputs
+    ) {
+        return new Transaction(
+                1,
+                inputs,
+                outputs,
+                new UInt32(0)
+        );
+    }
+    private static TxIn input(
+            String byteValue,
+            long outputIndex
+    ) {
+        return new TxIn(
+                new OutPoint(
+                        Hash256.fromDisplayHex(
+                                byteValue.repeat(32)
+                        ),
+                        new UInt32(
+                                outputIndex
+                        )
+                ),
+                new byte[0],
+                TxIn.FINAL_SEQUENCE
+        );
+    }
+    @Test
+    void shouldValidateInputScriptsDuringContextualValidation() {
+
+        OutPoint previousOutput =
+                new OutPoint(
+                        Hash256.fromDisplayHex(
+                                "66".repeat(32)
+                        ),
+                        new UInt32(0)
+                );
+
+        Transaction transaction =
+                transaction(
+                        previousOutput,
+                        9_000L
+                );
+
+        UtxoView utxoView =
+                outPoint -> {
+
+                    if (!outPoint.equals(
+                            previousOutput
+                    )) {
+                        return Optional.empty();
+                    }
+
+                    return Optional.of(
+                            new UtxoEntry(
+                                    10_000L,
+
+                                    /*
+                                     * OP_0.
+                                     *
+                                     * Script evaluation must fail.
+                                     */
+                                    new byte[]{0x00},
+
+                                    100L,
+                                    false
+                            )
+                    );
+                };
+
+        assertThrows(
+                TransactionValidationException.class,
+                () ->
+                        ContextualTransactionValidator.validate(
+                                transaction,
+                                200L,
+                                utxoView,
+                                ScriptVerifyFlags.NONE
+                        )
+        );
+    }
+    @Test
+    void shouldAcceptValidScriptsDuringContextualValidation() {
+
+        OutPoint previousOutput =
+                new OutPoint(
+                        Hash256.fromDisplayHex(
+                                "77".repeat(32)
+                        ),
+                        new UInt32(0)
+                );
+
+        Transaction transaction =
+                transaction(
+                        previousOutput,
+                        9_000L
+                );
+
+        UtxoView utxoView =
+                outPoint -> {
+
+                    if (!outPoint.equals(
+                            previousOutput
+                    )) {
+                        return Optional.empty();
+                    }
+
+                    return Optional.of(
+                            new UtxoEntry(
+                                    10_000L,
+                                    new byte[]{0x51},
+                                    100L,
+                                    false
+                            )
+                    );
+                };
+
+        TransactionContextResult result =
+                ContextualTransactionValidator.validate(
+                        transaction,
+                        200L,
+                        utxoView,
+                        ScriptVerifyFlags.NONE
                 );
 
         assertEquals(

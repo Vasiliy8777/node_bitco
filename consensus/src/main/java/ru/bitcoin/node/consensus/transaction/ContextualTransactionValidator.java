@@ -4,6 +4,7 @@ import ru.bitcoin.node.consensus.money.Money;
 import ru.bitcoin.node.protocol.transaction.Transaction;
 import ru.bitcoin.node.protocol.transaction.TxIn;
 import ru.bitcoin.node.protocol.transaction.TxOut;
+import ru.bitcoin.node.script.ScriptVerifyFlags;
 
 public final class ContextualTransactionValidator {
     public static final long COINBASE_MATURITY =
@@ -15,6 +16,19 @@ public final class ContextualTransactionValidator {
             Transaction transaction,
             long spendingHeight,
             UtxoView utxoView
+    ) {
+        return validate(
+                transaction,
+                spendingHeight,
+                utxoView,
+                ScriptVerifyFlags.NONE
+        );
+    }
+    public static TransactionContextResult validate(
+            Transaction transaction,
+            long spendingHeight,
+            UtxoView utxoView,
+            int scriptVerifyFlags
     ) {
         if (transaction == null) {
             throw new IllegalArgumentException(
@@ -44,7 +58,7 @@ public final class ContextualTransactionValidator {
             );
         }
 
-        long inputValue = 0;
+        long inputValue = 0L;
 
         for (TxIn input :
                 transaction.inputs()) {
@@ -78,16 +92,14 @@ public final class ContextualTransactionValidator {
                 );
             }
 
-            if (inputValue
-                    > Money.MAX_MONEY) {
-
+            if (inputValue > Money.MAX_MONEY) {
                 throw new TransactionValidationException(
                         "Transaction input value exceeds MAX_MONEY"
                 );
             }
         }
 
-        long outputValue = 0;
+        long outputValue = 0L;
 
         for (TxOut output :
                 transaction.outputs()) {
@@ -104,9 +116,7 @@ public final class ContextualTransactionValidator {
                 );
             }
 
-            if (outputValue
-                    > Money.MAX_MONEY) {
-
+            if (outputValue > Money.MAX_MONEY) {
                 throw new TransactionValidationException(
                         "Transaction output value exceeds MAX_MONEY"
                 );
@@ -118,6 +128,17 @@ public final class ContextualTransactionValidator {
                     "Transaction spends more than its inputs"
             );
         }
+
+        /*
+         * После всех contextual monetary checks
+         * выполняем проверку scriptSig /
+         * scriptPubKey / witness для всех inputs.
+         */
+        InputScriptValidator.validateAll(
+                transaction,
+                utxoView,
+                scriptVerifyFlags
+        );
 
         long fee =
                 inputValue - outputValue;
