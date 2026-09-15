@@ -3,6 +3,7 @@ package ru.bitcoin.node.consensus.block;
 import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.consensus.transaction.TransactionValidationException;
 import ru.bitcoin.node.consensus.transaction.TransactionValidator;
+import ru.bitcoin.node.consensus.transaction.TransactionSigOpCost;
 import ru.bitcoin.node.crypto.merkle.MerkleRootResult;
 import ru.bitcoin.node.crypto.merkle.MerkleTree;
 import ru.bitcoin.node.protocol.block.Block;
@@ -57,6 +58,7 @@ public final class BlockValidator {
             }
         }
 
+        long legacySigOpsCost = 0;
         for (Transaction transaction :
                 transactions) {
 
@@ -71,6 +73,8 @@ public final class BlockValidator {
                                 + e.getMessage()
                 );
             }
+            legacySigOpsCost += TransactionSigOpCost.legacyCost(transaction);
+            BlockSigOpsValidator.validate(legacySigOpsCost);
         }
 
         long blockWeight =

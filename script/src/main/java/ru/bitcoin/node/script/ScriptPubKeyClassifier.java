@@ -16,6 +16,10 @@ public final class ScriptPubKeyClassifier {
             );
         }
 
+        if (java.util.Arrays.equals(scriptPubKey, new byte[]{0x51, 2, 0x4e, 0x73})) {
+            return ScriptPubKeyType.ANCHOR;
+        }
+
         if (isP2pkh(scriptPubKey)) {
             return ScriptPubKeyType.PUBKEYHASH;
         }

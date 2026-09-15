@@ -162,6 +162,18 @@ public final class RocksDbDatabase
         }
     }
 
+    /** Checks logical contents, including every store sharing this database. */
+    public boolean isEmpty() {
+        ensureOpen();
+        try (var iterator = database.newIterator()) {
+            iterator.seekToFirst();
+            iterator.status();
+            return !iterator.isValid();
+        } catch (RocksDBException e) {
+            throw new IllegalStateException("Failed to inspect RocksDB contents", e);
+        }
+    }
+
     private void ensureOpen() {
         if (closed) {
             throw new IllegalStateException(

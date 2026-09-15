@@ -30,6 +30,15 @@ public final class ContextualTransactionValidator {
             UtxoView utxoView,
             int scriptVerifyFlags
     ) {
+        TransactionContextResult result = validateInputs(transaction, spendingHeight, utxoView);
+        InputScriptValidator.validateAll(transaction, utxoView, scriptVerifyFlags);
+        return result;
+    }
+
+    /** Checks structure, amounts and maturity. Does not execute input scripts. */
+    public static TransactionContextResult validateInputs(
+            Transaction transaction, long spendingHeight, UtxoView utxoView
+    ) {
         if (transaction == null) {
             throw new IllegalArgumentException(
                     "transaction must not be null"
@@ -128,17 +137,6 @@ public final class ContextualTransactionValidator {
                     "Transaction spends more than its inputs"
             );
         }
-
-        /*
-         * После всех contextual monetary checks
-         * выполняем проверку scriptSig /
-         * scriptPubKey / witness для всех inputs.
-         */
-        InputScriptValidator.validateAll(
-                transaction,
-                utxoView,
-                scriptVerifyFlags
-        );
 
         long fee =
                 inputValue - outputValue;

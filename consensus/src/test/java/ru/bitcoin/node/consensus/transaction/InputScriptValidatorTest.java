@@ -23,6 +23,17 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class InputScriptValidatorTest {
+    @Test
+    void historicalDerTrailingBytesAreAllowedOnlyWithoutStrictDerFlags() {
+        Fixture fixture = createFixture();
+        byte[] original = fixture.signatureWithHashType();
+        byte[] historical = Arrays.copyOf(original, original.length + 1);
+        historical[original.length - 1] = 0;
+        historical[original.length] = original[original.length - 1];
+        var tx = replaceScriptSig(fixture.transaction(), P2pkhScript.scriptSig(historical, fixture.publicKey().compressed()));
+        assertDoesNotThrow(() -> InputScriptValidator.validateAll(tx, fixture.utxoView(), ScriptVerifyFlags.NONE));
+        assertThrows(TransactionValidationException.class, () -> InputScriptValidator.validateAll(tx, fixture.utxoView(), ScriptVerifyFlags.DERSIG));
+    }
 
     @Test
     void validP2pkhInputShouldPass() {

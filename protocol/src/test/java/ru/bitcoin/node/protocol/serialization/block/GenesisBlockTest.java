@@ -5,6 +5,8 @@ import ru.bitcoin.node.common.bytes.HexUtils;
 import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.crypto.merkle.MerkleTree;
 import ru.bitcoin.node.protocol.block.Block;
+import ru.bitcoin.node.protocol.block.GenesisBlockFactory;
+import ru.bitcoin.node.protocol.network.NetworkParametersRegistry;
 import ru.bitcoin.node.protocol.serialization.BlockParser;
 import ru.bitcoin.node.protocol.serialization.BlockSerializer;
 import ru.bitcoin.node.protocol.transaction.Transaction;
@@ -46,6 +48,12 @@ class GenesisBlockTest {
                     "4104678afdb0fe5548271967f1a67130b7105cd6a828e03909a67962e0ea1f61deb649f6bc3f4cef38c4f35504e51ec112de5c384df7ba0b8d578a4c702b6bf11d5fac" +
 
                     "00000000";
+
+    @Test
+    void factoryMatchesEntireKnownGenesisSerialization() {
+        assertArrayEquals(HexUtils.decode(GENESIS_BLOCK), BlockSerializer.serialize(
+                GenesisBlockFactory.create(NetworkParametersRegistry.mainnet())));
+    }
 
     @Test
     void shouldParseRealBitcoinGenesisBlock() {

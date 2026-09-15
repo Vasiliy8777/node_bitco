@@ -41,7 +41,7 @@ class MempoolTest {
         MempoolEntry entry =
                 mempool.admit(
                         fixture.transaction(),
-                        SPENDING_HEIGHT,
+                        new MempoolValidationContext(SPENDING_HEIGHT, 1_700_000_000L, height -> 1_600_000_000L),
                         fixture.utxoView()
                 );
 
@@ -104,7 +104,7 @@ class MempoolTest {
 
         mempool.admit(
                 fixture.transaction(),
-                SPENDING_HEIGHT,
+                new MempoolValidationContext(SPENDING_HEIGHT, 1_700_000_000L, height -> 1_600_000_000L),
                 fixture.utxoView()
         );
 
@@ -113,7 +113,7 @@ class MempoolTest {
                 () ->
                         mempool.admit(
                                 fixture.transaction(),
-                                SPENDING_HEIGHT,
+                                new MempoolValidationContext(SPENDING_HEIGHT, 1_700_000_000L, height -> 1_600_000_000L),
                                 fixture.utxoView()
                         )
         );
@@ -135,7 +135,7 @@ class MempoolTest {
 
         mempool.admit(
                 fixture.transaction(),
-                SPENDING_HEIGHT,
+                new MempoolValidationContext(SPENDING_HEIGHT, 1_700_000_000L, height -> 1_600_000_000L),
                 fixture.utxoView()
         );
 
@@ -176,7 +176,7 @@ class MempoolTest {
                 () ->
                         mempool.admit(
                                 fixture.transaction(),
-                                SPENDING_HEIGHT,
+                                new MempoolValidationContext(SPENDING_HEIGHT, 1_700_000_000L, height -> 1_600_000_000L),
                                 fixture.utxoView()
                         )
         );
@@ -243,9 +243,7 @@ class MempoolTest {
          * Чтобы transaction прошла STANDARD
          * script validation.
          */
-        byte[] scriptPubKey = {
-                (byte) Opcode.OP_1
-        };
+        byte[] scriptPubKey = java.util.HexFormat.of().parseHex("0020" + java.util.HexFormat.of().formatHex(ru.bitcoin.node.crypto.hash.Sha256.hash(new byte[]{0x51})));
 
         byte[] previousHash =
                 new byte[32];
@@ -270,7 +268,7 @@ class MempoolTest {
                         new UInt32(
                                 0xffff_fffeL
                         ),
-                        Witness.EMPTY
+                        new Witness(List.of(new byte[]{0x51}))
                 );
 
         TxOut output = new TxOut(
@@ -398,9 +396,7 @@ class MempoolTest {
         TxOut output =
                 new TxOut(
                         90_000L,
-                        new byte[]{
-                                (byte) Opcode.OP_1
-                        }
+                        java.util.HexFormat.of().parseHex("0014" + "11".repeat(20))
                 );
 
         Transaction transaction =
@@ -409,9 +405,7 @@ class MempoolTest {
                         List.of(
                                 input
                         ),
-                        List.of(
-                                output
-                        ),
+                        List.of(output, new TxOut(0, new byte[]{0x6a})),
                         new UInt32(0L)
                 );
 
@@ -474,7 +468,7 @@ class MempoolTest {
                 () ->
                         mempool.admit(
                                 fixture.transaction(),
-                                SPENDING_HEIGHT,
+                                new MempoolValidationContext(SPENDING_HEIGHT, 1_700_000_000L, height -> 1_600_000_000L),
                                 fixture.utxoView()
                         )
         );

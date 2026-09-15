@@ -51,14 +51,8 @@ public final class BlockParser {
         long transactionCount =
                 reader.readCompactSize();
 
-        if (transactionCount > Integer.MAX_VALUE) {
-            throw new IllegalArgumentException(
-                    "Transaction count is too large"
-            );
-        }
-
         int count =
-                (int) transactionCount;
+                reader.checkedCollectionSize(transactionCount, 10, "transaction count");
 
         List<Transaction> transactions =
                 new ArrayList<>(count);

@@ -22,7 +22,8 @@ public final class StandardScriptVerifyFlags {
                     | ScriptVerifyFlags.NULLDUMMY
                     | ScriptVerifyFlags.CHECKLOCKTIMEVERIFY
                     | ScriptVerifyFlags.CHECKSEQUENCEVERIFY
-                    | ScriptVerifyFlags.WITNESS;
+                    | ScriptVerifyFlags.WITNESS
+                    | ScriptVerifyFlags.TAPROOT;
 
     /*
      * Дополнительные standardness / relay policy
@@ -39,7 +40,10 @@ public final class StandardScriptVerifyFlags {
                     | ScriptVerifyFlags.LOW_S
                     | ScriptVerifyFlags.DISCOURAGE_UPGRADABLE_WITNESS_PROGRAM
                     | ScriptVerifyFlags.WITNESS_PUBKEYTYPE
-                    | ScriptVerifyFlags.CONST_SCRIPTCODE;
+                    | ScriptVerifyFlags.CONST_SCRIPTCODE
+                    | ScriptVerifyFlags.DISCOURAGE_UPGRADABLE_TAPROOT_VERSION
+                    | ScriptVerifyFlags.DISCOURAGE_OP_SUCCESS
+                    | ScriptVerifyFlags.DISCOURAGE_UPGRADABLE_PUBKEYTYPE;
 
     public static final int STANDARD =
             MANDATORY

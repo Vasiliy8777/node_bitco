@@ -13,6 +13,16 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 class SequenceLocksTest {
+    @Test
+    void unsignedVersionsMustEnforceRelativeLocks() {
+        for (int version : new int[]{2, Integer.MIN_VALUE, 0x80000002, -1}) {
+            var lock = SequenceLocks.calculate(transaction(version, new UInt32(5)),
+                    List.of(new InputConfirmation(100, 1000)));
+            assertEquals(104, lock.minimumHeight());
+            assertFalse(SequenceLocks.evaluate(lock, 104, 1001));
+            assertTrue(SequenceLocks.evaluate(lock, 105, 1001));
+        }
+    }
 
     @Test
     void shouldIgnoreSequenceLocksForTransactionVersionBelowTwo() {

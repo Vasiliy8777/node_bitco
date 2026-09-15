@@ -4,255 +4,152 @@ import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.consensus.transaction.TransactionWeight;
 import ru.bitcoin.node.consensus.transaction.UtxoEntry;
 import ru.bitcoin.node.consensus.transaction.UtxoView;
+import ru.bitcoin.node.protocol.transaction.OutPoint;
 import ru.bitcoin.node.protocol.transaction.Transaction;
-import ru.bitcoin.node.protocol.transaction.TxIn;
-import ru.bitcoin.node.protocol.transaction.TxOut;
 
-import java.time.Instant;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.*;
 
+/** All entry and spent-outpoint mutations share this object's monitor.
+ * Admission requires a stable external chain/UTXO snapshot; acquire the chain lock first.
+ * Replacement and resource checks complete before committing a prospective pool.
+ */
 public final class Mempool {
     private final MempoolPolicy policy;
-    private final Map<Hash256, MempoolEntry> entries =
-            new ConcurrentHashMap<>();
+    private final MempoolLimits limits;
+    private final java.time.Clock clock;
+    private final Map<Hash256, MempoolEntry> entries = new LinkedHashMap<>();
+    private final Map<OutPoint, Hash256> spent = new HashMap<>();
 
-    public Mempool() {
-        this(
-                new MempoolPolicy()
-        );
+    public Mempool() { this(new MempoolPolicy()); }
+    public Mempool(MempoolPolicy policy) { this(policy, MempoolLimits.DEFAULT, java.time.Clock.systemUTC()); }
+    public Mempool(MempoolPolicy policy, MempoolLimits limits, java.time.Clock clock) {
+        this.policy = Objects.requireNonNull(policy, "policy");
+        this.limits = Objects.requireNonNull(limits, "limits");
+        this.clock = Objects.requireNonNull(clock, "clock");
     }
 
-    public Mempool(
-            MempoolPolicy policy
-    ) {
-        if (policy == null) {
-            throw new IllegalArgumentException(
-                    "policy must not be null"
-            );
+    public synchronized MempoolEntry admit(Transaction transaction, MempoolValidationContext context, UtxoView chainUtxos) {
+        Objects.requireNonNull(transaction, "transaction");
+        Objects.requireNonNull(context, "context");
+        Objects.requireNonNull(chainUtxos, "chainUtxos");
+        Hash256 txId = transaction.txId();
+        if (entries.containsKey(txId)) throw new MempoolAdmissionException("Transaction already exists: " + txId);
+        if (transaction.isCoinbase()) throw new MempoolAdmissionException("Coinbase cannot enter mempool");
+        long weight = TransactionWeight.calculate(transaction);
+        policy.validateStandardStructure(transaction, weight);
+        Set<Hash256> conflicts = new HashSet<>();
+        for (var input : transaction.inputs()) {
+            Hash256 conflict = spent.get(input.previousOutput());
+            if (conflict != null) conflicts.add(conflict);
         }
-
-        this.policy =
-                policy;
-    }
-
-    /**
-     * Единственная публичная точка добавления
-     * новой транзакции в mempool.
-     *
-     * Сначала выполняется validation,
-     * и только после успешной проверки
-     * создаётся MempoolEntry.
-     */
-    public MempoolEntry admit(
-            Transaction transaction,
-            long spendingHeight,
-            UtxoView utxoView
-    ) {
-        if (transaction == null) {
-            throw new IllegalArgumentException(
-                    "transaction must not be null"
-            );
+        Set<Hash256> evicted = MempoolGraphPolicy.descendants(entries, conflicts);
+        Map<OutPoint, UtxoEntry> coins = new HashMap<>();
+        for (var input : transaction.inputs()) {
+            OutPoint point = input.previousOutput();
+            if (evicted.contains(point.transactionId())) throw new MempoolAdmissionException("Replacement spends an evicted parent");
+            MempoolEntry parent = entries.get(point.transactionId());
+            if (parent != null) {
+                long index = point.outputIndex().value();
+                if (index >= parent.transaction().outputs().size()) throw new MempoolAdmissionException("Invalid parent output index");
+                var output = parent.transaction().outputs().get((int) index);
+                coins.put(point, new UtxoEntry(output.value(), output.scriptPubKey(), context.nextBlockHeight(), false));
+            } else {
+                coins.put(point, chainUtxos.find(point).orElseThrow(() -> new MempoolAdmissionException("Missing UTXO: " + point)));
+            }
         }
-
-        if (utxoView == null) {
-            throw new IllegalArgumentException(
-                    "utxoView must not be null"
-            );
-        }
-
-        Hash256 txId =
-                transaction.txId();
-
-        /*
-         * Быстрая предварительная проверка.
-         *
-         * Окончательная защита от race condition
-         * ниже всё равно делается через putIfAbsent.
-         */
-        if (entries.containsKey(txId)) {
-            throw new MempoolAdmissionException(
-                    "Transaction already exists in mempool: "
-                            + txId.toDisplayHex()
-            );
-        }
-
-        /*
-         * Consensus/contextual + standard policy.
-         *
-         * Если здесь произойдёт exception,
-         * состояние mempool вообще не изменится.
-         */
-        MempoolValidator.validate(
-                transaction,
-                spendingHeight,
-                utxoView
-        );
-
-        long fee =
-                calculateFee(
-                        transaction,
-                        utxoView
-                );
-
-        long arrivalTime =
-                Instant.now()
-                        .getEpochSecond();
-
-        long weight =
-                TransactionWeight.calculate(
-                        transaction
-                );
-
-        policy.validateStandardStructure(
-                transaction,
-                weight
-        );
-
-        policy.validateFee(
-                fee,
-                weight
-        );
-
-        MempoolEntry entry =
-                new MempoolEntry(
-                        transaction,
-                        fee,
-                        weight,
-                        arrivalTime
-                );
-
-        MempoolEntry existing =
-                entries.putIfAbsent(
-                        txId,
-                        entry
-                );
-
-        /*
-         * Между containsKey() и putIfAbsent()
-         * другая thread могла добавить ту же tx.
-         */
-        if (existing != null) {
-            throw new MempoolAdmissionException(
-                    "Transaction already exists in mempool: "
-                            + txId.toDisplayHex()
-            );
-        }
-
+        UtxoView view = point -> Optional.ofNullable(coins.get(point));
+        long fee = MempoolValidator.validate(transaction, context, view);
+        long sigops = ru.bitcoin.node.consensus.transaction.TransactionSigOpCost.calculate(transaction, view,
+                ru.bitcoin.node.mempool.policy.StandardScriptVerifyFlags.STANDARD);
+        policy.validateFee(fee, Math.max(weight, sigops * 20));
+        ru.bitcoin.node.mempool.policy.StandardTransactionPolicy.validateDustFee(transaction, fee);
+        var entry = new MempoolEntry(transaction, fee, weight, clock.instant().getEpochSecond(), sigops);
+        MempoolGraphPolicy.replacement(entries, conflicts, evicted, entry, limits);
+        Map<Hash256, MempoolEntry> candidate = new LinkedHashMap<>(entries);
+        evicted.forEach(candidate::remove);
+        candidate.put(txId, entry);
+        MempoolGraphPolicy.checkLimits(candidate, txId, limits);
+        MempoolGraphPolicy.trim(candidate, limits.maxPoolVirtualBytes(), txId);
+        entries.clear();
+        entries.putAll(candidate);
+        rebuildSpent();
         return entry;
     }
 
-    public boolean contains(
-            Hash256 txId
-    ) {
-        if (txId == null) {
-            throw new IllegalArgumentException(
-                    "txId must not be null"
-            );
+    public synchronized boolean contains(Hash256 txId) { return entries.containsKey(Objects.requireNonNull(txId)); }
+    public synchronized Optional<MempoolEntry> find(Hash256 txId) { return Optional.ofNullable(entries.get(Objects.requireNonNull(txId))); }
+
+    /** Eviction removes descendants as their unconfirmed inputs would otherwise disappear. */
+    public synchronized Optional<MempoolEntry> remove(Hash256 txId) {
+        Objects.requireNonNull(txId);
+        MempoolEntry root = entries.get(txId);
+        if (root == null) return Optional.empty();
+        Set<Hash256> removed = new HashSet<>();
+        removed.add(txId);
+        // Insertion order is topological: parents must already exist when children enter.
+        for (var entry : entries.values()) {
+            if (entry.transaction().inputs().stream().anyMatch(in -> removed.contains(in.previousOutput().transactionId()))) {
+                removed.add(entry.transaction().txId());
+            }
         }
-
-        return entries.containsKey(
-                txId
-        );
-    }
-
-    public Optional<MempoolEntry> find(
-            Hash256 txId
-    ) {
-        if (txId == null) {
-            throw new IllegalArgumentException(
-                    "txId must not be null"
-            );
+        for (Hash256 id : removed) {
+            MempoolEntry entry = entries.remove(id);
+            for (var input : entry.transaction().inputs()) spent.remove(input.previousOutput(), id);
         }
-
-        return Optional.ofNullable(
-                entries.get(
-                        txId
-                )
-        );
+        return Optional.of(root);
     }
 
-    public Optional<MempoolEntry> remove(
-            Hash256 txId
-    ) {
-        if (txId == null) {
-            throw new IllegalArgumentException(
-                    "txId must not be null"
-            );
-        }
+    public synchronized int size() { return entries.size(); }
 
-        return Optional.ofNullable(
-                entries.remove(
-                        txId
-                )
-        );
-    }
-
-    public int size() {
-        return entries.size();
-    }
-
-    public boolean isEmpty() {
-        return entries.isEmpty();
-    }
-
-    /**
-     * Immutable snapshot текущего состояния.
-     *
-     * Возвращаем именно snapshot, а не внутреннюю
-     * mutable map.
+    /** Recheck after a chain update under the caller's chain lock. Confirmed IDs are
+     * omitted; their children can spend the corresponding coins in the new UTXO view.
+     * Unexpected storage/history failures leave the previous pool intact.
      */
-    public List<MempoolEntry> entries() {
-        return List.copyOf(
-                entries.values()
-        );
+    public synchronized List<Hash256> revalidate(MempoolValidationContext context, UtxoView chainUtxos,
+                                                 Set<Hash256> confirmed) {
+        Objects.requireNonNull(context);
+        Objects.requireNonNull(chainUtxos);
+        Objects.requireNonNull(confirmed);
+        Mempool replacement = new Mempool(policy, limits, clock);
+        List<Hash256> removed = new ArrayList<>();
+        for (var entry : entries.values()) {
+            Hash256 id = entry.transaction().txId();
+            if (confirmed.contains(id)) {
+                removed.add(id);
+                continue;
+            }
+            try {
+                replacement.admit(entry.transaction(), context, chainUtxos);
+                replacement.entries.put(id, entry); // Keep original arrival time and metadata.
+            } catch (MempoolAdmissionException
+                     | ru.bitcoin.node.consensus.transaction.TransactionValidationException
+                     | ru.bitcoin.node.script.ScriptExecutionException
+                     | ru.bitcoin.node.script.ScriptParseException e) {
+                removed.add(id);
+            }
+        }
+        entries.clear();
+        entries.putAll(replacement.entries);
+        spent.clear();
+        spent.putAll(replacement.spent);
+        return List.copyOf(removed);
+    }
+    public synchronized boolean isEmpty() { return entries.isEmpty(); }
+    public synchronized List<MempoolEntry> entries() { return List.copyOf(entries.values()); }
+
+    public synchronized int expire() {
+        long cutoff = clock.instant().getEpochSecond() - limits.expirySeconds();
+        int before = entries.size();
+        for (var entry : List.copyOf(entries.values())) {
+            if (entry.arrivalTime() < cutoff) remove(entry.transaction().txId());
+        }
+        return before - entries.size();
     }
 
-    private static long calculateFee(
-            Transaction transaction,
-            UtxoView utxoView
-    ) {
-        long totalInput =
-                0L;
-
-        for (TxIn input : transaction.inputs()) {
-
-            UtxoEntry utxo =
-                    utxoView.find(
-                                    input.previousOutput()
-                            )
-                            .orElseThrow(
-                                    () ->
-                                            new MempoolAdmissionException(
-                                                    "Missing UTXO while calculating fee: "
-                                                            + input.previousOutput()
-                                            )
-                            );
-
-            totalInput =
-                    Math.addExact(
-                            totalInput,
-                            utxo.amount()
-                    );
+    private void rebuildSpent() {
+        spent.clear();
+        for (var entry : entries.values()) for (var input : entry.transaction().inputs()) {
+            spent.put(input.previousOutput(), entry.transaction().txId());
         }
-
-        long totalOutput =
-                0L;
-
-        for (TxOut output : transaction.outputs()) {
-
-            totalOutput =
-                    Math.addExact(
-                            totalOutput,
-                            output.value()
-                    );
-        }
-
-        return Math.subtractExact(
-                totalInput,
-                totalOutput
-        );
     }
 }

@@ -71,7 +71,7 @@ class MempoolValidatorScriptPolicyTest {
                 () ->
                         MempoolValidator.validate(
                                 fixture.transaction(),
-                                SPENDING_HEIGHT,
+                                new MempoolValidationContext(SPENDING_HEIGHT, 1_700_000_000L, height -> 1_600_000_000L),
                                 fixture.utxoView()
                         )
         );

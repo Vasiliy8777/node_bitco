@@ -14,6 +14,13 @@ public final class ConsensusScriptFlags {
     private ConsensusScriptFlags() {
     }
 
+    public static int forBlock(long blockHeight, Hash256 blockHash,
+                               NetworkParameters parameters, boolean taprootActive) {
+        int flags = forBlock(blockHeight, blockHash, parameters);
+        if (taprootActive && !MAINNET_TAPROOT_EXCEPTION.equals(blockHash)) flags |= ScriptVerifyFlags.TAPROOT;
+        return flags;
+    }
+
     public static int forBlock(
             long blockHeight,
             Hash256 blockHash,

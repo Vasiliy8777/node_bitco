@@ -164,8 +164,13 @@ public final class BlockConnectChangesBuilder {
                 ConsensusScriptFlags.forBlock(
                         blockHeight,
                         block.header().hash(),
-                        networkParameters
+                        networkParameters,
+                        medianTimePastResolver.taprootActive(networkParameters)
                 );
+
+        WitnessCommitmentValidator.validate(block, blockHeight >= networkParameters.segwitHeight());
+        SignetBlockValidator.validate(block, networkParameters);
+        long sigOpsCost = 0;
 
         for (int transactionIndex = 0;
              transactionIndex < transactions.size();
@@ -188,16 +193,20 @@ public final class BlockConnectChangesBuilder {
             boolean coinbase =
                     transactionIndex == 0;
 
-            if (!coinbase) {
-
-                TransactionFinality.validate(
+            TransactionFinality.validate(
                         transaction,
                         blockHeight,
                         lockTimeCutoff
                 );
 
+            sigOpsCost = Math.addExact(sigOpsCost,
+                    TransactionSigOpCost.calculate(transaction, utxoView, scriptVerifyFlags));
+            BlockSigOpsValidator.validate(sigOpsCost);
+
+            if (!coinbase) {
+
                 TransactionContextResult contextResult =
-                        ContextualTransactionValidator.validate(
+                        ContextualTransactionValidator.validateInputs(
                                 transaction,
                                 blockHeight,
                                 utxoView
@@ -210,7 +219,7 @@ public final class BlockConnectChangesBuilder {
                  * Поэтому теперь безопасно формируем BIP68 context.
                  */
                 if (blockHeight >= networkParameters.csvHeight()
-                        && transaction.version() >= 2) {
+                        && Integer.toUnsignedLong(transaction.version()) >= 2) {
 
                     List<InputConfirmation> inputConfirmations =
                             buildInputConfirmations(

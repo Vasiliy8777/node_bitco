@@ -117,6 +117,14 @@ public final class BitcoinReader {
         return decoded.value();
     }
 
+    /** Bound allocation by the bytes actually available, before creating a collection. */
+    public int checkedCollectionSize(long count, int minimumElementBytes, String name) {
+        if (count < 0 || count > Integer.MAX_VALUE || count > remaining() / minimumElementBytes) {
+            throw new IllegalArgumentException(name + " exceeds available serialized data");
+        }
+        return (int) count;
+    }
+
     public byte[] readCompactBytes() {
         long length =
                 readCompactSize();

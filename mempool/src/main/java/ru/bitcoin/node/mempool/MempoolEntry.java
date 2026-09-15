@@ -7,12 +7,17 @@ public record MempoolEntry(
         Transaction transaction,
         long fee,
         long weight,
-        long arrivalTime
+        long arrivalTime,
+        long sigOpCost
 ) {
+
+    public MempoolEntry(Transaction transaction, long fee, long weight, long arrivalTime) {
+        this(transaction, fee, weight, arrivalTime, 0);
+    }
 
     public long virtualSize() {
         return TransactionWeight.virtualSize(
-                weight
+                        Math.max(weight, Math.multiplyExact(sigOpCost, 20))
         );
     }
 

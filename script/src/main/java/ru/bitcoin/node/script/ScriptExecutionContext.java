@@ -8,7 +8,8 @@ public record ScriptExecutionContext(
         byte[] scriptCode,
         int flags,
         long amount,
-        SignatureVersion signatureVersion
+        SignatureVersion signatureVersion,
+        TaprootExecutionData taprootData
 ) {
 
     public ScriptExecutionContext {
@@ -48,6 +49,11 @@ public record ScriptExecutionContext(
 
         scriptCode =
                 scriptCode.clone();
+    }
+
+    public ScriptExecutionContext(Transaction transaction, int inputIndex, byte[] scriptCode,
+                                  int flags, long amount, SignatureVersion signatureVersion) {
+        this(transaction, inputIndex, scriptCode, flags, amount, signatureVersion, null);
     }
 
     public ScriptExecutionContext(

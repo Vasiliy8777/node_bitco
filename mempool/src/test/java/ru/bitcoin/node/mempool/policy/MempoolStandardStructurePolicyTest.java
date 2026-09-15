@@ -107,7 +107,7 @@ class MempoolStandardStructurePolicyTest {
 
         Transaction transaction =
                 createTransaction(
-                        new byte[5]
+                        new byte[]{0x6a, 3, 1, 2, 3}
                 );
 
         int strippedSize =
@@ -174,7 +174,7 @@ class MempoolStandardStructurePolicyTest {
 
         Transaction transaction =
                 createTransaction(
-                        new byte[25]
+                        java.util.HexFormat.of().parseHex("76a914" + "11".repeat(20) + "88ac")
                 );
 
         long weight =
@@ -205,7 +205,7 @@ class MempoolStandardStructurePolicyTest {
 
         Transaction transaction =
                 createTransaction(
-                        new byte[25]
+                        java.util.HexFormat.of().parseHex("76a914" + "11".repeat(20) + "88ac")
                 );
 
         assertThrows(
@@ -278,7 +278,7 @@ class MempoolStandardStructurePolicyTest {
                 createTransaction(
                         1,
                         new byte[0],
-                        new byte[25]
+                        java.util.HexFormat.of().parseHex("76a914" + "11".repeat(20) + "88ac")
                 );
 
         assertDoesNotThrow(
@@ -299,7 +299,7 @@ class MempoolStandardStructurePolicyTest {
                 createTransaction(
                         3,
                         new byte[0],
-                        new byte[25]
+                        java.util.HexFormat.of().parseHex("76a914" + "11".repeat(20) + "88ac")
                 );
 
         assertDoesNotThrow(
@@ -320,7 +320,7 @@ class MempoolStandardStructurePolicyTest {
                 createTransaction(
                         0,
                         new byte[0],
-                        new byte[25]
+                        java.util.HexFormat.of().parseHex("76a914" + "11".repeat(20) + "88ac")
                 );
 
         assertThrows(
@@ -342,7 +342,7 @@ class MempoolStandardStructurePolicyTest {
                 createTransaction(
                         4,
                         new byte[0],
-                        new byte[25]
+                        java.util.HexFormat.of().parseHex("76a914" + "11".repeat(20) + "88ac")
                 );
 
         assertThrows(
@@ -365,7 +365,7 @@ class MempoolStandardStructurePolicyTest {
                         new byte[
                                 MempoolPolicy.MAX_STANDARD_SCRIPTSIG_SIZE
                                 ],
-                        new byte[25]
+                        java.util.HexFormat.of().parseHex("76a914" + "11".repeat(20) + "88ac")
                 );
 
         assertDoesNotThrow(
@@ -389,7 +389,7 @@ class MempoolStandardStructurePolicyTest {
                                 MempoolPolicy.MAX_STANDARD_SCRIPTSIG_SIZE
                                         + 1
                                 ],
-                        new byte[25]
+                        java.util.HexFormat.of().parseHex("76a914" + "11".repeat(20) + "88ac")
                 );
 
         assertThrows(

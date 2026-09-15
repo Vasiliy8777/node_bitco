@@ -76,8 +76,9 @@ public final class TransactionParser {
         }
 
         int inputsSize =
-                toCollectionSize(
+                reader.checkedCollectionSize(
                         inputCount,
+                        41,
                         "input count"
                 );
 
@@ -99,8 +100,9 @@ public final class TransactionParser {
                 reader.readCompactSize();
 
         int outputsSize =
-                toCollectionSize(
+                reader.checkedCollectionSize(
                         outputCount,
+                        9,
                         "output count"
                 );
 
@@ -134,6 +136,9 @@ public final class TransactionParser {
             }
 
             inputs = withWitness;
+            if (inputs.stream().allMatch(input -> input.witness().isEmpty())) {
+                throw new IllegalArgumentException("Superfluous witness record");
+            }
         }
 
         UInt32 lockTime =
@@ -210,8 +215,9 @@ public final class TransactionParser {
                 reader.readCompactSize();
 
         int size =
-                toCollectionSize(
+                reader.checkedCollectionSize(
                         count,
+                        1,
                         "witness item count"
                 );
 
@@ -227,16 +233,4 @@ public final class TransactionParser {
         return new Witness(items);
     }
 
-    private static int toCollectionSize(
-            long value,
-            String name
-    ) {
-        if (value > Integer.MAX_VALUE) {
-            throw new IllegalArgumentException(
-                    name + " is too large"
-            );
-        }
-
-        return (int) value;
-    }
 }

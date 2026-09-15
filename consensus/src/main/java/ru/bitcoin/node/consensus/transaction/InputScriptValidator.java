@@ -83,6 +83,29 @@ public final class InputScriptValidator {
 
             if (witnessProgram.isPresent()) {
 
+                var program = witnessProgram.get();
+                if (!ScriptNumber.castToBool(program.program())) {
+                    throw new TransactionValidationException("Witness program evaluates to false before witness execution");
+                }
+                if (ScriptPubKeyClassifier.classify(scriptPubKey) == ScriptPubKeyType.ANCHOR) {
+                    if (input.scriptSig().length != 0) throw new TransactionValidationException("Native anchor requires empty scriptSig");
+                    return;
+                }
+                if (program.version() == 1 && program.programLength() == 32
+                        && ScriptVerifyFlags.has(scriptVerifyFlags, ScriptVerifyFlags.TAPROOT)) {
+                    if (input.scriptSig().length != 0) {
+                        throw new TransactionValidationException("Native Taproot requires empty scriptSig");
+                    }
+                    var coins = transaction.inputs().stream().map(txIn -> {
+                        var coin = utxoView.find(txIn.previousOutput()).orElseThrow(
+                                () -> new TransactionValidationException("Missing Taproot input UTXO"));
+                        return new ru.bitcoin.node.protocol.transaction.TxOut(coin.amount(), coin.scriptPubKey());
+                    }).toList();
+                    ru.bitcoin.node.script.validation.TaprootValidator.validate(
+                            transaction, inputIndex, coins, program.program(), scriptVerifyFlags);
+                    return;
+                }
+
                 validateNativeWitnessProgram(
                         transaction,
                         inputIndex,
@@ -122,7 +145,18 @@ public final class InputScriptValidator {
                             input.scriptSig()
                     );
 
+            // Detect the redeem program independently of the canonical wrapper.
+            // A malformed witness wrapper must never fall back to legacy execution.
+            byte[] lastPush = SigOpCounter.lastPush(input.scriptSig());
+            if (lastPush != null && WitnessProgram.parse(lastPush).isPresent()
+                    && wrappedWitnessProgram.isEmpty()) {
+                throw new TransactionValidationException("Non-canonical P2SH witness scriptSig");
+            }
+
             if (wrappedWitnessProgram.isPresent()) {
+                if (!ScriptNumber.castToBool(wrappedWitnessProgram.get().program())) {
+                    throw new TransactionValidationException("Witness redeemScript evaluates to false");
+                }
 
                 /*
                  * Проверяем только внешний P2SH:

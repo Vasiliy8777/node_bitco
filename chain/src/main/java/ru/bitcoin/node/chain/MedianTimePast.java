@@ -65,6 +65,11 @@ public final class MedianTimePast {
                 );
             }
 
+            if (!parent.hash().equals(current.previousBlockHash())
+                    || parent.height() != current.height() - 1L) {
+                throw new IllegalStateException("Invalid BlockIndex linkage while calculating MedianTimePast");
+            }
+
             current = parent;
         }
 

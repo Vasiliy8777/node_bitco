@@ -15,11 +15,11 @@ public final class NetworkParametersRegistry {
     /*
      * Bitcoin mainnet/testnet PoW limit:
      *
-     * 00000000FFFF0000000000000000000000000000000000000000000000000000
+     * 00000000FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
      */
     private static final BigInteger MAIN_POW_LIMIT =
             new BigInteger(
-                    "00000000ffff0000000000000000000000000000000000000000000000000000",
+                    "00000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
                     16
             );
 
@@ -87,7 +87,7 @@ public final class NetworkParametersRegistry {
                 0x0709110BL,
                 18333,
                 Hash256.fromDisplayHex(
-                        "000000000933ea01ad0ee984209779baae8c49c7b00203cc83f10bfa6c712f72"
+                        "000000000933ea01ad0ee984209779baaec3ced90fa3f408719526f8d77f4943"
                 ),
                 Hash256.fromDisplayHex(
                         "00000000dd30457c001f4095d208cc12"
@@ -114,11 +114,10 @@ public final class NetworkParametersRegistry {
                 0x40CF030AL,
                 38333,
                 Hash256.fromDisplayHex(
-                        "00000008819873e925422c1ff0f99f7c" +
-                                "6a0a92672c4b4f75eaa8bdfc22f4b9f9"
+                        "00000008819873e925422c1ff0f99f7cc9bbb232af63a077a480a3633bee1ef6"
                 ),
                 null,
-                MAIN_POW_LIMIT,
+                new BigInteger("00000377ae000000000000000000000000000000000000000000000000000000", 16),
                 TARGET_SPACING,
                 TARGET_TIMESPAN,
                 210_000L,

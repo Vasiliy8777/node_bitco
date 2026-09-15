@@ -1,74 +1,45 @@
 package ru.bitcoin.node.mempool;
 
-import ru.bitcoin.node.consensus.transaction.ContextualTransactionValidator;
-import ru.bitcoin.node.consensus.transaction.InputScriptValidator;
-import ru.bitcoin.node.consensus.transaction.UtxoView;
+import ru.bitcoin.node.consensus.transaction.*;
 import ru.bitcoin.node.mempool.policy.StandardScriptVerifyFlags;
 import ru.bitcoin.node.protocol.transaction.Transaction;
 
+import java.util.ArrayList;
+import java.util.Objects;
+
 public final class MempoolValidator {
+    private MempoolValidator() { }
 
-    private MempoolValidator() {
-    }
-
-    /**
-     * Проверяет транзакцию перед её принятием
-     * в mempool.
-     *
-     * Здесь намеренно используются STANDARD
-     * script verification flags, а не
-     * ConsensusScriptFlags.forBlock(...).
-     *
-     * Это позволяет транзакции быть:
-     *
-     * consensus-valid,
-     * но non-standard для mempool/relay.
-     */
-    public static void validate(
-            Transaction transaction,
-            long spendingHeight,
-            UtxoView utxoView
-    ) {
-        if (transaction == null) {
-            throw new IllegalArgumentException(
-                    "transaction must not be null"
-            );
+    /** Standard next-block admission, including BIP68 and BIP113. Returns the fee. */
+    public static long validate(Transaction transaction, MempoolValidationContext context, UtxoView utxoView) {
+        Objects.requireNonNull(transaction, "transaction");
+        Objects.requireNonNull(context, "context");
+        Objects.requireNonNull(utxoView, "utxoView");
+        if (transaction.isCoinbase()) throw new MempoolAdmissionException("Coinbase cannot enter mempool");
+        var result = ContextualTransactionValidator.validateInputs(transaction, context.nextBlockHeight(), utxoView);
+        TransactionFinality.validate(transaction, context.nextBlockHeight(), context.tipMedianTimePast());
+        var confirmations = new ArrayList<InputConfirmation>();
+        for (var input : transaction.inputs()) {
+            var coin = utxoView.find(input.previousOutput()).orElseThrow();
+            if (coin.height() > context.nextBlockHeight()) {
+                throw new MempoolAdmissionException("Input confirmation is above next-block height");
+            }
+            long time = 0;
+            long sequence = input.sequence().value();
+            if (Integer.toUnsignedLong(transaction.version()) >= 2
+                    && (sequence & SequenceLocks.SEQUENCE_LOCKTIME_DISABLE_FLAG) == 0
+                    && (sequence & SequenceLocks.SEQUENCE_LOCKTIME_TYPE_FLAG) != 0) {
+                time = coin.height() == context.nextBlockHeight() ? context.tipMedianTimePast()
+                        : context.coinPreviousMedianTimePast().applyAsLong(coin.height());
+            }
+            confirmations.add(new InputConfirmation(coin.height(), time));
         }
-
-        if (utxoView == null) {
-            throw new IllegalArgumentException(
-                    "utxoView must not be null"
-            );
+        if (!SequenceLocks.evaluate(SequenceLocks.calculate(transaction, confirmations),
+                context.nextBlockHeight(), context.tipMedianTimePast())) {
+            throw new MempoolAdmissionException("Non-final BIP68 sequence locks");
         }
-
-        /*
-         * Contextual consensus checks:
-         *
-         * - referenced UTXOs exist
-         * - coinbase maturity
-         * - input/output amounts
-         * - fee / money range
-         *
-         * Важно выполнять их до script validation,
-         * поскольку script validator также
-         * использует UTXO.
-         */
-        ContextualTransactionValidator.validate(
-                transaction,
-                spendingHeight,
-                utxoView
-        );
-
-        /*
-         * Mempool script validation.
-         *
-         * В отличие от block connection здесь
-         * применяется STANDARD policy.
-         */
-        InputScriptValidator.validateAll(
-                transaction,
-                utxoView,
-                StandardScriptVerifyFlags.STANDARD
-        );
+        ru.bitcoin.node.mempool.policy.StandardTransactionPolicy.validateInputs(transaction, utxoView);
+        InputScriptValidator.validateAll(transaction, utxoView, StandardScriptVerifyFlags.STANDARD);
+        return result.fee();
     }
 }

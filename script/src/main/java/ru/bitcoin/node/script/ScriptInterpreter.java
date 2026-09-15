@@ -97,7 +97,7 @@ public final class ScriptInterpreter {
          * Relative lock-time semantics существуют
          * только для transaction version >= 2.
          */
-        if (context.transaction().version() < 2) {
+        if (Integer.toUnsignedLong(context.transaction().version()) < 2) {
 
             throw new ScriptExecutionException(
                     "OP_CHECKSEQUENCEVERIFY requires transaction version >= 2"
@@ -289,7 +289,8 @@ public final class ScriptInterpreter {
          */
         machine.clearAltStack();
 
-        if (script.length
+        boolean tapscript = context != null && context.signatureVersion() == SignatureVersion.TAPSCRIPT;
+        if (!tapscript && script.length
                 > ScriptLimits.MAX_SCRIPT_SIZE) {
 
             throw new ScriptExecutionException(
@@ -323,9 +324,12 @@ public final class ScriptInterpreter {
         int lastCodeSeparatorOffset = 0;
 
         int nextInstructionOffset = 0;
+        long opcodePosition = -1;
+        long tapCodeSeparator = 0xffff_ffffL;
 
         for (ScriptInstruction instruction
                 : instructions) {
+            opcodePosition++;
 
             int instructionLength =
                     serializedLength(
@@ -363,7 +367,7 @@ public final class ScriptInterpreter {
              *
              * Push-операции и OP_0..OP_16 сюда не входят.
              */
-            if (instruction.opcode()
+            if (!tapscript && instruction.opcode()
                     > Opcode.OP_16) {
 
                 opCount++;
@@ -531,10 +535,31 @@ public final class ScriptInterpreter {
 
                 lastCodeSeparatorOffset =
                         nextInstructionOffset;
+                tapCodeSeparator = opcodePosition;
 
                 machine.validateStackSize();
 
                 continue;
+            }
+
+            if (tapscript && !instruction.isPushData()) {
+                if (opcode == Opcode.OP_CHECKMULTISIG || opcode == Opcode.OP_CHECKMULTISIGVERIFY) {
+                    throw new ScriptExecutionException("CHECKMULTISIG is disabled in tapscript");
+                }
+                if (opcode == Opcode.OP_CHECKSIG || opcode == Opcode.OP_CHECKSIGVERIFY || opcode == 0xba) {
+                    machine.requireStackSize(opcode == 0xba ? 3 : 2);
+                    byte[] key = machine.pop();
+                    long n = opcode == 0xba ? decodeNumber(machine.pop(), 4, context) : 0;
+                    byte[] signature = machine.pop();
+                    boolean valid = context.taprootData().check(signature, key, tapCodeSeparator, context.flags());
+                    if (opcode == Opcode.OP_CHECKSIGVERIFY) {
+                        if (!valid) throw new ScriptExecutionException("Tapscript CHECKSIGVERIFY failed");
+                    } else {
+                        machine.push(ScriptNumber.encode(n + (valid ? 1 : 0)));
+                    }
+                    machine.validateStackSize();
+                    continue;
+                }
             }
 
             opCount =
@@ -555,7 +580,7 @@ public final class ScriptInterpreter {
              */
             machine.validateStackSize();
 
-            if (opCount
+            if (!tapscript && opCount
                     > ScriptLimits.MAX_OPS_PER_SCRIPT) {
 
                 throw new ScriptExecutionException(
@@ -1435,205 +1460,26 @@ public final class ScriptInterpreter {
         );
     }
 
-    private static void executeCheckSig(
-            ScriptMachine machine,
-            ScriptExecutionContext context,
-            int lastCodeSeparatorOffset
-    ) {
-        if (context == null) {
-
-            throw new ScriptExecutionException(
-                    "OP_CHECKSIG requires transaction context"
-            );
-        }
-
+    private static void executeCheckSig(ScriptMachine machine, ScriptExecutionContext context, int lastCodeSeparatorOffset) {
+        if (context == null) throw new ScriptExecutionException("OP_CHECKSIG requires transaction context");
         machine.requireStackSize(2);
-
-        byte[] publicKeyBytes =
-                machine.pop();
-
-        byte[] signatureWithHashType =
-                machine.pop();
-
-        /*
-         * Empty signature is simply false.
-         */
-        if (signatureWithHashType.length == 0) {
-
-            machine.push(
-                    ScriptNumber.encode(0)
-            );
-
-            return;
-        }
-
-        SignatureEncoding.validateSignature(
-                signatureWithHashType,
-                context.flags()
-        );
-
-        SignatureEncoding.validatePublicKey(
-                publicKeyBytes,
-                context.flags(),
-                context.signatureVersion()
-        );
-
-        int hashType =
-                Byte.toUnsignedInt(
-                        signatureWithHashType[
-                                signatureWithHashType.length - 1
-                                ]
-                );
-
-        byte[] der =
-                Arrays.copyOf(
-                        signatureWithHashType,
-                        signatureWithHashType.length - 1
-                );
-
-        boolean valid;
-
-        try {
-
-            /*
-             * 1. scriptCode начинается после
-             *    последнего выполненного CODESEPARATOR.
-             */
-            byte[] scriptCode =
-                    LegacyScriptCode.afterCodeSeparator(
-                            context.scriptCode(),
-                            lastCodeSeparatorOffset
-                    );
-
-            /*
-             * 2. Legacy FindAndDelete:
-             *
-             * удаляем из scriptCode точный serialized
-             * push текущей подписи.
-             */
-            if (context.signatureVersion()
-                    == SignatureVersion.LEGACY) {
-
-                byte[] originalScriptCode =
-                        scriptCode;
-
-                byte[] filteredScriptCode =
-                        LegacyScriptCode.findAndDeleteSignature(
-                                originalScriptCode,
-                                signatureWithHashType
-                        );
-
-                /*
-                 * Historical legacy behavior позволяет
-                 * FindAndDelete удалить serialized push
-                 * текущей signature из scriptCode.
-                 *
-                 * CONST_SCRIPTCODE запрещает именно
-                 * МОДИФИКАЦИЮ scriptCode.
-                 */
-                if (ScriptVerifyFlags.has(
-                        context.flags(),
-                        ScriptVerifyFlags.CONST_SCRIPTCODE
-                )
-                        && !Arrays.equals(
-                        originalScriptCode,
-                        filteredScriptCode
-                )) {
-
-                    throw new ScriptExecutionException(
-                            "CONST_SCRIPTCODE: signature found in scriptCode"
-                    );
-                }
-
-                scriptCode =
-                        filteredScriptCode;
+        byte[] key = machine.pop();
+        byte[] signature = machine.pop();
+        byte[] scriptCode = LegacyScriptCode.afterCodeSeparator(context.scriptCode(), lastCodeSeparatorOffset);
+        if (context.signatureVersion() == SignatureVersion.LEGACY) {
+            byte[] filtered = LegacyScriptCode.findAndDeleteSignature(scriptCode, signature);
+            if (ScriptVerifyFlags.has(context.flags(), ScriptVerifyFlags.CONST_SCRIPTCODE)
+                    && !Arrays.equals(scriptCode, filtered)) {
+                throw new ScriptExecutionException("CONST_SCRIPTCODE: signature found in scriptCode");
             }
-
-            /*
-             * 3. LegacySignatureHash затем выполняет
-             * остальные legacy sighash transformations,
-             * включая удаление оставшихся
-             * OP_CODESEPARATOR.
-             */
-            byte[] digest;
-
-            if (context.signatureVersion()
-                    == SignatureVersion.WITNESS_V0) {
-
-                digest =
-                        WitnessV0SignatureHash.calculate(
-                                context.transaction(),
-                                context.inputIndex(),
-                                scriptCode,
-                                context.amount(),
-                                hashType
-                        );
-
-            } else {
-
-                digest =
-                        LegacySignatureHash.calculate(
-                                context.transaction(),
-                                context.inputIndex(),
-                                scriptCode,
-                                hashType
-                        );
-            }
-
-            EcdsaSignature signature =
-                    EcdsaSignature.fromDer(
-                            der
-                    );
-
-            PublicKey publicKey =
-                    PublicKey.fromBytes(
-                            publicKeyBytes
-                    );
-
-            valid =
-                    Secp256k1.verify(
-                            digest,
-                            signature,
-                            publicKey
-                    );
-
-        } catch (IllegalArgumentException e) {
-
-            /*
-             * До ScriptVerifyFlags malformed DER/pubkey
-             * трактуем как failed CHECKSIG.
-             */
-            valid = false;
+            scriptCode = filtered;
         }
-        /*
-         * NULLFAIL:
-         *
-         * если CHECKSIG вернул false,
-         * непустая signature запрещена.
-         *
-         * Пустая signature разрешена и остаётся
-         * обычным false.
-         */
-        if (!valid
-                && ScriptVerifyFlags.has(
-                context.flags(),
-                ScriptVerifyFlags.NULLFAIL
-        )
-                && signatureWithHashType.length != 0) {
-
-            throw new ScriptExecutionException(
-                    "NULLFAIL: non-empty signature failed OP_CHECKSIG"
-            );
+        boolean valid = checkSignature(signature, key, context, scriptCode);
+        if (!valid && signature.length != 0 && ScriptVerifyFlags.has(context.flags(), ScriptVerifyFlags.NULLFAIL)) {
+            throw new ScriptExecutionException("NULLFAIL: non-empty signature failed OP_CHECKSIG");
         }
-
-
-        machine.push(
-                valid
-                        ? ScriptNumber.encode(1)
-                        : ScriptNumber.encode(0)
-        );
+        machine.push(ScriptNumber.encode(valid ? 1 : 0));
     }
-
     private static int executeCheckMultiSig(
             ScriptMachine machine,
             ScriptExecutionContext context,
@@ -1868,63 +1714,21 @@ public final class ScriptInterpreter {
     }
 
     private static boolean verifyMultiSignature(
-            byte[][] signatures,
-            byte[][] publicKeys,
-            ScriptExecutionContext context,
-            byte[] scriptCode
+            byte[][] signatures, byte[][] publicKeys,
+            ScriptExecutionContext context, byte[] scriptCode
     ) {
-        int signatureIndex = 0;
-        int publicKeyIndex = 0;
-
-        while (signatureIndex < signatures.length
-                && publicKeyIndex < publicKeys.length) {
-
-            /*
-             * Если оставшихся pubkeys уже меньше,
-             * чем оставшихся signatures,
-             * успех невозможен.
-             */
-            int signaturesRemaining =
-                    signatures.length
-                            - signatureIndex;
-
-            int publicKeysRemaining =
-                    publicKeys.length
-                            - publicKeyIndex;
-
-            if (signaturesRemaining
-                    > publicKeysRemaining) {
-
-                return false;
+        // Core walks from the top of the stack. Encoding failures make order observable.
+        int signaturesRemaining = signatures.length;
+        int keysRemaining = publicKeys.length;
+        while (signaturesRemaining > 0) {
+            if (signaturesRemaining > keysRemaining) return false;
+            if (checkSignature(signatures[signaturesRemaining - 1], publicKeys[keysRemaining - 1], context, scriptCode)) {
+                signaturesRemaining--;
             }
-
-            byte[] signature =
-                    signatures[
-                            signatureIndex
-                            ];
-
-            byte[] publicKey =
-                    publicKeys[
-                            publicKeyIndex
-                            ];
-
-            if (checkSignature(
-                    signature,
-                    publicKey,
-                    context,
-                    scriptCode
-            )) {
-
-                signatureIndex++;
-            }
-
-            publicKeyIndex++;
+            keysRemaining--;
         }
-
-        return signatureIndex
-                == signatures.length;
+        return true;
     }
-
     private static boolean checkSignature(
             byte[] signatureWithHashType,
             byte[] publicKeyBytes,
@@ -1935,9 +1739,7 @@ public final class ScriptInterpreter {
          * Пустая подпись просто не совпадает
          * с данным public key.
          */
-        if (signatureWithHashType.length == 0) {
-            return false;
-        }
+
 
         /*
          * Encoding failures при активных flags
@@ -1954,6 +1756,8 @@ public final class ScriptInterpreter {
                 context.flags(),
                 context.signatureVersion()
         );
+
+        if (signatureWithHashType.length == 0) return false;
 
         int hashType =
                 Byte.toUnsignedInt(
@@ -1996,7 +1800,7 @@ public final class ScriptInterpreter {
             }
 
             EcdsaSignature signature =
-                    EcdsaSignature.fromDer(
+                    ru.bitcoin.node.crypto.secp256k1.LegacyDerSignatureReader.parse(
                             der
                     );
 
@@ -2128,6 +1932,7 @@ public final class ScriptInterpreter {
     private static boolean requiresMinimalIf(
             ScriptExecutionContext context
     ) {
+        if (context != null && context.signatureVersion() == SignatureVersion.TAPSCRIPT) return true;
         return context != null
                 && context.signatureVersion()
                 == SignatureVersion.WITNESS_V0

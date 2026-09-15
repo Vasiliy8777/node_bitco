@@ -49,7 +49,7 @@ public final class SequenceLocks {
         /*
          * BIP68 применяется только к transaction version >= 2.
          */
-        if (transaction.version() < 2) {
+        if (Integer.toUnsignedLong(transaction.version()) < 2) {
             return SequenceLock.NONE;
         }
 

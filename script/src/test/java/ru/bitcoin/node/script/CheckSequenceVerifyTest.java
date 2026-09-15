@@ -13,6 +13,13 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 class CheckSequenceVerifyTest {
+    @Test
+    void acceptsUnsignedTransactionVersions() {
+        for (int version : new int[]{Integer.MIN_VALUE, 0x80000002, -1}) {
+            assertDoesNotThrow(() -> execute(transaction(version, 10), 10, CSV));
+            assertThrows(ScriptExecutionException.class, () -> execute(transaction(version, 9), 10, CSV));
+        }
+    }
 
     private static final int CSV =
             ScriptVerifyFlags.CHECKSEQUENCEVERIFY;

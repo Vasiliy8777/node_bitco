@@ -145,6 +145,7 @@ public final class MempoolPolicy {
                             + MIN_STANDARD_TX_NONWITNESS_SIZE
             );
         }
+        ru.bitcoin.node.mempool.policy.StandardTransactionPolicy.validateStructure(transaction, 100_000);
     }
     /**
      * Проверяет fee транзакции относительно

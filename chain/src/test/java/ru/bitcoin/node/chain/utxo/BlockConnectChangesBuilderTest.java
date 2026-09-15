@@ -29,6 +29,56 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.*;
 
 class BlockConnectChangesBuilderTest {
+    @Test
+    void rejectsNonFinalCoinbase() {
+        var original = coinbase(101);
+        var tx = new Transaction(original.version(),
+                List.of(new TxIn(OutPoint.coinbase(), original.inputs().getFirst().scriptSig(), new UInt32(0))),
+                original.outputs(), new UInt32(101));
+        assertThrows(TransactionValidationException.class,
+                () -> buildBlock(block(List.of(tx)), 101, 1_700_000_000L, new TestUtxoStore()));
+    }
+
+    @Test
+    void allowsFinalSequenceToDisableCoinbaseLocktime() {
+        var original = coinbase(101);
+        var tx = new Transaction(original.version(), original.inputs(), original.outputs(), new UInt32(999));
+        assertDoesNotThrow(() -> buildBlock(block(List.of(tx)), 101, 1_700_000_000L, new TestUtxoStore()));
+    }
+
+    @Test
+    void rejectsUnsignedVersionSpendingImmatureRelativeLock() {
+        var store = new TestUtxoStore();
+        var point = new OutPoint(Hash256.fromDisplayHex("77".repeat(32)), new UInt32(0));
+        store.save(point, new StoredUtxo(10_000, new byte[]{0x51}, 100, false));
+        var tx = new Transaction(0x80000002,
+                List.of(new TxIn(point, new byte[0], new UInt32(2))),
+                List.of(new TxOut(9000, new byte[]{0x51})), new UInt32(0));
+        assertThrows(TransactionValidationException.class,
+                () -> buildBlock(block(List.of(coinbase(101), tx)), 101, 1_700_000_000L, store));
+        assertTrue(store.find(point).isPresent());
+    }
+
+    @Test
+    void rejectsCoinbaseWitnessWithoutCommitment() {
+        var original = coinbase(101);
+        var tx = new Transaction(1, List.of(new TxIn(OutPoint.coinbase(),
+                original.inputs().getFirst().scriptSig(), TxIn.FINAL_SEQUENCE,
+                new ru.bitcoin.node.protocol.transaction.Witness(List.of(new byte[32])))),
+                original.outputs(), new UInt32(0));
+        assertThrows(BlockValidationException.class,
+                () -> buildBlock(block(List.of(tx)), 101, 1_700_000_000L, new TestUtxoStore()));
+    }
+
+    @Test
+    void rejectsExcessSigopsInUnexecutedCoinbaseOutputs() {
+        var original = coinbase(101);
+        byte[] script = new byte[20_001];
+        java.util.Arrays.fill(script, (byte) 0xac);
+        var tx = new Transaction(1, original.inputs(), List.of(new TxOut(1, script)), new UInt32(0));
+        assertThrows(BlockValidationException.class,
+                () -> buildBlock(block(List.of(tx)), 101, 1_700_000_000L, new TestUtxoStore()));
+    }
 
     @Test
     void shouldRejectTransactionSpendingMissingUtxo() {

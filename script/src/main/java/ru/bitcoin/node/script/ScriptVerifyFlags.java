@@ -1,6 +1,10 @@
 package ru.bitcoin.node.script;
 
 public final class ScriptVerifyFlags {
+    public static final int TAPROOT = 1 << 16;
+    public static final int DISCOURAGE_UPGRADABLE_TAPROOT_VERSION = 1 << 17;
+    public static final int DISCOURAGE_OP_SUCCESS = 1 << 18;
+    public static final int DISCOURAGE_UPGRADABLE_PUBKEYTYPE = 1 << 19;
 
     public static final int NONE =
             0;
