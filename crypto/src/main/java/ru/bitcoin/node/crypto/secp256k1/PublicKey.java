@@ -25,6 +25,9 @@ public final class PublicKey {
     }
 
     public static PublicKey fromBytes(byte[] encoded) {
+        if (encoded != null && encoded.length == 0) {
+            throw new IllegalArgumentException("Public key encoding must not be empty");
+        }
         if (encoded == null) {
             throw new IllegalArgumentException(
                     "encoded must not be null"

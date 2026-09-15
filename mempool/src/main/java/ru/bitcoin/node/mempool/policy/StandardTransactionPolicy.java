@@ -9,7 +9,8 @@ import java.util.*;
 /** Local relay policy. Never invoke from block consensus validation. */
 public final class StandardTransactionPolicy {
     private StandardTransactionPolicy() { }
-    public static void validateStructure(Transaction tx, int maxDataCarrierBytes) {
+    public static void validateStructure(Transaction tx, int maxDataCarrierBytes) { validateStructure(tx, maxDataCarrierBytes, 3000); }
+    public static void validateStructure(Transaction tx, int maxDataCarrierBytes, long dustRate) {
         for (var input : tx.inputs()) {
             if (!pushOnly(input.scriptSig())) fail("scriptsig-not-pushonly");
         }
@@ -28,21 +29,23 @@ public final class StandardTransactionPolicy {
                 remaining -= script.length;
                 if (remaining < 0) fail("datacarrier-size");
             }
-            if (output.value() < dustThreshold(output)) dust++;
+            if (output.value() < dustThreshold(output, dustRate)) dust++;
         }
         if (dust > 1) fail("dust");
     }
 
-    public static long dustThreshold(TxOut output) {
+    public static long dustThreshold(TxOut output) { return dustThreshold(output, 3000); }
+    public static long dustThreshold(TxOut output, long dustRate) {
         byte[] script = output.scriptPubKey();
         if (script.length > 10_000 || (script.length > 0 && script[0] == 0x6a)) return 0;
         long serializedSize = 8L + (script.length < 253 ? 1 : script.length <= 65535 ? 3 : 5) + script.length;
-        return (serializedSize + (WitnessProgram.parse(script).isPresent() ? 67 : 148)) * 3;
+        return new FeeRate(dustRate).feeForVSize(serializedSize + (WitnessProgram.parse(script).isPresent() ? 67 : 148));
     }
 
     /** Ephemeral dust is only allowed with zero fee; package relay must also enforce its spend. */
-    public static void validateDustFee(Transaction tx, long fee) {
-        if (fee != 0 && tx.outputs().stream().anyMatch(out -> out.value() < dustThreshold(out))) fail("dust-with-fee");
+    public static void validateDustFee(Transaction tx, long fee) { validateDustFee(tx, fee, 3000); }
+    public static void validateDustFee(Transaction tx, long fee, long dustRate) {
+        if (fee != 0 && tx.outputs().stream().anyMatch(out -> out.value() < dustThreshold(out, dustRate))) fail("dust-with-fee");
     }
 
     public static long validateInputs(Transaction tx, UtxoView view) {

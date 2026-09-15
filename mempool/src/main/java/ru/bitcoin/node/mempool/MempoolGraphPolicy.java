@@ -37,28 +37,43 @@ final class MempoolGraphPolicy {
         if (conflicts.isEmpty()) return;
         if (evicted.size() > 100) fail("too-many-replacements");
         long oldFee = 0;
-        Set<OutPoint> originalInputs = new HashSet<>();
+        Set<Hash256> originalParents = new HashSet<>();
+        long potentialReplacements = 0;
         for (Hash256 id : evicted) oldFee = Math.addExact(oldFee, entries.get(id).fee());
         for (Hash256 id : conflicts) {
             var old = entries.get(id);
-            for (var in : old.transaction().inputs()) originalInputs.add(in.previousOutput());
+            potentialReplacements += descendants(entries, Set.of(id)).size();
+            if (potentialReplacements > 100) fail("too-many-potential-replacements");
+            for (var in : old.transaction().inputs()) originalParents.add(in.previousOutput().transactionId());
             if (compareRate(replacement.fee(), replacement.virtualSize(), old.fee(), old.virtualSize()) <= 0) fail("replacement-feerate");
         }
         for (var in : replacement.transaction().inputs()) {
-            if (entries.containsKey(in.previousOutput().transactionId()) && !originalInputs.contains(in.previousOutput())) fail("replacement-adds-unconfirmed-input");
+            if (entries.containsKey(in.previousOutput().transactionId()) && !originalParents.contains(in.previousOutput().transactionId())) fail("replacement-adds-unconfirmed-input");
         }
         long delta = new FeeRate(limits.incrementalRelaySatPerKvB()).feeForVSize(replacement.virtualSize());
         if (replacement.fee() < oldFee || replacement.fee() - oldFee < delta) fail("replacement-fee");
     }
     static void checkLimits(Map<Hash256, MempoolEntry> entries, Hash256 added, MempoolLimits limits) {
+        checkLimits(entries, added, limits, true);
+    }
+    static void checkLimits(Map<Hash256, MempoolEntry> entries, Hash256 added, MempoolLimits limits, boolean carveOut) {
         Set<Hash256> ancestors = ancestors(entries, added);
         if (ancestors.size() > limits.ancestors() || size(entries, ancestors) > limits.familyVirtualBytes()) fail("ancestor-limit");
         for (Hash256 id : ancestors) {
             Set<Hash256> descendants = descendants(entries, Set.of(id));
-            if (descendants.size() > limits.descendants() || size(entries, descendants) > limits.familyVirtualBytes()) fail("descendant-limit");
+            if (descendants.size() > limits.descendants() || size(entries, descendants) > limits.familyVirtualBytes()) {
+                boolean allowed = carveOut && ancestors.size() <= 2 && entries.get(added).virtualSize() <= 10_000
+                        && entries.get(added).transaction().version() != 3
+                        && descendants.size() <= (long) limits.descendants() + 1
+                        && size(entries, descendants) <= limits.familyVirtualBytes() + 10_000;
+                if (!allowed) fail("descendant-limit");
+            }
         }
         // TRUC version inheritance, two-generation topology and size limits.
         for (var e : entries.entrySet()) {
+            // Reorgs may leave unrelated TRUC violations in the pool (Core v30).
+            // Admission must inspect the new transaction's ancestry, not reject globally.
+            if (!ancestors.contains(e.getKey())) continue;
             Transaction tx = e.getValue().transaction();
             Set<Hash256> parents = new HashSet<>();
             for (var in : tx.inputs()) {
@@ -74,7 +89,8 @@ final class MempoolGraphPolicy {
             }
         }
     }
-    static void trim(Map<Hash256, MempoolEntry> entries, long maximumSize, Hash256 added) {
+    static long trim(Map<Hash256, MempoolEntry> entries, long maximumSize, Hash256 added) {
+        long removedRate = 0;
         while (size(entries, entries.keySet()) > maximumSize) {
             Set<Hash256> worst = null;
             long worstFee = 0, worstSize = 1;
@@ -87,8 +103,23 @@ final class MempoolGraphPolicy {
                 }
             }
             if (worst.contains(added)) fail("mempool-full");
+            removedRate = Math.max(removedRate, worstFee * 1000 / worstSize);
             worst.forEach(entries::remove);
         }
+        return removedRate;
+    }
+    static void addSiblingConflict(Map<Hash256, MempoolEntry> entries, Transaction transaction, Set<Hash256> conflicts) {
+        if (transaction.version() != 3) return;
+        Set<Hash256> parents = new HashSet<>();
+        for (var input : transaction.inputs()) if (entries.containsKey(input.previousOutput().transactionId())) parents.add(input.previousOutput().transactionId());
+        if (parents.size() != 1) return;
+        Hash256 parent = parents.iterator().next();
+        if (entries.get(parent).transaction().version() != 3) return;
+        Set<Hash256> family = descendants(entries, Set.of(parent));
+        if (family.size() != 2) return;
+        family.remove(parent);
+        Hash256 sibling = family.iterator().next();
+        if (ancestors(entries, sibling).size() == 2) conflicts.add(sibling);
     }
     private static long size(Map<Hash256, MempoolEntry> entries, Set<Hash256> ids) {
         return ids.stream().mapToLong(id -> entries.get(id).virtualSize()).sum();

@@ -49,6 +49,11 @@ public final class InputScriptValidator {
                         inputIndex
                 );
 
+        if (ScriptVerifyFlags.has(scriptVerifyFlags, ScriptVerifyFlags.SIGPUSHONLY)
+                && !P2shScript.isPushOnly(input.scriptSig())) {
+            throw new TransactionValidationException("scriptSig is not push-only");
+        }
+
         UtxoEntry utxo =
                 utxoView.find(
                                 input.previousOutput()

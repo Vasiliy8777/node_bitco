@@ -164,8 +164,7 @@ public final class BlockConnectChangesBuilder {
                 ConsensusScriptFlags.forBlock(
                         blockHeight,
                         block.header().hash(),
-                        networkParameters,
-                        medianTimePastResolver.taprootActive(networkParameters)
+                        networkParameters
                 );
 
         WitnessCommitmentValidator.validate(block, blockHeight >= networkParameters.segwitHeight());
@@ -354,6 +353,9 @@ public final class BlockConnectChangesBuilder {
                     outputs.get(
                             outputIndex
                     );
+
+            byte[] script = output.scriptPubKey();
+            if (script.length > 10_000 || (script.length > 0 && script[0] == 0x6a)) continue;
 
             OutPoint outPoint =
                     new OutPoint(

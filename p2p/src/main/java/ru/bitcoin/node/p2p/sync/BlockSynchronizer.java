@@ -1,4 +1,4 @@
-package ru.bitcoin.minig.node.p2p.sync;
+package ru.bitcoin.node.p2p.sync;
 
 public class BlockSynchronizer {
 }

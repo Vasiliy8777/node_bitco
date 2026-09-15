@@ -357,6 +357,12 @@ public final class ScriptInterpreter {
             int opcode =
                     instruction.opcode();
 
+            if (opcode == Opcode.OP_CODESEPARATOR && context != null
+                    && context.signatureVersion() == SignatureVersion.LEGACY
+                    && ScriptVerifyFlags.has(context.flags(), ScriptVerifyFlags.CONST_SCRIPTCODE)) {
+                throw new ScriptExecutionException("CONST_SCRIPTCODE: legacy OP_CODESEPARATOR");
+            }
+
             boolean executing =
                     isExecuting(
                             executionConditions

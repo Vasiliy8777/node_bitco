@@ -31,6 +31,8 @@ public final class MempoolPolicy {
             new FeeRate(100L);
 
     private final FeeRate minRelayFeeRate;
+    private final int maxDataCarrierBytes;
+    private final long dustRelaySatPerKvB;
 
     public MempoolPolicy() {
         this(DEFAULT_MIN_RELAY_FEE_RATE);
@@ -39,6 +41,12 @@ public final class MempoolPolicy {
     public MempoolPolicy(
             FeeRate minRelayFeeRate
     ) {
+        this(minRelayFeeRate, 100_000, 3000);
+    }
+    public MempoolPolicy(FeeRate minRelayFeeRate, int maxDataCarrierBytes, long dustRelaySatPerKvB) {
+        if (maxDataCarrierBytes < 0 || dustRelaySatPerKvB < 0) throw new IllegalArgumentException("Invalid relay policy");
+        this.maxDataCarrierBytes = maxDataCarrierBytes;
+        this.dustRelaySatPerKvB = dustRelaySatPerKvB;
         this.minRelayFeeRate =
                 Objects.requireNonNull(
                         minRelayFeeRate,
@@ -49,6 +57,8 @@ public final class MempoolPolicy {
     public FeeRate minRelayFeeRate() {
         return minRelayFeeRate;
     }
+    public long dustRelaySatPerKvB() { return dustRelaySatPerKvB; }
+    public int maxDataCarrierBytes() { return maxDataCarrierBytes; }
     public void validateStandardStructure(
             Transaction transaction,
             long weight
@@ -145,7 +155,7 @@ public final class MempoolPolicy {
                             + MIN_STANDARD_TX_NONWITNESS_SIZE
             );
         }
-        ru.bitcoin.node.mempool.policy.StandardTransactionPolicy.validateStructure(transaction, 100_000);
+        ru.bitcoin.node.mempool.policy.StandardTransactionPolicy.validateStructure(transaction, maxDataCarrierBytes, dustRelaySatPerKvB);
     }
     /**
      * Проверяет fee транзакции относительно

@@ -1,0 +1,12 @@
+{
+  "bestblock": "7416ec3bfc01f90fefc49d94a1f42a16cb203140b23c79b54d5f16180c2f1f4e",
+  "confirmations": 103,
+  "value": 50.00000000,
+  "scriptPubKey": {
+    "asm": "1",
+    "desc": "raw(51)#8lvh9jxk",
+    "hex": "51",
+    "type": "nonstandard"
+  },
+  "coinbase": true
+}

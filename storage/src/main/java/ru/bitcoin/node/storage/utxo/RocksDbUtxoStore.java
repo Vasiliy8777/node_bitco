@@ -11,6 +11,9 @@ public final class RocksDbUtxoStore
 
     private static final byte UTXO_PREFIX = 0x03;
 
+    /** Diagnostic full count; requires a stable chain snapshot. */
+    public long count() { return database.countPrefix(UTXO_PREFIX); }
+
     private static final int TXID_SIZE = 32;
     private static final int VOUT_SIZE = 4;
 

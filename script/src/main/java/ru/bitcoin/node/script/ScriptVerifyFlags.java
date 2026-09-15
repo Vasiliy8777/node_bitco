@@ -1,6 +1,10 @@
 package ru.bitcoin.node.script;
 
 public final class ScriptVerifyFlags {
+    /** Explicit script verification option; not a block consensus activation.
+     * Bit assignments are internal and must not be interpreted as Core's numeric mask.
+     */
+    public static final int SIGPUSHONLY = 1 << 20;
     public static final int TAPROOT = 1 << 16;
     public static final int DISCOURAGE_UPGRADABLE_TAPROOT_VERSION = 1 << 17;
     public static final int DISCOURAGE_OP_SUCCESS = 1 << 18;
@@ -92,6 +96,8 @@ public final class ScriptVerifyFlags {
      *
      * legacy signature checking must not modify
      * scriptCode through historical FindAndDelete.
+     * Legacy OP_CODESEPARATOR is also forbidden, even in an unexecuted branch.
+     * A separator byte inside pushed data is not an opcode.
      *
      * Для WITNESS_V0 этот flag не применяется,
      * потому что BIP143 не использует FindAndDelete.
@@ -100,6 +106,43 @@ public final class ScriptVerifyFlags {
             1 << 15;
 
     private ScriptVerifyFlags() {
+    }
+
+    /** Parse the symbolic flag lists used by Bitcoin Core test vectors.
+     * Core numeric masks are intentionally not accepted: our bit assignments differ.
+     */
+    public static int parseNames(String names) {
+        java.util.Objects.requireNonNull(names, "names");
+        if (names.isBlank()) return NONE;
+        int flags = NONE;
+        for (String token : names.split(",", -1)) {
+            flags |= switch (token.trim()) {
+                case "NONE" -> NONE;
+                case "P2SH" -> P2SH;
+                case "STRICTENC" -> STRICTENC;
+                case "DERSIG" -> DERSIG;
+                case "LOW_S" -> LOW_S;
+                case "NULLDUMMY" -> NULLDUMMY;
+                case "SIGPUSHONLY" -> SIGPUSHONLY;
+                case "MINIMALDATA" -> MINIMALDATA;
+                case "DISCOURAGE_UPGRADABLE_NOPS" -> DISCOURAGE_UPGRADABLE_NOPS;
+                case "CLEANSTACK" -> CLEANSTACK;
+                case "CHECKLOCKTIMEVERIFY" -> CHECKLOCKTIMEVERIFY;
+                case "CHECKSEQUENCEVERIFY" -> CHECKSEQUENCEVERIFY;
+                case "WITNESS" -> WITNESS;
+                case "DISCOURAGE_UPGRADABLE_WITNESS_PROGRAM" -> DISCOURAGE_UPGRADABLE_WITNESS_PROGRAM;
+                case "MINIMALIF" -> MINIMALIF;
+                case "NULLFAIL" -> NULLFAIL;
+                case "WITNESS_PUBKEYTYPE" -> WITNESS_PUBKEYTYPE;
+                case "CONST_SCRIPTCODE" -> CONST_SCRIPTCODE;
+                case "TAPROOT" -> TAPROOT;
+                case "DISCOURAGE_UPGRADABLE_TAPROOT_VERSION" -> DISCOURAGE_UPGRADABLE_TAPROOT_VERSION;
+                case "DISCOURAGE_OP_SUCCESS" -> DISCOURAGE_OP_SUCCESS;
+                case "DISCOURAGE_UPGRADABLE_PUBKEYTYPE" -> DISCOURAGE_UPGRADABLE_PUBKEYTYPE;
+                default -> throw new IllegalArgumentException("Unknown Script verification flag: " + token);
+            };
+        }
+        return flags;
     }
 
     public static boolean has(

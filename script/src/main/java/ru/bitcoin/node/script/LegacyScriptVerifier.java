@@ -57,6 +57,10 @@ public final class LegacyScriptVerifier {
         }
 
         try {
+            if (ScriptVerifyFlags.has(flags, ScriptVerifyFlags.SIGPUSHONLY)
+                    && !P2shScript.isPushOnly(scriptSig)) {
+                return false;
+            }
 
             boolean verifyP2sh =
                     ScriptVerifyFlags.has(

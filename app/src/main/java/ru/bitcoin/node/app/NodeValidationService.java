@@ -67,6 +67,13 @@ public final class NodeValidationService {
     public List<MempoolEntry> mempoolEntries() {
         synchronized (chain) { synchronizePool(); mempool.expire(); return mempool.entries(); }
     }
+    public List<MempoolEntry> admitPackage(List<Transaction> transactions) {
+        synchronized (chain) {
+            synchronizePool();
+            mempool.expire();
+            return mempool.admitPackage(transactions, context(), coins);
+        }
+    }
     public BlockIndex activeTip() { synchronized (chain) { return chain.activeTip(); } }
 
     private MempoolValidationContext context() {
@@ -87,18 +94,7 @@ public final class NodeValidationService {
         for (var index : plan.blocksToDisconnect().reversed()) {
             for (var tx : requireBlock(index).transactions()) if (!tx.isCoinbase()) retry.add(tx);
         }
-        for (var entry : mempool.entries()) retry.add(entry.transaction());
-        var context = context();
-        mempool.revalidate(context, coins, confirmed);
-        for (var tx : retry) {
-            if (confirmed.contains(tx.txId()) || mempool.contains(tx.txId())) continue;
-            try { mempool.admit(tx, context, coins); }
-            catch (MempoolAdmissionException | TransactionValidationException
-                   | ru.bitcoin.node.script.ScriptExecutionException | ru.bitcoin.node.script.ScriptParseException expected) {
-                // No longer admissible on the new chain.
-            }
-        }
-        mempool.expire();
+        mempool.reconcile(context(), coins, confirmed, retry);
         poolTip = tip;
     }
     private Block requireBlock(BlockIndex index) {

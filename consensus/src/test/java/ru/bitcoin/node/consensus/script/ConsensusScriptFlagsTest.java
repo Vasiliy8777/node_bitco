@@ -9,6 +9,19 @@ import ru.bitcoin.node.script.ScriptVerifyFlags;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ConsensusScriptFlagsTest {
+    @Test
+    void retrospectiveBaseAndBip16ExceptionsMatchCore() {
+        int base = ScriptVerifyFlags.P2SH | ScriptVerifyFlags.WITNESS | ScriptVerifyFlags.TAPROOT;
+        for (var parameters : new NetworkParameters[]{NetworkParametersRegistry.mainnet(),
+                NetworkParametersRegistry.testnet(), NetworkParametersRegistry.signet()}) {
+            assertEquals(base, ConsensusScriptFlags.forBlock(0, Hash256.fromDisplayHex("12".repeat(32)), parameters));
+            assertEquals(base, ConsensusScriptFlags.forBlock(0, Hash256.fromDisplayHex("12".repeat(32)), parameters, false));
+        }
+        for (var parameters : new NetworkParameters[]{NetworkParametersRegistry.mainnet(), NetworkParametersRegistry.testnet()}) {
+            assertEquals(ScriptVerifyFlags.NONE, ConsensusScriptFlags.forBlock(0,
+                    parameters.bip16ExceptionBlockHash(), parameters, true));
+        }
+    }
     private static final Hash256 NORMAL_BLOCK_HASH =
             Hash256.fromDisplayHex(
                     "11".repeat(32)
@@ -480,7 +493,7 @@ class ConsensusScriptFlagsTest {
         );
     }
     @Test
-    void mainnetWitnessMustActivateAtSegwitHeight() {
+    void mainnetWitnessIsRetrospective() {
 
         NetworkParameters parameters =
                 NetworkParametersRegistry.mainnet();
@@ -504,7 +517,7 @@ class ConsensusScriptFlagsTest {
                         parameters
                 );
 
-        assertFalse(
+        assertTrue(
                 ScriptVerifyFlags.has(
                         before,
                         ScriptVerifyFlags.WITNESS
@@ -520,7 +533,7 @@ class ConsensusScriptFlagsTest {
     }
 
     @Test
-    void testnetWitnessMustActivateAtConfiguredHeight() {
+    void testnetWitnessIsRetrospective() {
 
         NetworkParameters parameters =
                 NetworkParametersRegistry.testnet();
@@ -544,7 +557,7 @@ class ConsensusScriptFlagsTest {
                         parameters
                 );
 
-        assertFalse(
+        assertTrue(
                 ScriptVerifyFlags.has(
                         before,
                         ScriptVerifyFlags.WITNESS
@@ -560,7 +573,7 @@ class ConsensusScriptFlagsTest {
     }
 
     @Test
-    void signetWitnessMustActivateAtHeightOne() {
+    void signetWitnessIsRetrospective() {
 
         NetworkParameters parameters =
                 NetworkParametersRegistry.signet();
@@ -579,7 +592,7 @@ class ConsensusScriptFlagsTest {
                         parameters
                 );
 
-        assertFalse(
+        assertTrue(
                 ScriptVerifyFlags.has(
                         heightZero,
                         ScriptVerifyFlags.WITNESS
@@ -727,56 +740,18 @@ class ConsensusScriptFlagsTest {
         );
     }
     @Test
-    void mainnetTaprootExceptionMustUseExactHistoricalFlags() {
-
-        NetworkParameters mainnet =
-                NetworkParametersRegistry.mainnet();
-
-        Hash256 exceptionHash =
-                Hash256.fromDisplayHex(
-                        "0000000000000000000f14c35b2d841e986ab5441de8c585d5ffe55ea1e395ad"
-                );
-
-        int flags =
-                ConsensusScriptFlags.forBlock(
-                        709_632L,
-                        exceptionHash,
-                        mainnet
-                );
-
-        assertEquals(
-                ScriptVerifyFlags.P2SH
-                        | ScriptVerifyFlags.WITNESS,
-                flags
-        );
-
-        assertFalse(
-                ScriptVerifyFlags.has(
-                        flags,
-                        ScriptVerifyFlags.NULLDUMMY
-                )
-        );
-
-        assertFalse(
-                ScriptVerifyFlags.has(
-                        flags,
-                        ScriptVerifyFlags.DERSIG
-                )
-        );
-
-        assertFalse(
-                ScriptVerifyFlags.has(
-                        flags,
-                        ScriptVerifyFlags.CHECKLOCKTIMEVERIFY
-                )
-        );
-
-        assertFalse(
-                ScriptVerifyFlags.has(
-                        flags,
-                        ScriptVerifyFlags.CHECKSEQUENCEVERIFY
-                )
-        );
+    void taprootExceptionPreservesOtherActiveRules() {
+        var hash = Hash256.fromDisplayHex("0000000000000000000f14c35b2d841e986ab5441de8c585d5ffe55ea1e395ad");
+        int expected = ScriptVerifyFlags.P2SH | ScriptVerifyFlags.WITNESS
+                | ScriptVerifyFlags.DERSIG | ScriptVerifyFlags.NULLDUMMY
+                | ScriptVerifyFlags.CHECKLOCKTIMEVERIFY | ScriptVerifyFlags.CHECKSEQUENCEVERIFY;
+        for (boolean active : new boolean[]{false, true}) {
+            assertEquals(expected, ConsensusScriptFlags.forBlock(709632, hash,
+                    NetworkParametersRegistry.mainnet(), active));
+        }
+        assertEquals(expected, ConsensusScriptFlags.forBlock(709632, hash,
+                NetworkParametersRegistry.mainnet()));
+        assertEquals(expected | ScriptVerifyFlags.TAPROOT,
+                ConsensusScriptFlags.forBlock(709632, hash, NetworkParametersRegistry.regtest(), true));
     }
-
 }

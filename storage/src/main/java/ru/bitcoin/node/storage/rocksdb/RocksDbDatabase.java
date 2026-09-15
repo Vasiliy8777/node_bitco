@@ -174,6 +174,25 @@ public final class RocksDbDatabase
         }
     }
 
+    /** Counts one key namespace without loading its values. Caller must exclude concurrent writes. */
+    public long countPrefix(byte prefix) {
+        ensureOpen();
+        long count = 0;
+        try (var iterator = database.newIterator()) {
+            iterator.seek(new byte[]{prefix});
+            while (iterator.isValid()) {
+                byte[] key = iterator.key();
+                if (key.length == 0 || key[0] != prefix) break;
+                count = Math.incrementExact(count);
+                iterator.next();
+            }
+            iterator.status();
+            return count;
+        } catch (RocksDBException e) {
+            throw new IllegalStateException("Failed to count RocksDB namespace", e);
+        }
+    }
+
     private void ensureOpen() {
         if (closed) {
             throw new IllegalStateException(
