@@ -15,5 +15,17 @@
     </parent>
 
     <artifactId>mining</artifactId>
+    <dependencies>
+        <dependency>
+            <groupId>ru.bitcoin.mining</groupId>
+            <artifactId>mempool</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ru.bitcoin.mining</groupId>
+            <artifactId>chain</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+    </dependencies>
 
 </project>

@@ -110,7 +110,7 @@ public final class BlockDisconnectChangesBuilder {
                  outputIndex++) {
 
                 byte[] script = transaction.outputs().get(outputIndex).scriptPubKey();
-                if (script.length > 10_000 || (script.length > 0 && script[0] == 0x6a)) continue;
+                if (ru.bitcoin.node.script.UnspendableScript.isUnspendable(script)) continue;
 
                 OutPoint outPoint =
                         new OutPoint(

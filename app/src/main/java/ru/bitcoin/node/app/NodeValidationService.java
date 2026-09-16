@@ -26,12 +26,17 @@ public final class NodeValidationService {
     private final UtxoView coins;
     private final BlockProcessor processor;
     private final Mempool mempool;
+    private final NetworkParameters parameters;
+    private final AdjustedTime time;
+    private final RocksDbUtxoStore utxos;
     private BlockIndex poolTip;
 
     public NodeValidationService(RocksDbDatabase database, NetworkParameters parameters,
                                  AdjustedTime time, Mempool mempool) {
         this.mempool = Objects.requireNonNull(mempool);
-        var utxos = new RocksDbUtxoStore(database);
+        this.parameters = Objects.requireNonNull(parameters);
+        this.time = Objects.requireNonNull(time);
+        utxos = new RocksDbUtxoStore(database);
         var indexes = new RocksDbBlockIndexStore(database);
         var tips = new RocksDbChainStateStore(database);
         var undos = new RocksDbUndoStore(database);
@@ -75,6 +80,22 @@ public final class NodeValidationService {
         }
     }
     public BlockIndex activeTip() { synchronized (chain) { return chain.activeTip(); } }
+
+    /** Fresh template from one coherent chain/mempool snapshot. Does not search PoW. */
+    public Block createMiningTemplate(byte[] payout, byte[] extraNonce, long maximumWeight, FeeRate minimumRate) {
+        synchronized (chain) {
+            synchronizePool();
+            mempool.expire();
+            var parent = chain.activeTip();
+            long now = time.currentTimeSeconds();
+            long timestamp = Math.max(now, Math.addExact(MedianTimePast.calculate(parent,lookup),1));
+            if (timestamp > Math.addExact(now,7200)) throw new IllegalStateException("Chain time too far ahead of local time");
+            var blockTime = new ru.bitcoin.node.common.types.UInt32(timestamp);
+            var bits = ChainHeaderValidator.nextBits(parent,lookup,parameters,blockTime);
+            return ru.bitcoin.node.mining.BlockTemplateBuilder.fromMempool(parent,lookup,utxos,parameters,
+                    0x20000000,blockTime,bits,payout,extraNonce,mempool.entries(),maximumWeight,minimumRate);
+        }
+    }
 
     private MempoolValidationContext context() {
         BlockIndex tip = chain.activeTip();

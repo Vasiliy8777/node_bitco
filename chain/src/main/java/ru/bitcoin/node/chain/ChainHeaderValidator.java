@@ -14,6 +14,18 @@ public final class ChainHeaderValidator {
     private ChainHeaderValidator() {
     }
 
+    /** Shared difficulty calculation for a candidate extending this parent. */
+    public static UInt32 nextBits(BlockIndex parent, BlockIndexLookup lookup,
+                                 NetworkParameters parameters, UInt32 timestamp) {
+        java.util.Objects.requireNonNull(parent);
+        java.util.Objects.requireNonNull(lookup);
+        java.util.Objects.requireNonNull(parameters);
+        java.util.Objects.requireNonNull(timestamp);
+        var candidate = new BlockHeader(4, parent.hash(), parent.header().merkleRoot(),
+                timestamp, parent.header().bits(), new UInt32(0));
+        return calculateExpectedBits(Math.addExact(parent.height(),1),candidate,parent,lookup,parameters);
+    }
+
     public static void validate(
             BlockHeader header,
             BlockIndex parent,
