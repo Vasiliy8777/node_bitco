@@ -1,4 +1,17 @@
-package ru.bitcoin.minig.node.p2p.message;
+package ru.bitcoin.node.p2p.message;
 
-public class BlockMessage {
+import ru.bitcoin.node.protocol.block.Block;
+
+import java.util.Objects;
+
+public record BlockMessage(
+        Block block
+) {
+
+    public BlockMessage {
+        Objects.requireNonNull(
+                block,
+                "block"
+        );
+    }
 }
