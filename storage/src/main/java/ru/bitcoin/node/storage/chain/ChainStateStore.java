@@ -11,4 +11,10 @@ public interface ChainStateStore {
     void saveActiveTipHash(
             Hash256 hash
     );
+
+    Optional<Hash256> loadBestHeaderTipHash();
+
+    void saveBestHeaderTipHash(
+            Hash256 hash
+    );
 }

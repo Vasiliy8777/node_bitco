@@ -157,6 +157,122 @@ class RocksDbChainStateStoreTest {
         }
     }
 
+    @Test
+    void shouldReturnEmptyWhenBestHeaderTipDoesNotExist() {
+
+        Path databasePath =
+                tempDirectory.resolve(
+                        "chain-state"
+                );
+
+        try (RocksDbDatabase database =
+                     new RocksDbDatabase(databasePath)) {
+
+            RocksDbChainStateStore store =
+                    new RocksDbChainStateStore(database);
+
+            Optional<Hash256> result =
+                    store.loadBestHeaderTipHash();
+
+            assertTrue(
+                    result.isEmpty()
+            );
+        }
+    }
+
+    @Test
+    void shouldPersistBestHeaderTipAfterDatabaseReopen() {
+
+        Path databasePath =
+                tempDirectory.resolve(
+                        "chain-state"
+                );
+
+        Hash256 hash =
+                testHash();
+
+        /*
+         * Первый запуск ноды.
+         */
+        try (RocksDbDatabase database =
+                     new RocksDbDatabase(databasePath)) {
+
+            RocksDbChainStateStore store =
+                    new RocksDbChainStateStore(database);
+
+            store.saveBestHeaderTipHash(
+                    hash
+            );
+        }
+
+        /*
+         * Имитация перезапуска ноды.
+         */
+        try (RocksDbDatabase database =
+                     new RocksDbDatabase(databasePath)) {
+
+            RocksDbChainStateStore store =
+                    new RocksDbChainStateStore(database);
+
+            Hash256 restored =
+                    store.loadBestHeaderTipHash()
+                            .orElseThrow();
+
+            assertEquals(
+                    hash,
+                    restored
+            );
+        }
+    }
+
+    @Test
+    void shouldStoreActiveTipAndBestHeaderTipIndependently() {
+
+        Path databasePath =
+                tempDirectory.resolve(
+                        "chain-state"
+                );
+
+        Hash256 activeTip =
+                Hash256.fromDisplayHex(
+                        "11111111111111111111111111111111" +
+                                "11111111111111111111111111111111"
+                );
+
+        Hash256 bestHeaderTip =
+                Hash256.fromDisplayHex(
+                        "22222222222222222222222222222222" +
+                                "22222222222222222222222222222222"
+                );
+
+        try (RocksDbDatabase database =
+                     new RocksDbDatabase(databasePath)) {
+
+            RocksDbChainStateStore store =
+                    new RocksDbChainStateStore(database);
+
+            store.saveActiveTipHash(
+                    activeTip
+            );
+
+            store.saveBestHeaderTipHash(
+                    bestHeaderTip
+            );
+
+            assertEquals(
+                    activeTip,
+                    store.loadActiveTipHash()
+                            .orElseThrow()
+            );
+
+            assertEquals(
+                    bestHeaderTip,
+                    store.loadBestHeaderTipHash()
+                            .orElseThrow()
+            );
+        }
+    }
+
     private static Hash256 testHash() {
 
         return Hash256.fromDisplayHex(

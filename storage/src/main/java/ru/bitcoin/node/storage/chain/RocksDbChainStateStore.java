@@ -15,6 +15,10 @@ public final class RocksDbChainStateStore
             0x02,
             0x01
     };
+    private static final byte[] BEST_HEADER_TIP_KEY = {
+            0x02,
+            0x02
+    };
 
     private static final int HASH_SIZE = 32;
 
@@ -57,6 +61,70 @@ public final class RocksDbChainStateStore
     }
 
     @Override
+    public Optional<Hash256> loadBestHeaderTipHash() {
+
+        byte[] value =
+                database.get(
+                        BEST_HEADER_TIP_KEY
+                );
+
+        if (value == null) {
+            return Optional.empty();
+        }
+
+        if (value.length != HASH_SIZE) {
+            throw new IllegalStateException(
+                    "Invalid best header tip hash size: "
+                            + value.length
+            );
+        }
+
+        return Optional.of(
+                fromRawBytes(
+                        value
+                )
+        );
+    }
+
+    public void saveBestHeaderTipHash(
+            RocksDbWriteBatch batch,
+            Hash256 hash
+    ) {
+        if (batch == null) {
+            throw new IllegalArgumentException(
+                    "batch must not be null"
+            );
+        }
+
+        if (hash == null) {
+            throw new IllegalArgumentException(
+                    "hash must not be null"
+            );
+        }
+
+        batch.put(
+                BEST_HEADER_TIP_KEY,
+                hash.bytes()
+        );
+    }
+
+    @Override
+    public void saveBestHeaderTipHash(
+            Hash256 hash
+    ) {
+        if (hash == null) {
+            throw new IllegalArgumentException(
+                    "hash must not be null"
+            );
+        }
+
+        database.put(
+                BEST_HEADER_TIP_KEY,
+                hash.bytes()
+        );
+    }
+
+    @Override
     public void saveActiveTipHash(
             Hash256 hash
     ) {
@@ -81,6 +149,7 @@ public final class RocksDbChainStateStore
                 )
         );
     }
+
     public void saveActiveTipHash(
             RocksDbWriteBatch batch,
             Hash256 hash

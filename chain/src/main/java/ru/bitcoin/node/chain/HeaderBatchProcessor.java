@@ -2,7 +2,6 @@ package ru.bitcoin.node.chain;
 
 import ru.bitcoin.node.protocol.block.BlockHeader;
 import ru.bitcoin.node.storage.block.BlockIndexStore;
-import ru.bitcoin.node.storage.block.StoredBlockIndex;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -65,7 +64,9 @@ public final class HeaderBatchProcessor {
                     );
 
             blockIndexStore.save(
-                    toStored(index)
+                    BlockIndexStorageMapper.toStored(
+                            index
+                    )
             );
 
             processed.add(
@@ -75,18 +76,6 @@ public final class HeaderBatchProcessor {
 
         return List.copyOf(
                 processed
-        );
-    }
-
-    private static StoredBlockIndex toStored(
-            BlockIndex index
-    ) {
-        return new StoredBlockIndex(
-                index.hash(),
-                index.header(),
-                index.height(),
-                index.previousBlockHash(),
-                index.chainWork()
         );
     }
 }

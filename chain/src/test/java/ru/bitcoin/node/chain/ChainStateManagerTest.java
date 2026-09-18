@@ -195,5 +195,15 @@ class ChainStateManagerTest {
             this.activeTipHash =
                     hash;
         }
+
+        @Override
+        public Optional<Hash256> loadBestHeaderTipHash() {
+            return Optional.empty();
+        }
+
+        @Override
+        public void saveBestHeaderTipHash(Hash256 hash) {
+
+        }
     }
 }

@@ -10,7 +10,6 @@ import ru.bitcoin.node.protocol.block.BlockHeader;
 import ru.bitcoin.node.protocol.network.NetworkParameters;
 import ru.bitcoin.node.protocol.network.NetworkParametersRegistry;
 import ru.bitcoin.node.storage.block.RocksDbBlockIndexStore;
-import ru.bitcoin.node.storage.block.StoredBlockIndex;
 import ru.bitcoin.node.storage.rocksdb.RocksDbDatabase;
 
 import java.math.BigInteger;
@@ -53,7 +52,7 @@ class HeaderBatchProcessorTest {
                     createGenesisIndex();
 
             store.save(
-                    toStored(
+                    BlockIndexStorageMapper.toStored(
                             genesis
                     )
             );
@@ -227,18 +226,6 @@ class HeaderBatchProcessorTest {
 
         throw new IllegalStateException(
                 "Could not find valid regtest nonce"
-        );
-    }
-
-    private static StoredBlockIndex toStored(
-            BlockIndex index
-    ) {
-        return new StoredBlockIndex(
-                index.hash(),
-                index.header(),
-                index.height(),
-                index.previousBlockHash(),
-                index.chainWork()
         );
     }
 }

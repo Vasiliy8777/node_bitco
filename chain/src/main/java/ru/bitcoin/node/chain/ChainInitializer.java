@@ -43,16 +43,54 @@ public final class ChainInitializer {
                 if (blocks.find(state.activeTip().hash()).isEmpty()) {
                     throw new IllegalStateException("Missing active tip block body");
                 }
+
+                if (tips.loadBestHeaderTipHash().isEmpty()) {
+
+                    /*
+                     * Database created before separate
+                     * best-header-tip persistence existed.
+                     *
+                     * The active tip is always a fully validated
+                     * known header, therefore it is a safe
+                     * migration starting point.
+                     */
+                    tips.saveBestHeaderTipHash(
+                            state.activeTip().hash()
+                    );
+                }
+
                 return state;
             }
             if (!database.isEmpty()) {
                 throw new IllegalStateException("Nonempty database has no active tip; recovery is required");
             }
             try (RocksDbWriteBatch batch = new RocksDbWriteBatch()) {
-                blocks.save(batch, genesis);
-                indexes.save(batch, BlockIndexStorageMapper.toStored(genesisIndex));
-                tips.saveActiveTipHash(batch, genesis.hash());
-                database.write(batch);
+
+                blocks.save(
+                        batch,
+                        genesis
+                );
+
+                indexes.save(
+                        batch,
+                        BlockIndexStorageMapper.toStored(
+                                genesisIndex
+                        )
+                );
+
+                tips.saveActiveTipHash(
+                        batch,
+                        genesis.hash()
+                );
+
+                tips.saveBestHeaderTipHash(
+                        batch,
+                        genesis.hash()
+                );
+
+                database.write(
+                        batch
+                );
             }
             // Genesis is an anchor: its coinbase output must never enter the UTXO set.
             return new ChainState(genesisIndex);

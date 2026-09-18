@@ -127,6 +127,80 @@ class ChainInitializerTest {
     }
 
     @Test
+    void migratesLegacyDatabaseWithoutBestHeaderTip() {
+
+        try (var db = new RocksDbDatabase(path)) {
+
+            var genesis =
+                    GenesisBlockFactory.create(
+                            NetworkParametersRegistry.regtest()
+                    );
+
+            var genesisIndex =
+                    BlockIndexFactory.createGenesis(
+                            genesis.header()
+                    );
+
+            var blocks =
+                    new RocksDbBlockStore(db);
+
+            var indexes =
+                    new RocksDbBlockIndexStore(db);
+
+            var tips =
+                    new RocksDbChainStateStore(db);
+
+            /*
+             * Simulate database created by the old node version:
+             *
+             * - genesis block exists
+             * - genesis block index exists
+             * - active tip exists
+             * - best header tip does not exist
+             */
+            blocks.save(
+                    genesis
+            );
+
+            indexes.save(
+                    BlockIndexStorageMapper.toStored(
+                            genesisIndex
+                    )
+            );
+
+            tips.saveActiveTipHash(
+                    genesis.hash()
+            );
+
+            assertTrue(
+                    tips.loadBestHeaderTipHash()
+                            .isEmpty()
+            );
+
+            ChainState state =
+                    initializer(db)
+                            .initialize();
+
+            assertEquals(
+                    genesis.hash(),
+                    state.activeTip().hash()
+            );
+
+            assertEquals(
+                    genesis.hash(),
+                    tips.loadActiveTipHash()
+                            .orElseThrow()
+            );
+
+            assertEquals(
+                    genesis.hash(),
+                    tips.loadBestHeaderTipHash()
+                            .orElseThrow()
+            );
+        }
+    }
+
+    @Test
     void closedDatabaseCannotBeInitialized() {
         var db = new RocksDbDatabase(path);
         db.close();
