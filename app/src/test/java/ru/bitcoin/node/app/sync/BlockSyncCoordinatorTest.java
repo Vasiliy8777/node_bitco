@@ -234,6 +234,14 @@ class BlockSyncCoordinatorTest {
                         peer.isReady()
                 );
 
+                peer.messageReader()
+                        .start();
+
+                assertTrue(
+                        peer.messageReader()
+                                .isStarted()
+                );
+
                 PeerManager peerManager =
                         new PeerManager();
 
@@ -567,6 +575,14 @@ class BlockSyncCoordinatorTest {
                         peer.isReady()
                 );
 
+                peer.messageReader()
+                        .start();
+
+                assertTrue(
+                        peer.messageReader()
+                                .isStarted()
+                );
+
                 PeerManager peerManager =
                         new PeerManager();
 
@@ -821,6 +837,18 @@ class BlockSyncCoordinatorTest {
                 );
 
                 peer.handshake();
+
+                assertTrue(
+                        peer.isReady()
+                );
+
+                peer.messageReader()
+                        .start();
+
+                assertTrue(
+                        peer.messageReader()
+                                .isStarted()
+                );
 
                 PeerManager peerManager =
                         new PeerManager();
@@ -1327,6 +1355,14 @@ class BlockSyncCoordinatorTest {
                         peer.isReady()
                 );
 
+                peer.messageReader()
+                        .start();
+
+                assertTrue(
+                        peer.messageReader()
+                                .isStarted()
+                );
+
                 PeerManager peerManager =
                         new PeerManager();
 
@@ -1714,6 +1750,11 @@ class BlockSyncCoordinatorTest {
                             1
                     );
 
+            CountDownLatch releaseHealthyPeers =
+                    new CountDownLatch(
+                            1
+                    );
+
             CompletableFuture<Void> firstServerFuture =
                     CompletableFuture.runAsync(
                             () -> runFastWorkConservingPeer(
@@ -1721,7 +1762,8 @@ class BlockSyncCoordinatorTest {
                                     block1,
                                     block3,
                                     0x6162636465666768L,
-                                    block3Requested
+                                    block3Requested,
+                                    releaseHealthyPeers
                             )
                     );
 
@@ -1731,7 +1773,8 @@ class BlockSyncCoordinatorTest {
                                     secondServer,
                                     block2,
                                     0x7172737475767778L,
-                                    block3Requested
+                                    block3Requested,
+                                    releaseHealthyPeers
                             )
                     );
 
@@ -1805,6 +1848,8 @@ class BlockSyncCoordinatorTest {
                     secondPeer.isReady()
             );
 
+            releaseHealthyPeers.countDown();
+
             firstServerFuture.get(
                     5,
                     TimeUnit.SECONDS
@@ -1861,6 +1906,9 @@ class BlockSyncCoordinatorTest {
             CountDownLatch failingPeerRequestedBlock =
                     new CountDownLatch(1);
 
+            CountDownLatch releaseHealthyPeer =
+                    new CountDownLatch(1);
+
             CompletableFuture<Void> failingServerFuture =
                     CompletableFuture.runAsync(
                             () -> runDisconnectingBlockPeer(
@@ -1878,7 +1926,8 @@ class BlockSyncCoordinatorTest {
                                     block2,
                                     block1,
                                     0x2122232425262728L,
-                                    failingPeerRequestedBlock
+                                    failingPeerRequestedBlock,
+                                    releaseHealthyPeer
                             )
                     );
 
@@ -1952,6 +2001,8 @@ class BlockSyncCoordinatorTest {
                     healthyPeer.isReady()
             );
 
+            releaseHealthyPeer.countDown();
+
             failingServerFuture.get(
                     5,
                     TimeUnit.SECONDS
@@ -1993,12 +2044,16 @@ class BlockSyncCoordinatorTest {
              PeerManager peerManager =
                      new PeerManager()) {
 
+            CountDownLatch releaseNotFoundPeers =
+                    new CountDownLatch(1);
+
             CompletableFuture<Void> firstServerFuture =
                     CompletableFuture.runAsync(
                             () -> runNotFoundBlockPeer(
                                     firstServer,
                                     block.hash(),
-                                    0x3132333435363738L
+                                    0x3132333435363738L,
+                                    releaseNotFoundPeers
                             )
                     );
 
@@ -2007,7 +2062,8 @@ class BlockSyncCoordinatorTest {
                             () -> runNotFoundBlockPeer(
                                     secondServer,
                                     block.hash(),
-                                    0x4142434445464748L
+                                    0x4142434445464748L,
+                                    releaseNotFoundPeers
                             )
                     );
 
@@ -2088,6 +2144,8 @@ class BlockSyncCoordinatorTest {
             assertTrue(
                     secondPeer.isReady()
             );
+
+            releaseNotFoundPeers.countDown();
 
             firstServerFuture.get(
                     5,
@@ -2515,7 +2573,8 @@ class BlockSyncCoordinatorTest {
     private static void runNotFoundBlockPeer(
             ServerSocket serverSocket,
             Hash256 expectedBlockHash,
-            long remoteNonce
+            long remoteNonce,
+            CountDownLatch release
     ) {
 
         try (Socket socket =
@@ -2577,6 +2636,14 @@ class BlockSyncCoordinatorTest {
             );
 
             output.flush();
+
+            assertTrue(
+                    release.await(
+                            5,
+                            TimeUnit.SECONDS
+                    ),
+                    "Timed out waiting to release NOTFOUND peer"
+            );
 
         } catch (Exception exception) {
             throw new RuntimeException(
@@ -2656,7 +2723,8 @@ class BlockSyncCoordinatorTest {
             Block initiallyAssignedBlock,
             Block reassignedBlock,
             long remoteNonce,
-            CountDownLatch failingPeerRequestedBlock
+            CountDownLatch failingPeerRequestedBlock,
+            CountDownLatch release
     ) {
 
         try (Socket socket =
@@ -2753,6 +2821,14 @@ class BlockSyncCoordinatorTest {
 
             output.flush();
 
+            assertTrue(
+                    release.await(
+                            5,
+                            TimeUnit.SECONDS
+                    ),
+                    "Timed out waiting to release healthy failover peer"
+            );
+
         } catch (Exception exception) {
             throw new RuntimeException(
                     exception
@@ -2765,7 +2841,8 @@ class BlockSyncCoordinatorTest {
             Block firstBlock,
             Block thirdBlock,
             long remoteNonce,
-            CountDownLatch block3Requested
+            CountDownLatch block3Requested,
+            CountDownLatch release
     ) {
 
         try (Socket socket =
@@ -2858,6 +2935,14 @@ class BlockSyncCoordinatorTest {
 
             output.flush();
 
+            assertTrue(
+                    release.await(
+                            5,
+                            TimeUnit.SECONDS
+                    ),
+                    "Timed out waiting to release fast peer"
+            );
+
         } catch (Exception exception) {
             throw new RuntimeException(
                     exception
@@ -2869,7 +2954,8 @@ class BlockSyncCoordinatorTest {
             ServerSocket serverSocket,
             Block secondBlock,
             long remoteNonce,
-            CountDownLatch block3Requested
+            CountDownLatch block3Requested,
+            CountDownLatch release
     ) {
 
         try (Socket socket =
@@ -2949,6 +3035,14 @@ class BlockSyncCoordinatorTest {
             );
 
             output.flush();
+
+            assertTrue(
+                    release.await(
+                            5,
+                            TimeUnit.SECONDS
+                    ),
+                    "Timed out waiting to release slow peer"
+            );
 
         } catch (Exception exception) {
             throw new RuntimeException(
@@ -3041,6 +3135,105 @@ class BlockSyncCoordinatorTest {
 
         } catch (Exception e) {
             throw new RuntimeException(e);
+        }
+    }
+
+
+    private static void runPeer(
+            ServerSocket serverSocket,
+            List<Block> blocks,
+            CountDownLatch release
+    ) {
+
+        try (Socket socket =
+                     serverSocket.accept()) {
+
+            socket.setSoTimeout(
+                    5_000
+            );
+
+            BitcoinMessageStreamReader reader =
+                    new BitcoinMessageStreamReader(
+                            new BitcoinMessageDecoder(
+                                    PARAMETERS
+                            )
+                    );
+
+            BitcoinMessageEncoder encoder =
+                    new BitcoinMessageEncoder(
+                            PARAMETERS
+                    );
+
+            BufferedInputStream input =
+                    new BufferedInputStream(
+                            socket.getInputStream()
+                    );
+
+            BufferedOutputStream output =
+                    new BufferedOutputStream(
+                            socket.getOutputStream()
+                    );
+
+            performHandshake(
+                    reader,
+                    encoder,
+                    input,
+                    output
+            );
+
+            for (Block block : blocks) {
+
+                BitcoinMessage getDataWire =
+                        reader.read(input)
+                                .orElseThrow();
+
+                assertEquals(
+                        "getdata",
+                        getDataWire.command()
+                );
+
+                GetDataMessage getData =
+                        BitcoinMessages.decodeGetData(
+                                getDataWire
+                        );
+
+                assertEquals(
+                        1,
+                        getData.size()
+                );
+
+                assertEquals(
+                        block.hash(),
+                        getData.inventory()
+                                .get(0)
+                                .hash()
+                );
+
+                output.write(
+                        encoder.encode(
+                                BitcoinMessages.block(
+                                        new BlockMessage(
+                                                block
+                                        )
+                                )
+                        )
+                );
+
+                output.flush();
+            }
+
+            assertTrue(
+                    release.await(
+                            5,
+                            TimeUnit.SECONDS
+                    ),
+                    "Timed out waiting to release test peer"
+            );
+
+        } catch (Exception exception) {
+            throw new RuntimeException(
+                    exception
+            );
         }
     }
 
@@ -3154,6 +3347,14 @@ class BlockSyncCoordinatorTest {
 
             assertTrue(
                     peer.isReady()
+            );
+
+            peer.messageReader()
+                    .start();
+
+            assertTrue(
+                    peer.messageReader()
+                            .isStarted()
             );
 
             return peer;
@@ -3376,6 +3577,11 @@ class BlockSyncCoordinatorTest {
                             2
                     );
 
+            CountDownLatch releaseBarrierPeers =
+                    new CountDownLatch(
+                            1
+                    );
+
             CompletableFuture<Void> firstServerFuture =
                     CompletableFuture.runAsync(
                             () -> runBarrierBlockPeer(
@@ -3383,7 +3589,8 @@ class BlockSyncCoordinatorTest {
                                     block1,
                                     block1.hash(),
                                     0x4142434445464748L,
-                                    requestsReceived
+                                    requestsReceived,
+                                    releaseBarrierPeers
                             )
                     );
 
@@ -3394,7 +3601,8 @@ class BlockSyncCoordinatorTest {
                                     block2,
                                     block2.hash(),
                                     0x5152535455565758L,
-                                    requestsReceived
+                                    requestsReceived,
+                                    releaseBarrierPeers
                             )
                     );
 
@@ -3461,6 +3669,8 @@ class BlockSyncCoordinatorTest {
             assertTrue(
                     secondPeer.isReady()
             );
+
+            releaseBarrierPeers.countDown();
 
             firstServerFuture.get(
                     5,
@@ -3648,6 +3858,11 @@ class BlockSyncCoordinatorTest {
                             index4
                     );
 
+            CountDownLatch releasePeer =
+                    new CountDownLatch(
+                            1
+                    );
+
             /*
              * The peer has ONLY the bodies which are missing
              * from local storage.
@@ -3662,7 +3877,8 @@ class BlockSyncCoordinatorTest {
                                     List.of(
                                             block2,
                                             block4
-                                    )
+                                    ),
+                                    releasePeer
                             )
                     );
 
@@ -3776,6 +3992,8 @@ class BlockSyncCoordinatorTest {
                 assertTrue(
                         peer.isReady()
                 );
+
+                releasePeer.countDown();
             }
 
             server.get(
@@ -3790,7 +4008,8 @@ class BlockSyncCoordinatorTest {
             Block expectedBlock,
             Hash256 expectedHash,
             long remoteNonce,
-            CountDownLatch requestsReceived
+            CountDownLatch requestsReceived,
+            CountDownLatch release
     ) {
 
         try (Socket socket =
@@ -3873,6 +4092,14 @@ class BlockSyncCoordinatorTest {
             );
 
             output.flush();
+
+            assertTrue(
+                    release.await(
+                            5,
+                            TimeUnit.SECONDS
+                    ),
+                    "Timed out waiting to release barrier peer"
+            );
 
         } catch (Exception exception) {
             throw new RuntimeException(

@@ -63,28 +63,6 @@ public final class BlockSynchronizer {
                     )
             );
 
-            while (!future.isDone()) {
-
-                try {
-                    peer.messageReader()
-                            .readNext();
-
-                } catch (IOException exception) {
-
-                    if ("Peer disconnected".equals(
-                            exception.getMessage()
-                    )) {
-                        throw new IOException(
-                                "Peer disconnected before sending block "
-                                        + blockHash.toDisplayHex(),
-                                exception
-                        );
-                    }
-
-                    throw exception;
-                }
-            }
-
             return completedBlock(
                     future
             );

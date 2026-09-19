@@ -85,6 +85,14 @@ class BlockSynchronizerTest {
                         peer.isReady()
                 );
 
+                peer.messageReader()
+                        .start();
+
+                assertTrue(
+                        peer.messageReader()
+                                .isStarted()
+                );
+
                 BlockSynchronizer synchronizer =
                         new BlockSynchronizer(
                                 peer
@@ -158,6 +166,14 @@ class BlockSynchronizerTest {
 
                 peer.handshake();
 
+                peer.messageReader()
+                        .start();
+
+                assertTrue(
+                        peer.messageReader()
+                                .isStarted()
+                );
+
                 BlockSynchronizer synchronizer =
                         new BlockSynchronizer(
                                 peer
@@ -175,13 +191,6 @@ class BlockSynchronizerTest {
                 assertEquals(
                         expectedHash,
                         exception.blockHash()
-                );
-
-                assertTrue(
-                        exception.getMessage()
-                                .contains(
-                                        expectedHash.toDisplayHex()
-                                )
                 );
             }
 
@@ -241,6 +250,14 @@ class BlockSynchronizerTest {
                         peer.isReady()
                 );
 
+                peer.messageReader()
+                        .start();
+
+                assertTrue(
+                        peer.messageReader()
+                                .isStarted()
+                );
+
                 BlockSynchronizer synchronizer =
                         new BlockSynchronizer(
                                 peer
@@ -257,13 +274,6 @@ class BlockSynchronizerTest {
 
                 assertFalse(
                         exception instanceof BlockNotFoundException
-                );
-
-                assertTrue(
-                        exception.getMessage()
-                                .contains(
-                                        expectedHash.toDisplayHex()
-                                )
                 );
             }
 
@@ -359,6 +369,14 @@ class BlockSynchronizerTest {
 
                 peer.handshake();
 
+                peer.messageReader()
+                        .start();
+
+                assertTrue(
+                        peer.messageReader()
+                                .isStarted()
+                );
+
                 BlockSynchronizer synchronizer =
                         new BlockSynchronizer(
                                 peer
@@ -432,6 +450,14 @@ class BlockSynchronizerTest {
                 );
 
                 peer.handshake();
+
+                peer.messageReader()
+                        .start();
+
+                assertTrue(
+                        peer.messageReader()
+                                .isStarted()
+                );
 
                 BlockSynchronizer synchronizer =
                         new BlockSynchronizer(

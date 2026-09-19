@@ -22,6 +22,7 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -49,6 +50,11 @@ class BlockDownloadServiceTest {
         Hash256 expectedHash =
                 expectedBlock.hash();
 
+        CountDownLatch release =
+                new CountDownLatch(
+                        1
+                );
+
         try (ServerSocket firstServer =
                      new ServerSocket(0);
 
@@ -63,7 +69,8 @@ class BlockDownloadServiceTest {
                             () -> runNotFoundPeer(
                                     firstServer,
                                     expectedHash,
-                                    FIRST_REMOTE_NONCE
+                                    FIRST_REMOTE_NONCE,
+                                    release
                             )
                     );
 
@@ -73,7 +80,8 @@ class BlockDownloadServiceTest {
                                     secondServer,
                                     expectedBlock,
                                     expectedHash,
-                                    SECOND_REMOTE_NONCE
+                                    SECOND_REMOTE_NONCE,
+                                    release
                             )
                     );
 
@@ -147,6 +155,8 @@ class BlockDownloadServiceTest {
                             .size()
             );
 
+            release.countDown();
+
             first.get(
                     5,
                     TimeUnit.SECONDS
@@ -179,6 +189,7 @@ class BlockDownloadServiceTest {
                 );
 
         try {
+
             peer.connect(
                     "127.0.0.1",
                     port
@@ -188,6 +199,14 @@ class BlockDownloadServiceTest {
 
             assertTrue(
                     peer.isReady()
+            );
+
+            peer.messageReader()
+                    .start();
+
+            assertTrue(
+                    peer.messageReader()
+                            .isStarted()
             );
 
             return peer;
@@ -381,7 +400,8 @@ class BlockDownloadServiceTest {
     private static void runNotFoundPeer(
             ServerSocket serverSocket,
             Hash256 expectedHash,
-            long remoteNonce
+            long remoteNonce,
+            CountDownLatch release
     ) {
 
         try (Socket socket =
@@ -421,6 +441,14 @@ class BlockDownloadServiceTest {
             session.output()
                     .flush();
 
+            assertTrue(
+                    release.await(
+                            5,
+                            TimeUnit.SECONDS
+                    ),
+                    "Timed out waiting to release test peer"
+            );
+
         } catch (Exception exception) {
             throw new RuntimeException(
                     exception
@@ -432,7 +460,8 @@ class BlockDownloadServiceTest {
             ServerSocket serverSocket,
             Block expectedBlock,
             Hash256 expectedHash,
-            long remoteNonce
+            long remoteNonce,
+            CountDownLatch release
     ) {
 
         try (Socket socket =
@@ -464,6 +493,14 @@ class BlockDownloadServiceTest {
             session.output()
                     .flush();
 
+            assertTrue(
+                    release.await(
+                            5,
+                            TimeUnit.SECONDS
+                    ),
+                    "Timed out waiting to release test peer"
+            );
+
         } catch (Exception exception) {
             throw new RuntimeException(
                     exception
@@ -482,6 +519,11 @@ class BlockDownloadServiceTest {
 
         Hash256 expectedHash =
                 expectedBlock.hash();
+
+        CountDownLatch release =
+                new CountDownLatch(
+                        1
+                );
 
         try (ServerSocket firstServer =
                      new ServerSocket(0);
@@ -507,7 +549,8 @@ class BlockDownloadServiceTest {
                                     secondServer,
                                     expectedBlock,
                                     expectedHash,
-                                    SECOND_REMOTE_NONCE
+                                    SECOND_REMOTE_NONCE,
+                                    release
                             )
                     );
 
@@ -589,6 +632,8 @@ class BlockDownloadServiceTest {
                             .get(0)
             );
 
+            release.countDown();
+
             first.get(
                     5,
                     TimeUnit.SECONDS
@@ -613,6 +658,11 @@ class BlockDownloadServiceTest {
         Hash256 expectedHash =
                 expectedBlock.hash();
 
+        CountDownLatch release =
+                new CountDownLatch(
+                        1
+                );
+
         try (ServerSocket firstServer =
                      new ServerSocket(0);
 
@@ -627,7 +677,8 @@ class BlockDownloadServiceTest {
                             () -> runNotFoundPeer(
                                     firstServer,
                                     expectedHash,
-                                    FIRST_REMOTE_NONCE
+                                    FIRST_REMOTE_NONCE,
+                                    release
                             )
                     );
 
@@ -726,6 +777,8 @@ class BlockDownloadServiceTest {
                             .get(0)
             );
 
+            release.countDown();
+
             first.get(
                     5,
                     TimeUnit.SECONDS
@@ -750,6 +803,11 @@ class BlockDownloadServiceTest {
         Hash256 expectedHash =
                 expectedBlock.hash();
 
+        CountDownLatch release =
+                new CountDownLatch(
+                        1
+                );
+
         try (ServerSocket serverSocket =
                      new ServerSocket(0);
 
@@ -762,7 +820,8 @@ class BlockDownloadServiceTest {
                                     serverSocket,
                                     expectedBlock,
                                     expectedHash,
-                                    FIRST_REMOTE_NONCE
+                                    FIRST_REMOTE_NONCE,
+                                    release
                             )
                     );
 
@@ -800,6 +859,8 @@ class BlockDownloadServiceTest {
                     peer.isReady()
             );
 
+            release.countDown();
+
             server.get(
                     5,
                     TimeUnit.SECONDS
@@ -833,6 +894,7 @@ class BlockDownloadServiceTest {
              * BlockSynchronizer must observe EOF and report
              * an IOException to BlockDownloadService.
              */
+
         } catch (Exception exception) {
             throw new RuntimeException(
                     exception

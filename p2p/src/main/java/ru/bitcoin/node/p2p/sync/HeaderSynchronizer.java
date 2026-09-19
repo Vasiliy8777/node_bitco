@@ -78,25 +78,6 @@ public final class HeaderSynchronizer {
                     )
             );
 
-            while (!future.isDone()) {
-                try {
-                    peer.messageReader()
-                            .readNext();
-                } catch (IOException exception) {
-
-                    if ("Peer disconnected".equals(
-                            exception.getMessage()
-                    )) {
-                        throw new IOException(
-                                "Peer disconnected before sending headers",
-                                exception
-                        );
-                    }
-
-                    throw exception;
-                }
-            }
-
             return completedHeaders(
                     future
             );
