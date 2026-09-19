@@ -3,19 +3,27 @@ package ru.bitcoin.node.app;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.junit.jupiter.api.io.TempDir;
+import ru.bitcoin.node.app.sync.BlockSyncCoordinator;
+import ru.bitcoin.node.app.sync.HeaderSyncCoordinator;
 import ru.bitcoin.node.chain.*;
+import ru.bitcoin.node.chain.storage.KnownHeaderStorage;
 import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.consensus.time.AdjustedTime;
 import ru.bitcoin.node.mempool.Mempool;
 import ru.bitcoin.node.p2p.Peer;
 import ru.bitcoin.node.p2p.PeerConnection;
+import ru.bitcoin.node.p2p.PeerManager;
 import ru.bitcoin.node.p2p.PeerState;
 import ru.bitcoin.node.p2p.message.*;
+import ru.bitcoin.node.p2p.sync.BlockDownloadScheduler;
+import ru.bitcoin.node.p2p.sync.BlockDownloadService;
 import ru.bitcoin.node.p2p.sync.BlockSynchronizer;
 import ru.bitcoin.node.p2p.sync.HeaderSynchronizer;
 import ru.bitcoin.node.protocol.network.NetworkParameters;
 import ru.bitcoin.node.protocol.network.NetworkParametersRegistry;
 import ru.bitcoin.node.storage.block.RocksDbBlockIndexStore;
+import ru.bitcoin.node.storage.block.RocksDbBlockStore;
+import ru.bitcoin.node.storage.chain.RocksDbChainStateStore;
 import ru.bitcoin.node.storage.rocksdb.RocksDbDatabase;
 
 import java.nio.file.Path;
@@ -44,9 +52,12 @@ class BitcoinCoreHeaderSyncIntegrationTest {
 
     private static final Hash256 EXPECTED_TIP =
             Hash256.fromDisplayHex(
-                    "58fb5d854840e3d20f48f8226b56c2a6"
-                            + "d6cba54e366a896de7d179fe70c34668"
+                    "778f75bdbca77aff13c33c0f7a5a7987"
+                            + "d8aa2a707ddd14099f4d7cbda8360638"
             );
+
+    private static final long EXPECTED_HEIGHT =
+            2005L;
 
     @TempDir
     Path tempDirectory;
@@ -87,6 +98,11 @@ class BitcoinCoreHeaderSyncIntegrationTest {
                             new Mempool()
                     );
 
+            RocksDbBlockStore blockStore =
+                    new RocksDbBlockStore(
+                            database
+                    );
+
             assertEquals(
                     REGTEST_GENESIS,
                     validationService
@@ -118,15 +134,46 @@ class BitcoinCoreHeaderSyncIntegrationTest {
                             adjustedTime
                     );
 
+            RocksDbChainStateStore chainStateStore =
+                    new RocksDbChainStateStore(
+                            database
+                    );
+
+            HeaderChainState headerChainState =
+                    new HeaderChainStateLoader(
+                            indexStore,
+                            chainStateStore
+                    )
+                            .load()
+                            .orElseThrow(
+                                    () ->
+                                            new IllegalStateException(
+                                                    "Best header state was not initialized"
+                                            )
+                            );
+
+            KnownHeaderStorage headerStorage =
+                    new KnownHeaderStorage(
+                            database,
+                            indexStore,
+                            chainStateStore
+                    );
+
             HeaderBatchProcessor batchProcessor =
                     new HeaderBatchProcessor(
                             headerProcessor,
-                            indexStore
+                            headerChainState,
+                            headerStorage
                     );
 
             HeaderSyncService headerSyncService =
                     new HeaderSyncService(
                             batchProcessor
+                    );
+
+            BlockLocatorBuilder blockLocatorBuilder =
+                    new BlockLocatorBuilder(
+                            indexLookup
                     );
 
             try (PeerConnection connection =
@@ -164,52 +211,39 @@ class BitcoinCoreHeaderSyncIntegrationTest {
                         peer.state()
                 );
 
-                BlockSynchronizer blockSynchronizer =
-                        new BlockSynchronizer(
-                                connection,
-                                peer
-                        );
-
                 HeaderSynchronizer headerSynchronizer =
                         new HeaderSynchronizer(
                                 connection,
                                 peer
                         );
 
-                /*
-                 * Ask for everything after our current
-                 * active genesis block.
-                 */
-                Hash256 locatorHash =
-                        validationService
-                                .activeTip()
-                                .hash();
+                HeaderSyncCoordinator headerSyncCoordinator =
+                        new HeaderSyncCoordinator(
+                                headerSynchronizer,
+                                headerSyncService,
+                                headerChainState,
+                                blockLocatorBuilder
+                        );
 
+                /*
+                 * Synchronize the complete header chain.
+                 *
+                 * The coordinator rebuilds the block locator
+                 * from its per-session synchronization cursor
+                 * after every non-empty headers response.
+                 */
                 Hash256 stopHash =
                         new Hash256(
                                 new byte[Hash256.LENGTH]
                         );
 
-                HeadersMessage headers =
-                        headerSynchronizer.download(
-                                List.of(
-                                        locatorHash
-                                ),
+                List<BlockIndex> processed =
+                        headerSyncCoordinator.synchronize(
                                 stopHash
                         );
 
                 assertEquals(
-                        3,
-                        headers.size()
-                );
-
-                List<BlockIndex> processed =
-                        headerSyncService.process(
-                                headers
-                        );
-
-                assertEquals(
-                        3,
+                        EXPECTED_HEIGHT,
                         processed.size()
                 );
 
@@ -219,13 +253,13 @@ class BitcoinCoreHeaderSyncIntegrationTest {
                 );
 
                 assertEquals(
-                        2L,
-                        processed.get(1).height()
+                        2000L,
+                        processed.get(1999).height()
                 );
 
                 assertEquals(
-                        3L,
-                        processed.get(2).height()
+                        EXPECTED_HEIGHT,
+                        processed.get(2004).height()
                 );
 
                 assertEquals(
@@ -234,21 +268,45 @@ class BitcoinCoreHeaderSyncIntegrationTest {
                                 .previousBlockHash()
                 );
 
+                /*
+                 * Verify ancestry around the 2000-header
+                 * protocol batch boundary.
+                 */
                 assertEquals(
-                        processed.get(0).hash(),
-                        processed.get(1)
+                        processed.get(1998).hash(),
+                        processed.get(1999)
                                 .previousBlockHash()
                 );
 
                 assertEquals(
-                        processed.get(1).hash(),
-                        processed.get(2)
+                        processed.get(1999).hash(),
+                        processed.get(2000)
+                                .previousBlockHash()
+                );
+
+                assertEquals(
+                        processed.get(2003).hash(),
+                        processed.get(2004)
                                 .previousBlockHash()
                 );
 
                 assertEquals(
                         EXPECTED_TIP,
-                        processed.get(2).hash()
+                        processed.get(2004).hash()
+                );
+
+                assertEquals(
+                        EXPECTED_TIP,
+                        headerChainState
+                                .bestHeaderTip()
+                                .hash()
+                );
+
+                assertEquals(
+                        EXPECTED_TIP,
+                        chainStateStore
+                                .loadBestHeaderTipHash()
+                                .orElseThrow()
                 );
 
                 /*
@@ -265,7 +323,7 @@ class BitcoinCoreHeaderSyncIntegrationTest {
                 );
 
                 assertEquals(
-                        3L,
+                        EXPECTED_HEIGHT,
                         storedTip.height()
                 );
 
@@ -329,125 +387,696 @@ class BitcoinCoreHeaderSyncIntegrationTest {
                 );
 
                 /*
-                 * Download and connect every block body whose
-                 * header has already been validated and persisted.
+                 * Header synchronization is complete.
                  *
-                 * Bodies must be processed in chain order because
-                 * block #2 cannot be connected before block #1, etc.
+                 * Now download the corresponding block bodies
+                 * and submit every block through the real
+                 * NodeValidationService / BlockProcessor pipeline.
                  */
-                for (int i = 0;
-                     i < processed.size();
-                     i++) {
+                PeerManager peerManager =
+                        new PeerManager();
 
-                    BlockIndex expectedIndex =
-                            processed.get(i);
+                peerManager.add(
+                        peer
+                );
 
-                    Hash256 requestedBlockHash =
-                            expectedIndex.hash();
+                BlockDownloadService blockDownloadService =
+                        new BlockDownloadService(
+                                peerManager
+                        );
 
-                    var block =
-                            blockSynchronizer.download(
-                                    requestedBlockHash
-                            );
+                BlockDownloadScheduler blockDownloadScheduler =
+                        new BlockDownloadScheduler(
+                                peerManager,
+                                blockDownloadService
+                        );
 
-                    assertEquals(
-                            requestedBlockHash,
-                            block.hash()
-                    );
+                BlockSyncCoordinator coordinator =
+                        new BlockSyncCoordinator(
+                                blockDownloadScheduler,
+                                validationService,
+                                headerChainState,
+                                indexLookup,
+                                blockStore
+                        );
 
-                    BlockProcessingResult result =
-                            validationService.processBlock(
-                                    block
-                            );
+                List<BlockIndex> downloadedBlocks =
+                        coordinator.synchronize();
 
-                    assertEquals(
-                            BlockProcessingResult.CONNECTED,
-                            result
-                    );
-
-                    assertEquals(
-                            expectedIndex.height(),
-                            validationService
-                                    .activeTip()
-                                    .height()
-                    );
-
-                    assertEquals(
-                            requestedBlockHash,
-                            validationService
-                                    .activeTip()
-                                    .hash()
-                    );
-
-                    System.out.println(
-                            "Block processing result at height "
-                                    + expectedIndex.height()
-                                    + ": "
-                                    + result
-                    );
-
-                    System.out.println(
-                            "Active block-chain height after block: "
-                                    + validationService
-                                    .activeTip()
-                                    .height()
-                    );
-
-                    System.out.println(
-                            "Active block-chain tip after block: "
-                                    + validationService
-                                    .activeTip()
-                                    .hash()
-                                    .toDisplayHex()
-                    );
-                }
-
-                /*
-                 * All downloaded headers now also have validated
-                 * block bodies, so the active chain must reach the
-                 * same tip as the header chain.
-                 */
                 assertEquals(
-                        3L,
-                        validationService
-                                .activeTip()
+                        EXPECTED_HEIGHT,
+                        downloadedBlocks.size()
+                );
+
+                assertEquals(
+                        1L,
+                        downloadedBlocks.get(0)
+                                .height()
+                );
+
+                assertEquals(
+                        2000L,
+                        downloadedBlocks.get(1999)
+                                .height()
+                );
+
+                assertEquals(
+                        EXPECTED_HEIGHT,
+                        downloadedBlocks.get(2004)
                                 .height()
                 );
 
                 assertEquals(
                         EXPECTED_TIP,
-                        validationService
-                                .activeTip()
+                        downloadedBlocks.get(2004)
                                 .hash()
+                );
+
+                /*
+                 * The fully validated block chain must now
+                 * have caught up with the best header chain.
+                 */
+                BlockIndex activeTip =
+                        validationService.activeTip();
+
+                assertEquals(
+                        EXPECTED_HEIGHT,
+                        activeTip.height()
                 );
 
                 assertEquals(
-                        storedTip.hash(),
+                        EXPECTED_TIP,
+                        activeTip.hash()
+                );
+
+                assertEquals(
+                        headerChainState
+                                .bestHeaderTip()
+                                .hash(),
+                        activeTip.hash()
+                );
+
+                /*
+                 * Verify that the active-chain tip was
+                 * persisted, not only changed in memory.
+                 */
+                assertEquals(
+                        EXPECTED_TIP,
+                        chainStateStore
+                                .loadActiveTipHash()
+                                .orElseThrow()
+                );
+
+                assertEquals(
+                        chainStateStore
+                                .loadBestHeaderTipHash()
+                                .orElseThrow(),
+                        chainStateStore
+                                .loadActiveTipHash()
+                                .orElseThrow()
+                );
+
+                System.out.println(
+                        "Downloaded/validated blocks: "
+                                + downloadedBlocks.size()
+                );
+
+                System.out.println(
+                        "Active block-chain tip after block IBD: "
+                                + activeTip.hash()
+                                .toDisplayHex()
+                );
+
+                System.out.println(
+                        "Active block-chain height after block IBD: "
+                                + activeTip.height()
+                );
+            }
+        }
+    }
+    @Test
+    @EnabledIfSystemProperty(
+            named = "bitcoin.core.integration",
+            matches = "true"
+    )
+    void shouldResumeBlockIbdAfterRestartWithoutRedownloadingConnectedBlocks()
+            throws Exception {
+
+        Path databasePath =
+                tempDirectory.resolve(
+                        "bitcoin-core-block-resume"
+                );
+
+        AdjustedTime adjustedTime =
+                () -> System.currentTimeMillis()
+                        / 1000L;
+
+        Hash256 block1000Hash;
+
+        /*
+         * =========================================================
+         * SESSION 1
+         *
+         * 1. Start from genesis.
+         * 2. Download all 2005 headers.
+         * 3. Download only block bodies #1..#1000.
+         * 4. Close peer and RocksDB.
+         * =========================================================
+         */
+        try (RocksDbDatabase database =
+                     new RocksDbDatabase(
+                             databasePath
+                     )) {
+
+            NodeValidationService validationService =
+                    new NodeValidationService(
+                            database,
+                            REGTEST,
+                            adjustedTime,
+                            new Mempool()
+                    );
+
+            RocksDbBlockStore blockStore =
+                    new RocksDbBlockStore(
+                            database
+                    );
+
+            RocksDbBlockIndexStore indexStore =
+                    new RocksDbBlockIndexStore(
+                            database
+                    );
+
+            StoredBlockIndexLookup indexLookup =
+                    new StoredBlockIndexLookup(
+                            indexStore
+                    );
+
+            RocksDbChainStateStore chainStateStore =
+                    new RocksDbChainStateStore(
+                            database
+                    );
+
+            HeaderChainState headerChainState =
+                    new HeaderChainStateLoader(
+                            indexStore,
+                            chainStateStore
+                    )
+                            .load()
+                            .orElseThrow();
+
+            HeaderProcessor headerProcessor =
+                    new HeaderProcessor(
+                            indexLookup,
+                            REGTEST,
+                            adjustedTime
+                    );
+
+            KnownHeaderStorage headerStorage =
+                    new KnownHeaderStorage(
+                            database,
+                            indexStore,
+                            chainStateStore
+                    );
+
+            HeaderBatchProcessor batchProcessor =
+                    new HeaderBatchProcessor(
+                            headerProcessor,
+                            headerChainState,
+                            headerStorage
+                    );
+
+            HeaderSyncService headerSyncService =
+                    new HeaderSyncService(
+                            batchProcessor
+                    );
+
+            BlockLocatorBuilder blockLocatorBuilder =
+                    new BlockLocatorBuilder(
+                            indexLookup
+                    );
+
+            try (PeerConnection connection =
+                         new PeerConnection(
+                                 REGTEST,
+                                 5_000,
+                                 10_000
+                         );
+
+                 Peer peer =
+                         new Peer(
+                                 connection,
+                                 VersionMessage.DEFAULT_SERVICES,
+                                 0,
+                                 true
+                         )) {
+
+                peer.connect(
+                        CORE_HOST,
+                        CORE_P2P_PORT
+                );
+
+                peer.handshake();
+
+                assertTrue(
+                        peer.isReady()
+                );
+
+                HeaderSynchronizer headerSynchronizer =
+                        new HeaderSynchronizer(
+                                connection,
+                                peer
+                        );
+
+                HeaderSyncCoordinator headerSyncCoordinator =
+                        new HeaderSyncCoordinator(
+                                headerSynchronizer,
+                                headerSyncService,
+                                headerChainState,
+                                blockLocatorBuilder
+                        );
+
+                Hash256 stopHash =
+                        new Hash256(
+                                new byte[Hash256.LENGTH]
+                        );
+
+                List<BlockIndex> headers =
+                        headerSyncCoordinator.synchronize(
+                                stopHash
+                        );
+
+                assertEquals(
+                        EXPECTED_HEIGHT,
+                        headers.size()
+                );
+
+                assertEquals(
+                        EXPECTED_TIP,
+                        headerChainState
+                                .bestHeaderTip()
+                                .hash()
+                );
+
+                /*
+                 * Header chain is #2005,
+                 * but active block chain is still genesis.
+                 */
+                assertEquals(
+                        0L,
                         validationService
                                 .activeTip()
-                                .hash()
-                );
-
-                System.out.println(
-                        "Header-chain tip: "
-                                + storedTip
-                                .hash()
-                                .toDisplayHex()
-                );
-
-                System.out.println(
-                        "Active block-chain tip: "
-                                + validationService
-                                .activeTip()
-                                .hash()
-                                .toDisplayHex()
-                );
-
-                System.out.println(
-                        "Active block-chain height: "
-                                + validationService
-                                .activeTip()
                                 .height()
+                );
+
+                PeerManager peerManager =
+                        new PeerManager();
+
+                peerManager.add(
+                        peer
+                );
+
+                BlockDownloadService blockDownloadService =
+                        new BlockDownloadService(
+                                peerManager
+                        );
+
+                BlockDownloadScheduler blockDownloadScheduler =
+                        new BlockDownloadScheduler(
+                                peerManager,
+                                blockDownloadService
+                        );
+
+                BlockSyncCoordinator coordinator =
+                        new BlockSyncCoordinator(
+                                blockDownloadScheduler,
+                                validationService,
+                                headerChainState,
+                                indexLookup,
+                                blockStore
+                        );
+
+                /*
+                 * Deliberately stop body synchronization
+                 * at block #1000.
+                 */
+                List<BlockIndex> firstBatch =
+                        coordinator.synchronize(
+                                1000
+                        );
+
+                assertEquals(
+                        1000,
+                        firstBatch.size()
+                );
+
+                assertEquals(
+                        1L,
+                        firstBatch.get(0)
+                                .height()
+                );
+
+                assertEquals(
+                        1000L,
+                        firstBatch.get(999)
+                                .height()
+                );
+
+                BlockIndex activeTip =
+                        validationService.activeTip();
+
+                assertEquals(
+                        1000L,
+                        activeTip.height()
+                );
+
+                block1000Hash =
+                        activeTip.hash();
+
+                assertEquals(
+                        firstBatch.get(999).hash(),
+                        block1000Hash
+                );
+
+                /*
+                 * The two persisted tips must now intentionally
+                 * be different.
+                 */
+                assertEquals(
+                        block1000Hash,
+                        chainStateStore
+                                .loadActiveTipHash()
+                                .orElseThrow()
+                );
+
+                assertEquals(
+                        EXPECTED_TIP,
+                        chainStateStore
+                                .loadBestHeaderTipHash()
+                                .orElseThrow()
+                );
+
+                System.out.println(
+                        "Session 1 active block height: "
+                                + activeTip.height()
+                );
+
+                System.out.println(
+                        "Session 1 active block hash: "
+                                + activeTip.hash()
+                                .toDisplayHex()
+                );
+
+                System.out.println(
+                        "Session 1 best header height: "
+                                + headerChainState
+                                .bestHeaderTip()
+                                .height()
+                );
+            }
+        }
+
+        /*
+         * At this point BOTH the Peer and RocksDbDatabase
+         * from session 1 have actually been closed.
+         *
+         * Everything below is reconstructed from persisted state.
+         */
+
+        /*
+         * =========================================================
+         * SESSION 2
+         *
+         * Open the same database from scratch.
+         * =========================================================
+         */
+        try (RocksDbDatabase database =
+                     new RocksDbDatabase(
+                             databasePath
+                     )) {
+
+            NodeValidationService validationService =
+                    new NodeValidationService(
+                            database,
+                            REGTEST,
+                            adjustedTime,
+                            new Mempool()
+                    );
+
+            RocksDbBlockStore blockStore =
+                    new RocksDbBlockStore(
+                            database
+                    );
+
+            /*
+             * ChainInitializer inside NodeValidationService
+             * must restore activeTip #1000.
+             */
+            BlockIndex restoredActiveTip =
+                    validationService.activeTip();
+
+            assertEquals(
+                    1000L,
+                    restoredActiveTip.height()
+            );
+
+            assertEquals(
+                    block1000Hash,
+                    restoredActiveTip.hash()
+            );
+
+            RocksDbBlockIndexStore indexStore =
+                    new RocksDbBlockIndexStore(
+                            database
+                    );
+
+            StoredBlockIndexLookup indexLookup =
+                    new StoredBlockIndexLookup(
+                            indexStore
+                    );
+
+            RocksDbChainStateStore chainStateStore =
+                    new RocksDbChainStateStore(
+                            database
+                    );
+
+            /*
+             * Header state is reconstructed independently
+             * from the persisted best-header pointer.
+             */
+            HeaderChainState headerChainState =
+                    new HeaderChainStateLoader(
+                            indexStore,
+                            chainStateStore
+                    )
+                            .load()
+                            .orElseThrow();
+
+            assertEquals(
+                    EXPECTED_HEIGHT,
+                    headerChainState
+                            .bestHeaderTip()
+                            .height()
+            );
+
+            assertEquals(
+                    EXPECTED_TIP,
+                    headerChainState
+                            .bestHeaderTip()
+                            .hash()
+            );
+
+            /*
+             * Persistence itself must still show:
+             *
+             * activeTip     = #1000
+             * bestHeaderTip = #2005
+             */
+            assertEquals(
+                    block1000Hash,
+                    chainStateStore
+                            .loadActiveTipHash()
+                            .orElseThrow()
+            );
+
+            assertEquals(
+                    EXPECTED_TIP,
+                    chainStateStore
+                            .loadBestHeaderTipHash()
+                            .orElseThrow()
+            );
+
+            try (PeerConnection connection =
+                         new PeerConnection(
+                                 REGTEST,
+                                 5_000,
+                                 10_000
+                         );
+
+                 Peer peer =
+                         new Peer(
+                                 connection,
+                                 VersionMessage.DEFAULT_SERVICES,
+                                 Math.toIntExact(
+                                         restoredActiveTip.height()
+                                 ),
+                                 true
+                         )) {
+
+                peer.connect(
+                        CORE_HOST,
+                        CORE_P2P_PORT
+                );
+
+                peer.handshake();
+
+                assertTrue(
+                        peer.isReady()
+                );
+
+                assertEquals(
+                        PeerState.READY,
+                        peer.state()
+                );
+
+                PeerManager peerManager =
+                        new PeerManager();
+
+                peerManager.add(
+                        peer
+                );
+
+                BlockDownloadService blockDownloadService =
+                        new BlockDownloadService(
+                                peerManager
+                        );
+
+                BlockDownloadScheduler blockDownloadScheduler =
+                        new BlockDownloadScheduler(
+                                peerManager,
+                                blockDownloadService
+                        );
+
+                BlockSyncCoordinator coordinator =
+                        new BlockSyncCoordinator(
+                                blockDownloadScheduler,
+                                validationService,
+                                headerChainState,
+                                indexLookup,
+                                blockStore
+                        );
+
+                /*
+                 * IMPORTANT:
+                 *
+                 * synchronize() replans from restored
+                 * activeTip #1000, not genesis.
+                 */
+                List<BlockIndex> resumed =
+                        coordinator.synchronize();
+
+                /*
+                 * 2005 - 1000 = 1005.
+                 *
+                 * If blocks #1..#1000 were downloaded again,
+                 * this assertion would fail.
+                 */
+                assertEquals(
+                        1005,
+                        resumed.size()
+                );
+
+                /*
+                 * The first requested block after restart
+                 * must therefore be #1001.
+                 */
+                assertEquals(
+                        1001L,
+                        resumed.get(0)
+                                .height()
+                );
+
+                assertEquals(
+                        2005L,
+                        resumed.get(1004)
+                                .height()
+                );
+
+                assertEquals(
+                        EXPECTED_TIP,
+                        resumed.get(1004)
+                                .hash()
+                );
+
+                BlockIndex finalActiveTip =
+                        validationService.activeTip();
+
+                assertEquals(
+                        EXPECTED_HEIGHT,
+                        finalActiveTip.height()
+                );
+
+                assertEquals(
+                        EXPECTED_TIP,
+                        finalActiveTip.hash()
+                );
+
+                assertEquals(
+                        headerChainState
+                                .bestHeaderTip()
+                                .hash(),
+                        finalActiveTip.hash()
+                );
+
+                /*
+                 * Both persisted pointers must converge
+                 * after resume completes.
+                 */
+                assertEquals(
+                        EXPECTED_TIP,
+                        chainStateStore
+                                .loadActiveTipHash()
+                                .orElseThrow()
+                );
+
+                assertEquals(
+                        EXPECTED_TIP,
+                        chainStateStore
+                                .loadBestHeaderTipHash()
+                                .orElseThrow()
+                );
+
+                System.out.println(
+                        "Restart restored active height: "
+                                + restoredActiveTip.height()
+                );
+
+                System.out.println(
+                        "Restart restored best-header height: "
+                                + headerChainState
+                                .bestHeaderTip()
+                                .height()
+                );
+
+                System.out.println(
+                        "Blocks downloaded after restart: "
+                                + resumed.size()
+                );
+
+                System.out.println(
+                        "First resumed block height: "
+                                + resumed.get(0)
+                                .height()
+                );
+
+                System.out.println(
+                        "Final active block height: "
+                                + finalActiveTip.height()
+                );
+
+                System.out.println(
+                        "Final active block hash: "
+                                + finalActiveTip.hash()
+                                .toDisplayHex()
                 );
             }
         }

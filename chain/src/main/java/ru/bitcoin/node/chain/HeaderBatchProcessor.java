@@ -1,7 +1,7 @@
 package ru.bitcoin.node.chain;
 
+import ru.bitcoin.node.chain.storage.KnownHeaderStorage;
 import ru.bitcoin.node.protocol.block.BlockHeader;
-import ru.bitcoin.node.storage.block.BlockIndexStore;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -9,11 +9,13 @@ import java.util.List;
 public final class HeaderBatchProcessor {
 
     private final HeaderProcessor headerProcessor;
-    private final BlockIndexStore blockIndexStore;
+    private final HeaderChainState headerChainState;
+    private final KnownHeaderStorage headerStorage;
 
     public HeaderBatchProcessor(
             HeaderProcessor headerProcessor,
-            BlockIndexStore blockIndexStore
+            HeaderChainState headerChainState,
+            KnownHeaderStorage headerStorage
     ) {
         if (headerProcessor == null) {
             throw new IllegalArgumentException(
@@ -21,17 +23,26 @@ public final class HeaderBatchProcessor {
             );
         }
 
-        if (blockIndexStore == null) {
+        if (headerChainState == null) {
             throw new IllegalArgumentException(
-                    "blockIndexStore must not be null"
+                    "headerChainState must not be null"
+            );
+        }
+
+        if (headerStorage == null) {
+            throw new IllegalArgumentException(
+                    "headerStorage must not be null"
             );
         }
 
         this.headerProcessor =
                 headerProcessor;
 
-        this.blockIndexStore =
-                blockIndexStore;
+        this.headerChainState =
+                headerChainState;
+
+        this.headerStorage =
+                headerStorage;
     }
 
     public List<BlockIndex> process(
@@ -63,11 +74,39 @@ public final class HeaderBatchProcessor {
                             header
                     );
 
-            blockIndexStore.save(
-                    BlockIndexStorageMapper.toStored(
+            boolean better =
+                    headerChainState.isBetterThanBest(
                             index
-                    )
+                    );
+
+            /*
+             * Persist first.
+             *
+             * If the candidate is the new best header,
+             * the BlockIndex and best-header pointer
+             * are committed in one RocksDB batch.
+             */
+            headerStorage.save(
+                    index,
+                    better
             );
+
+            /*
+             * Runtime state may move only after
+             * persistent storage committed successfully.
+             */
+            if (better) {
+                boolean changed =
+                        headerChainState.consider(
+                                index
+                        );
+
+                if (!changed) {
+                    throw new IllegalStateException(
+                            "Best header state changed unexpectedly"
+                    );
+                }
+            }
 
             processed.add(
                     index

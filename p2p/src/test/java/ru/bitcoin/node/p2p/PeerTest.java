@@ -524,6 +524,84 @@ class PeerTest {
             throw new RuntimeException(e);
         }
     }
+    @Test
+    void shouldBecomeClosedWhenClosed()
+            throws Exception {
+
+        try (ServerSocket serverSocket =
+                     new ServerSocket(0)) {
+
+            CompletableFuture<Void> server =
+                    CompletableFuture.runAsync(
+                            () -> runSuccessfulPeer(
+                                    serverSocket
+                            )
+                    );
+
+            PeerConnection connection =
+                    connection();
+
+            Peer peer =
+                    new Peer(
+                            connection,
+                            VersionMessage.DEFAULT_SERVICES,
+                            100,
+                            true,
+                            LOCAL_NONCE
+                    );
+
+            try {
+                peer.connect(
+                        "127.0.0.1",
+                        serverSocket.getLocalPort()
+                );
+
+                peer.handshake();
+
+                assertEquals(
+                        PeerState.READY,
+                        peer.state()
+                );
+
+                assertTrue(
+                        connection.isConnected()
+                );
+
+                peer.close();
+
+                assertEquals(
+                        PeerState.CLOSED,
+                        peer.state()
+                );
+
+                assertFalse(
+                        peer.isReady()
+                );
+
+                assertFalse(
+                        connection.isConnected()
+                );
+
+                /*
+                 * Closing an already closed peer must remain safe.
+                 */
+                peer.close();
+
+                assertEquals(
+                        PeerState.CLOSED,
+                        peer.state()
+                );
+
+            } finally {
+                peer.close();
+            }
+
+            server.get(
+                    5,
+                    TimeUnit.SECONDS
+            );
+        }
+    }
 
     private static void sendVersion(
             PeerIo io,

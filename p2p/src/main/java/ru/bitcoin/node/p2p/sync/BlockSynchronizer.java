@@ -2,12 +2,7 @@ package ru.bitcoin.node.p2p.sync;
 
 import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.p2p.Peer;
-import ru.bitcoin.node.p2p.PeerConnection;
-import ru.bitcoin.node.p2p.message.BitcoinMessage;
-import ru.bitcoin.node.p2p.message.BitcoinMessages;
-import ru.bitcoin.node.p2p.message.BlockMessage;
-import ru.bitcoin.node.p2p.message.GetDataMessage;
-import ru.bitcoin.node.p2p.message.InventoryVector;
+import ru.bitcoin.node.p2p.message.*;
 import ru.bitcoin.node.protocol.block.Block;
 
 import java.io.IOException;
@@ -17,19 +12,11 @@ import java.util.Optional;
 
 public final class BlockSynchronizer {
 
-    private final PeerConnection connection;
     private final Peer peer;
 
     public BlockSynchronizer(
-            PeerConnection connection,
             Peer peer
     ) {
-        this.connection =
-                Objects.requireNonNull(
-                        connection,
-                        "connection"
-                );
-
         this.peer =
                 Objects.requireNonNull(
                         peer,
@@ -56,7 +43,7 @@ public final class BlockSynchronizer {
                         )
                 );
 
-        connection.send(
+        peer.send(
                 BitcoinMessages.getData(
                         request
                 )
@@ -65,7 +52,7 @@ public final class BlockSynchronizer {
         while (true) {
 
             Optional<BitcoinMessage> optional =
-                    connection.receive();
+                    peer.receive();
 
             if (optional.isEmpty()) {
                 throw new IOException(
@@ -104,9 +91,56 @@ public final class BlockSynchronizer {
                 return block;
             }
 
+            if ("notfound".equals(
+                    message.command()
+            )) {
+
+                NotFoundMessage notFoundMessage =
+                        BitcoinMessages.decodeNotFound(
+                                message
+                        );
+
+                boolean requestedBlockNotFound =
+                        notFoundMessage.inventory()
+                                .stream()
+                                .anyMatch(
+                                        vector ->
+                                                blockHash.equals(
+                                                        vector.hash()
+                                                )
+                                                        && isBlockInventoryType(
+                                                        vector.type()
+                                                )
+                                );
+
+                if (requestedBlockNotFound) {
+                    throw new BlockNotFoundException(
+                            blockHash
+                    );
+                }
+
+                /*
+                 * This notfound does not refer to the block
+                 * currently being downloaded. Treat it as an
+                 * unrelated peer message.
+                 */
+                peer.handleMessage(
+                        message
+                );
+
+                continue;
+            }
+
             peer.handleMessage(
                     message
             );
         }
+    }
+
+    private static boolean isBlockInventoryType(
+            long type
+    ) {
+        return type == InventoryVector.MSG_BLOCK
+                || type == InventoryVector.MSG_WITNESS_BLOCK;
     }
 }

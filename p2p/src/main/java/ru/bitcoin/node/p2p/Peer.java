@@ -472,6 +472,39 @@ public final class Peer implements AutoCloseable {
         );
     }
 
+    public void send(
+            BitcoinMessage message
+    ) throws IOException {
+
+        if (message == null) {
+            throw new IllegalArgumentException(
+                    "message must not be null"
+            );
+        }
+
+        if (!isReady()) {
+            throw new IllegalStateException(
+                    "Peer handshake is not complete"
+            );
+        }
+
+        connection.send(
+                message
+        );
+    }
+
+    public Optional<BitcoinMessage> receive()
+            throws IOException {
+
+        if (!isReady()) {
+            throw new IllegalStateException(
+                    "Peer handshake is not complete"
+            );
+        }
+
+        return connection.receive();
+    }
+
     public long localNonce() {
         return localNonce;
     }
@@ -495,9 +528,11 @@ public final class Peer implements AutoCloseable {
     public void close()
             throws IOException {
 
-        connection.close();
-
-        state =
-                PeerState.CLOSED;
+        try {
+            connection.close();
+        } finally {
+            state =
+                    PeerState.CLOSED;
+        }
     }
 }

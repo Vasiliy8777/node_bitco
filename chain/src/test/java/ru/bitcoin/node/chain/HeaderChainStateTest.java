@@ -89,6 +89,38 @@ class HeaderChainStateTest {
     }
 
     @Test
+    void shouldCheckBetterCandidateWithoutChangingState() {
+
+        BlockIndex current =
+                blockIndex(
+                        1,
+                        BigInteger.valueOf(100)
+                );
+
+        BlockIndex candidate =
+                blockIndex(
+                        2,
+                        BigInteger.valueOf(101)
+                );
+
+        HeaderChainState state =
+                new HeaderChainState(
+                        current
+                );
+
+        assertTrue(
+                state.isBetterThanBest(
+                        candidate
+                )
+        );
+
+        assertEquals(
+                current,
+                state.bestHeaderTip()
+        );
+    }
+
+    @Test
     void shouldKeepBestHeaderTipWhenCandidateHasEqualChainWork() {
 
         BlockIndex current =

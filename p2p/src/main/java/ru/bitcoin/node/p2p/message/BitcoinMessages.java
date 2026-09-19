@@ -208,6 +208,36 @@ public final class BitcoinMessages {
         );
     }
 
+    public static BitcoinMessage notFound(
+            NotFoundMessage notFoundMessage
+    ) {
+        if (notFoundMessage == null) {
+            throw new IllegalArgumentException(
+                    "notFoundMessage must not be null"
+            );
+        }
+
+        return new BitcoinMessage(
+                "notfound",
+                NotFoundMessageCodec.encode(
+                        notFoundMessage
+                )
+        );
+    }
+
+    public static NotFoundMessage decodeNotFound(
+            BitcoinMessage message
+    ) {
+        requireCommand(
+                message,
+                "notfound"
+        );
+
+        return NotFoundMessageCodec.decode(
+                message.payload()
+        );
+    }
+
     public static GetDataMessage decodeGetData(
             BitcoinMessage message
     ) {

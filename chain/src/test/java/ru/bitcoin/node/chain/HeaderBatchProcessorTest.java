@@ -2,6 +2,7 @@ package ru.bitcoin.node.chain;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import ru.bitcoin.node.chain.storage.KnownHeaderStorage;
 import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.common.types.UInt32;
 import ru.bitcoin.node.consensus.pow.ProofOfWork;
@@ -10,6 +11,7 @@ import ru.bitcoin.node.protocol.block.BlockHeader;
 import ru.bitcoin.node.protocol.network.NetworkParameters;
 import ru.bitcoin.node.protocol.network.NetworkParametersRegistry;
 import ru.bitcoin.node.storage.block.RocksDbBlockIndexStore;
+import ru.bitcoin.node.storage.chain.RocksDbChainStateStore;
 import ru.bitcoin.node.storage.rocksdb.RocksDbDatabase;
 
 import java.math.BigInteger;
@@ -48,6 +50,11 @@ class HeaderBatchProcessorTest {
                             database
                     );
 
+            RocksDbChainStateStore chainStateStore =
+                    new RocksDbChainStateStore(
+                            database
+                    );
+
             BlockIndex genesis =
                     createGenesisIndex();
 
@@ -56,6 +63,22 @@ class HeaderBatchProcessorTest {
                             genesis
                     )
             );
+
+            chainStateStore.saveBestHeaderTipHash(
+                    genesis.hash()
+            );
+
+            HeaderChainState headerChainState =
+                    new HeaderChainState(
+                            genesis
+                    );
+
+            KnownHeaderStorage headerStorage =
+                    new KnownHeaderStorage(
+                            database,
+                            store,
+                            chainStateStore
+                    );
 
             StoredBlockIndexLookup lookup =
                     new StoredBlockIndexLookup(
@@ -72,7 +95,8 @@ class HeaderBatchProcessorTest {
             HeaderBatchProcessor batchProcessor =
                     new HeaderBatchProcessor(
                             headerProcessor,
-                            store
+                            headerChainState,
+                            headerStorage
                     );
 
             BlockHeader header1 =
@@ -163,6 +187,20 @@ class HeaderBatchProcessorTest {
                     lookup.find(
                             header3.hash()
                     ).height()
+            );
+
+            assertEquals(
+                    result.get(2).hash(),
+                    headerChainState
+                            .bestHeaderTip()
+                            .hash()
+            );
+
+            assertEquals(
+                    result.get(2).hash(),
+                    chainStateStore
+                            .loadBestHeaderTipHash()
+                            .orElseThrow()
             );
         }
     }

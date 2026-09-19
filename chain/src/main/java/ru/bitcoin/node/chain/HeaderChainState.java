@@ -23,14 +23,9 @@ public final class HeaderChainState {
     public synchronized boolean consider(
             BlockIndex candidate
     ) {
-        Objects.requireNonNull(
-                candidate,
-                "candidate"
-        );
-
-        if (candidate.chainWork().compareTo(
-                bestHeaderTip.chainWork()
-        ) <= 0) {
+        if (!isBetterThanBest(
+                candidate
+        )) {
             return false;
         }
 
@@ -38,5 +33,18 @@ public final class HeaderChainState {
                 candidate;
 
         return true;
+    }
+
+    public synchronized boolean isBetterThanBest(
+            BlockIndex candidate
+    ) {
+        Objects.requireNonNull(
+                candidate,
+                "candidate"
+        );
+
+        return candidate.chainWork().compareTo(
+                bestHeaderTip.chainWork()
+        ) > 0;
     }
 }

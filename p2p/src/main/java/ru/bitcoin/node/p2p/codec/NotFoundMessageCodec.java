@@ -1,14 +1,14 @@
 package ru.bitcoin.node.p2p.codec;
 
-import ru.bitcoin.node.p2p.message.GetDataMessage;
+import ru.bitcoin.node.p2p.message.NotFoundMessage;
 
-public final class GetDataMessageCodec {
+public final class NotFoundMessageCodec {
 
-    private GetDataMessageCodec() {
+    private NotFoundMessageCodec() {
     }
 
     public static byte[] encode(
-            GetDataMessage message
+            NotFoundMessage message
     ) {
         if (message == null) {
             throw new IllegalArgumentException(
@@ -21,10 +21,10 @@ public final class GetDataMessageCodec {
         );
     }
 
-    public static GetDataMessage decode(
+    public static NotFoundMessage decode(
             byte[] payload
     ) {
-        return new GetDataMessage(
+        return new NotFoundMessage(
                 InventoryVectorListCodec.decode(
                         payload
                 )
