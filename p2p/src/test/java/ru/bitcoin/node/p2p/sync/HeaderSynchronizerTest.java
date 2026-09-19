@@ -100,7 +100,6 @@ class HeaderSynchronizerTest {
 
                 HeaderSynchronizer synchronizer =
                         new HeaderSynchronizer(
-                                connection,
                                 peer
                         );
 

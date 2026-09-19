@@ -213,7 +213,6 @@ class BitcoinCoreHeaderSyncIntegrationTest {
 
                 HeaderSynchronizer headerSynchronizer =
                         new HeaderSynchronizer(
-                                connection,
                                 peer
                         );
 
@@ -643,7 +642,6 @@ class BitcoinCoreHeaderSyncIntegrationTest {
 
                 HeaderSynchronizer headerSynchronizer =
                         new HeaderSynchronizer(
-                                connection,
                                 peer
                         );
 

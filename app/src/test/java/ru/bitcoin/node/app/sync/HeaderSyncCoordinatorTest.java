@@ -195,7 +195,6 @@ class HeaderSyncCoordinatorTest {
 
                 HeaderSynchronizer headerSynchronizer =
                         new HeaderSynchronizer(
-                                connection,
                                 peer
                         );
 
@@ -645,7 +644,6 @@ class HeaderSyncCoordinatorTest {
 
                 HeaderSynchronizer headerSynchronizer =
                         new HeaderSynchronizer(
-                                connection,
                                 peer
                         );
 
@@ -992,7 +990,6 @@ class HeaderSyncCoordinatorTest {
 
                 HeaderSynchronizer headerSynchronizer =
                         new HeaderSynchronizer(
-                                connection,
                                 peer
                         );
 

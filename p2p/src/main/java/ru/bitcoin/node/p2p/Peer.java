@@ -10,6 +10,8 @@ import java.time.Instant;
 import java.util.Optional;
 
 public final class Peer implements AutoCloseable {
+    private final PeerMessageDispatcher messageDispatcher;
+    private final PeerMessageReader messageReader;
     private static final int WTXID_RELAY_VERSION =
             70016;
     private boolean remoteWtxidRelay;
@@ -43,6 +45,7 @@ public final class Peer implements AutoCloseable {
             long localServices,
             int startHeight,
             boolean relay
+
     ) {
         this(
                 connection,
@@ -86,6 +89,15 @@ public final class Peer implements AutoCloseable {
 
         this.localNonce =
                 localNonce;
+        this.messageDispatcher =
+                new PeerMessageDispatcher(
+                        this
+                );
+        this.messageReader =
+                new PeerMessageReader(
+                        this,
+                        messageDispatcher
+                );
     }
 
     public void connect(
@@ -180,17 +192,13 @@ public final class Peer implements AutoCloseable {
 
         switch (message.command()) {
 
-            case "version" ->
-                    handleVersion(message);
+            case "version" -> handleVersion(message);
 
-            case "wtxidrelay" ->
-                    handleWtxidRelay(message);
+            case "wtxidrelay" -> handleWtxidRelay(message);
 
-            case "sendaddrv2" ->
-                    handleSendAddrV2(message);
+            case "sendaddrv2" -> handleSendAddrV2(message);
 
-            case "verack" ->
-                    handleVerack(message);
+            case "verack" -> handleVerack(message);
 
             default -> {
                 /*
@@ -313,6 +321,7 @@ public final class Peer implements AutoCloseable {
 
         updateReadyState();
     }
+
     private void sendFeatureNegotiation(
             VersionMessage version
     ) throws IOException {
@@ -432,8 +441,7 @@ public final class Peer implements AutoCloseable {
 
         switch (message.command()) {
 
-            case "ping" ->
-                    handlePing(message);
+            case "ping" -> handlePing(message);
 
             default -> {
                 /*
@@ -505,9 +513,18 @@ public final class Peer implements AutoCloseable {
         return connection.receive();
     }
 
+    public PeerMessageDispatcher messageDispatcher() {
+        return messageDispatcher;
+    }
+
+    public PeerMessageReader messageReader() {
+        return messageReader;
+    }
+
     public long localNonce() {
         return localNonce;
     }
+
     public boolean remoteWtxidRelay() {
         return remoteWtxidRelay;
     }
@@ -524,15 +541,59 @@ public final class Peer implements AutoCloseable {
         return localSendAddrV2Sent;
     }
 
-    @Override
-    public void close()
-            throws IOException {
+    void handleReaderFailure(
+            IOException failure
+    ) {
+        if (failure == null) {
+            throw new IllegalArgumentException(
+                    "failure must not be null"
+            );
+        }
+
+        /*
+         * Explicit close already owns the CLOSED transition.
+         */
+        if (state == PeerState.CLOSED) {
+            return;
+        }
+
+        messageDispatcher.failAllPending(
+                failure
+        );
 
         try {
             connection.close();
+        } catch (IOException closeException) {
+            failure.addSuppressed(
+                    closeException
+            );
         } finally {
             state =
                     PeerState.CLOSED;
+        }
+    }
+
+    @Override
+    public void close() throws IOException {
+
+        IOException closedFailure =
+                new IOException(
+                        "Peer closed"
+                );
+
+        messageDispatcher.failAllPending(
+                closedFailure
+        );
+
+        try {
+            messageReader.close();
+        } finally {
+            try {
+                connection.close();
+            } finally {
+                state =
+                        PeerState.CLOSED;
+            }
         }
     }
 }

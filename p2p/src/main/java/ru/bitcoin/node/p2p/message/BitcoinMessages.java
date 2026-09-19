@@ -79,6 +79,24 @@ public final class BitcoinMessages {
                 )
         );
     }
+
+    public static BitcoinMessage headers(
+            HeadersMessage headersMessage
+    ) {
+        if (headersMessage == null) {
+            throw new IllegalArgumentException(
+                    "headersMessage must not be null"
+            );
+        }
+
+        return new BitcoinMessage(
+                "headers",
+                HeadersMessageCodec.encode(
+                        headersMessage
+                )
+        );
+    }
+
     public static HeadersMessage decodeHeaders(
             BitcoinMessage message
     ) {

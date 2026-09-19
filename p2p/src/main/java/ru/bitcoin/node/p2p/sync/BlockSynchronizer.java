@@ -2,13 +2,17 @@ package ru.bitcoin.node.p2p.sync;
 
 import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.p2p.Peer;
-import ru.bitcoin.node.p2p.message.*;
+import ru.bitcoin.node.p2p.PeerMessageDispatcher;
+import ru.bitcoin.node.p2p.message.BitcoinMessages;
+import ru.bitcoin.node.p2p.message.GetDataMessage;
+import ru.bitcoin.node.p2p.message.InventoryVector;
 import ru.bitcoin.node.protocol.block.Block;
 
 import java.io.IOException;
 import java.util.List;
 import java.util.Objects;
-import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 
 public final class BlockSynchronizer {
 
@@ -33,114 +37,91 @@ public final class BlockSynchronizer {
                 "blockHash"
         );
 
-        GetDataMessage request =
-                new GetDataMessage(
-                        List.of(
-                                new InventoryVector(
-                                        InventoryVector.MSG_WITNESS_BLOCK,
-                                        blockHash
-                                )
-                        )
+        PeerMessageDispatcher dispatcher =
+                peer.messageDispatcher();
+
+        CompletableFuture<Block> future =
+                dispatcher.registerBlock(
+                        blockHash
                 );
 
-        peer.send(
-                BitcoinMessages.getData(
-                        request
-                )
-        );
+        try {
 
-        while (true) {
-
-            Optional<BitcoinMessage> optional =
-                    peer.receive();
-
-            if (optional.isEmpty()) {
-                throw new IOException(
-                        "Peer disconnected before sending block "
-                                + blockHash.toDisplayHex()
-                );
-            }
-
-            BitcoinMessage message =
-                    optional.get();
-
-            if ("block".equals(
-                    message.command()
-            )) {
-
-                BlockMessage blockMessage =
-                        BitcoinMessages.decodeBlock(
-                                message
-                        );
-
-                Block block =
-                        blockMessage.block();
-
-                if (!blockHash.equals(
-                        block.hash()
-                )) {
-                    throw new IOException(
-                            "Received unexpected block: requested "
-                                    + blockHash.toDisplayHex()
-                                    + ", received "
-                                    + block.hash()
-                                    .toDisplayHex()
+            GetDataMessage request =
+                    new GetDataMessage(
+                            List.of(
+                                    new InventoryVector(
+                                            InventoryVector.MSG_WITNESS_BLOCK,
+                                            blockHash
+                                    )
+                            )
                     );
-                }
 
-                return block;
-            }
+            peer.send(
+                    BitcoinMessages.getData(
+                            request
+                    )
+            );
 
-            if ("notfound".equals(
-                    message.command()
-            )) {
+            while (!future.isDone()) {
 
-                NotFoundMessage notFoundMessage =
-                        BitcoinMessages.decodeNotFound(
-                                message
+                try {
+                    peer.messageReader()
+                            .readNext();
+
+                } catch (IOException exception) {
+
+                    if ("Peer disconnected".equals(
+                            exception.getMessage()
+                    )) {
+                        throw new IOException(
+                                "Peer disconnected before sending block "
+                                        + blockHash.toDisplayHex(),
+                                exception
                         );
+                    }
 
-                boolean requestedBlockNotFound =
-                        notFoundMessage.inventory()
-                                .stream()
-                                .anyMatch(
-                                        vector ->
-                                                blockHash.equals(
-                                                        vector.hash()
-                                                )
-                                                        && isBlockInventoryType(
-                                                        vector.type()
-                                                )
-                                );
-
-                if (requestedBlockNotFound) {
-                    throw new BlockNotFoundException(
-                            blockHash
-                    );
+                    throw exception;
                 }
-
-                /*
-                 * This notfound does not refer to the block
-                 * currently being downloaded. Treat it as an
-                 * unrelated peer message.
-                 */
-                peer.handleMessage(
-                        message
-                );
-
-                continue;
             }
 
-            peer.handleMessage(
-                    message
+            return completedBlock(
+                    future
+            );
+
+        } finally {
+
+            dispatcher.unregisterBlock(
+                    blockHash,
+                    future
             );
         }
     }
 
-    private static boolean isBlockInventoryType(
-            long type
-    ) {
-        return type == InventoryVector.MSG_BLOCK
-                || type == InventoryVector.MSG_WITNESS_BLOCK;
+    private static Block completedBlock(
+            CompletableFuture<Block> future
+    ) throws IOException {
+
+        try {
+            return future.join();
+
+        } catch (CompletionException exception) {
+
+            Throwable cause =
+                    exception.getCause();
+
+            if (cause instanceof IOException ioException) {
+                throw ioException;
+            }
+
+            if (cause instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            }
+
+            throw new IOException(
+                    "Block download failed",
+                    cause
+            );
+        }
     }
 }

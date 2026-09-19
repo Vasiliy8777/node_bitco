@@ -2,8 +2,7 @@ package ru.bitcoin.node.p2p.sync;
 
 import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.p2p.Peer;
-import ru.bitcoin.node.p2p.PeerConnection;
-import ru.bitcoin.node.p2p.message.BitcoinMessage;
+import ru.bitcoin.node.p2p.PeerMessageDispatcher;
 import ru.bitcoin.node.p2p.message.BitcoinMessages;
 import ru.bitcoin.node.p2p.message.GetHeadersMessage;
 import ru.bitcoin.node.p2p.message.HeadersMessage;
@@ -12,23 +11,16 @@ import ru.bitcoin.node.p2p.message.VersionMessage;
 import java.io.IOException;
 import java.util.List;
 import java.util.Objects;
-import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 
 public final class HeaderSynchronizer {
 
-    private final PeerConnection connection;
     private final Peer peer;
 
     public HeaderSynchronizer(
-            PeerConnection connection,
             Peer peer
     ) {
-        this.connection =
-                Objects.requireNonNull(
-                        connection,
-                        "connection"
-                );
-
         this.peer =
                 Objects.requireNonNull(
                         peer,
@@ -73,36 +65,72 @@ public final class HeaderSynchronizer {
                         stopHash
                 );
 
-        connection.send(
-                BitcoinMessages.getHeaders(
-                        request
-                )
-        );
+        PeerMessageDispatcher dispatcher =
+                peer.messageDispatcher();
 
-        while (true) {
+        CompletableFuture<HeadersMessage> future =
+                dispatcher.registerHeaders();
 
-            Optional<BitcoinMessage> optional =
-                    connection.receive();
+        try {
+            peer.send(
+                    BitcoinMessages.getHeaders(
+                            request
+                    )
+            );
 
-            if (optional.isEmpty()) {
-                throw new IOException(
-                        "Peer disconnected before sending headers"
-                );
+            while (!future.isDone()) {
+                try {
+                    peer.messageReader()
+                            .readNext();
+                } catch (IOException exception) {
+
+                    if ("Peer disconnected".equals(
+                            exception.getMessage()
+                    )) {
+                        throw new IOException(
+                                "Peer disconnected before sending headers",
+                                exception
+                        );
+                    }
+
+                    throw exception;
+                }
             }
 
-            BitcoinMessage message =
-                    optional.orElseThrow();
+            return completedHeaders(
+                    future
+            );
 
-            if ("headers".equals(
-                    message.command()
-            )) {
-                return BitcoinMessages.decodeHeaders(
-                        message
-                );
+        } finally {
+            dispatcher.unregisterHeaders(
+                    future
+            );
+        }
+    }
+
+    private static HeadersMessage completedHeaders(
+            CompletableFuture<HeadersMessage> future
+    ) throws IOException {
+
+        try {
+            return future.join();
+
+        } catch (CompletionException exception) {
+
+            Throwable cause =
+                    exception.getCause();
+
+            if (cause instanceof IOException ioException) {
+                throw ioException;
             }
 
-            peer.handleMessage(
-                    message
+            if (cause instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            }
+
+            throw new IOException(
+                    "Header download failed",
+                    cause
             );
         }
     }

@@ -4,17 +4,18 @@ import org.junit.jupiter.api.Test;
 import ru.bitcoin.node.p2p.codec.BitcoinMessageDecoder;
 import ru.bitcoin.node.p2p.codec.BitcoinMessageEncoder;
 import ru.bitcoin.node.p2p.codec.BitcoinMessageStreamReader;
-import ru.bitcoin.node.p2p.message.BitcoinMessage;
-import ru.bitcoin.node.p2p.message.BitcoinMessages;
-import ru.bitcoin.node.p2p.message.NetworkAddress;
-import ru.bitcoin.node.p2p.message.VersionMessage;
+import ru.bitcoin.node.p2p.message.*;
+import ru.bitcoin.node.protocol.block.Block;
+import ru.bitcoin.node.protocol.block.GenesisBlockFactory;
 import ru.bitcoin.node.protocol.network.NetworkParametersRegistry;
 
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
+import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -600,6 +601,828 @@ class PeerTest {
                     5,
                     TimeUnit.SECONDS
             );
+        }
+    }
+
+    @Test
+    void shouldDispatchPostHandshakePingThroughBackgroundMessageReader()
+            throws Exception {
+
+        final long pingNonce =
+                0x2122232425262728L;
+
+        try (ServerSocket serverSocket =
+                     new ServerSocket(0)) {
+
+            CompletableFuture<Void> server =
+                    CompletableFuture.runAsync(
+                            () -> {
+                                try (Socket socket =
+                                             serverSocket.accept()) {
+
+                                    PeerIo io =
+                                            peerIo(
+                                                    socket
+                                            );
+
+                                    /*
+                                     * Receive client's VERSION.
+                                     */
+                                    BitcoinMessage ourVersion =
+                                            io.reader()
+                                                    .read(io.input())
+                                                    .orElseThrow();
+
+                                    assertEquals(
+                                            "version",
+                                            ourVersion.command()
+                                    );
+
+                                    /*
+                                     * Send server VERSION.
+                                     */
+                                    sendVersion(
+                                            io,
+                                            REMOTE_NONCE
+                                    );
+
+                                    /*
+                                     * Receive feature negotiation
+                                     * and VERACK from client.
+                                     */
+                                    assertEquals(
+                                            "wtxidrelay",
+                                            io.reader()
+                                                    .read(io.input())
+                                                    .orElseThrow()
+                                                    .command()
+                                    );
+
+                                    assertEquals(
+                                            "sendaddrv2",
+                                            io.reader()
+                                                    .read(io.input())
+                                                    .orElseThrow()
+                                                    .command()
+                                    );
+
+                                    assertEquals(
+                                            "verack",
+                                            io.reader()
+                                                    .read(io.input())
+                                                    .orElseThrow()
+                                                    .command()
+                                    );
+
+                                    /*
+                                     * Complete server side of handshake.
+                                     */
+                                    io.output().write(
+                                            io.encoder().encode(
+                                                    BitcoinMessages.wtxidRelay()
+                                            )
+                                    );
+
+                                    io.output().write(
+                                            io.encoder().encode(
+                                                    BitcoinMessages.sendAddrV2()
+                                            )
+                                    );
+
+                                    io.output().write(
+                                            io.encoder().encode(
+                                                    BitcoinMessages.verack()
+                                            )
+                                    );
+
+                                    io.output().flush();
+
+                                    /*
+                                     * Send post-handshake PING.
+                                     */
+                                    io.output().write(
+                                            io.encoder().encode(
+                                                    BitcoinMessages.ping(
+                                                            new PingMessage(
+                                                                    pingNonce
+                                                            )
+                                                    )
+                                            )
+                                    );
+
+                                    io.output().flush();
+
+                                    /*
+                                     * No client-side receive()/dispatch()
+                                     * is performed by the test.
+                                     *
+                                     * Background PeerMessageReader must:
+                                     *
+                                     * receive PING
+                                     * -> dispatch it
+                                     * -> Peer.handleMessage()
+                                     * -> send PONG.
+                                     */
+                                    BitcoinMessage pongWire =
+                                            io.reader()
+                                                    .read(io.input())
+                                                    .orElseThrow();
+
+                                    assertEquals(
+                                            "pong",
+                                            pongWire.command()
+                                    );
+
+                                    assertEquals(
+                                            pingNonce,
+                                            BitcoinMessages.decodePong(
+                                                    pongWire
+                                            ).nonce()
+                                    );
+
+                                } catch (Exception exception) {
+                                    throw new RuntimeException(
+                                            exception
+                                    );
+                                }
+                            }
+                    );
+
+            try (PeerConnection connection =
+                         connection();
+
+                 Peer peer =
+                         new Peer(
+                                 connection,
+                                 VersionMessage.DEFAULT_SERVICES,
+                                 0,
+                                 true,
+                                 LOCAL_NONCE
+                         )) {
+
+                peer.connect(
+                        "127.0.0.1",
+                        serverSocket.getLocalPort()
+                );
+
+                peer.handshake();
+
+                assertTrue(
+                        peer.isReady()
+                );
+
+                /*
+                 * Explicitly switch this peer to
+                 * background message reading.
+                 */
+                peer.messageReader()
+                        .start();
+
+                assertTrue(
+                        peer.messageReader()
+                                .isStarted()
+                );
+
+                /*
+                 * IMPORTANT:
+                 *
+                 * Wait for the server while Peer is still open.
+                 * Successful server completion proves that it
+                 * received the PONG generated through the
+                 * background reader path.
+                 *
+                 * Only after this get() returns may
+                 * try-with-resources close the Peer.
+                 */
+                server.get(
+                        5,
+                        TimeUnit.SECONDS
+                );
+            }
+        }
+    }
+
+    @Test
+    void shouldDispatchPostHandshakePingThroughPeerMessageDispatcher()
+            throws Exception {
+
+        final long pingNonce =
+                0x2122232425262728L;
+
+        try (ServerSocket serverSocket =
+                     new ServerSocket(0)) {
+
+            CompletableFuture<Void> server =
+                    CompletableFuture.runAsync(
+                            () -> {
+                                try (Socket socket =
+                                             serverSocket.accept()) {
+
+                                    PeerIo io =
+                                            peerIo(
+                                                    socket
+                                            );
+
+                                    BitcoinMessage ourVersion =
+                                            io.reader()
+                                                    .read(io.input())
+                                                    .orElseThrow();
+
+                                    assertEquals(
+                                            "version",
+                                            ourVersion.command()
+                                    );
+
+                                    sendVersion(
+                                            io,
+                                            REMOTE_NONCE
+                                    );
+
+                                    assertEquals(
+                                            "wtxidrelay",
+                                            io.reader()
+                                                    .read(io.input())
+                                                    .orElseThrow()
+                                                    .command()
+                                    );
+
+                                    assertEquals(
+                                            "sendaddrv2",
+                                            io.reader()
+                                                    .read(io.input())
+                                                    .orElseThrow()
+                                                    .command()
+                                    );
+
+                                    assertEquals(
+                                            "verack",
+                                            io.reader()
+                                                    .read(io.input())
+                                                    .orElseThrow()
+                                                    .command()
+                                    );
+
+                                    io.output().write(
+                                            io.encoder().encode(
+                                                    BitcoinMessages.wtxidRelay()
+                                            )
+                                    );
+
+                                    io.output().write(
+                                            io.encoder().encode(
+                                                    BitcoinMessages.sendAddrV2()
+                                            )
+                                    );
+
+                                    io.output().write(
+                                            io.encoder().encode(
+                                                    BitcoinMessages.verack()
+                                            )
+                                    );
+
+                                    io.output().flush();
+
+                                    /*
+                                     * Post-handshake PING.
+                                     */
+                                    io.output().write(
+                                            io.encoder().encode(
+                                                    BitcoinMessages.ping(
+                                                            new PingMessage(
+                                                                    pingNonce
+                                                            )
+                                                    )
+                                            )
+                                    );
+
+                                    io.output().flush();
+
+                                    BitcoinMessage pongWire =
+                                            io.reader()
+                                                    .read(io.input())
+                                                    .orElseThrow();
+
+                                    assertEquals(
+                                            "pong",
+                                            pongWire.command()
+                                    );
+
+                                    assertEquals(
+                                            pingNonce,
+                                            BitcoinMessages.decodePong(
+                                                    pongWire
+                                            ).nonce()
+                                    );
+
+                                } catch (Exception exception) {
+                                    throw new RuntimeException(
+                                            exception
+                                    );
+                                }
+                            }
+                    );
+
+            try (PeerConnection connection =
+                         connection();
+
+                 Peer peer =
+                         new Peer(
+                                 connection,
+                                 VersionMessage.DEFAULT_SERVICES,
+                                 0,
+                                 true,
+                                 LOCAL_NONCE
+                         )) {
+
+                peer.connect(
+                        "127.0.0.1",
+                        serverSocket.getLocalPort()
+                );
+
+                peer.handshake();
+
+                assertTrue(
+                        peer.isReady()
+                );
+
+                /*
+                 * Old synchronous path.
+                 */
+                BitcoinMessage message =
+                        peer.receive()
+                                .orElseThrow();
+
+                assertEquals(
+                        "ping",
+                        message.command()
+                );
+
+                /*
+                 * IMPORTANT:
+                 * use the dispatcher owned by Peer.
+                 * Do not create another dispatcher.
+                 */
+                peer.messageDispatcher()
+                        .dispatch(
+                                message
+                        );
+
+                /*
+                 * Keep Peer alive until server has
+                 * actually received and validated PONG.
+                 */
+                server.get(
+                        5,
+                        TimeUnit.SECONDS
+                );
+            }
+        }
+    }
+
+    @Test
+    void shouldFailPendingRequestsWhenPeerIsClosed()
+            throws Exception {
+
+        PeerConnection connection =
+                new PeerConnection(
+                        NetworkParametersRegistry.mainnet(),
+                        5_000,
+                        5_000
+                );
+
+        Peer peer =
+                new Peer(
+                        connection,
+                        0L,
+                        0,
+                        true
+                );
+
+        CompletableFuture<Block> blockFuture =
+                peer.messageDispatcher()
+                        .registerBlock(
+                                GenesisBlockFactory.create(
+                                        NetworkParametersRegistry.mainnet()
+                                ).hash()
+                        );
+
+        CompletableFuture<HeadersMessage> headersFuture =
+                peer.messageDispatcher()
+                        .registerHeaders();
+
+        peer.close();
+
+        assertTrue(
+                blockFuture.isCompletedExceptionally()
+        );
+
+        assertTrue(
+                headersFuture.isCompletedExceptionally()
+        );
+
+        CompletionException blockException =
+                assertThrows(
+                        CompletionException.class,
+                        blockFuture::join
+                );
+
+        CompletionException headersException =
+                assertThrows(
+                        CompletionException.class,
+                        headersFuture::join
+                );
+
+        assertInstanceOf(
+                IOException.class,
+                blockException.getCause()
+        );
+
+        assertInstanceOf(
+                IOException.class,
+                headersException.getCause()
+        );
+
+        assertEquals(
+                "Peer closed",
+                blockException.getCause()
+                        .getMessage()
+        );
+
+        assertEquals(
+                "Peer closed",
+                headersException.getCause()
+                        .getMessage()
+        );
+    }
+
+    @Test
+    void shouldOwnSingleMessageDispatcher() {
+
+        try (PeerConnection connection =
+                     connection();
+
+             Peer peer =
+                     new Peer(
+                             connection,
+                             VersionMessage.DEFAULT_SERVICES,
+                             0,
+                             true,
+                             LOCAL_NONCE
+                     )) {
+
+            PeerMessageDispatcher first =
+                    peer.messageDispatcher();
+
+            PeerMessageDispatcher second =
+                    peer.messageDispatcher();
+
+            assertNotNull(
+                    first
+            );
+
+            assertSame(
+                    first,
+                    second
+            );
+        } catch (Exception exception) {
+            fail(
+                    exception
+            );
+        }
+    }
+
+    @Test
+    void shouldOwnSingleMessageReader() {
+
+        try (PeerConnection connection =
+                     connection();
+
+             Peer peer =
+                     new Peer(
+                             connection,
+                             VersionMessage.DEFAULT_SERVICES,
+                             0,
+                             true,
+                             LOCAL_NONCE
+                     )) {
+
+            PeerMessageReader first =
+                    peer.messageReader();
+
+            PeerMessageReader second =
+                    peer.messageReader();
+
+            assertNotNull(
+                    first
+            );
+
+            assertSame(
+                    first,
+                    second
+            );
+
+        } catch (Exception exception) {
+            fail(
+                    exception
+            );
+        }
+    }
+
+    @Test
+    void shouldRejectStartingMessageReaderBeforeHandshake() {
+
+        try (PeerConnection connection =
+                     connection();
+
+             Peer peer =
+                     new Peer(
+                             connection,
+                             VersionMessage.DEFAULT_SERVICES,
+                             0,
+                             true,
+                             LOCAL_NONCE
+                     )) {
+
+            IllegalStateException exception =
+                    assertThrows(
+                            IllegalStateException.class,
+                            () -> peer.messageReader()
+                                    .start()
+                    );
+
+            assertEquals(
+                    "Peer handshake is not complete",
+                    exception.getMessage()
+            );
+
+        } catch (IOException exception) {
+            fail(
+                    exception
+            );
+        }
+    }
+
+    @Test
+    void shouldRejectStartingClosedMessageReader() {
+
+        try (PeerConnection connection =
+                     connection();
+
+             Peer peer =
+                     new Peer(
+                             connection,
+                             VersionMessage.DEFAULT_SERVICES,
+                             0,
+                             true,
+                             LOCAL_NONCE
+                     )) {
+
+            PeerMessageReader reader =
+                    peer.messageReader();
+
+            reader.close();
+
+            IllegalStateException exception =
+                    assertThrows(
+                            IllegalStateException.class,
+                            reader::start
+                    );
+
+            assertEquals(
+                    "Peer message reader is closed",
+                    exception.getMessage()
+            );
+
+        } catch (IOException exception) {
+            fail(
+                    exception
+            );
+        }
+    }
+
+    @Test
+    void shouldClosePeerWhenBackgroundMessageReaderReachesEof()
+            throws Exception {
+
+        try (ServerSocket serverSocket =
+                     new ServerSocket(0)) {
+
+            CompletableFuture<Void> server =
+                    CompletableFuture.runAsync(
+                            () -> {
+                                try (Socket socket =
+                                             serverSocket.accept()) {
+
+                                    PeerIo io =
+                                            peerIo(
+                                                    socket
+                                            );
+
+                                    /*
+                                     * Receive client VERSION.
+                                     */
+                                    BitcoinMessage ourVersion =
+                                            io.reader()
+                                                    .read(io.input())
+                                                    .orElseThrow();
+
+                                    assertEquals(
+                                            "version",
+                                            ourVersion.command()
+                                    );
+
+                                    /*
+                                     * Send server VERSION.
+                                     */
+                                    sendVersion(
+                                            io,
+                                            REMOTE_NONCE
+                                    );
+
+                                    /*
+                                     * Receive client's feature
+                                     * negotiation and VERACK.
+                                     */
+                                    assertEquals(
+                                            "wtxidrelay",
+                                            io.reader()
+                                                    .read(io.input())
+                                                    .orElseThrow()
+                                                    .command()
+                                    );
+
+                                    assertEquals(
+                                            "sendaddrv2",
+                                            io.reader()
+                                                    .read(io.input())
+                                                    .orElseThrow()
+                                                    .command()
+                                    );
+
+                                    assertEquals(
+                                            "verack",
+                                            io.reader()
+                                                    .read(io.input())
+                                                    .orElseThrow()
+                                                    .command()
+                                    );
+
+                                    /*
+                                     * Complete server side
+                                     * of the handshake.
+                                     */
+                                    io.output().write(
+                                            io.encoder().encode(
+                                                    BitcoinMessages.wtxidRelay()
+                                            )
+                                    );
+
+                                    io.output().write(
+                                            io.encoder().encode(
+                                                    BitcoinMessages.sendAddrV2()
+                                            )
+                                    );
+
+                                    io.output().write(
+                                            io.encoder().encode(
+                                                    BitcoinMessages.verack()
+                                            )
+                                    );
+
+                                    io.output().flush();
+
+                                    /*
+                                     * Returning from this block closes
+                                     * the server-side socket.
+                                     *
+                                     * Client background reader must
+                                     * observe EOF and terminate Peer.
+                                     */
+
+                                } catch (Exception exception) {
+                                    throw new RuntimeException(
+                                            exception
+                                    );
+                                }
+                            }
+                    );
+
+            try (PeerConnection connection =
+                         connection();
+
+                 Peer peer =
+                         new Peer(
+                                 connection,
+                                 VersionMessage.DEFAULT_SERVICES,
+                                 0,
+                                 true,
+                                 LOCAL_NONCE
+                         )) {
+
+                peer.connect(
+                        "127.0.0.1",
+                        serverSocket.getLocalPort()
+                );
+
+                peer.handshake();
+
+                assertEquals(
+                        PeerState.READY,
+                        peer.state()
+                );
+
+                assertTrue(
+                        peer.isReady()
+                );
+
+                /*
+                 * Register requests before the remote peer
+                 * disconnects. This proves EOF also fails
+                 * outstanding work.
+                 */
+                CompletableFuture<Block> blockFuture =
+                        peer.messageDispatcher()
+                                .registerBlock(
+                                        GenesisBlockFactory.create(
+                                                NetworkParametersRegistry.mainnet()
+                                        ).hash()
+                                );
+
+                CompletableFuture<HeadersMessage> headersFuture =
+                        peer.messageDispatcher()
+                                .registerHeaders();
+
+                peer.messageReader()
+                        .start();
+
+                /*
+                 * Ensure the server has completed its work
+                 * and closed its socket.
+                 */
+                server.get(
+                        5,
+                        TimeUnit.SECONDS
+                );
+
+                /*
+                 * Reader transition is asynchronous.
+                 * Do not assert state immediately after
+                 * server.get(): the reader thread may not
+                 * have observed EOF yet.
+                 */
+                long deadline =
+                        System.nanoTime()
+                                + TimeUnit.SECONDS.toNanos(
+                                5
+                        );
+
+                while (peer.state()
+                        != PeerState.CLOSED
+                        && System.nanoTime()
+                        < deadline) {
+
+                    Thread.sleep(
+                            10
+                    );
+                }
+
+                assertEquals(
+                        PeerState.CLOSED,
+                        peer.state()
+                );
+
+                assertFalse(
+                        peer.isReady()
+                );
+
+                assertFalse(
+                        connection.isConnected()
+                );
+
+                assertTrue(
+                        blockFuture.isCompletedExceptionally()
+                );
+
+                assertTrue(
+                        headersFuture.isCompletedExceptionally()
+                );
+
+                assertInstanceOf(
+                        IOException.class,
+                        assertThrows(
+                                CompletionException.class,
+                                blockFuture::join
+                        ).getCause()
+                );
+
+                assertInstanceOf(
+                        IOException.class,
+                        assertThrows(
+                                CompletionException.class,
+                                headersFuture::join
+                        ).getCause()
+                );
+            }
         }
     }
 
