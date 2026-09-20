@@ -7,13 +7,7 @@ import ru.bitcoin.node.protocol.block.Block;
 
 import java.io.IOException;
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.IdentityHashMap;
-import java.util.List;
-import java.util.Objects;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.*;
 
 public final class SchedulerBlockDownloadSession
@@ -1088,5 +1082,22 @@ public final class SchedulerBlockDownloadSession
         }
 
         return released;
+    }
+
+    @Override
+    public synchronized Optional<Peer> inFlightPeer(
+            Hash256 blockHash
+    ) {
+
+        Objects.requireNonNull(
+                blockHash,
+                "blockHash"
+        );
+
+        return Optional.ofNullable(
+                inFlightTracker.peerForBlock(
+                        blockHash
+                )
+        );
     }
 }
