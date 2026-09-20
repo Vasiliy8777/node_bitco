@@ -16,10 +16,7 @@ import ru.bitcoin.node.p2p.codec.BitcoinMessageDecoder;
 import ru.bitcoin.node.p2p.codec.BitcoinMessageEncoder;
 import ru.bitcoin.node.p2p.codec.BitcoinMessageStreamReader;
 import ru.bitcoin.node.p2p.message.*;
-import ru.bitcoin.node.p2p.sync.BlockDownloadScheduler;
-import ru.bitcoin.node.p2p.sync.BlockDownloadService;
-import ru.bitcoin.node.p2p.sync.BlockNotFoundException;
-import ru.bitcoin.node.p2p.sync.BlockSynchronizer;
+import ru.bitcoin.node.p2p.sync.*;
 import ru.bitcoin.node.protocol.block.Block;
 import ru.bitcoin.node.protocol.block.BlockHeader;
 import ru.bitcoin.node.protocol.block.GenesisBlockFactory;
@@ -40,6 +37,7 @@ import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
@@ -255,7 +253,10 @@ class BlockSyncCoordinatorTest {
                 BlockDownloadScheduler blockDownloadScheduler =
                         new BlockDownloadScheduler(
                                 peerManager,
-                                blockDownloadService
+                                blockDownloadService,
+                                new BlockDownloadTimeoutPolicy(
+                                        Duration.ofMinutes(10)
+                                )
                         );
 
                 BlockSyncCoordinator coordinator =
@@ -600,7 +601,9 @@ class BlockSyncCoordinatorTest {
                 BlockDownloadScheduler blockDownloadScheduler =
                         new BlockDownloadScheduler(
                                 peerManager,
-                                blockDownloadService
+                                blockDownloadService,
+                                new BlockDownloadTimeoutPolicy(
+                                        Duration.ofMinutes(10))
                         );
 
                 BlockSyncCoordinator coordinator =
@@ -865,7 +868,9 @@ class BlockSyncCoordinatorTest {
                 BlockDownloadScheduler blockDownloadScheduler =
                         new BlockDownloadScheduler(
                                 peerManager,
-                                blockDownloadService
+                                blockDownloadService,
+                                new BlockDownloadTimeoutPolicy(
+                                        Duration.ofMinutes(10))
                         );
 
                 BlockSyncCoordinator coordinator =
@@ -1370,7 +1375,9 @@ class BlockSyncCoordinatorTest {
                 BlockDownloadScheduler blockDownloadScheduler =
                         new BlockDownloadScheduler(
                                 peerManager,
-                                blockDownloadService
+                                blockDownloadService,
+                                new BlockDownloadTimeoutPolicy(
+                                        Duration.ofMinutes(10))
                         );
 
                 BlockSyncCoordinator coordinator =
@@ -1603,7 +1610,9 @@ class BlockSyncCoordinatorTest {
                 BlockDownloadScheduler blockDownloadScheduler =
                         new BlockDownloadScheduler(
                                 peerManager,
-                                blockDownloadService
+                                blockDownloadService,
+                                new BlockDownloadTimeoutPolicy(
+                                        Duration.ofMinutes(10))
                         );
 
                 BlockSyncCoordinator coordinator =
@@ -1796,7 +1805,9 @@ class BlockSyncCoordinatorTest {
             BlockDownloadScheduler scheduler =
                     new BlockDownloadScheduler(
                             peerManager,
-                            blockDownloadService
+                            blockDownloadService,
+                            new BlockDownloadTimeoutPolicy(
+                                    Duration.ofMinutes(10))
                     );
 
             List<Block> downloaded =
@@ -1949,7 +1960,9 @@ class BlockSyncCoordinatorTest {
             BlockDownloadScheduler scheduler =
                     new BlockDownloadScheduler(
                             peerManager,
-                            blockDownloadService
+                            blockDownloadService,
+                            new BlockDownloadTimeoutPolicy(
+                                    Duration.ofMinutes(10))
                     );
 
             List<Block> downloaded =
@@ -2085,7 +2098,9 @@ class BlockSyncCoordinatorTest {
             BlockDownloadScheduler scheduler =
                     new BlockDownloadScheduler(
                             peerManager,
-                            blockDownloadService
+                            blockDownloadService,
+                            new BlockDownloadTimeoutPolicy(
+                                    Duration.ofMinutes(10))
                     );
 
             IOException exception =
@@ -2152,7 +2167,7 @@ class BlockSyncCoordinatorTest {
     }
 
     @Test
-    void shouldProcessCurrentDownloadWindowBeforeRequestingNextWindow()
+    void shouldSlideDownloadWindowForwardAfterProcessingEarlierBlock()
             throws Exception {
 
         Block genesisBlock =
@@ -2204,7 +2219,7 @@ class BlockSyncCoordinatorTest {
         try (RocksDbDatabase database =
                      new RocksDbDatabase(
                              directory.resolve(
-                                     "block-sync-download-window"
+                                     "block-sync-sliding-window"
                              )
                      );
 
@@ -2267,22 +2282,23 @@ class BlockSyncCoordinatorTest {
                     );
 
             /*
-             * The server is allowed to accept B3 only after
-             * the real validation pipeline has activated B2.
+             * Server proves the sliding-window property:
+             *
+             * 1. B1 and B2 are initially requested.
+             * 2. B1 is returned.
+             * 3. B2 remains deliberately outstanding.
+             * 4. B3 MUST be requested before B2 is returned.
+             *
+             * Therefore B3 can only appear if processing B1
+             * slides the download horizon forward.
              */
-            CountDownLatch firstWindowProcessed =
-                    new CountDownLatch(
-                            1
-                    );
-
             CompletableFuture<Void> server =
                     CompletableFuture.runAsync(
-                            () -> runBoundedWindowPeer(
+                            () -> runSlidingWindowPeer(
                                     serverSocket,
                                     block1,
                                     block2,
-                                    block3,
-                                    firstWindowProcessed
+                                    block3
                             )
                     );
 
@@ -2306,13 +2322,14 @@ class BlockSyncCoordinatorTest {
                 BlockDownloadScheduler blockDownloadScheduler =
                         new BlockDownloadScheduler(
                                 peerManager,
-                                blockDownloadService
+                                blockDownloadService,
+                                new BlockDownloadTimeoutPolicy(
+                                        Duration.ofMinutes(
+                                                10
+                                        )
+                                )
                         );
 
-                /*
-                 * Explicitly make the window smaller than
-                 * the three-block connect path.
-                 */
                 BlockSyncCoordinator coordinator =
                         new BlockSyncCoordinator(
                                 blockDownloadScheduler,
@@ -2323,67 +2340,8 @@ class BlockSyncCoordinatorTest {
                                 2
                         );
 
-                CompletableFuture<List<BlockIndex>> synchronization =
-                        CompletableFuture.supplyAsync(
-                                () -> {
-                                    try {
-                                        return coordinator.synchronize();
-                                    } catch (IOException exception) {
-                                        throw new RuntimeException(
-                                                exception
-                                        );
-                                    }
-                                }
-                        );
-
-                /*
-                 * Wait until the REAL active chain reaches B2.
-                 *
-                 * This is stronger than observing that B1/B2 were
-                 * merely downloaded: both must already have passed
-                 * through processBlock().
-                 */
-                long deadline =
-                        System.nanoTime()
-                                + TimeUnit.SECONDS.toNanos(
-                                5
-                        );
-
-                while (!validationService
-                        .activeTip()
-                        .hash()
-                        .equals(
-                                block2.hash()
-                        )) {
-
-                    if (System.nanoTime()
-                            >= deadline) {
-
-                        fail(
-                                "First download window was not processed "
-                                        + "before timeout; active tip is "
-                                        + validationService
-                                        .activeTip()
-                                        .hash()
-                                        .toDisplayHex()
-                        );
-                    }
-
-                    Thread.sleep(
-                            10
-                    );
-                }
-
-                /*
-                 * Only now may the fake peer proceed to expect B3.
-                 */
-                firstWindowProcessed.countDown();
-
                 List<BlockIndex> processed =
-                        synchronization.get(
-                                5,
-                                TimeUnit.SECONDS
-                        );
+                        coordinator.synchronize();
 
                 assertEquals(
                         3,
@@ -2434,12 +2392,11 @@ class BlockSyncCoordinatorTest {
         }
     }
 
-    private static void runBoundedWindowPeer(
+    private static void runSlidingWindowPeer(
             ServerSocket serverSocket,
             Block firstBlock,
             Block secondBlock,
-            Block thirdBlock,
-            CountDownLatch firstWindowProcessed
+            Block thirdBlock
     ) {
 
         try (Socket socket =
@@ -2478,15 +2435,86 @@ class BlockSyncCoordinatorTest {
                     output
             );
 
+            Map<Hash256, Block> initialWindow =
+                    Map.of(
+                            firstBlock.hash(),
+                            firstBlock,
+                            secondBlock.hash(),
+                            secondBlock
+                    );
+
+            Set<Hash256> requested =
+                    new HashSet<>();
+
             /*
-             * Window #1.
+             * Initial horizon contains exactly B1 and B2.
+             *
+             * Their wire request order is intentionally
+             * unspecified.
              */
-            assertRequestedBlock(
-                    reader,
-                    input,
-                    firstBlock.hash()
+            for (int i = 0;
+                 i < 2;
+                 i++) {
+
+                BitcoinMessage getDataWire =
+                        reader.read(
+                                input
+                        ).orElseThrow();
+
+                assertEquals(
+                        "getdata",
+                        getDataWire.command()
+                );
+
+                GetDataMessage getData =
+                        BitcoinMessages.decodeGetData(
+                                getDataWire
+                        );
+
+                assertEquals(
+                        1,
+                        getData.size()
+                );
+
+                InventoryVector vector =
+                        getData.inventory()
+                                .get(0);
+
+                assertEquals(
+                        InventoryVector.MSG_WITNESS_BLOCK,
+                        vector.type()
+                );
+
+                Hash256 requestedHash =
+                        vector.hash();
+
+                assertTrue(
+                        initialWindow.containsKey(
+                                requestedHash
+                        ),
+                        "Initial download window received unexpected request "
+                                + requestedHash.toDisplayHex()
+                );
+
+                assertTrue(
+                        requested.add(
+                                requestedHash
+                        ),
+                        "Initial download window received duplicate request "
+                                + requestedHash.toDisplayHex()
+                );
+            }
+
+            assertEquals(
+                    initialWindow.keySet(),
+                    requested
             );
 
+            /*
+             * Return ONLY B1.
+             *
+             * B2 deliberately remains in-flight.
+             */
             output.write(
                     encoder.encode(
                             BitcoinMessages.block(
@@ -2499,12 +2527,24 @@ class BlockSyncCoordinatorTest {
 
             output.flush();
 
+            /*
+             * Critical assertion:
+             *
+             * B3 must now be requested while B2 is STILL
+             * outstanding.
+             *
+             * The old batch-barrier coordinator deadlocks here:
+             * it waits for B2 before it can expose B3.
+             */
             assertRequestedBlock(
                     reader,
                     input,
-                    secondBlock.hash()
+                    thirdBlock.hash()
             );
 
+            /*
+             * Now complete B2.
+             */
             output.write(
                     encoder.encode(
                             BitcoinMessages.block(
@@ -2518,31 +2558,11 @@ class BlockSyncCoordinatorTest {
             output.flush();
 
             /*
-             * CRITICAL BOUNDED-WINDOW BARRIER.
+             * And deliberately complete B3 immediately after it.
              *
-             * Do not even attempt to read B3 until the test thread
-             * has observed B2 as the real active chain tip.
+             * Consensus processing must nevertheless remain
+             * B1 -> B2 -> B3.
              */
-            boolean processed =
-                    firstWindowProcessed.await(
-                            5,
-                            TimeUnit.SECONDS
-                    );
-
-            assertTrue(
-                    processed,
-                    "B1/B2 must be processed before the next window starts"
-            );
-
-            /*
-             * Window #2 may start only now.
-             */
-            assertRequestedBlock(
-                    reader,
-                    input,
-                    thirdBlock.hash()
-            );
-
             output.write(
                     encoder.encode(
                             BitcoinMessages.block(
@@ -3027,6 +3047,376 @@ class BlockSyncCoordinatorTest {
             );
 
         } catch (Exception exception) {
+            throw new RuntimeException(
+                    exception
+            );
+        }
+    }
+
+    @Test
+    void shouldHoldOutOfOrderCompletionUntilParentIsProcessed()
+            throws Exception {
+
+        Block genesisBlock =
+                GenesisBlockFactory.create(
+                        PARAMETERS
+                );
+
+        BlockIndex genesis =
+                BlockIndexFactory.createGenesis(
+                        genesisBlock.header()
+                );
+
+        Block block1 =
+                child(
+                        genesis,
+                        131
+                );
+
+        BlockIndex index1 =
+                BlockIndexFactory.createChild(
+                        genesis,
+                        block1.header()
+                );
+
+        Block block2 =
+                child(
+                        index1,
+                        132
+                );
+
+        BlockIndex index2 =
+                BlockIndexFactory.createChild(
+                        index1,
+                        block2.header()
+                );
+
+        Block block3 =
+                child(
+                        index2,
+                        133
+                );
+
+        BlockIndex index3 =
+                BlockIndexFactory.createChild(
+                        index2,
+                        block3.header()
+                );
+
+        try (RocksDbDatabase database =
+                     new RocksDbDatabase(
+                             directory.resolve(
+                                     "block-sync-out-of-order"
+                             )
+                     );
+
+             ServerSocket serverSocket =
+                     new ServerSocket(0)) {
+
+            NodeValidationService validationService =
+                    new NodeValidationService(
+                            database,
+                            PARAMETERS,
+                            () -> TIME + 10_000L,
+                            new Mempool()
+                    );
+
+            RocksDbBlockStore blockStore =
+                    new RocksDbBlockStore(
+                            database
+                    );
+
+            RocksDbBlockIndexStore indexStore =
+                    new RocksDbBlockIndexStore(
+                            database
+                    );
+
+            indexStore.save(
+                    BlockIndexStorageMapper.toStored(
+                            index1
+                    )
+            );
+
+            indexStore.save(
+                    BlockIndexStorageMapper.toStored(
+                            index2
+                    )
+            );
+
+            indexStore.save(
+                    BlockIndexStorageMapper.toStored(
+                            index3
+                    )
+            );
+
+            RocksDbChainStateStore chainStateStore =
+                    new RocksDbChainStateStore(
+                            database
+                    );
+
+            chainStateStore.saveBestHeaderTipHash(
+                    index3.hash()
+            );
+
+            BlockIndexLookup lookup =
+                    new StoredBlockIndexLookup(
+                            indexStore
+                    );
+
+            HeaderChainState headerChainState =
+                    new HeaderChainState(
+                            index3
+                    );
+
+            CompletableFuture<Void> server =
+                    CompletableFuture.runAsync(
+                            () -> runOutOfOrderSlidingPeer(
+                                    serverSocket,
+                                    block1,
+                                    block2,
+                                    block3
+                            )
+                    );
+
+            try (PeerManager peerManager =
+                         new PeerManager()) {
+
+                Peer peer =
+                        connectPeer(
+                                serverSocket.getLocalPort()
+                        );
+
+                peerManager.add(
+                        peer
+                );
+
+                BlockDownloadService blockDownloadService =
+                        new BlockDownloadService(
+                                peerManager
+                        );
+
+                BlockDownloadScheduler blockDownloadScheduler =
+                        new BlockDownloadScheduler(
+                                peerManager,
+                                blockDownloadService,
+                                new BlockDownloadTimeoutPolicy(
+                                        Duration.ofMinutes(
+                                                10
+                                        )
+                                )
+                        );
+
+                BlockSyncCoordinator coordinator =
+                        new BlockSyncCoordinator(
+                                blockDownloadScheduler,
+                                validationService,
+                                headerChainState,
+                                lookup,
+                                blockStore,
+                                2
+                        );
+
+                List<BlockIndex> processed =
+                        coordinator.synchronize();
+
+                assertEquals(
+                        List.of(
+                                block1.hash(),
+                                block2.hash(),
+                                block3.hash()
+                        ),
+                        processed.stream()
+                                .map(BlockIndex::hash)
+                                .toList()
+                );
+
+                assertEquals(
+                        block3.hash(),
+                        validationService
+                                .activeTip()
+                                .hash()
+                );
+
+                assertEquals(
+                        3L,
+                        validationService
+                                .activeTip()
+                                .height()
+                );
+
+                assertEquals(
+                        block3.hash(),
+                        chainStateStore
+                                .loadActiveTipHash()
+                                .orElseThrow()
+                );
+            }
+
+            server.get(
+                    5,
+                    TimeUnit.SECONDS
+            );
+        }
+    }
+
+    private static void runOutOfOrderSlidingPeer(
+            ServerSocket serverSocket,
+            Block firstBlock,
+            Block secondBlock,
+            Block thirdBlock
+    ) {
+
+        try (Socket socket =
+                     serverSocket.accept()) {
+
+            socket.setSoTimeout(
+                    5_000
+            );
+
+            BitcoinMessageStreamReader reader =
+                    new BitcoinMessageStreamReader(
+                            new BitcoinMessageDecoder(
+                                    PARAMETERS
+                            )
+                    );
+
+            BitcoinMessageEncoder encoder =
+                    new BitcoinMessageEncoder(
+                            PARAMETERS
+                    );
+
+            BufferedInputStream input =
+                    new BufferedInputStream(
+                            socket.getInputStream()
+                    );
+
+            BufferedOutputStream output =
+                    new BufferedOutputStream(
+                            socket.getOutputStream()
+                    );
+
+            performHandshake(
+                    reader,
+                    encoder,
+                    input,
+                    output
+            );
+
+            /*
+             * Initial horizon = B1,B2.
+             * Request order between them is intentionally irrelevant.
+             */
+            Set<Hash256> initialRequests =
+                    new HashSet<>();
+
+            for (int i = 0; i < 2; i++) {
+
+                BitcoinMessage wire =
+                        reader.read(
+                                input
+                        ).orElseThrow();
+
+                assertEquals(
+                        "getdata",
+                        wire.command()
+                );
+
+                GetDataMessage getData =
+                        BitcoinMessages.decodeGetData(
+                                wire
+                        );
+
+                assertEquals(
+                        1,
+                        getData.size()
+                );
+
+                Hash256 hash =
+                        getData.inventory()
+                                .get(0)
+                                .hash();
+
+                assertTrue(
+                        hash.equals(firstBlock.hash())
+                                || hash.equals(secondBlock.hash())
+                );
+
+                assertTrue(
+                        initialRequests.add(
+                                hash
+                        )
+                );
+            }
+
+            assertEquals(
+                    Set.of(
+                            firstBlock.hash(),
+                            secondBlock.hash()
+                    ),
+                    initialRequests
+            );
+
+            /*
+             * Complete B2 FIRST.
+             *
+             * Coordinator now possesses B2, but B1 is still absent.
+             * B2 therefore MUST NOT be processed yet.
+             */
+            output.write(
+                    encoder.encode(
+                            BitcoinMessages.block(
+                                    new BlockMessage(
+                                            secondBlock
+                                    )
+                            )
+                    )
+            );
+
+            output.flush();
+
+            /*
+             * No horizon advancement is possible merely because B2
+             * arrived. The left edge is still B1.
+             *
+             * Now return B1.
+             */
+            output.write(
+                    encoder.encode(
+                            BitcoinMessages.block(
+                                    new BlockMessage(
+                                            firstBlock
+                                    )
+                            )
+                    )
+            );
+
+            output.flush();
+
+            /*
+             * Once B1 is processed, B2 is already buffered and may be
+             * processed immediately. That advances the horizon far
+             * enough for B3 to be submitted.
+             */
+            assertRequestedBlock(
+                    reader,
+                    input,
+                    thirdBlock.hash()
+            );
+
+            output.write(
+                    encoder.encode(
+                            BitcoinMessages.block(
+                                    new BlockMessage(
+                                            thirdBlock
+                                    )
+                            )
+                    )
+            );
+
+            output.flush();
+
+        } catch (Exception exception) {
+
             throw new RuntimeException(
                     exception
             );
@@ -3613,7 +4003,9 @@ class BlockSyncCoordinatorTest {
             BlockDownloadScheduler scheduler =
                     new BlockDownloadScheduler(
                             peerManager,
-                            blockDownloadService
+                            blockDownloadService,
+                            new BlockDownloadTimeoutPolicy(
+                                    Duration.ofMinutes(10))
                     );
 
             List<Block> downloaded =
@@ -3883,7 +4275,9 @@ class BlockSyncCoordinatorTest {
                 BlockDownloadScheduler blockDownloadScheduler =
                         new BlockDownloadScheduler(
                                 peerManager,
-                                blockDownloadService
+                                blockDownloadService,
+                                new BlockDownloadTimeoutPolicy(
+                                        Duration.ofMinutes(10))
                         );
 
                 BlockSyncCoordinator coordinator =

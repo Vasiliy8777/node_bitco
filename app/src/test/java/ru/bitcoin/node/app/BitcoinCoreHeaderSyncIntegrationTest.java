@@ -15,10 +15,7 @@ import ru.bitcoin.node.p2p.PeerConnection;
 import ru.bitcoin.node.p2p.PeerManager;
 import ru.bitcoin.node.p2p.PeerState;
 import ru.bitcoin.node.p2p.message.*;
-import ru.bitcoin.node.p2p.sync.BlockDownloadScheduler;
-import ru.bitcoin.node.p2p.sync.BlockDownloadService;
-import ru.bitcoin.node.p2p.sync.BlockSynchronizer;
-import ru.bitcoin.node.p2p.sync.HeaderSynchronizer;
+import ru.bitcoin.node.p2p.sync.*;
 import ru.bitcoin.node.protocol.network.NetworkParameters;
 import ru.bitcoin.node.protocol.network.NetworkParametersRegistry;
 import ru.bitcoin.node.storage.block.RocksDbBlockIndexStore;
@@ -27,6 +24,7 @@ import ru.bitcoin.node.storage.chain.RocksDbChainStateStore;
 import ru.bitcoin.node.storage.rocksdb.RocksDbDatabase;
 
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -407,7 +405,10 @@ class BitcoinCoreHeaderSyncIntegrationTest {
                 BlockDownloadScheduler blockDownloadScheduler =
                         new BlockDownloadScheduler(
                                 peerManager,
-                                blockDownloadService
+                                blockDownloadService,
+                                new BlockDownloadTimeoutPolicy(
+                                        Duration.ofMinutes(10)
+                                )
                         );
 
                 BlockSyncCoordinator coordinator =
@@ -701,7 +702,10 @@ class BitcoinCoreHeaderSyncIntegrationTest {
                 BlockDownloadScheduler blockDownloadScheduler =
                         new BlockDownloadScheduler(
                                 peerManager,
-                                blockDownloadService
+                                blockDownloadService,
+                                new BlockDownloadTimeoutPolicy(
+                                        Duration.ofMinutes(10)
+                                )
                         );
 
                 BlockSyncCoordinator coordinator =
@@ -951,7 +955,10 @@ class BitcoinCoreHeaderSyncIntegrationTest {
                 BlockDownloadScheduler blockDownloadScheduler =
                         new BlockDownloadScheduler(
                                 peerManager,
-                                blockDownloadService
+                                blockDownloadService,
+                                new BlockDownloadTimeoutPolicy(
+                                        Duration.ofMinutes(10)
+                                )
                         );
 
                 BlockSyncCoordinator coordinator =

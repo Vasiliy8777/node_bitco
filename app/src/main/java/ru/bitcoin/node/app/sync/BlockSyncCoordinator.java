@@ -9,6 +9,8 @@ import ru.bitcoin.node.chain.ReorganizationPlan;
 import ru.bitcoin.node.chain.ReorganizationPlanner;
 import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.p2p.sync.BlockDownloadScheduler;
+import ru.bitcoin.node.p2p.sync.BlockDownloadSession;
+import ru.bitcoin.node.p2p.sync.CompletedBlockDownload;
 import ru.bitcoin.node.protocol.block.Block;
 import ru.bitcoin.node.storage.block.BlockStore;
 
@@ -150,168 +152,271 @@ public final class BlockSyncCoordinator {
                 );
 
         /*
-         * Download and connect the requested path in bounded windows.
+         * Bodies which are already available either from local
+         * storage or from an asynchronous network completion.
          *
-         * This prevents synchronize() from materializing the complete
-         * remaining IBD path in memory before consensus processing.
+         * Consensus processing still consumes this map strictly
+         * in blocksToDownload order.
          */
-        for (int windowStart = 0;
-             windowStart < blocksToDownload.size();
-             windowStart += downloadWindow) {
+        Map<Hash256, Block> availableBlocks =
+                new HashMap<>();
 
-            int windowEnd =
-                    Math.min(
-                            windowStart + downloadWindow,
-                            blocksToDownload.size()
-                    );
+        /*
+         * nextToExpose:
+         *     first connect-path position which has not yet entered
+         *     the download horizon.
+         *
+         * nextToProcess:
+         *     first connect-path position which has not yet passed
+         *     through validationService.processBlock().
+         *
+         * The permitted horizon is:
+         *
+         * [nextToProcess, nextToProcess + downloadWindow)
+         */
+        int nextToExpose = 0;
+        int nextToProcess = 0;
 
-            List<BlockIndex> window =
-                    blocksToDownload.subList(
-                            windowStart,
-                            windowEnd
-                    );
+        try (BlockDownloadSession session =
+                     blockDownloadScheduler.openSession()) {
 
-            Map<Hash256, Block> availableBlocks =
-                    new HashMap<>(
-                            window.size()
-                    );
+            while (nextToProcess
+                    < blocksToDownload.size()) {
 
-            List<Hash256> missingBlockHashes =
-                    new ArrayList<>();
-
-            /*
-             * Local-first remains mandatory.
-             *
-             * Bodies already present in BlockStore are used directly
-             * and are not requested from peers.
-             */
-            for (BlockIndex index : window) {
-
-                Block localBlock =
-                        blockStore.find(
-                                        index.hash()
+                /*
+                 * Extend the horizon as far as currently permitted.
+                 *
+                 * Local bodies enter availableBlocks immediately.
+                 * Missing bodies are submitted to the SAME long-lived
+                 * download session.
+                 */
+                int horizonEnd =
+                        Math.min(
+                                blocksToDownload.size(),
+                                Math.addExact(
+                                        nextToProcess,
+                                        downloadWindow
                                 )
-                                .orElse(null);
-
-                if (localBlock != null) {
-
-                    availableBlocks.put(
-                            index.hash(),
-                            localBlock
-                    );
-
-                } else {
-
-                    missingBlockHashes.add(
-                            index.hash()
-                    );
-                }
-            }
-
-            /*
-             * Only missing bodies from THIS window are exposed to
-             * the network scheduler.
-             */
-            if (!missingBlockHashes.isEmpty()) {
-
-                List<Block> downloadedBlocks =
-                        blockDownloadScheduler.download(
-                                missingBlockHashes
                         );
 
-                if (downloadedBlocks.size()
-                        != missingBlockHashes.size()) {
+                List<Hash256> missingToSubmit =
+                        new ArrayList<>();
 
-                    throw new IllegalStateException(
-                            "Block download scheduler returned "
-                                    + downloadedBlocks.size()
-                                    + " block(s) for "
-                                    + missingBlockHashes.size()
-                                    + " requested hash(es)"
-                    );
-                }
+                while (nextToExpose
+                        < horizonEnd) {
 
-                for (int i = 0;
-                     i < missingBlockHashes.size();
-                     i++) {
+                    BlockIndex index =
+                            blocksToDownload.get(
+                                    nextToExpose
+                            );
 
-                    Hash256 expectedHash =
-                            missingBlockHashes.get(i);
+                    Block localBlock =
+                            blockStore.find(
+                                            index.hash()
+                                    )
+                                    .orElse(null);
 
-                    Block block =
-                            downloadedBlocks.get(i);
+                    if (localBlock != null) {
 
-                    if (!block.hash().equals(
-                            expectedHash
-                    )) {
+                        Block previous =
+                                availableBlocks.put(
+                                        index.hash(),
+                                        localBlock
+                                );
 
-                        throw new IllegalStateException(
-                                "Block download scheduler returned unexpected block: "
-                                        + "expected "
-                                        + expectedHash.toDisplayHex()
-                                        + ", actual "
-                                        + block.hash().toDisplayHex()
+                        if (previous != null) {
+                            throw new IllegalStateException(
+                                    "Block body became available more than once: "
+                                            + index.hash()
+                                            .toDisplayHex()
+                            );
+                        }
+
+                    } else {
+
+                        missingToSubmit.add(
+                                index.hash()
                         );
                     }
 
-                    availableBlocks.put(
-                            expectedHash,
-                            block
+                    nextToExpose =
+                            Math.incrementExact(
+                                    nextToExpose
+                            );
+                }
+
+                if (!missingToSubmit.isEmpty()) {
+
+                    session.submit(
+                            missingToSubmit
+                    );
+                }
+
+                /*
+                 * Process every contiguous body which is already
+                 * available.
+                 *
+                 * This is the operation which slides the horizon.
+                 */
+                boolean processedAny =
+                        false;
+
+                while (nextToProcess
+                        < blocksToDownload.size()) {
+
+                    BlockIndex index =
+                            blocksToDownload.get(
+                                    nextToProcess
+                            );
+
+                    Block block =
+                            availableBlocks.remove(
+                                    index.hash()
+                            );
+
+                    if (block == null) {
+                        break;
+                    }
+
+                    if (!block.hash().equals(
+                            index.hash()
+                    )) {
+                        throw new IllegalStateException(
+                                "Available block does not match connect path: "
+                                        + "expected "
+                                        + index.hash()
+                                        .toDisplayHex()
+                                        + ", actual "
+                                        + block.hash()
+                                        .toDisplayHex()
+                        );
+                    }
+
+                    BlockProcessingResult result =
+                            validationService.processBlock(
+                                    block
+                            );
+
+                    if (result ==
+                            BlockProcessingResult.UNKNOWN_PARENT) {
+
+                        throw new IllegalStateException(
+                                "Block has unknown parent: "
+                                        + index.hash()
+                                        .toDisplayHex()
+                                        + " at height "
+                                        + index.height()
+                        );
+                    }
+
+                    nextToProcess =
+                            Math.incrementExact(
+                                    nextToProcess
+                            );
+
+                    processedAny =
+                            true;
+                }
+
+                /*
+                 * Processing one or more blocks changed the left
+                 * edge of the horizon.
+                 *
+                 * Loop immediately so newly admitted positions are
+                 * submitted BEFORE waiting for older outstanding
+                 * downloads.
+                 *
+                 * Example with window=2:
+                 *
+                 * B1,B2 submitted
+                 * B1 completes
+                 * B1 processed
+                 * loop
+                 * B3 submitted while B2 remains in-flight
+                 */
+                if (processedAny) {
+                    continue;
+                }
+
+                /*
+                 * The next chain-ordered body is unavailable.
+                 *
+                 * There must therefore be at least one network
+                 * request outstanding somewhere inside the current
+                 * horizon. Wait for whichever one completes first.
+                 *
+                 * It does NOT have to be nextToProcess.
+                 */
+                if (session.pendingCount() == 0) {
+
+                    BlockIndex missing =
+                            blocksToDownload.get(
+                                    nextToProcess
+                            );
+
+                    throw new IllegalStateException(
+                            "Block body is unavailable and no download is pending: "
+                                    + missing.hash()
+                                    .toDisplayHex()
+                                    + " at height "
+                                    + missing.height()
+                    );
+                }
+
+                CompletedBlockDownload completed =
+                        session.awaitCompleted();
+
+                Hash256 completedHash =
+                        completed.requestedHash();
+
+                Block completedBlock =
+                        completed.block();
+
+                if (!completedHash.equals(
+                        completedBlock.hash()
+                )) {
+                    throw new IllegalStateException(
+                            "Completed block does not match requested hash: "
+                                    + "expected "
+                                    + completedHash.toDisplayHex()
+                                    + ", actual "
+                                    + completedBlock.hash()
+                                    .toDisplayHex()
+                    );
+                }
+
+                Block previous =
+                        availableBlocks.put(
+                                completedHash,
+                                completedBlock
+                        );
+
+                if (previous != null) {
+                    throw new IllegalStateException(
+                            "Block body completed more than once: "
+                                    + completedHash.toDisplayHex()
                     );
                 }
             }
 
             /*
-             * Consensus processing remains strictly ordered.
-             *
-             * The next download window is not started until every
-             * block in this window has been processed.
+             * Every network request admitted into the horizon must
+             * have completed before the complete bounded path can
+             * have been processed.
              */
-            for (BlockIndex index : window) {
-
-                Block block =
-                        availableBlocks.get(
-                                index.hash()
-                        );
-
-                if (block == null) {
-
-                    throw new IllegalStateException(
-                            "Block body is unavailable after download: "
-                                    + index.hash()
-                                    .toDisplayHex()
-                                    + " at height "
-                                    + index.height()
-                    );
-                }
-
-                BlockProcessingResult result =
-                        validationService.processBlock(
-                                block
-                        );
-
-                if (result ==
-                        BlockProcessingResult.UNKNOWN_PARENT) {
-
-                    throw new IllegalStateException(
-                            "Block has unknown parent: "
-                                    + index.hash()
-                                    .toDisplayHex()
-                                    + " at height "
-                                    + index.height()
-                    );
-                }
+            if (session.pendingCount() != 0) {
+                throw new IllegalStateException(
+                        "Block synchronization processed its bounded path "
+                                + "with "
+                                + session.pendingCount()
+                                + " download(s) still pending"
+                );
             }
         }
 
         /*
-         * Reaching bestHeaderTip is required only
-         * when this invocation covered the complete
-         * remaining connect path.
-         *
-         * A bounded synchronization call is allowed
-         * to stop earlier so that IBD can be resumed
-         * by a later invocation or after restart.
+         * Reaching bestHeaderTip is required only when this invocation
+         * covered the complete remaining connect path.
          */
         boolean complete =
                 downloadCount
@@ -325,6 +430,7 @@ public final class BlockSyncCoordinator {
             if (!finalTip.hash().equals(
                     bestHeaderTip.hash()
             )) {
+
                 throw new IllegalStateException(
                         "Block synchronization completed "
                                 + "without activating best header tip: "
