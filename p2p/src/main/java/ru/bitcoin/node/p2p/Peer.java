@@ -33,7 +33,7 @@ public final class Peer implements AutoCloseable {
     private final boolean relay;
     private final long localNonce;
 
-    private PeerState state =
+    private volatile PeerState state =
             PeerState.DISCONNECTED;
 
     private VersionMessage remoteVersion;

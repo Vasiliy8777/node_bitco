@@ -21,6 +21,8 @@ import java.util.concurrent.Future;
 
 public final class BlockDownloadScheduler {
 
+    public static final int MAX_BLOCKS_IN_FLIGHT_PER_PEER = 16;
+
     private final PeerManager peerManager;
     private final BlockDownloadService blockDownloadService;
 
@@ -101,18 +103,25 @@ public final class BlockDownloadScheduler {
         Block[] results =
                 new Block[blockHashes.size()];
 
-        /*
-         * A peer is present in this list only while it has
-         * no active download.
-         */
-        List<Peer> availablePeers =
-                new ArrayList<>(
-                        peers
+        IdentityHashMap<Peer, Integer> activeByPeer =
+                new IdentityHashMap<>();
+
+        for (Peer peer : peers) {
+            activeByPeer.put(peer, 0);
+        }
+
+        int maxParallelDownloads =
+                Math.min(
+                        states.size(),
+                        Math.multiplyExact(
+                                peers.size(),
+                                MAX_BLOCKS_IN_FLIGHT_PER_PEER
+                        )
                 );
 
         ExecutorService executor =
                 Executors.newFixedThreadPool(
-                        peers.size()
+                        maxParallelDownloads
                 );
 
         CompletionService<DownloadResult> completionService =
@@ -122,31 +131,44 @@ public final class BlockDownloadScheduler {
 
         int inFlight = 0;
         int completed = 0;
+        int nextPeerIndex = 0;
 
         try {
 
             while (completed < states.size()) {
 
-                /*
-                 * Assign as much work as possible.
-                 *
-                 * Once a peer receives a block it is removed
-                 * from availablePeers until that exact request
-                 * completes.
-                 */
                 boolean assigned;
 
                 do {
                     assigned = false;
 
-                    for (int peerIndex = 0;
-                         peerIndex < availablePeers.size();
-                         peerIndex++) {
+                    for (int offset = 0;
+                         offset < peers.size();
+                         offset++) {
+
+                        int peerIndex =
+                                (nextPeerIndex + offset)
+                                        % peers.size();
 
                         Peer peer =
-                                availablePeers.get(
+                                peers.get(
                                         peerIndex
                                 );
+
+                        if (!peer.isReady()) {
+                            continue;
+                        }
+
+                        int peerInFlight =
+                                activeByPeer.getOrDefault(
+                                        peer,
+                                        0
+                                );
+
+                        if (peerInFlight
+                                >= MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
+                            continue;
+                        }
 
                         DownloadState state =
                                 findAssignableState(
@@ -158,15 +180,16 @@ public final class BlockDownloadScheduler {
                             continue;
                         }
 
-                        availablePeers.remove(
-                                peerIndex
-                        );
-
                         state.inFlight =
                                 true;
 
                         state.attemptedPeers.add(
                                 peer
+                        );
+
+                        activeByPeer.put(
+                                peer,
+                                peerInFlight + 1
                         );
 
                         completionService.submit(
@@ -178,10 +201,10 @@ public final class BlockDownloadScheduler {
 
                         inFlight++;
                         assigned = true;
+                        nextPeerIndex =
+                                (peerIndex + 1)
+                                        % peers.size();
 
-                        /*
-                         * availablePeers changed.
-                         */
                         break;
                     }
 
@@ -189,14 +212,6 @@ public final class BlockDownloadScheduler {
 
                 if (inFlight == 0) {
 
-                    /*
-                     * There is unfinished work, but no request
-                     * is active and no available peer can be
-                     * assigned to it.
-                     *
-                     * Therefore every usable peer has already
-                     * failed this block.
-                     */
                     DownloadState failedState =
                             firstIncomplete(
                                     states
@@ -211,13 +226,6 @@ public final class BlockDownloadScheduler {
                     );
                 }
 
-                /*
-                 * Wait for ANY request to finish, not for an
-                 * entire batch.
-                 *
-                 * This is what makes the scheduler
-                 * work-conserving.
-                 */
                 DownloadResult downloadResult;
 
                 try {
@@ -255,6 +263,23 @@ public final class BlockDownloadScheduler {
 
                 Peer peer =
                         downloadResult.peer();
+
+                int peerInFlight =
+                        activeByPeer.getOrDefault(
+                                peer,
+                                0
+                        );
+
+                if (peerInFlight <= 0) {
+                    throw new IllegalStateException(
+                            "Peer block download count underflow"
+                    );
+                }
+
+                activeByPeer.put(
+                        peer,
+                        peerInFlight - 1
+                );
 
                 if (downloadResult.block() != null) {
 
@@ -296,35 +321,9 @@ public final class BlockDownloadScheduler {
                             downloadResult.failure()
                     );
                 }
-
-                /*
-                 * NOTFOUND leaves the peer ready.
-                 *
-                 * Transport/protocol failure causes
-                 * BlockDownloadService to close it, so
-                 * isReady() becomes false.
-                 *
-                 * A healthy peer immediately returns to the
-                 * available pool and may receive another block
-                 * on the next scheduling iteration.
-                 */
-                if (peer.isReady()) {
-                    availablePeers.add(
-                            peer
-                    );
-                }
             }
 
         } finally {
-
-            /*
-             * At normal completion there are no in-flight
-             * operations.
-             *
-             * On exceptional exit interrupt any remaining
-             * executor tasks. PeerConnection shutdown remains
-             * owned by Peer / PeerManager.
-             */
             executor.shutdownNow();
         }
 

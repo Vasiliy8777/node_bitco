@@ -40,7 +40,7 @@ import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.file.Path;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -196,6 +196,11 @@ class BlockSyncCoordinatorTest {
                             index3
                     );
 
+            CountDownLatch releaseServer =
+                    new CountDownLatch(
+                            1
+                    );
+
             CompletableFuture<Void> server =
                     CompletableFuture.runAsync(
                             () -> runPeer(
@@ -204,7 +209,8 @@ class BlockSyncCoordinatorTest {
                                             block1,
                                             block2,
                                             block3
-                                    )
+                                    ),
+                                    releaseServer
                             )
                     );
 
@@ -304,6 +310,12 @@ class BlockSyncCoordinatorTest {
                                 .loadActiveTipHash()
                                 .orElseThrow()
                 );
+
+                assertTrue(
+                        peer.isReady()
+                );
+
+                releaseServer.countDown();
             }
 
             server.get(
@@ -528,6 +540,11 @@ class BlockSyncCoordinatorTest {
                             b4Index
                     );
 
+            CountDownLatch releaseServer =
+                    new CountDownLatch(
+                            1
+                    );
+
             CompletableFuture<Void> server =
                     CompletableFuture.runAsync(
                             () -> runPeer(
@@ -537,7 +554,8 @@ class BlockSyncCoordinatorTest {
                                             b2,
                                             b3,
                                             b4
-                                    )
+                                    ),
+                                    releaseServer
                             )
                     );
 
@@ -664,6 +682,12 @@ class BlockSyncCoordinatorTest {
                                 .bestHeaderTip()
                                 .hash()
                 );
+
+                assertTrue(
+                        peer.isReady()
+                );
+
+                releaseServer.countDown();
             }
 
             server.get(
@@ -1661,7 +1685,7 @@ class BlockSyncCoordinatorTest {
     }
 
     @Test
-    void shouldAssignNextBlockToPeerBeforeSlowerPeerFinishes()
+    void shouldAssignAdditionalBlockWhileEarlierRequestsRemainInFlight()
             throws Exception {
 
         Block genesisBlock =
@@ -2851,7 +2875,8 @@ class BlockSyncCoordinatorTest {
             );
 
             /*
-             * P1 receives B1 first.
+             * With multiple in-flight requests per peer, P1 may
+             * receive B3 while B1 is still outstanding.
              */
             assertRequestedBlock(
                     reader,
@@ -2859,9 +2884,18 @@ class BlockSyncCoordinatorTest {
                     firstBlock.hash()
             );
 
+            assertRequestedBlock(
+                    reader,
+                    input,
+                    thirdBlock.hash()
+            );
+
             /*
-             * Complete B1 immediately.
+             * Prove that the additional request was assigned
+             * before the slow peer was allowed to complete B2.
              */
+            block3Requested.countDown();
+
             output.write(
                     encoder.encode(
                             BitcoinMessages.block(
@@ -2871,25 +2905,6 @@ class BlockSyncCoordinatorTest {
                             )
                     )
             );
-
-            output.flush();
-
-            /*
-             * CRITICAL ASSERTION:
-             *
-             * P1 must now receive B3 without waiting
-             * for P2 to finish B2.
-             */
-            assertRequestedBlock(
-                    reader,
-                    input,
-                    thirdBlock.hash()
-            );
-
-            /*
-             * Only now allow the slow peer to release B2.
-             */
-            block3Requested.countDown();
 
             output.write(
                     encoder.encode(
@@ -2975,11 +2990,10 @@ class BlockSyncCoordinatorTest {
             /*
              * Deliberately hold B2.
              *
-             * A batch scheduler deadlocks here because it waits
-             * for B2 before assigning B3.
-             *
-             * A work-conserving scheduler lets P1 receive B3
-             * while B2 is still outstanding.
+             * B2 remains outstanding while P1 is allowed to
+             * receive an additional request for B3. This proves
+             * that one outstanding request does not consume the
+             * peer's entire in-flight capacity.
              */
             boolean thirdBlockWasRequested =
                     block3Requested.await(
@@ -3023,89 +3037,12 @@ class BlockSyncCoordinatorTest {
             ServerSocket serverSocket,
             List<Block> blocks
     ) {
-
-        try (Socket socket =
-                     serverSocket.accept()) {
-
-            socket.setSoTimeout(
-                    5_000
-            );
-
-            BitcoinMessageStreamReader reader =
-                    new BitcoinMessageStreamReader(
-                            new BitcoinMessageDecoder(
-                                    PARAMETERS
-                            )
-                    );
-
-            BitcoinMessageEncoder encoder =
-                    new BitcoinMessageEncoder(
-                            PARAMETERS
-                    );
-
-            BufferedInputStream input =
-                    new BufferedInputStream(
-                            socket.getInputStream()
-                    );
-
-            BufferedOutputStream output =
-                    new BufferedOutputStream(
-                            socket.getOutputStream()
-                    );
-
-            performHandshake(
-                    reader,
-                    encoder,
-                    input,
-                    output
-            );
-
-            for (Block block : blocks) {
-
-                BitcoinMessage getDataWire =
-                        reader.read(input)
-                                .orElseThrow();
-
-                assertEquals(
-                        "getdata",
-                        getDataWire.command()
-                );
-
-                GetDataMessage getData =
-                        BitcoinMessages.decodeGetData(
-                                getDataWire
-                        );
-
-                assertEquals(
-                        1,
-                        getData.size()
-                );
-
-                assertEquals(
-                        block.hash(),
-                        getData.inventory()
-                                .get(0)
-                                .hash()
-                );
-
-                output.write(
-                        encoder.encode(
-                                BitcoinMessages.block(
-                                        new BlockMessage(
-                                                block
-                                        )
-                                )
-                        )
-                );
-
-                output.flush();
-            }
-
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        runPeer(
+                serverSocket,
+                blocks,
+                null
+        );
     }
-
 
     private static void runPeer(
             ServerSocket serverSocket,
@@ -3149,11 +3086,49 @@ class BlockSyncCoordinatorTest {
                     output
             );
 
+            /*
+             * Several scheduler tasks may issue getdata
+             * concurrently for the same peer.
+             *
+             * PeerConnection guarantees that complete P2P
+             * messages are serialized on the wire, but the
+             * relative order of different scheduler threads
+             * is intentionally not guaranteed.
+             *
+             * Therefore this fake peer validates the complete
+             * requested set rather than imposing B1, B2, B3...
+             * as the wire order.
+             */
+            Map<Hash256, Block> expectedBlocks =
+                    new HashMap<>();
+
             for (Block block : blocks) {
 
+                Block previous =
+                        expectedBlocks.put(
+                                block.hash(),
+                                block
+                        );
+
+                assertNull(
+                        previous,
+                        "Duplicate expected block hash "
+                                + block.hash()
+                                .toDisplayHex()
+                );
+            }
+
+            Set<Hash256> requested =
+                    new HashSet<>();
+
+            for (int i = 0;
+                 i < blocks.size();
+                 i++) {
+
                 BitcoinMessage getDataWire =
-                        reader.read(input)
-                                .orElseThrow();
+                        reader.read(
+                                input
+                        ).orElseThrow();
 
                 assertEquals(
                         "getdata",
@@ -3170,18 +3145,48 @@ class BlockSyncCoordinatorTest {
                         getData.size()
                 );
 
-                assertEquals(
-                        block.hash(),
+                InventoryVector vector =
                         getData.inventory()
-                                .get(0)
-                                .hash()
+                                .get(0);
+
+                assertEquals(
+                        InventoryVector.MSG_WITNESS_BLOCK,
+                        vector.type()
                 );
 
+                Hash256 requestedHash =
+                        vector.hash();
+
+                Block requestedBlock =
+                        expectedBlocks.get(
+                                requestedHash
+                        );
+
+                assertNotNull(
+                        requestedBlock,
+                        "Peer received unexpected block request "
+                                + requestedHash
+                                .toDisplayHex()
+                );
+
+                assertTrue(
+                        requested.add(
+                                requestedHash
+                        ),
+                        "Peer received duplicate block request "
+                                + requestedHash
+                                .toDisplayHex()
+                );
+
+                /*
+                 * Reply to the block that was ACTUALLY
+                 * requested, irrespective of request order.
+                 */
                 output.write(
                         encoder.encode(
                                 BitcoinMessages.block(
                                         new BlockMessage(
-                                                block
+                                                requestedBlock
                                         )
                                 )
                         )
@@ -3190,13 +3195,29 @@ class BlockSyncCoordinatorTest {
                 output.flush();
             }
 
-            assertTrue(
-                    release.await(
-                            5,
-                            TimeUnit.SECONDS
-                    ),
-                    "Timed out waiting to release test peer"
+            /*
+             * Every expected block must have been requested
+             * exactly once.
+             */
+            assertEquals(
+                    expectedBlocks.keySet(),
+                    requested
             );
+
+            /*
+             * Some tests need the connection to remain alive
+             * while the caller verifies Peer.READY.
+             */
+            if (release != null) {
+
+                assertTrue(
+                        release.await(
+                                5,
+                                TimeUnit.SECONDS
+                        ),
+                        "Timed out waiting to release test peer"
+                );
+            }
 
         } catch (Exception exception) {
             throw new RuntimeException(
