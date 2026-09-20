@@ -234,14 +234,6 @@ class BlockSyncCoordinatorTest {
                         peer.isReady()
                 );
 
-                peer.messageReader()
-                        .start();
-
-                assertTrue(
-                        peer.messageReader()
-                                .isStarted()
-                );
-
                 PeerManager peerManager =
                         new PeerManager();
 
@@ -575,14 +567,6 @@ class BlockSyncCoordinatorTest {
                         peer.isReady()
                 );
 
-                peer.messageReader()
-                        .start();
-
-                assertTrue(
-                        peer.messageReader()
-                                .isStarted()
-                );
-
                 PeerManager peerManager =
                         new PeerManager();
 
@@ -840,14 +824,6 @@ class BlockSyncCoordinatorTest {
 
                 assertTrue(
                         peer.isReady()
-                );
-
-                peer.messageReader()
-                        .start();
-
-                assertTrue(
-                        peer.messageReader()
-                                .isStarted()
                 );
 
                 PeerManager peerManager =
@@ -1353,14 +1329,6 @@ class BlockSyncCoordinatorTest {
 
                 assertTrue(
                         peer.isReady()
-                );
-
-                peer.messageReader()
-                        .start();
-
-                assertTrue(
-                        peer.messageReader()
-                                .isStarted()
                 );
 
                 PeerManager peerManager =
@@ -3347,14 +3315,6 @@ class BlockSyncCoordinatorTest {
 
             assertTrue(
                     peer.isReady()
-            );
-
-            peer.messageReader()
-                    .start();
-
-            assertTrue(
-                    peer.messageReader()
-                            .isStarted()
             );
 
             return peer;

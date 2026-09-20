@@ -775,13 +775,6 @@ class PeerTest {
                  * Explicitly switch this peer to
                  * background message reading.
                  */
-                peer.messageReader()
-                        .start();
-
-                assertTrue(
-                        peer.messageReader()
-                                .isStarted()
-                );
 
                 /*
                  * IMPORTANT:
@@ -945,27 +938,10 @@ class PeerTest {
                         peer.isReady()
                 );
 
-                /*
-                 * Old synchronous path.
-                 */
-                BitcoinMessage message =
-                        peer.receive()
-                                .orElseThrow();
-
-                assertEquals(
-                        "ping",
-                        message.command()
+                assertTrue(
+                        peer.messageReader()
+                                .isStarted()
                 );
-
-                /*
-                 * IMPORTANT:
-                 * use the dispatcher owned by Peer.
-                 * Do not create another dispatcher.
-                 */
-                peer.messageDispatcher()
-                        .dispatch(
-                                message
-                        );
 
                 /*
                  * Keep Peer alive until server has
@@ -1352,8 +1328,6 @@ class PeerTest {
                         peer.messageDispatcher()
                                 .registerHeaders();
 
-                peer.messageReader()
-                        .start();
 
                 /*
                  * Ensure the server has completed its work

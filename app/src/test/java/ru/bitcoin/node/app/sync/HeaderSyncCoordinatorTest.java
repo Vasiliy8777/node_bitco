@@ -192,13 +192,6 @@ class HeaderSyncCoordinatorTest {
                 assertTrue(
                         peer.isReady()
                 );
-                peer.messageReader()
-                        .start();
-
-                assertTrue(
-                        peer.messageReader()
-                                .isStarted()
-                );
 
                 HeaderSynchronizer headerSynchronizer =
                         new HeaderSynchronizer(
@@ -649,14 +642,6 @@ class HeaderSyncCoordinatorTest {
                         peer.isReady()
                 );
 
-                peer.messageReader()
-                        .start();
-
-                assertTrue(
-                        peer.messageReader()
-                                .isStarted()
-                );
-
                 HeaderSynchronizer headerSynchronizer =
                         new HeaderSynchronizer(
                                 peer
@@ -1001,14 +986,6 @@ class HeaderSyncCoordinatorTest {
 
                 assertTrue(
                         peer.isReady()
-                );
-
-                peer.messageReader()
-                        .start();
-
-                assertTrue(
-                        peer.messageReader()
-                                .isStarted()
                 );
 
                 HeaderSynchronizer headerSynchronizer =

@@ -201,14 +201,6 @@ class BlockDownloadServiceTest {
                     peer.isReady()
             );
 
-            peer.messageReader()
-                    .start();
-
-            assertTrue(
-                    peer.messageReader()
-                            .isStarted()
-            );
-
             return peer;
 
         } catch (Exception exception) {

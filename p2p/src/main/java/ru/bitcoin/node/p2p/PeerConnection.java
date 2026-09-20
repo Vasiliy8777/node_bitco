@@ -34,6 +34,9 @@ public final class PeerConnection implements AutoCloseable {
     private BitcoinMessageEncoder encoder;
     private BitcoinMessageStreamReader reader;
 
+    private final Object sendLock =
+            new Object();
+
     public PeerConnection(
             NetworkParameters networkParameters
     ) {
@@ -161,19 +164,21 @@ public final class PeerConnection implements AutoCloseable {
             BitcoinMessage message
     ) throws IOException {
 
-        ensureConnected();
-
         if (message == null) {
             throw new IllegalArgumentException(
                     "message must not be null"
             );
         }
 
-        byte[] packet =
-                encoder.encode(message);
+        synchronized (sendLock) {
+            ensureConnected();
 
-        output.write(packet);
-        output.flush();
+            byte[] packet =
+                    encoder.encode(message);
+
+            output.write(packet);
+            output.flush();
+        }
     }
 
     public Optional<BitcoinMessage> receive()
@@ -214,17 +219,19 @@ public final class PeerConnection implements AutoCloseable {
 
     @Override
     public void close() throws IOException {
-        Socket currentSocket =
-                socket;
+        synchronized (sendLock) {
+            Socket currentSocket =
+                    socket;
 
-        socket = null;
-        input = null;
-        output = null;
-        encoder = null;
-        reader = null;
+            socket = null;
+            input = null;
+            output = null;
+            encoder = null;
+            reader = null;
 
-        if (currentSocket != null) {
-            currentSocket.close();
+            if (currentSocket != null) {
+                currentSocket.close();
+            }
         }
     }
 }

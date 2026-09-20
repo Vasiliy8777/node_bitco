@@ -146,6 +146,8 @@ public final class Peer implements AutoCloseable {
                     optional.orElseThrow()
             );
         }
+
+        messageReader.start();
     }
 
     private void sendVersion()

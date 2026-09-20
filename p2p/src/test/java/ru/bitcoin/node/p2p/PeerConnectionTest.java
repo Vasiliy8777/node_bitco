@@ -14,6 +14,7 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -347,6 +348,235 @@ class PeerConnectionTest {
             server.get(
                     5,
                     TimeUnit.SECONDS
+            );
+        }
+    }
+
+    @Test
+    void shouldSerializeConcurrentSendsIntoCompleteBitcoinFrames()
+            throws Exception {
+
+        final int messagesPerSender =
+                16;
+
+        final int payloadSize =
+                128 * 1024;
+
+        try (ServerSocket serverSocket =
+                     new ServerSocket(0)) {
+
+            CompletableFuture<Void> server =
+                    CompletableFuture.runAsync(
+                            () -> {
+                                try (Socket socket =
+                                             serverSocket.accept()) {
+
+                                    socket.setSoTimeout(
+                                            5_000
+                                    );
+
+                                    BitcoinMessageStreamReader reader =
+                                            new BitcoinMessageStreamReader(
+                                                    new BitcoinMessageDecoder(
+                                                            NetworkParametersRegistry
+                                                                    .mainnet()
+                                                    )
+                                            );
+
+                                    BufferedInputStream input =
+                                            new BufferedInputStream(
+                                                    socket.getInputStream()
+                                            );
+
+                                    boolean[][] received =
+                                            new boolean[2][messagesPerSender];
+
+                                    for (int i = 0;
+                                         i < messagesPerSender * 2;
+                                         i++) {
+
+                                        BitcoinMessage message =
+                                                reader.read(input)
+                                                        .orElseThrow();
+
+                                        assertEquals(
+                                                "tx",
+                                                message.command()
+                                        );
+
+                                        byte[] payload =
+                                                message.payload();
+
+                                        assertEquals(
+                                                payloadSize,
+                                                payload.length
+                                        );
+
+                                        int sender =
+                                                Byte.toUnsignedInt(
+                                                        payload[0]
+                                                );
+
+                                        int sequence =
+                                                Byte.toUnsignedInt(
+                                                        payload[1]
+                                                );
+
+                                        assertTrue(
+                                                sender < 2
+                                        );
+
+                                        assertTrue(
+                                                sequence < messagesPerSender
+                                        );
+
+                                        assertFalse(
+                                                received[sender][sequence]
+                                        );
+
+                                        received[sender][sequence] =
+                                                true;
+
+                                        byte expected =
+                                                (byte) (sender * 32
+                                                        + sequence);
+
+                                        for (int offset = 2;
+                                             offset < payload.length;
+                                             offset++) {
+
+                                            assertEquals(
+                                                    expected,
+                                                    payload[offset]
+                                            );
+                                        }
+                                    }
+
+                                    for (boolean[] senderMessages : received) {
+                                        for (boolean messageReceived : senderMessages) {
+                                            assertTrue(
+                                                    messageReceived
+                                            );
+                                        }
+                                    }
+
+                                } catch (Exception exception) {
+                                    throw new RuntimeException(
+                                            exception
+                                    );
+                                }
+                            }
+                    );
+
+            try (PeerConnection connection =
+                         new PeerConnection(
+                                 NetworkParametersRegistry.mainnet(),
+                                 5_000,
+                                 5_000
+                         )) {
+
+                connection.connect(
+                        "127.0.0.1",
+                        serverSocket.getLocalPort()
+                );
+
+                CountDownLatch start =
+                        new CountDownLatch(
+                                1
+                        );
+
+                CompletableFuture<Void> firstSender =
+                        CompletableFuture.runAsync(
+                                () -> sendMessages(
+                                        connection,
+                                        0,
+                                        messagesPerSender,
+                                        payloadSize,
+                                        start
+                                )
+                        );
+
+                CompletableFuture<Void> secondSender =
+                        CompletableFuture.runAsync(
+                                () -> sendMessages(
+                                        connection,
+                                        1,
+                                        messagesPerSender,
+                                        payloadSize,
+                                        start
+                                )
+                        );
+
+                start.countDown();
+
+                firstSender.get(
+                        5,
+                        TimeUnit.SECONDS
+                );
+
+                secondSender.get(
+                        5,
+                        TimeUnit.SECONDS
+                );
+
+                server.get(
+                        5,
+                        TimeUnit.SECONDS
+                );
+            }
+        }
+    }
+
+    private static void sendMessages(
+            PeerConnection connection,
+            int sender,
+            int messageCount,
+            int payloadSize,
+            CountDownLatch start
+    ) {
+        try {
+            assertTrue(
+                    start.await(
+                            5,
+                            TimeUnit.SECONDS
+                    )
+            );
+
+            for (int sequence = 0;
+                 sequence < messageCount;
+                 sequence++) {
+
+                byte[] payload =
+                        new byte[payloadSize];
+
+                payload[0] =
+                        (byte) sender;
+
+                payload[1] =
+                        (byte) sequence;
+
+                byte value =
+                        (byte) (sender * 32
+                                + sequence);
+
+                java.util.Arrays.fill(
+                        payload,
+                        2,
+                        payload.length,
+                        value
+                );
+
+                connection.send(
+                        new BitcoinMessage(
+                                "tx",
+                                payload
+                        )
+                );
+            }
+
+        } catch (Exception exception) {
+            throw new RuntimeException(
+                    exception
             );
         }
     }

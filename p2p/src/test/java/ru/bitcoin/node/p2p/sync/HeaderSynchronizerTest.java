@@ -98,14 +98,6 @@ class HeaderSynchronizerTest {
                         peer.isReady()
                 );
 
-                peer.messageReader()
-                        .start();
-
-                assertTrue(
-                        peer.messageReader()
-                                .isStarted()
-                );
-
                 HeaderSynchronizer synchronizer =
                         new HeaderSynchronizer(
                                 peer
