@@ -76,14 +76,49 @@ public final class OutboundPeerManager {
             int startHeight
     ) throws IOException {
 
+        return connectOneWithAddress(
+                startHeight,
+                List.of()
+        ).peer();
+    }
+
+    public Peer connectOne(
+            int startHeight,
+            List<PeerAddress> excludedAddresses
+    ) throws IOException {
+
+        return connectOneWithAddress(
+                startHeight,
+                excludedAddresses
+        ).peer();
+    }
+
+    public OutboundPeerConnection connectOneWithAddress(
+            int startHeight,
+            List<PeerAddress> excludedAddresses
+    ) throws IOException {
+
         if (startHeight < 0) {
             throw new IllegalArgumentException(
                     "startHeight must not be negative"
             );
         }
 
+        Objects.requireNonNull(
+                excludedAddresses,
+                "excludedAddresses"
+        );
+
         List<PeerAddress> candidates =
-                selector.candidates();
+                selector.candidates()
+                        .stream()
+                        .filter(
+                                candidate ->
+                                        !excludedAddresses.contains(
+                                                candidate
+                                        )
+                        )
+                        .toList();
 
         if (candidates.isEmpty()) {
             throw new IOException(
@@ -98,15 +133,11 @@ public final class OutboundPeerManager {
                                 + " known peer address(es)"
                 );
 
-        for (PeerAddress address :
-                candidates) {
-
-            Instant attemptTime =
-                    now();
+        for (PeerAddress address : candidates) {
 
             addressManager.markAttempt(
                     address,
-                    attemptTime
+                    now()
             );
 
             try {
@@ -140,19 +171,17 @@ public final class OutboundPeerManager {
                     continue;
                 }
 
-                /*
-                 * Success is recorded only after the Bitcoin
-                 * handshake completed and the peer reached READY.
-                 */
                 addressManager.markSuccess(
                         address,
                         now()
                 );
 
                 try {
+
                     peerManager.add(
                             peer
                     );
+
                 } catch (RuntimeException exception) {
 
                     try {
@@ -166,7 +195,10 @@ public final class OutboundPeerManager {
                     throw exception;
                 }
 
-                return peer;
+                return new OutboundPeerConnection(
+                        peer,
+                        address
+                );
 
             } catch (IOException exception) {
 

@@ -24,12 +24,12 @@ import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
 class HeaderSynchronizerTest {
 
@@ -100,7 +100,10 @@ class HeaderSynchronizerTest {
 
                 HeaderSynchronizer synchronizer =
                         new HeaderSynchronizer(
-                                peer
+                                peer,
+                                Duration.ofMillis(
+                                        100
+                                )
                         );
 
                 HeadersMessage headers =
@@ -108,6 +111,8 @@ class HeaderSynchronizerTest {
                                 List.of(locatorHash),
                                 stopHash
                         );
+
+
 
                 assertEquals(
                         1,
@@ -123,6 +128,269 @@ class HeaderSynchronizerTest {
             server.get(
                     5,
                     TimeUnit.SECONDS
+            );
+        }
+    }
+
+    @Test
+    void shouldTimeoutWhenPeerDoesNotRespondToGetHeaders()
+            throws Exception {
+
+        Block genesis =
+                GenesisBlockFactory.create(
+                        PARAMETERS
+                );
+
+        Hash256 locatorHash =
+                genesis.hash();
+
+        Hash256 stopHash =
+                new Hash256(
+                        new byte[Hash256.LENGTH]
+                );
+
+        try (ServerSocket serverSocket =
+                     new ServerSocket(0)) {
+
+            CompletableFuture<Void> server =
+                    CompletableFuture.runAsync(
+                            () -> runSilentPeer(
+                                    serverSocket,
+                                    locatorHash,
+                                    stopHash
+                            )
+                    );
+
+            try (PeerConnection connection =
+                         new PeerConnection(
+                                 PARAMETERS,
+                                 5_000,
+                                 5_000
+                         );
+
+                 Peer peer =
+                         new Peer(
+                                 connection,
+                                 VersionMessage.DEFAULT_SERVICES,
+                                 0,
+                                 true
+                         )) {
+
+                peer.connect(
+                        "127.0.0.1",
+                        serverSocket.getLocalPort()
+                );
+
+                peer.handshake();
+
+                assertTrue(
+                        peer.isReady()
+                );
+
+                Duration timeout =
+                        Duration.ofMillis(
+                                100
+                        );
+
+                HeaderSynchronizer synchronizer =
+                        new HeaderSynchronizer(
+                                peer,
+                                timeout
+                        );
+
+                HeaderSynchronizationTimeoutException exception =
+                        assertThrows(
+                                HeaderSynchronizationTimeoutException.class,
+                                () -> synchronizer.download(
+                                        List.of(
+                                                locatorHash
+                                        ),
+                                        stopHash
+                                )
+                        );
+
+                assertEquals(
+                        timeout,
+                        exception.timeout()
+                );
+
+                /*
+                 * HeaderSynchronizer owns the request deadline,
+                 * not the Peer lifecycle.
+                 */
+                assertTrue(
+                        peer.isReady()
+                );
+            }
+
+            server.get(
+                    5,
+                    TimeUnit.SECONDS
+            );
+        }
+    }
+
+    private static void runSilentPeer(
+            ServerSocket serverSocket,
+            Hash256 locatorHash,
+            Hash256 stopHash
+    ) {
+
+        try (Socket socket =
+                     serverSocket.accept()) {
+
+            socket.setSoTimeout(
+                    5_000
+            );
+
+            BitcoinMessageStreamReader reader =
+                    new BitcoinMessageStreamReader(
+                            new BitcoinMessageDecoder(
+                                    PARAMETERS
+                            )
+                    );
+
+            BitcoinMessageEncoder encoder =
+                    new BitcoinMessageEncoder(
+                            PARAMETERS
+                    );
+
+            BufferedInputStream input =
+                    new BufferedInputStream(
+                            socket.getInputStream()
+                    );
+
+            BufferedOutputStream output =
+                    new BufferedOutputStream(
+                            socket.getOutputStream()
+                    );
+
+            /*
+             * Complete a normal handshake.
+             */
+            BitcoinMessage version =
+                    reader.read(input)
+                            .orElseThrow();
+
+            assertEquals(
+                    "version",
+                    version.command()
+            );
+
+            VersionMessage remoteVersion =
+                    new VersionMessage(
+                            70016,
+                            VersionMessage.DEFAULT_SERVICES,
+                            1_700_000_000L,
+                            NetworkAddress.unspecified(),
+                            NetworkAddress.unspecified(),
+                            REMOTE_NONCE,
+                            "/silent-header-peer/",
+                            0,
+                            true
+                    );
+
+            output.write(
+                    encoder.encode(
+                            BitcoinMessages.version(
+                                    remoteVersion
+                            )
+                    )
+            );
+
+            output.flush();
+
+            assertEquals(
+                    "wtxidrelay",
+                    reader.read(input)
+                            .orElseThrow()
+                            .command()
+            );
+
+            assertEquals(
+                    "sendaddrv2",
+                    reader.read(input)
+                            .orElseThrow()
+                            .command()
+            );
+
+            assertEquals(
+                    "verack",
+                    reader.read(input)
+                            .orElseThrow()
+                            .command()
+            );
+
+            output.write(
+                    encoder.encode(
+                            BitcoinMessages.wtxidRelay()
+                    )
+            );
+
+            output.write(
+                    encoder.encode(
+                            BitcoinMessages.sendAddrV2()
+                    )
+            );
+
+            output.write(
+                    encoder.encode(
+                            BitcoinMessages.verack()
+                    )
+            );
+
+            output.flush();
+
+            /*
+             * Receive getheaders, verify it, but deliberately
+             * DO NOT send a headers response.
+             */
+            BitcoinMessage getHeadersWire =
+                    reader.read(input)
+                            .orElseThrow();
+
+            assertEquals(
+                    "getheaders",
+                    getHeadersWire.command()
+            );
+
+            GetHeadersMessage getHeaders =
+                    ru.bitcoin.node.p2p.codec
+                            .GetHeadersMessageCodec
+                            .decode(
+                                    getHeadersWire.payload()
+                            );
+
+            assertEquals(
+                    List.of(
+                            locatorHash
+                    ),
+                    getHeaders.locatorHashes()
+            );
+
+            assertEquals(
+                    stopHash,
+                    getHeaders.stopHash()
+            );
+
+            /*
+             * Keep the TCP connection alive.
+             *
+             * The client must fail because of the explicit
+             * HeaderSynchronizer deadline, not EOF/disconnect.
+             *
+             * The test closes Peer after observing the timeout,
+             * which causes EOF here.
+             */
+            assertEquals(
+                    -1,
+                    input.read()
+            );
+
+        } catch (Exception exception) {
+
+            throw new RuntimeException(
+                    exception
             );
         }
     }

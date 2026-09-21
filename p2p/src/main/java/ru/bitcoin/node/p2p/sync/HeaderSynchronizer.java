@@ -9,23 +9,56 @@ import ru.bitcoin.node.p2p.message.HeadersMessage;
 import ru.bitcoin.node.p2p.message.VersionMessage;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 public final class HeaderSynchronizer {
 
+    public static final Duration DEFAULT_RESPONSE_TIMEOUT =
+            Duration.ofSeconds(
+                    30
+            );
+
     private final Peer peer;
+    private final Duration responseTimeout;
 
     public HeaderSynchronizer(
             Peer peer
+    ) {
+        this(
+                peer,
+                DEFAULT_RESPONSE_TIMEOUT
+        );
+    }
+
+    public HeaderSynchronizer(
+            Peer peer,
+            Duration responseTimeout
     ) {
         this.peer =
                 Objects.requireNonNull(
                         peer,
                         "peer"
                 );
+
+        this.responseTimeout =
+                Objects.requireNonNull(
+                        responseTimeout,
+                        "responseTimeout"
+                );
+
+        if (responseTimeout.isZero()
+                || responseTimeout.isNegative()) {
+
+            throw new IllegalArgumentException(
+                    "responseTimeout must be positive"
+            );
+        }
     }
 
     public HeadersMessage download(
@@ -72,6 +105,7 @@ public final class HeaderSynchronizer {
                 dispatcher.registerHeaders();
 
         try {
+
             peer.send(
                     BitcoinMessages.getHeaders(
                             request
@@ -79,10 +113,12 @@ public final class HeaderSynchronizer {
             );
 
             return completedHeaders(
-                    future
+                    future,
+                    responseTimeout
             );
 
         } finally {
+
             dispatcher.unregisterHeaders(
                     future
             );
@@ -90,13 +126,34 @@ public final class HeaderSynchronizer {
     }
 
     private static HeadersMessage completedHeaders(
-            CompletableFuture<HeadersMessage> future
+            CompletableFuture<HeadersMessage> future,
+            Duration timeout
     ) throws IOException {
 
         try {
-            return future.join();
 
-        } catch (CompletionException exception) {
+            return future.get(
+                    timeout.toNanos(),
+                    TimeUnit.NANOSECONDS
+            );
+
+        } catch (TimeoutException exception) {
+
+            throw new HeaderSynchronizationTimeoutException(
+                    timeout
+            );
+
+        } catch (InterruptedException exception) {
+
+            Thread.currentThread()
+                    .interrupt();
+
+            throw new IOException(
+                    "Interrupted while waiting for headers",
+                    exception
+            );
+
+        } catch (ExecutionException exception) {
 
             Throwable cause =
                     exception.getCause();
