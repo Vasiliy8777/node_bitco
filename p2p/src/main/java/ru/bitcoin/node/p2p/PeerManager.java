@@ -14,6 +14,7 @@ public final class PeerManager
     public synchronized void add(
             Peer peer
     ) {
+
         Objects.requireNonNull(
                 peer,
                 "peer"
@@ -23,7 +24,26 @@ public final class PeerManager
             return;
         }
 
-        peers.add(peer);
+        peer.addCloseListener(
+                this::onPeerClosed
+        );
+
+        peers.add(
+                peer
+        );
+    }
+
+    private void onPeerClosed(
+            Peer peer,
+            IOException cause
+    ) {
+
+        synchronized (this) {
+
+            peers.remove(
+                    peer
+            );
+        }
     }
 
     public synchronized void remove(

@@ -48,11 +48,13 @@ import java.util.concurrent.TimeUnit;
 import static org.junit.jupiter.api.Assertions.*;
 
 class NodeLifecycleServiceTest {
+
     private static final long BITS =
             0x207fffffL;
 
     private static final long REWARD =
             5_000_000_000L;
+
     @TempDir
     Path directory;
 
@@ -323,14 +325,87 @@ class NodeLifecycleServiceTest {
                             .hash()
             );
 
-            lifecycle.start();
+            Thread lifecycleThread =
+                    startLifecycle(
+                            lifecycle
+                    );
+
+            try {
+
+                awaitRunning(
+                        lifecycle
+                );
+
+                assertTrue(
+                        lifecycleThread.isAlive()
+                );
+
+                assertTrue(
+                        lifecycle.failure()
+                                .isEmpty()
+                );
+
+                assertEquals(
+                        block1.hash(),
+                        validationService
+                                .activeTip()
+                                .hash()
+                );
+
+                assertEquals(
+                        1L,
+                        validationService
+                                .activeTip()
+                                .height()
+                );
+
+                assertEquals(
+                        block1.hash(),
+                        syncInfrastructure
+                                .headerChainState()
+                                .bestHeaderTip()
+                                .hash()
+                );
+
+                assertEquals(
+                        validationService
+                                .activeTip()
+                                .hash(),
+                        syncInfrastructure
+                                .headerChainState()
+                                .bestHeaderTip()
+                                .hash()
+                );
+
+                assertEquals(
+                        1,
+                        peerManager.readyPeers()
+                                .size()
+                );
+
+            } finally {
+
+                closeAndAwaitLifecycle(
+                        lifecycle,
+                        lifecycleThread
+                );
+            }
+
+            server.get(
+                    5,
+                    TimeUnit.SECONDS
+            );
+
+            assertFalse(
+                    lifecycleThread.isAlive()
+            );
 
             assertEquals(
-                    NodeLifecycleState.RUNNING,
+                    NodeLifecycleState.STOPPED,
                     lifecycle.state()
             );
 
-            assertTrue(
+            assertFalse(
                     lifecycle.isRunning()
             );
 
@@ -339,6 +414,10 @@ class NodeLifecycleServiceTest {
                             .isEmpty()
             );
 
+            /*
+             * Synchronization result must remain committed
+             * after lifecycle shutdown.
+             */
             assertEquals(
                     block1.hash(),
                     validationService
@@ -371,22 +450,11 @@ class NodeLifecycleServiceTest {
                             .hash()
             );
 
-            assertEquals(
-                    1,
-                    peerManager.readyPeers()
-                            .size()
-            );
-
-            lifecycle.close();
-
-            assertEquals(
-                    NodeLifecycleState.STOPPED,
-                    lifecycle.state()
-            );
-
-            server.get(
-                    5,
-                    TimeUnit.SECONDS
+            /*
+             * Shutdown closes and removes every managed peer.
+             */
+            assertTrue(
+                    peerManager.isEmpty()
             );
         }
     }
@@ -433,11 +501,6 @@ class NodeLifecycleServiceTest {
                     output
             );
 
-            /*
-             * First getheaders:
-             *
-             * genesis -> block1
-             */
             BitcoinMessage firstGetHeaders =
                     reader.read(
                             input
@@ -472,10 +535,6 @@ class NodeLifecycleServiceTest {
 
             output.flush();
 
-            /*
-             * HeaderSyncCoordinator continues until peer
-             * answers with an empty headers message.
-             */
             BitcoinMessage secondGetHeaders =
                     reader.read(
                             input
@@ -509,10 +568,6 @@ class NodeLifecycleServiceTest {
 
             output.flush();
 
-            /*
-             * Header chain is now ahead of active chain.
-             * BlockSyncCoordinator requests the body.
-             */
             BitcoinMessage getDataWire =
                     reader.read(
                             input
@@ -560,7 +615,7 @@ class NodeLifecycleServiceTest {
             output.flush();
 
             /*
-             * Keep the connection alive until lifecycle.close().
+             * Keep connection alive until lifecycle.close().
              */
             assertEquals(
                     -1,
@@ -597,10 +652,6 @@ class NodeLifecycleServiceTest {
                         versionWire
                 );
 
-        /*
-         * Fresh database:
-         * active tip is regtest genesis.
-         */
         assertEquals(
                 0,
                 version.startHeight()
@@ -768,14 +819,6 @@ class NodeLifecycleServiceTest {
                             0L
                     );
 
-            /*
-             * Order is intentional:
-             *
-             * OutboundPeerSelector currently preserves the
-             * PeerAddressManager candidate order.
-             *
-             * P1 must therefore be attempted before P2.
-             */
             addressManager.add(
                     failingAddress,
                     Instant.ofEpochSecond(
@@ -815,91 +858,90 @@ class NodeLifecycleServiceTest {
                     lifecycle.state()
             );
 
-            lifecycle.start();
+            Thread lifecycleThread =
+                    startLifecycle(
+                            lifecycle
+                    );
 
-            /*
-             * P1 failed during header synchronization,
-             * but that must not fail the node.
-             */
-            assertEquals(
-                    NodeLifecycleState.RUNNING,
-                    lifecycle.state()
-            );
+            try {
 
-            assertTrue(
-                    lifecycle.isRunning()
-            );
+                awaitRunning(
+                        lifecycle
+                );
 
-            assertTrue(
-                    lifecycle.failure()
-                            .isEmpty()
-            );
+                assertTrue(
+                        lifecycleThread.isAlive()
+                );
 
-            /*
-             * P2 supplied block1 and IBD reached it.
-             */
-            assertEquals(
-                    block1.hash(),
-                    validationService
-                            .activeTip()
-                            .hash()
-            );
+                assertEquals(
+                        NodeLifecycleState.RUNNING,
+                        lifecycle.state()
+                );
 
-            assertEquals(
-                    1L,
-                    validationService
-                            .activeTip()
-                            .height()
-            );
+                assertTrue(
+                        lifecycle.isRunning()
+                );
 
-            assertEquals(
-                    block1.hash(),
-                    syncInfrastructure
-                            .headerChainState()
-                            .bestHeaderTip()
-                            .hash()
-            );
+                assertTrue(
+                        lifecycle.failure()
+                                .isEmpty()
+                );
 
-            assertEquals(
-                    validationService
-                            .activeTip()
-                            .hash(),
-                    syncInfrastructure
-                            .headerChainState()
-                            .bestHeaderTip()
-                            .hash()
-            );
+                assertEquals(
+                        block1.hash(),
+                        validationService
+                                .activeTip()
+                                .hash()
+                );
 
-            /*
-             * Failed P1 must have been removed.
-             * Only healthy P2 remains managed and READY.
-             */
-            assertEquals(
-                    1,
-                    peerManager.size()
-            );
+                assertEquals(
+                        1L,
+                        validationService
+                                .activeTip()
+                                .height()
+                );
 
-            assertEquals(
-                    1,
-                    peerManager.readyPeers()
-                            .size()
-            );
+                assertEquals(
+                        block1.hash(),
+                        syncInfrastructure
+                                .headerChainState()
+                                .bestHeaderTip()
+                                .hash()
+                );
 
-            /*
-             * Make sure the P1 server actually reached
-             * the intended failure point.
-             */
-            failingServer.get(
-                    5,
-                    TimeUnit.SECONDS
-            );
+                assertEquals(
+                        validationService
+                                .activeTip()
+                                .hash(),
+                        syncInfrastructure
+                                .headerChainState()
+                                .bestHeaderTip()
+                                .hash()
+                );
 
-            lifecycle.close();
+                assertEquals(
+                        1,
+                        peerManager.size()
+                );
 
-            assertEquals(
-                    NodeLifecycleState.STOPPED,
-                    lifecycle.state()
-            );
+                assertEquals(
+                        1,
+                        peerManager.readyPeers()
+                                .size()
+                );
+
+                failingServer.get(
+                        5,
+                        TimeUnit.SECONDS
+                );
+
+            } finally {
+
+                closeAndAwaitLifecycle(
+                        lifecycle,
+                        lifecycleThread
+                );
+            }
 
             assertTrue(
                     peerManager.isEmpty()
@@ -1011,9 +1053,6 @@ class NodeLifecycleServiceTest {
                             0L
                     );
 
-            /*
-             * P1 must be attempted first.
-             */
             addressManager.add(
                     silentAddress,
                     Instant.ofEpochSecond(
@@ -1048,80 +1087,80 @@ class NodeLifecycleServiceTest {
                             PeerManager.class
                     );
 
-            lifecycle.start();
+            Thread lifecycleThread =
+                    startLifecycle(
+                            lifecycle
+                    );
 
-            /*
-             * P1 stayed connected but failed to answer
-             * getheaders before the request deadline.
-             *
-             * Lifecycle must have moved to P2.
-             */
-            assertEquals(
-                    NodeLifecycleState.RUNNING,
-                    lifecycle.state()
-            );
+            try {
 
-            assertTrue(
-                    lifecycle.isRunning()
-            );
+                awaitRunning(
+                        lifecycle
+                );
 
-            assertTrue(
-                    lifecycle.failure()
-                            .isEmpty()
-            );
+                assertTrue(
+                        lifecycleThread.isAlive()
+                );
 
-            assertEquals(
-                    block1.hash(),
-                    validationService
-                            .activeTip()
-                            .hash()
-            );
+                assertEquals(
+                        NodeLifecycleState.RUNNING,
+                        lifecycle.state()
+                );
 
-            assertEquals(
-                    1L,
-                    validationService
-                            .activeTip()
-                            .height()
-            );
+                assertTrue(
+                        lifecycle.isRunning()
+                );
 
-            assertEquals(
-                    block1.hash(),
-                    syncInfrastructure
-                            .headerChainState()
-                            .bestHeaderTip()
-                            .hash()
-            );
+                assertTrue(
+                        lifecycle.failure()
+                                .isEmpty()
+                );
 
-            /*
-             * Silent P1 must have been removed and closed.
-             * Only healthy P2 remains.
-             */
-            assertEquals(
-                    1,
-                    peerManager.size()
-            );
+                assertEquals(
+                        block1.hash(),
+                        validationService
+                                .activeTip()
+                                .hash()
+                );
 
-            assertEquals(
-                    1,
-                    peerManager.readyPeers()
-                            .size()
-            );
+                assertEquals(
+                        1L,
+                        validationService
+                                .activeTip()
+                                .height()
+                );
 
-            /*
-             * This also proves lifecycle actually closed P1
-             * after its getheaders timeout.
-             */
-            silentServer.get(
-                    5,
-                    TimeUnit.SECONDS
-            );
+                assertEquals(
+                        block1.hash(),
+                        syncInfrastructure
+                                .headerChainState()
+                                .bestHeaderTip()
+                                .hash()
+                );
 
-            lifecycle.close();
+                assertEquals(
+                        1,
+                        peerManager.size()
+                );
 
-            assertEquals(
-                    NodeLifecycleState.STOPPED,
-                    lifecycle.state()
-            );
+                assertEquals(
+                        1,
+                        peerManager.readyPeers()
+                                .size()
+                );
+
+                silentServer.get(
+                        5,
+                        TimeUnit.SECONDS
+                );
+
+            } finally {
+
+                closeAndAwaitLifecycle(
+                        lifecycle,
+                        lifecycleThread
+                );
+            }
 
             assertTrue(
                     peerManager.isEmpty()
@@ -1213,8 +1252,11 @@ class NodeLifecycleServiceTest {
                     CompletableFuture.runAsync(
                             () -> {
                                 try {
+
                                     lifecycle.start();
+
                                 } catch (IOException exception) {
+
                                     throw new RuntimeException(
                                             exception
                                     );
@@ -1367,11 +1409,6 @@ class NodeLifecycleServiceTest {
                             }
                     );
 
-            /*
-             * Do not close until the peer has actually received
-             * getdata. This proves lifecycle is inside block IBD,
-             * not header synchronization.
-             */
             getDataReceived.get(
                     5,
                     TimeUnit.SECONDS
@@ -1457,9 +1494,6 @@ class NodeLifecycleServiceTest {
                     output
             );
 
-            /*
-             * Header batch containing block1.
-             */
             BitcoinMessage firstGetHeaders =
                     reader.read(
                             input
@@ -1484,10 +1518,6 @@ class NodeLifecycleServiceTest {
 
             output.flush();
 
-            /*
-             * Coordinator asks again from block1.
-             * Empty headers means header synchronization is complete.
-             */
             BitcoinMessage secondGetHeaders =
                     reader.read(
                             input
@@ -1522,9 +1552,6 @@ class NodeLifecycleServiceTest {
 
             output.flush();
 
-            /*
-             * We must now be in block synchronization.
-             */
             BitcoinMessage getDataWire =
                     reader.read(
                             input
@@ -1559,19 +1586,10 @@ class NodeLifecycleServiceTest {
                     requested.hash()
             );
 
-            /*
-             * Signal the test only AFTER getdata reached us.
-             */
             getDataReceived.complete(
                     null
             );
 
-            /*
-             * Deliberately do NOT send the block.
-             *
-             * lifecycle.close() must close this peer and therefore
-             * unblock the pending block download.
-             */
             assertEquals(
                     -1,
                     input.read()
@@ -1645,12 +1663,6 @@ class NodeLifecycleServiceTest {
                     null
             );
 
-            /*
-             * Do not answer.
-             *
-             * The node must close this connection as part
-             * of intentional lifecycle shutdown.
-             */
             assertEquals(
                     -1,
                     input.read()
@@ -1702,9 +1714,6 @@ class NodeLifecycleServiceTest {
                             parameters
                     );
 
-            /*
-             * P1 is a perfectly valid READY peer.
-             */
             performHandshake(
                     reader,
                     encoder,
@@ -1732,22 +1741,6 @@ class NodeLifecycleServiceTest {
                             .isEmpty()
             );
 
-            /*
-             * Deliberately send nothing.
-             *
-             * TCP stays alive, so this is NOT the disconnect
-             * failover scenario tested elsewhere.
-             *
-             * NodeLifecycleService should hit its 150 ms
-             * HeaderSynchronizer deadline and close this peer.
-             */
-            /*
-             * Keep P1 connected and completely silent long enough
-             * for the node-side HeaderSynchronizer deadline to expire.
-             *
-             * The important condition is that this peer does NOT
-             * disconnect before the 150 ms request timeout.
-             */
             Thread.sleep(
                     500
             );
@@ -1794,10 +1787,6 @@ class NodeLifecycleServiceTest {
                             parameters
                     );
 
-            /*
-             * Connection itself is completely valid.
-             * P1 must become READY first.
-             */
             performHandshake(
                     reader,
                     encoder,
@@ -1805,9 +1794,6 @@ class NodeLifecycleServiceTest {
                     output
             );
 
-            /*
-             * Wait until the node actually starts header sync.
-             */
             BitcoinMessage getHeadersWire =
                     reader.read(
                             input
@@ -1828,20 +1814,90 @@ class NodeLifecycleServiceTest {
                             .isEmpty()
             );
 
-            /*
-             * Return without sending headers.
-             *
-             * try-with-resources closes the socket here,
-             * so PeerMessageReader on the node side must
-             * detect the disconnect and fail the pending
-             * HeaderSynchronizer future.
-             */
         } catch (Exception exception) {
 
             throw new RuntimeException(
                     exception
             );
         }
+    }
+
+    private static Thread startLifecycle(
+            NodeLifecycleService lifecycle
+    ) {
+
+        return Thread.ofPlatform()
+                .name(
+                        "node-lifecycle-test"
+                )
+                .start(
+                        () -> {
+                            try {
+
+                                lifecycle.start();
+
+                            } catch (IOException exception) {
+
+                                throw new RuntimeException(
+                                        exception
+                                );
+                            }
+                        }
+                );
+    }
+
+    private static void awaitRunning(
+            NodeLifecycleService lifecycle
+    ) throws InterruptedException {
+
+        long deadline =
+                System.nanoTime()
+                        + TimeUnit.SECONDS.toNanos(
+                        5
+                );
+
+        while (!lifecycle.isRunning()
+                && lifecycle.state()
+                != NodeLifecycleState.FAILED
+                && System.nanoTime() < deadline) {
+
+            Thread.sleep(
+                    10
+            );
+        }
+
+        assertEquals(
+                NodeLifecycleState.RUNNING,
+                lifecycle.state(),
+                () -> "Lifecycle did not reach RUNNING; failure="
+                        + lifecycle.failure()
+        );
+    }
+
+    private static void closeAndAwaitLifecycle(
+            NodeLifecycleService lifecycle,
+            Thread lifecycleThread
+    ) throws Exception {
+
+        lifecycle.close();
+
+        lifecycleThread.join(
+                5_000
+        );
+
+        assertFalse(
+                lifecycleThread.isAlive(),
+                "Lifecycle thread did not terminate after close()"
+        );
+
+        assertEquals(
+                NodeLifecycleState.STOPPED,
+                lifecycle.state()
+        );
+
+        assertFalse(
+                lifecycle.isRunning()
+        );
     }
 
     private static Block child(

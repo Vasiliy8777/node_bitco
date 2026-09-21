@@ -185,6 +185,8 @@ public final class NodeLifecycleService
                     NodeLifecycleState.RUNNING
             );
 
+            awaitShutdown();
+
         } catch (IOException | RuntimeException exception) {
 
             if (isStoppingOrStopped()) {
@@ -374,6 +376,31 @@ public final class NodeLifecycleService
         }
     }
 
+    private void awaitShutdown()
+            throws IOException {
+
+        synchronized (this) {
+
+            while (state == NodeLifecycleState.RUNNING) {
+
+                try {
+
+                    wait();
+
+                } catch (InterruptedException exception) {
+
+                    Thread.currentThread()
+                            .interrupt();
+
+                    throw new IOException(
+                            "Interrupted while waiting for node shutdown",
+                            exception
+                    );
+                }
+            }
+        }
+    }
+
     private void setState(
             NodeLifecycleState newState
     ) {
@@ -434,6 +461,8 @@ public final class NodeLifecycleService
 
             state =
                     NodeLifecycleState.FAILED;
+
+            notifyAll();
         }
 
         log.error(
@@ -491,6 +520,8 @@ public final class NodeLifecycleService
 
             state =
                     NodeLifecycleState.STOPPING;
+
+            notifyAll();
         }
 
         log.info(

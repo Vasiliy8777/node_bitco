@@ -7,9 +7,13 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.security.SecureRandom;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 public final class Peer implements AutoCloseable {
+    private final List<PeerCloseListener> closeListeners =
+            new CopyOnWriteArrayList<>();
     private final PeerMessageDispatcher messageDispatcher;
     private final PeerMessageReader messageReader;
     private static final int WTXID_RELAY_VERSION =
@@ -98,6 +102,50 @@ public final class Peer implements AutoCloseable {
                         this,
                         messageDispatcher
                 );
+    }
+
+    public void addCloseListener(
+            PeerCloseListener listener
+    ) {
+        closeListeners.add(
+                java.util.Objects.requireNonNull(
+                        listener,
+                        "listener"
+                )
+        );
+    }
+
+    private void notifyClosed(
+            IOException cause
+    ) {
+
+        for (PeerCloseListener listener : closeListeners) {
+
+            try {
+
+                listener.onPeerClosed(
+                        this,
+                        cause
+                );
+
+            } catch (RuntimeException ignored) {
+                /*
+                 * A lifecycle observer must never break
+                 * peer shutdown.
+                 */
+            }
+        }
+    }
+
+    public void removeCloseListener(
+            PeerCloseListener listener
+    ) {
+        closeListeners.remove(
+                java.util.Objects.requireNonNull(
+                        listener,
+                        "listener"
+                )
+        );
     }
 
     public void connect(
@@ -564,19 +612,33 @@ public final class Peer implements AutoCloseable {
         );
 
         try {
+
             connection.close();
+
         } catch (IOException closeException) {
+
             failure.addSuppressed(
                     closeException
             );
+
         } finally {
+
             state =
                     PeerState.CLOSED;
+
+            notifyClosed(
+                    failure
+            );
         }
     }
 
     @Override
-    public void close() throws IOException {
+    public void close()
+            throws IOException {
+
+        if (state == PeerState.CLOSED) {
+            return;
+        }
 
         IOException closedFailure =
                 new IOException(
@@ -587,15 +649,37 @@ public final class Peer implements AutoCloseable {
                 closedFailure
         );
 
+        IOException closeFailure =
+                null;
+
         try {
+
             messageReader.close();
+
         } finally {
+
             try {
+
                 connection.close();
+
+            } catch (IOException exception) {
+
+                closeFailure =
+                        exception;
+
             } finally {
+
                 state =
                         PeerState.CLOSED;
+
+                notifyClosed(
+                        closeFailure
+                );
             }
+        }
+
+        if (closeFailure != null) {
+            throw closeFailure;
         }
     }
 }

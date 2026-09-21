@@ -26,8 +26,13 @@ class PeerManagerTest {
             Peer second =
                     newPeer();
 
-            manager.add(first);
-            manager.add(second);
+            manager.add(
+                    first
+            );
+
+            manager.add(
+                    second
+            );
 
             assertEquals(
                     2,
@@ -43,7 +48,9 @@ class PeerManagerTest {
                     manager.isEmpty()
             );
 
-            manager.remove(first);
+            manager.remove(
+                    first
+            );
 
             assertEquals(
                     1,
@@ -52,7 +59,8 @@ class PeerManagerTest {
 
             assertEquals(
                     second,
-                    manager.peers().get(0)
+                    manager.peers()
+                            .getFirst()
             );
         }
     }
@@ -67,8 +75,13 @@ class PeerManagerTest {
             Peer peer =
                     newPeer();
 
-            manager.add(peer);
-            manager.add(peer);
+            manager.add(
+                    peer
+            );
+
+            manager.add(
+                    peer
+            );
 
             assertEquals(
                     1,
@@ -87,12 +100,16 @@ class PeerManagerTest {
             Peer peer =
                     newPeer();
 
-            manager.add(peer);
+            manager.add(
+                    peer
+            );
 
             var snapshot =
                     manager.peers();
 
-            manager.remove(peer);
+            manager.remove(
+                    peer
+            );
 
             assertEquals(
                     1,
@@ -124,6 +141,38 @@ class PeerManagerTest {
             assertTrue(
                     manager.readyPeers()
                             .isEmpty()
+            );
+        }
+    }
+
+    @Test
+    void shouldRemovePeerWhenPeerCloses()
+            throws Exception {
+
+        try (PeerManager manager =
+                     new PeerManager()) {
+
+            Peer peer =
+                    newPeer();
+
+            manager.add(
+                    peer
+            );
+
+            assertEquals(
+                    1,
+                    manager.size()
+            );
+
+            peer.close();
+
+            assertEquals(
+                    0,
+                    manager.size()
+            );
+
+            assertTrue(
+                    manager.isEmpty()
             );
         }
     }

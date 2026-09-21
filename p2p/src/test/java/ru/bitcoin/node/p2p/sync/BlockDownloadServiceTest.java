@@ -564,6 +564,11 @@ class BlockDownloadServiceTest {
                     secondPeer
             );
 
+            assertEquals(
+                    2,
+                    peerManager.size()
+            );
+
             BlockDownloadService service =
                     new BlockDownloadService(
                             peerManager
@@ -586,8 +591,10 @@ class BlockDownloadServiceTest {
 
             /*
              * A transport failure closes the broken peer.
-             * PeerManager may still own it, but it must no longer
-             * participate in subsequent downloads.
+             *
+             * PeerManager observes the close event and removes
+             * the dead peer completely instead of retaining a
+             * CLOSED peer and merely filtering it from readyPeers().
              */
             assertEquals(
                     PeerState.CLOSED,
@@ -599,17 +606,37 @@ class BlockDownloadServiceTest {
             );
 
             assertFalse(
+                    peerManager.peers()
+                            .contains(
+                                    firstPeer
+                            )
+            );
+
+            assertFalse(
                     peerManager.readyPeers()
                             .contains(
                                     firstPeer
                             )
             );
 
-            assertTrue(
+            /*
+             * Only the healthy peer remains managed.
+             */
+            assertEquals(
+                    1,
+                    peerManager.size()
+            );
+
+            assertEquals(
+                    1,
                     peerManager.peers()
-                            .contains(
-                                    firstPeer
-                            )
+                            .size()
+            );
+
+            assertSame(
+                    secondPeer,
+                    peerManager.peers()
+                            .getFirst()
             );
 
             assertEquals(
@@ -621,7 +648,7 @@ class BlockDownloadServiceTest {
             assertSame(
                     secondPeer,
                     peerManager.readyPeers()
-                            .get(0)
+                            .getFirst()
             );
 
             release.countDown();
