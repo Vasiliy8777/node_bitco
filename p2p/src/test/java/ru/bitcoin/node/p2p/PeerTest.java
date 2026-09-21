@@ -14,9 +14,8 @@ import java.io.BufferedOutputStream;
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -1398,6 +1397,163 @@ class PeerTest {
                 );
             }
         }
+    }
+
+    @Test
+    void shouldNotifyLateCloseListenerImmediately()
+            throws Exception {
+
+        Peer peer =
+                new Peer(
+                        connection(),
+                        0,
+                        0,
+                        true
+                );
+
+        peer.close();
+
+        AtomicInteger notifications =
+                new AtomicInteger();
+
+        peer.addCloseListener(
+                (closedPeer, cause) -> {
+
+                    assertSame(
+                            peer,
+                            closedPeer
+                    );
+
+                    assertNotNull(
+                            cause
+                    );
+
+                    notifications.incrementAndGet();
+                }
+        );
+
+        assertEquals(
+                1,
+                notifications.get()
+        );
+    }
+
+    @Test
+    void shouldNotifyCloseListenersExactlyOnceWhenCloseRacesReaderFailure()
+            throws Exception {
+
+        Peer peer =
+                new Peer(
+                        connection(),
+                        0,
+                        0,
+                        true
+                );
+
+        AtomicInteger notifications =
+                new AtomicInteger();
+
+        peer.addCloseListener(
+                (closedPeer, cause) ->
+                        notifications.incrementAndGet()
+        );
+
+        int taskCount =
+                32;
+
+        CountDownLatch ready =
+                new CountDownLatch(
+                        taskCount
+                );
+
+        CountDownLatch start =
+                new CountDownLatch(
+                        1
+                );
+
+        ExecutorService executor =
+                Executors.newFixedThreadPool(
+                        taskCount
+                );
+
+        try {
+
+            CompletableFuture<?>[] futures =
+                    new CompletableFuture<?>[
+                            taskCount
+                            ];
+
+            for (int i = 0;
+                 i < taskCount;
+                 i++) {
+
+                final int index =
+                        i;
+
+                futures[i] =
+                        CompletableFuture.runAsync(
+                                () -> {
+
+                                    ready.countDown();
+
+                                    try {
+
+                                        start.await();
+
+                                        if ((index & 1) == 0) {
+
+                                            peer.close();
+
+                                        } else {
+
+                                            peer.handleReaderFailure(
+                                                    new IOException(
+                                                            "reader failed"
+                                                    )
+                                            );
+                                        }
+
+                                    } catch (Exception exception) {
+
+                                        throw new RuntimeException(
+                                                exception
+                                        );
+                                    }
+                                },
+                                executor
+                        );
+            }
+
+            assertTrue(
+                    ready.await(
+                            5,
+                            TimeUnit.SECONDS
+                    )
+            );
+
+            start.countDown();
+
+            CompletableFuture.allOf(
+                    futures
+            ).get(
+                    5,
+                    TimeUnit.SECONDS
+            );
+
+        } finally {
+
+            executor.shutdownNow();
+        }
+
+        assertEquals(
+                PeerState.CLOSED,
+                peer.state()
+        );
+
+        assertEquals(
+                1,
+                notifications.get()
+        );
     }
 
     private static void sendVersion(

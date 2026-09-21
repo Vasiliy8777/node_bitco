@@ -177,6 +177,33 @@ class PeerManagerTest {
         }
     }
 
+    @Test
+    void shouldNotRetainPeerThatWasAlreadyClosed()
+            throws Exception {
+
+        try (PeerManager manager =
+                     new PeerManager()) {
+
+            Peer peer =
+                    newPeer();
+
+            peer.close();
+
+            manager.add(
+                    peer
+            );
+
+            assertTrue(
+                    manager.isEmpty()
+            );
+
+            assertEquals(
+                    0,
+                    manager.size()
+            );
+        }
+    }
+
     private static Peer newPeer() {
 
         PeerConnection connection =

@@ -14,6 +14,10 @@ import java.util.concurrent.CopyOnWriteArrayList;
 public final class Peer implements AutoCloseable {
     private final List<PeerCloseListener> closeListeners =
             new CopyOnWriteArrayList<>();
+    private final Object lifecycleLock =
+            new Object();
+
+    private IOException closeCause;
     private final PeerMessageDispatcher messageDispatcher;
     private final PeerMessageReader messageReader;
     private static final int WTXID_RELAY_VERSION =
@@ -107,33 +111,67 @@ public final class Peer implements AutoCloseable {
     public void addCloseListener(
             PeerCloseListener listener
     ) {
-        closeListeners.add(
+        PeerCloseListener checked =
                 java.util.Objects.requireNonNull(
                         listener,
                         "listener"
-                )
+                );
+
+        IOException cause;
+
+        synchronized (lifecycleLock) {
+
+            if (state != PeerState.CLOSED) {
+
+                closeListeners.add(
+                        checked
+                );
+
+                return;
+            }
+
+            cause =
+                    closeCause;
+        }
+
+        notifyClosed(
+                checked,
+                cause
         );
     }
 
     private void notifyClosed(
+            List<PeerCloseListener> listeners,
             IOException cause
     ) {
 
-        for (PeerCloseListener listener : closeListeners) {
+        for (PeerCloseListener listener : listeners) {
 
-            try {
+            notifyClosed(
+                    listener,
+                    cause
+            );
+        }
+    }
 
-                listener.onPeerClosed(
-                        this,
-                        cause
-                );
+    private void notifyClosed(
+            PeerCloseListener listener,
+            IOException cause
+    ) {
 
-            } catch (RuntimeException ignored) {
-                /*
-                 * A lifecycle observer must never break
-                 * peer shutdown.
-                 */
-            }
+        try {
+
+            listener.onPeerClosed(
+                    this,
+                    cause
+            );
+
+        } catch (RuntimeException ignored) {
+
+            /*
+             * Lifecycle observer must never
+             * break peer shutdown.
+             */
         }
     }
 
@@ -594,17 +632,39 @@ public final class Peer implements AutoCloseable {
     void handleReaderFailure(
             IOException failure
     ) {
+
         if (failure == null) {
+
             throw new IllegalArgumentException(
                     "failure must not be null"
             );
         }
 
-        /*
-         * Explicit close already owns the CLOSED transition.
-         */
-        if (state == PeerState.CLOSED) {
-            return;
+        List<PeerCloseListener> listeners;
+
+        synchronized (lifecycleLock) {
+
+            /*
+             * Another thread may already own
+             * the CLOSED transition.
+             *
+             * Only the first thread is allowed
+             * to perform shutdown notification.
+             */
+            if (state == PeerState.CLOSED) {
+                return;
+            }
+
+            state =
+                    PeerState.CLOSED;
+
+            closeCause =
+                    failure;
+
+            listeners =
+                    List.copyOf(
+                            closeListeners
+                    );
         }
 
         messageDispatcher.failAllPending(
@@ -612,6 +672,8 @@ public final class Peer implements AutoCloseable {
         );
 
         try {
+
+            messageReader.close();
 
             connection.close();
 
@@ -623,10 +685,8 @@ public final class Peer implements AutoCloseable {
 
         } finally {
 
-            state =
-                    PeerState.CLOSED;
-
             notifyClosed(
+                    listeners,
                     failure
             );
         }
@@ -636,14 +696,34 @@ public final class Peer implements AutoCloseable {
     public void close()
             throws IOException {
 
-        if (state == PeerState.CLOSED) {
-            return;
-        }
-
         IOException closedFailure =
                 new IOException(
                         "Peer closed"
                 );
+
+        List<PeerCloseListener> listeners;
+
+        synchronized (lifecycleLock) {
+
+            /*
+             * Exactly one thread owns
+             * the CLOSED transition.
+             */
+            if (state == PeerState.CLOSED) {
+                return;
+            }
+
+            state =
+                    PeerState.CLOSED;
+
+            closeCause =
+                    closedFailure;
+
+            listeners =
+                    List.copyOf(
+                            closeListeners
+                    );
+        }
 
         messageDispatcher.failAllPending(
                 closedFailure
@@ -667,18 +747,21 @@ public final class Peer implements AutoCloseable {
                 closeFailure =
                         exception;
 
+                closedFailure.addSuppressed(
+                        exception
+                );
+
             } finally {
 
-                state =
-                        PeerState.CLOSED;
-
                 notifyClosed(
-                        closeFailure
+                        listeners,
+                        closedFailure
                 );
             }
         }
 
         if (closeFailure != null) {
+
             throw closeFailure;
         }
     }

@@ -24,12 +24,35 @@ public final class PeerManager
             return;
         }
 
-        peer.addCloseListener(
-                this::onPeerClosed
-        );
-
+        /*
+         * IMPORTANT:
+         *
+         * Add the peer before registering
+         * the close listener.
+         *
+         * Peer.addCloseListener() immediately
+         * reports an already CLOSED peer.
+         *
+         * Therefore this ordering closes the race:
+         *
+         * peer closes
+         *      ↓
+         * PeerManager.add(peer)
+         *      ↓
+         * add to collection
+         *      ↓
+         * addCloseListener()
+         *      ↓
+         * immediate close callback
+         *      ↓
+         * peer removed again
+         */
         peers.add(
                 peer
+        );
+
+        peer.addCloseListener(
+                this::onPeerClosed
         );
     }
 
@@ -49,21 +72,26 @@ public final class PeerManager
     public synchronized void remove(
             Peer peer
     ) {
+
         Objects.requireNonNull(
                 peer,
                 "peer"
         );
 
-        peers.remove(peer);
+        peers.remove(
+                peer
+        );
     }
 
     public synchronized List<Peer> peers() {
+
         return List.copyOf(
                 peers
         );
     }
 
     public synchronized List<Peer> readyPeers() {
+
         return peers.stream()
                 .filter(Peer::isReady)
                 .toList();
@@ -84,6 +112,7 @@ public final class PeerManager
         List<Peer> snapshot;
 
         synchronized (this) {
+
             snapshot =
                     List.copyOf(
                             peers
@@ -96,10 +125,15 @@ public final class PeerManager
                 null;
 
         for (Peer peer : snapshot) {
+
             try {
+
                 peer.close();
+
             } catch (IOException exception) {
+
                 if (failure == null) {
+
                     failure =
                             new IOException(
                                     "Failed to close one or more peers"
