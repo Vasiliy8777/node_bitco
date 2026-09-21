@@ -14,6 +14,7 @@ import ru.bitcoin.node.consensus.time.AdjustedTime;
 import ru.bitcoin.node.mempool.Mempool;
 import ru.bitcoin.node.p2p.BitcoinClient;
 import ru.bitcoin.node.p2p.OutboundPeerManager;
+import ru.bitcoin.node.p2p.OutboundPeerSupervisor;
 import ru.bitcoin.node.p2p.PeerManager;
 import ru.bitcoin.node.p2p.address.PeerAddressManager;
 import ru.bitcoin.node.p2p.sync.BlockDownloadScheduler;
@@ -114,6 +115,22 @@ public class NodeConfiguration {
     }
 
     @Bean
+    public OutboundPeerSupervisor outboundPeerSupervisor(
+            OutboundPeerManager outboundPeerManager,
+            NodeValidationService validationService
+    ) {
+
+        return new OutboundPeerSupervisor(
+                outboundPeerManager,
+                () -> Math.toIntExact(
+                        validationService
+                                .activeTip()
+                                .height()
+                )
+        );
+    }
+
+    @Bean
     public PeerDiscovery peerDiscovery(
             NetworkParameters parameters,
             PeerAddressManager peerAddressManager
@@ -206,17 +223,16 @@ public class NodeConfiguration {
             PeerAddressManager addressManager,
             PeerDiscovery peerDiscovery,
             OutboundPeerManager outboundPeerManager,
+            OutboundPeerSupervisor outboundPeerSupervisor,
             PeerManager peerManager,
             BlockSyncCoordinator blockSyncCoordinator,
-            @Value("${bitcoin.p2p.header-response-timeout-millis:20000}")
-            long headerResponseTimeoutMillis
+            NetworkParameters parameters
     ) {
-        if (headerResponseTimeoutMillis <= 0) {
-            throw new IllegalArgumentException(
-                    "bitcoin.p2p.header-response-timeout-millis "
-                            + "must be positive"
-            );
-        }
+
+        Duration headerResponseTimeout =
+                Duration.ofSeconds(
+                        parameters.targetSpacingSeconds()
+                );
 
         return new NodeLifecycleService(
                 validationService,
@@ -224,11 +240,10 @@ public class NodeConfiguration {
                 addressManager,
                 peerDiscovery,
                 outboundPeerManager,
+                outboundPeerSupervisor,
                 peerManager,
                 blockSyncCoordinator,
-                Duration.ofMillis(
-                        headerResponseTimeoutMillis
-                )
+                headerResponseTimeout
         );
     }
 

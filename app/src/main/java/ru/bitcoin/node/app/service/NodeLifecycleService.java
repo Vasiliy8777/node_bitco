@@ -10,6 +10,7 @@ import ru.bitcoin.node.chain.BlockIndex;
 import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.p2p.OutboundPeerConnection;
 import ru.bitcoin.node.p2p.OutboundPeerManager;
+import ru.bitcoin.node.p2p.OutboundPeerSupervisor;
 import ru.bitcoin.node.p2p.Peer;
 import ru.bitcoin.node.p2p.PeerManager;
 import ru.bitcoin.node.p2p.address.PeerAddress;
@@ -43,6 +44,7 @@ public final class NodeLifecycleService
     private final PeerAddressManager addressManager;
     private final PeerDiscovery peerDiscovery;
     private final OutboundPeerManager outboundPeerManager;
+    private final OutboundPeerSupervisor outboundPeerSupervisor;
     private final PeerManager peerManager;
 
     private final BlockSyncCoordinator blockSyncCoordinator;
@@ -60,11 +62,11 @@ public final class NodeLifecycleService
             PeerAddressManager addressManager,
             PeerDiscovery peerDiscovery,
             OutboundPeerManager outboundPeerManager,
+            OutboundPeerSupervisor outboundPeerSupervisor,
             PeerManager peerManager,
             BlockSyncCoordinator blockSyncCoordinator,
             Duration headerResponseTimeout
     ) {
-
         this.validationService =
                 Objects.requireNonNull(
                         validationService,
@@ -93,6 +95,12 @@ public final class NodeLifecycleService
                 Objects.requireNonNull(
                         outboundPeerManager,
                         "outboundPeerManager"
+                );
+
+        this.outboundPeerSupervisor =
+                Objects.requireNonNull(
+                        outboundPeerSupervisor,
+                        "outboundPeerSupervisor"
                 );
 
         this.peerManager =
@@ -160,9 +168,18 @@ public final class NodeLifecycleService
                             activeHeight
                     );
 
-            synchronizeHeadersWithFailover(
-                    startHeight
-            );
+            /*
+             * Keep the exact outbound connection that
+             * successfully completed header synchronization.
+             *
+             * We must not later guess the outbound peer
+             * from PeerManager because PeerManager may also
+             * contain other peers.
+             */
+            OutboundPeerConnection activeOutboundConnection =
+                    synchronizeHeadersWithFailover(
+                            startHeight
+                    );
 
             ensureNotStopping();
 
@@ -180,6 +197,17 @@ public final class NodeLifecycleService
                     return;
                 }
             }
+
+            /*
+             * Initial synchronization is complete.
+             * From this point the outbound supervisor owns
+             * long-lived outbound reconnection.
+             */
+            outboundPeerSupervisor.start(
+                    activeOutboundConnection
+            );
+
+            ensureNotStopping();
 
             setState(
                     NodeLifecycleState.RUNNING
@@ -263,7 +291,7 @@ public final class NodeLifecycleService
         );
     }
 
-    private void synchronizeHeadersWithFailover(
+    private OutboundPeerConnection synchronizeHeadersWithFailover(
             int startHeight
     ) throws IOException {
 
@@ -307,7 +335,11 @@ public final class NodeLifecycleService
                         peer
                 );
 
-                return;
+                /*
+                 * Return the exact connection that successfully
+                 * completed header synchronization.
+                 */
+                return connection;
 
             } catch (IOException syncFailure) {
 
@@ -471,6 +503,24 @@ public final class NodeLifecycleService
                 exception
         );
 
+        /*
+         * Stop reconnect activity before closing peers.
+         *
+         * Otherwise closing PeerManager could trigger
+         * a peer-close callback while the supervisor
+         * is still allowed to reconnect.
+         */
+        try {
+
+            outboundPeerSupervisor.close();
+
+        } catch (RuntimeException closeException) {
+
+            exception.addSuppressed(
+                    closeException
+            );
+        }
+
         try {
 
             peerManager.close();
@@ -532,14 +582,42 @@ public final class NodeLifecycleService
         IOException closeFailure =
                 null;
 
+        /*
+         * IMPORTANT:
+         *
+         * Stop the reconnect worker BEFORE PeerManager closes
+         * the active peer.
+         */
+        try {
+
+            outboundPeerSupervisor.close();
+
+        } catch (RuntimeException exception) {
+
+            closeFailure =
+                    new IOException(
+                            "Failed to stop outbound peer supervisor",
+                            exception
+                    );
+        }
+
         try {
 
             peerManager.close();
 
         } catch (IOException exception) {
 
-            closeFailure =
-                    exception;
+            if (closeFailure == null) {
+
+                closeFailure =
+                        exception;
+
+            } else {
+
+                closeFailure.addSuppressed(
+                        exception
+                );
+            }
         }
 
         if (closeFailure == null) {
@@ -548,6 +626,8 @@ public final class NodeLifecycleService
 
                 state =
                         NodeLifecycleState.STOPPED;
+
+                notifyAll();
             }
 
             log.info(
@@ -563,6 +643,8 @@ public final class NodeLifecycleService
 
                 state =
                         NodeLifecycleState.FAILED;
+
+                notifyAll();
             }
 
             log.error(
