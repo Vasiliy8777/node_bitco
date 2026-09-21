@@ -18,7 +18,7 @@ public final class BlockDownloadStallTracker {
         );
     }
 
-    BlockDownloadStallTracker(
+    public BlockDownloadStallTracker(
             LongSupplier nanoTime
     ) {
 
