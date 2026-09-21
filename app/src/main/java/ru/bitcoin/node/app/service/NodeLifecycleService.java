@@ -1,5 +1,7 @@
 package ru.bitcoin.node.app.service;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import ru.bitcoin.node.app.NodeValidationService;
 import ru.bitcoin.node.app.sync.BlockSyncCoordinator;
 import ru.bitcoin.node.app.sync.HeaderSyncCoordinator;
@@ -25,7 +27,10 @@ import java.util.Optional;
 public final class NodeLifecycleService
         implements NodeLifecycle {
 
-    private final Duration headerResponseTimeout;
+    private static final Logger log =
+            LoggerFactory.getLogger(
+                    NodeLifecycleService.class
+            );
 
     private static final Hash256 HEADER_SYNC_STOP_HASH =
             new Hash256(
@@ -42,6 +47,8 @@ public final class NodeLifecycleService
 
     private final BlockSyncCoordinator blockSyncCoordinator;
 
+    private final Duration headerResponseTimeout;
+
     private NodeLifecycleState state =
             NodeLifecycleState.NEW;
 
@@ -57,6 +64,7 @@ public final class NodeLifecycleService
             BlockSyncCoordinator blockSyncCoordinator,
             Duration headerResponseTimeout
     ) {
+
         this.validationService =
                 Objects.requireNonNull(
                         validationService,
@@ -121,18 +129,20 @@ public final class NodeLifecycleService
         synchronized (this) {
 
             if (state != NodeLifecycleState.NEW) {
+
                 throw new IllegalStateException(
                         "Node cannot start from state "
                                 + state
                 );
             }
 
-            state =
-                    NodeLifecycleState.STARTING;
-
             failure =
                     null;
         }
+
+        setState(
+                NodeLifecycleState.STARTING
+        );
 
         try {
 
@@ -169,10 +179,11 @@ public final class NodeLifecycleService
 
                     return;
                 }
-
-                state =
-                        NodeLifecycleState.RUNNING;
             }
+
+            setState(
+                    NodeLifecycleState.RUNNING
+            );
 
         } catch (IOException | RuntimeException exception) {
 
@@ -363,7 +374,7 @@ public final class NodeLifecycleService
         }
     }
 
-    private synchronized void setState(
+    private void setState(
             NodeLifecycleState newState
     ) {
 
@@ -372,41 +383,71 @@ public final class NodeLifecycleService
                 "newState"
         );
 
-        if (state == NodeLifecycleState.STOPPING
-                || state == NodeLifecycleState.STOPPED
-                || state == NodeLifecycleState.FAILED) {
+        NodeLifecycleState previousState;
 
-            throw new IllegalStateException(
-                    "Cannot transition node from "
-                            + state
-                            + " to "
-                            + newState
-            );
+        synchronized (this) {
+
+            if (state == NodeLifecycleState.STOPPING
+                    || state == NodeLifecycleState.STOPPED
+                    || state == NodeLifecycleState.FAILED) {
+
+                throw new IllegalStateException(
+                        "Cannot transition node from "
+                                + state
+                                + " to "
+                                + newState
+                );
+            }
+
+            previousState =
+                    state;
+
+            state =
+                    newState;
         }
 
-        state =
-                newState;
+        log.info(
+                "Bitcoin node state: {} -> {}",
+                previousState,
+                newState
+        );
     }
 
     private void fail(
             Throwable exception
     ) {
 
+        Objects.requireNonNull(
+                exception,
+                "exception"
+        );
+
+        NodeLifecycleState previousState;
+
         synchronized (this) {
 
+            previousState =
+                    state;
+
             failure =
-                    Objects.requireNonNull(
-                            exception,
-                            "exception"
-                    );
+                    exception;
 
             state =
                     NodeLifecycleState.FAILED;
         }
 
+        log.error(
+                "Bitcoin node state: {} -> FAILED",
+                previousState,
+                exception
+        );
+
         try {
+
             peerManager.close();
+
         } catch (IOException closeException) {
+
             exception.addSuppressed(
                     closeException
             );
@@ -418,18 +459,22 @@ public final class NodeLifecycleService
     }
 
     public synchronized Optional<Throwable> failure() {
+
         return Optional.ofNullable(
                 failure
         );
     }
 
     public synchronized boolean isRunning() {
+
         return state == NodeLifecycleState.RUNNING;
     }
 
     @Override
     public void close()
             throws IOException {
+
+        NodeLifecycleState previousState;
 
         synchronized (this) {
 
@@ -441,9 +486,17 @@ public final class NodeLifecycleService
                 return;
             }
 
+            previousState =
+                    state;
+
             state =
                     NodeLifecycleState.STOPPING;
         }
+
+        log.info(
+                "Bitcoin node state: {} -> STOPPING",
+                previousState
+        );
 
         IOException closeFailure =
                 null;
@@ -458,14 +511,21 @@ public final class NodeLifecycleService
                     exception;
         }
 
-        synchronized (this) {
+        if (closeFailure == null) {
 
-            if (closeFailure == null) {
+            synchronized (this) {
 
                 state =
                         NodeLifecycleState.STOPPED;
+            }
 
-            } else {
+            log.info(
+                    "Bitcoin node state: STOPPING -> STOPPED"
+            );
+
+        } else {
+
+            synchronized (this) {
 
                 failure =
                         closeFailure;
@@ -473,9 +533,12 @@ public final class NodeLifecycleService
                 state =
                         NodeLifecycleState.FAILED;
             }
-        }
 
-        if (closeFailure != null) {
+            log.error(
+                    "Bitcoin node state: STOPPING -> FAILED",
+                    closeFailure
+            );
+
             throw closeFailure;
         }
     }

@@ -5,6 +5,8 @@ import org.rocksdb.RocksDB;
 import org.rocksdb.RocksDBException;
 import org.rocksdb.WriteOptions;
 
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 
 public final class RocksDbDatabase
@@ -29,6 +31,11 @@ public final class RocksDbDatabase
         }
 
         try {
+
+            Files.createDirectories(
+                    databasePath
+            );
+
             options =
                     new Options()
                             .setCreateIfMissing(true);
@@ -39,12 +46,12 @@ public final class RocksDbDatabase
                             databasePath.toString()
                     );
 
-        } catch (RocksDBException e) {
+        } catch (IOException | RocksDBException exception) {
 
             throw new IllegalStateException(
                     "Failed to open RocksDB: "
                             + databasePath,
-                    e
+                    exception
             );
         }
     }

@@ -26,6 +26,7 @@ import ru.bitcoin.node.storage.rocksdb.RocksDbDatabase;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 
 /**
  * A data directory explicitly enables persistent node state.
@@ -79,8 +80,37 @@ public class NodeConfiguration {
     }
 
     @Bean
-    public PeerAddressManager peerAddressManager() {
-        return new PeerAddressManager();
+    public PeerAddressManager peerAddressManager(
+            NetworkParameters parameters,
+            @Value("${bitcoin.p2p.peers:}")
+            String configuredPeers
+    ) {
+
+        PeerAddressManager addressManager =
+                new PeerAddressManager();
+
+        if (configuredPeers == null
+                || configuredPeers.isBlank()) {
+
+            return addressManager;
+        }
+
+        List<String> peers =
+                List.of(
+                        configuredPeers.split(",")
+                );
+
+        ConfiguredPeerLoader configuredPeerLoader =
+                new ConfiguredPeerLoader(
+                        parameters,
+                        addressManager
+                );
+
+        configuredPeerLoader.load(
+                peers
+        );
+
+        return addressManager;
     }
 
     @Bean
