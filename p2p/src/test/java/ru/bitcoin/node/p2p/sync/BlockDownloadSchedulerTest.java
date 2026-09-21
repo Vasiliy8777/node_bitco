@@ -21,10 +21,7 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -764,24 +761,37 @@ class BlockDownloadSchedulerTest {
                                             io
                                     );
 
-                                    Hash256 requestedFirst =
+                                    /*
+                                     * Both downloads are submitted concurrently.
+                                     *
+                                     * PeerConnection serializes complete wire messages, but the
+                                     * executor is free to schedule either download task first.
+                                     * Therefore wire request order is intentionally irrelevant.
+                                     */
+                                    Hash256 firstRequest =
                                             readRequestedBlockHash(
                                                     io
                                             );
 
-                                    Hash256 requestedSecond =
+                                    Hash256 secondRequest =
                                             readRequestedBlockHash(
                                                     io
                                             );
 
-                                    assertEquals(
-                                            first.hash(),
-                                            requestedFirst
+                                    assertNotEquals(
+                                            firstRequest,
+                                            secondRequest
                                     );
 
                                     assertEquals(
-                                            second.hash(),
-                                            requestedSecond
+                                            Set.of(
+                                                    first.hash(),
+                                                    second.hash()
+                                            ),
+                                            Set.of(
+                                                    firstRequest,
+                                                    secondRequest
+                                            )
                                     );
 
                                     /*
@@ -861,6 +871,22 @@ class BlockDownloadSchedulerTest {
                         session.pendingCount()
                 );
 
+                assertSame(
+                        peer,
+                        session.inFlightPeer(
+                                        first.hash()
+                                )
+                                .orElseThrow()
+                );
+
+                assertSame(
+                        peer,
+                        session.inFlightPeer(
+                                        second.hash()
+                                )
+                                .orElseThrow()
+                );
+
                 CompletedBlockDownload completedSecond =
                         session.awaitCompleted();
 
@@ -890,6 +916,28 @@ class BlockDownloadSchedulerTest {
                 );
 
                 /*
+                 * B2 completed first, therefore its in-flight ownership
+                 * must already be gone.
+                 *
+                 * B1 is still deliberately withheld by the remote peer,
+                 * so B1 must remain owned by this peer.
+                 */
+                assertTrue(
+                        session.inFlightPeer(
+                                        second.hash()
+                                )
+                                .isEmpty()
+                );
+
+                assertSame(
+                        peer,
+                        session.inFlightPeer(
+                                        first.hash()
+                                )
+                                .orElseThrow()
+                );
+
+                /*
                  * Only now allow the remote peer to send B1.
                  */
                 secondCompletionObserved.countDown();
@@ -916,6 +964,20 @@ class BlockDownloadSchedulerTest {
                 assertEquals(
                         0,
                         session.pendingCount()
+                );
+
+                assertTrue(
+                        session.inFlightPeer(
+                                        first.hash()
+                                )
+                                .isEmpty()
+                );
+
+                assertTrue(
+                        session.inFlightPeer(
+                                        second.hash()
+                                )
+                                .isEmpty()
                 );
 
                 assertTrue(

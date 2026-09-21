@@ -8,8 +8,10 @@ import ru.bitcoin.node.chain.HeaderChainState;
 import ru.bitcoin.node.chain.ReorganizationPlan;
 import ru.bitcoin.node.chain.ReorganizationPlanner;
 import ru.bitcoin.node.common.types.Hash256;
+import ru.bitcoin.node.p2p.Peer;
 import ru.bitcoin.node.p2p.sync.BlockDownloadScheduler;
 import ru.bitcoin.node.p2p.sync.BlockDownloadSession;
+import ru.bitcoin.node.p2p.sync.BlockDownloadStallTracker;
 import ru.bitcoin.node.p2p.sync.CompletedBlockDownload;
 import ru.bitcoin.node.protocol.block.Block;
 import ru.bitcoin.node.storage.block.BlockStore;
@@ -35,6 +37,10 @@ public final class BlockSyncCoordinator {
     private final BlockIndexLookup lookup;
     private final BlockStore blockStore;
 
+    private final BlockDownloadWindowStallDetector stallDetector;
+    private final BlockDownloadStallTracker stallTracker;
+
+
     public BlockSyncCoordinator(
             BlockDownloadScheduler blockDownloadScheduler,
             NodeValidationService validationService,
@@ -59,6 +65,26 @@ public final class BlockSyncCoordinator {
             BlockIndexLookup lookup,
             BlockStore blockStore,
             int downloadWindow
+    ) {
+        this(
+                blockDownloadScheduler,
+                validationService,
+                headerChainState,
+                lookup,
+                blockStore,
+                downloadWindow,
+                new BlockDownloadStallTracker()
+        );
+    }
+
+    BlockSyncCoordinator(
+            BlockDownloadScheduler blockDownloadScheduler,
+            NodeValidationService validationService,
+            HeaderChainState headerChainState,
+            BlockIndexLookup lookup,
+            BlockStore blockStore,
+            int downloadWindow,
+            BlockDownloadStallTracker stallTracker
     ) {
         this.blockDownloadScheduler =
                 Objects.requireNonNull(
@@ -98,6 +124,15 @@ public final class BlockSyncCoordinator {
 
         this.downloadWindow =
                 downloadWindow;
+
+        this.stallDetector =
+                new BlockDownloadWindowStallDetector();
+
+        this.stallTracker =
+                Objects.requireNonNull(
+                        stallTracker,
+                        "stallTracker"
+                );
     }
 
     public List<BlockIndex> synchronize()
@@ -335,33 +370,56 @@ public final class BlockSyncCoordinator {
                  * B3 submitted while B2 remains in-flight
                  */
                 if (processedAny) {
+
+                    stallTracker.update(
+                            null
+                    );
+
                     continue;
                 }
 
-                /*
-                 * The next chain-ordered body is unavailable.
-                 *
-                 * There must therefore be at least one network
-                 * request outstanding somewhere inside the current
-                 * horizon. Wait for whichever one completes first.
-                 *
-                 * It does NOT have to be nextToProcess.
-                 */
                 if (session.pendingCount() == 0) {
 
-                    BlockIndex missing =
-                            blocksToDownload.get(
-                                    nextToProcess
-                            );
+                    stallTracker.update(
+                            null
+                    );
 
-                    throw new IllegalStateException(
-                            "Block body is unavailable and no download is pending: "
-                                    + missing.hash()
-                                    .toDisplayHex()
-                                    + " at height "
-                                    + missing.height()
+                    throw new IOException(
+                            "No pending block downloads while synchronization is incomplete"
                     );
                 }
+
+                Optional<Peer> stallingPeer =
+                        stallDetector.findStallingPeer(
+                                blocksToDownload,
+                                nextToProcess,
+                                downloadWindow,
+                                index -> {
+
+                                    Hash256 hash =
+                                            index.hash();
+
+                                    if (availableBlocks.containsKey(
+                                            hash
+                                    )) {
+                                        return true;
+                                    }
+
+                                    return blockStore.find(
+                                            hash
+                                    ).isPresent();
+                                },
+                                index ->
+                                        session.inFlightPeer(
+                                                index.hash()
+                                        )
+                        );
+
+                stallTracker.update(
+                        stallingPeer.orElse(
+                                null
+                        )
+                );
 
                 CompletedBlockDownload completed =
                         session.awaitCompleted();
@@ -412,6 +470,9 @@ public final class BlockSyncCoordinator {
                                 + " download(s) still pending"
                 );
             }
+        } finally {
+
+            stallTracker.clear();
         }
 
         /*

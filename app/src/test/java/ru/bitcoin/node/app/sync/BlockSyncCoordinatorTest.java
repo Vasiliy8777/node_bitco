@@ -2392,6 +2392,960 @@ class BlockSyncCoordinatorTest {
         }
     }
 
+    @Test
+    void shouldTrackPeerBlockingDownloadWindow()
+            throws Exception {
+
+        Block genesisBlock =
+                GenesisBlockFactory.create(
+                        PARAMETERS
+                );
+
+        BlockIndex genesis =
+                BlockIndexFactory.createGenesis(
+                        genesisBlock.header()
+                );
+
+        Block block1 =
+                child(
+                        genesis,
+                        141
+                );
+
+        BlockIndex index1 =
+                BlockIndexFactory.createChild(
+                        genesis,
+                        block1.header()
+                );
+
+        Block block2 =
+                child(
+                        index1,
+                        142
+                );
+
+        BlockIndex index2 =
+                BlockIndexFactory.createChild(
+                        index1,
+                        block2.header()
+                );
+
+        Block block3 =
+                child(
+                        index2,
+                        143
+                );
+
+        BlockIndex index3 =
+                BlockIndexFactory.createChild(
+                        index2,
+                        block3.header()
+                );
+
+        try (RocksDbDatabase database =
+                     new RocksDbDatabase(
+                             directory.resolve(
+                                     "block-sync-stall-tracking"
+                             )
+                     );
+
+             ServerSocket firstServer =
+                     new ServerSocket(0);
+
+             ServerSocket secondServer =
+                     new ServerSocket(0);
+
+             PeerManager peerManager =
+                     new PeerManager()) {
+
+            NodeValidationService validationService =
+                    new NodeValidationService(
+                            database,
+                            PARAMETERS,
+                            () -> TIME + 10_000L,
+                            new Mempool()
+                    );
+
+            RocksDbBlockStore blockStore =
+                    new RocksDbBlockStore(
+                            database
+                    );
+
+            RocksDbBlockIndexStore indexStore =
+                    new RocksDbBlockIndexStore(
+                            database
+                    );
+
+            indexStore.save(
+                    BlockIndexStorageMapper.toStored(
+                            index1
+                    )
+            );
+
+            indexStore.save(
+                    BlockIndexStorageMapper.toStored(
+                            index2
+                    )
+            );
+
+            indexStore.save(
+                    BlockIndexStorageMapper.toStored(
+                            index3
+                    )
+            );
+
+            new RocksDbChainStateStore(
+                    database
+            ).saveBestHeaderTipHash(
+                    index3.hash()
+            );
+
+            BlockIndexLookup lookup =
+                    new StoredBlockIndexLookup(
+                            indexStore
+                    );
+
+            HeaderChainState headerChainState =
+                    new HeaderChainState(
+                            index3
+                    );
+
+            CountDownLatch initialRequestsReceived =
+                    new CountDownLatch(
+                            2
+                    );
+
+            CountDownLatch releaseFirstBlock =
+                    new CountDownLatch(
+                            1
+                    );
+
+            CountDownLatch releaseSecondBlock =
+                    new CountDownLatch(
+                            1
+                    );
+
+            CompletableFuture<Void> firstServerFuture =
+                    CompletableFuture.runAsync(
+                            () -> runStallTrackingPeer(
+                                    firstServer,
+                                    block1,
+                                    0x6162636465666771L,
+                                    initialRequestsReceived,
+                                    releaseFirstBlock
+                            )
+                    );
+
+            CompletableFuture<Void> secondServerFuture =
+                    CompletableFuture.runAsync(
+                            () -> runStallTrackingPeer(
+                                    secondServer,
+                                    block2,
+                                    0x7172737475767781L,
+                                    initialRequestsReceived,
+                                    releaseSecondBlock
+                            )
+                    );
+
+            Peer firstPeer =
+                    connectPeer(
+                            firstServer.getLocalPort()
+                    );
+
+            Peer secondPeer =
+                    connectPeer(
+                            secondServer.getLocalPort()
+                    );
+
+            peerManager.add(
+                    firstPeer
+            );
+
+            peerManager.add(
+                    secondPeer
+            );
+
+            BlockDownloadService blockDownloadService =
+                    new BlockDownloadService(
+                            peerManager
+                    );
+
+            BlockDownloadScheduler scheduler =
+                    new BlockDownloadScheduler(
+                            peerManager,
+                            blockDownloadService,
+                            new BlockDownloadTimeoutPolicy(
+                                    Duration.ofMinutes(
+                                            10
+                                    )
+                            )
+                    );
+
+            BlockDownloadStallTracker stallTracker =
+                    new BlockDownloadStallTracker();
+
+            BlockSyncCoordinator coordinator =
+                    new BlockSyncCoordinator(
+                            scheduler,
+                            validationService,
+                            headerChainState,
+                            lookup,
+                            blockStore,
+                            2,
+                            stallTracker
+                    );
+
+            CompletableFuture<List<BlockIndex>> synchronization =
+                    CompletableFuture.supplyAsync(
+                            () -> {
+                                try {
+                                    return coordinator.synchronize();
+                                } catch (IOException exception) {
+                                    throw new RuntimeException(
+                                            exception
+                                    );
+                                }
+                            }
+                    );
+
+            /*
+             * B1 and B2 must both have entered the initial
+             * two-position download window.
+             */
+            assertTrue(
+                    initialRequestsReceived.await(
+                            5,
+                            TimeUnit.SECONDS
+                    ),
+                    "Initial download window was not fully requested"
+            );
+
+            /*
+             * Coordinator is now blocked:
+             *
+             * B1(P1) B2(P2) | B3
+             *
+             * No body is available, B3 exists beyond the window,
+             * and the first blocking in-flight block is B1/P1.
+             */
+            long deadline =
+                    System.nanoTime()
+                            + TimeUnit.SECONDS.toNanos(
+                            5
+                    );
+
+            while (!stallTracker.isStalling()
+                    && System.nanoTime() < deadline) {
+
+                Thread.onSpinWait();
+            }
+
+            assertTrue(
+                    stallTracker.isStalling(),
+                    "Coordinator did not report download-window stall"
+            );
+
+            assertSame(
+                    firstPeer,
+                    stallTracker.stallingPeer()
+            );
+
+            /*
+             * Let B1 complete. The processing frontier can then
+             * advance and the previous stall condition must end.
+             */
+            releaseFirstBlock.countDown();
+
+            deadline =
+                    System.nanoTime()
+                            + TimeUnit.SECONDS.toNanos(
+                            5
+                    );
+
+            while (stallTracker.isStalling(firstPeer)
+                    && System.nanoTime() < deadline) {
+
+                Thread.onSpinWait();
+            }
+
+            assertFalse(
+                    stallTracker.isStalling(firstPeer),
+                    "Old stalling peer remained tracked after progress"
+            );
+
+            /*
+             * Allow B2 to complete so synchronization can finish.
+             * B3 can subsequently be assigned normally.
+             */
+            releaseSecondBlock.countDown();
+
+            /*
+             * The fake peers only serve B1/B2, so this synchronization
+             * is not expected to finish successfully once B3 becomes
+             * requestable. We only care about the stall transition.
+             */
+            try {
+                synchronization.get(
+                        5,
+                        TimeUnit.SECONDS
+                );
+            } catch (Exception ignored) {
+                // Expected: no test peer serves B3.
+            }
+
+            firstServerFuture.get(
+                    5,
+                    TimeUnit.SECONDS
+            );
+
+            secondServerFuture.get(
+                    5,
+                    TimeUnit.SECONDS
+            );
+        }
+    }
+
+    @Test
+    void shouldMoveStallTrackingToNewBlockingPeerAfterProgress()
+            throws Exception {
+
+        Block genesisBlock =
+                GenesisBlockFactory.create(
+                        PARAMETERS
+                );
+
+        BlockIndex genesis =
+                BlockIndexFactory.createGenesis(
+                        genesisBlock.header()
+                );
+
+        Block block1 =
+                child(
+                        genesis,
+                        151
+                );
+
+        BlockIndex index1 =
+                BlockIndexFactory.createChild(
+                        genesis,
+                        block1.header()
+                );
+
+        Block block2 =
+                child(
+                        index1,
+                        152
+                );
+
+        BlockIndex index2 =
+                BlockIndexFactory.createChild(
+                        index1,
+                        block2.header()
+                );
+
+        Block block3 =
+                child(
+                        index2,
+                        153
+                );
+
+        BlockIndex index3 =
+                BlockIndexFactory.createChild(
+                        index2,
+                        block3.header()
+                );
+
+        Block block4 =
+                child(
+                        index3,
+                        154
+                );
+
+        BlockIndex index4 =
+                BlockIndexFactory.createChild(
+                        index3,
+                        block4.header()
+                );
+
+        try (RocksDbDatabase database =
+                     new RocksDbDatabase(
+                             directory.resolve(
+                                     "block-sync-stall-peer-transition"
+                             )
+                     );
+
+             ServerSocket firstServer =
+                     new ServerSocket(0);
+
+             ServerSocket secondServer =
+                     new ServerSocket(0);
+
+             PeerManager peerManager =
+                     new PeerManager()) {
+
+            NodeValidationService validationService =
+                    new NodeValidationService(
+                            database,
+                            PARAMETERS,
+                            () -> TIME + 10_000L,
+                            new Mempool()
+                    );
+
+            RocksDbBlockStore blockStore =
+                    new RocksDbBlockStore(
+                            database
+                    );
+
+            RocksDbBlockIndexStore indexStore =
+                    new RocksDbBlockIndexStore(
+                            database
+                    );
+
+            indexStore.save(
+                    BlockIndexStorageMapper.toStored(
+                            index1
+                    )
+            );
+
+            indexStore.save(
+                    BlockIndexStorageMapper.toStored(
+                            index2
+                    )
+            );
+
+            indexStore.save(
+                    BlockIndexStorageMapper.toStored(
+                            index3
+                    )
+            );
+
+            indexStore.save(
+                    BlockIndexStorageMapper.toStored(
+                            index4
+                    )
+            );
+
+            new RocksDbChainStateStore(
+                    database
+            ).saveBestHeaderTipHash(
+                    index4.hash()
+            );
+
+            BlockIndexLookup lookup =
+                    new StoredBlockIndexLookup(
+                            indexStore
+                    );
+
+            HeaderChainState headerChainState =
+                    new HeaderChainState(
+                            index4
+                    );
+
+            CountDownLatch initialRequestsReceived =
+                    new CountDownLatch(
+                            2
+                    );
+
+            CountDownLatch releaseBlock1 =
+                    new CountDownLatch(
+                            1
+                    );
+
+            CountDownLatch block3Requested =
+                    new CountDownLatch(
+                            1
+                    );
+
+            CountDownLatch releaseRemaining =
+                    new CountDownLatch(
+                            1
+                    );
+
+            CompletableFuture<Void> firstServerFuture =
+                    CompletableFuture.runAsync(
+                            () -> runFirstStallTransitionPeer(
+                                    firstServer,
+                                    block1,
+                                    block3,
+                                    0x6162636465666781L,
+                                    initialRequestsReceived,
+                                    releaseBlock1,
+                                    block3Requested,
+                                    releaseRemaining
+                            )
+                    );
+
+            CompletableFuture<Void> secondServerFuture =
+                    CompletableFuture.runAsync(
+                            () -> runSecondStallTransitionPeer(
+                                    secondServer,
+                                    block2,
+                                    0x7172737475767782L,
+                                    initialRequestsReceived,
+                                    releaseRemaining
+                            )
+                    );
+
+            Peer firstPeer =
+                    connectPeer(
+                            firstServer.getLocalPort()
+                    );
+
+            Peer secondPeer =
+                    connectPeer(
+                            secondServer.getLocalPort()
+                    );
+
+            peerManager.add(
+                    firstPeer
+            );
+
+            peerManager.add(
+                    secondPeer
+            );
+
+            BlockDownloadService blockDownloadService =
+                    new BlockDownloadService(
+                            peerManager
+                    );
+
+            BlockDownloadScheduler scheduler =
+                    new BlockDownloadScheduler(
+                            peerManager,
+                            blockDownloadService,
+                            new BlockDownloadTimeoutPolicy(
+                                    Duration.ofMinutes(
+                                            10
+                                    )
+                            )
+                    );
+
+            BlockDownloadStallTracker stallTracker =
+                    new BlockDownloadStallTracker();
+
+            BlockSyncCoordinator coordinator =
+                    new BlockSyncCoordinator(
+                            scheduler,
+                            validationService,
+                            headerChainState,
+                            lookup,
+                            blockStore,
+                            2,
+                            stallTracker
+                    );
+
+            CompletableFuture<List<BlockIndex>> synchronization =
+                    CompletableFuture.supplyAsync(
+                            () -> {
+                                try {
+                                    return coordinator.synchronize();
+                                } catch (IOException exception) {
+                                    throw new RuntimeException(
+                                            exception
+                                    );
+                                }
+                            }
+                    );
+
+            assertTrue(
+                    initialRequestsReceived.await(
+                            5,
+                            TimeUnit.SECONDS
+                    ),
+                    "Initial B1/B2 requests were not received"
+            );
+
+            /*
+             * Initial window:
+             *
+             * B1(P1) B2(P2) | B3 B4
+             *
+             * B1 is the first unavailable in-flight block.
+             */
+            waitForStallingPeer(
+                    stallTracker,
+                    firstPeer
+            );
+
+            assertSame(
+                    firstPeer,
+                    stallTracker.stallingPeer()
+            );
+
+            /*
+             * Complete B1.
+             *
+             * Coordinator processes B1, slides the window and
+             * submits B3 while B2 is still outstanding.
+             */
+            releaseBlock1.countDown();
+
+            assertTrue(
+                    block3Requested.await(
+                            5,
+                            TimeUnit.SECONDS
+                    ),
+                    "B3 was not requested after B1 advanced the window"
+            );
+
+            /*
+             * New window:
+             *
+             * B2(P2) B3(P1) | B4
+             *
+             * The first blocking peer is now P2.
+             */
+            waitForStallingPeer(
+                    stallTracker,
+                    secondPeer
+            );
+
+            assertSame(
+                    secondPeer,
+                    stallTracker.stallingPeer()
+            );
+
+            assertFalse(
+                    stallTracker.isStalling(
+                            firstPeer
+                    )
+            );
+
+            /*
+             * We have proved the transition.
+             *
+             * Release the remaining held bodies. The test does not
+             * need to make assumptions about which peer later receives
+             * B4, so closing these fake peers may make synchronization
+             * finish exceptionally after the property under test has
+             * already been established.
+             */
+            releaseRemaining.countDown();
+
+            firstServerFuture.get(
+                    5,
+                    TimeUnit.SECONDS
+            );
+
+            secondServerFuture.get(
+                    5,
+                    TimeUnit.SECONDS
+            );
+
+            try {
+                synchronization.get(
+                        5,
+                        TimeUnit.SECONDS
+                );
+            } catch (Exception ignored) {
+                /*
+                 * B4 is deliberately not served by these peers.
+                 */
+            }
+        }
+    }
+
+    private static void waitForStallingPeer(
+            BlockDownloadStallTracker stallTracker,
+            Peer expectedPeer
+    ) {
+
+        long deadline =
+                System.nanoTime()
+                        + TimeUnit.SECONDS.toNanos(
+                        5
+                );
+
+        while (!stallTracker.isStalling(
+                expectedPeer
+        )) {
+
+            if (System.nanoTime() >= deadline) {
+                fail(
+                        "Timed out waiting for expected stalling peer"
+                );
+            }
+
+            Thread.onSpinWait();
+        }
+    }
+
+    private static void runFirstStallTransitionPeer(
+            ServerSocket serverSocket,
+            Block firstBlock,
+            Block thirdBlock,
+            long remoteNonce,
+            CountDownLatch initialRequestsReceived,
+            CountDownLatch releaseFirstBlock,
+            CountDownLatch thirdBlockRequested,
+            CountDownLatch releaseRemaining
+    ) {
+
+        try (Socket socket =
+                     serverSocket.accept()) {
+
+            socket.setSoTimeout(
+                    5_000
+            );
+
+            BitcoinMessageStreamReader reader =
+                    new BitcoinMessageStreamReader(
+                            new BitcoinMessageDecoder(
+                                    PARAMETERS
+                            )
+                    );
+
+            BitcoinMessageEncoder encoder =
+                    new BitcoinMessageEncoder(
+                            PARAMETERS
+                    );
+
+            BufferedInputStream input =
+                    new BufferedInputStream(
+                            socket.getInputStream()
+                    );
+
+            BufferedOutputStream output =
+                    new BufferedOutputStream(
+                            socket.getOutputStream()
+                    );
+
+            performHandshake(
+                    reader,
+                    encoder,
+                    input,
+                    output,
+                    remoteNonce
+            );
+
+            assertRequestedBlock(
+                    reader,
+                    input,
+                    firstBlock.hash()
+            );
+
+            initialRequestsReceived.countDown();
+
+            assertTrue(
+                    releaseFirstBlock.await(
+                            5,
+                            TimeUnit.SECONDS
+                    ),
+                    "Timed out waiting to release B1"
+            );
+
+            output.write(
+                    encoder.encode(
+                            BitcoinMessages.block(
+                                    new BlockMessage(
+                                            firstBlock
+                                    )
+                            )
+                    )
+            );
+
+            output.flush();
+
+            /*
+             * B1 processing slides window:
+             *
+             * B2 B3 | B4
+             */
+            assertRequestedBlock(
+                    reader,
+                    input,
+                    thirdBlock.hash()
+            );
+
+            thirdBlockRequested.countDown();
+
+            assertTrue(
+                    releaseRemaining.await(
+                            5,
+                            TimeUnit.SECONDS
+                    ),
+                    "Timed out waiting to release B3"
+            );
+
+            output.write(
+                    encoder.encode(
+                            BitcoinMessages.block(
+                                    new BlockMessage(
+                                            thirdBlock
+                                    )
+                            )
+                    )
+            );
+
+            output.flush();
+
+        } catch (Exception exception) {
+            throw new RuntimeException(
+                    exception
+            );
+        }
+    }
+
+    private static void runSecondStallTransitionPeer(
+            ServerSocket serverSocket,
+            Block secondBlock,
+            long remoteNonce,
+            CountDownLatch initialRequestsReceived,
+            CountDownLatch releaseRemaining
+    ) {
+
+        try (Socket socket =
+                     serverSocket.accept()) {
+
+            socket.setSoTimeout(
+                    5_000
+            );
+
+            BitcoinMessageStreamReader reader =
+                    new BitcoinMessageStreamReader(
+                            new BitcoinMessageDecoder(
+                                    PARAMETERS
+                            )
+                    );
+
+            BitcoinMessageEncoder encoder =
+                    new BitcoinMessageEncoder(
+                            PARAMETERS
+                    );
+
+            BufferedInputStream input =
+                    new BufferedInputStream(
+                            socket.getInputStream()
+                    );
+
+            BufferedOutputStream output =
+                    new BufferedOutputStream(
+                            socket.getOutputStream()
+                    );
+
+            performHandshake(
+                    reader,
+                    encoder,
+                    input,
+                    output,
+                    remoteNonce
+            );
+
+            assertRequestedBlock(
+                    reader,
+                    input,
+                    secondBlock.hash()
+            );
+
+            initialRequestsReceived.countDown();
+
+            assertTrue(
+                    releaseRemaining.await(
+                            5,
+                            TimeUnit.SECONDS
+                    ),
+                    "Timed out waiting to release B2"
+            );
+
+            output.write(
+                    encoder.encode(
+                            BitcoinMessages.block(
+                                    new BlockMessage(
+                                            secondBlock
+                                    )
+                            )
+                    )
+            );
+
+            output.flush();
+
+        } catch (Exception exception) {
+            throw new RuntimeException(
+                    exception
+            );
+        }
+    }
+
+    private static void runStallTrackingPeer(
+            ServerSocket serverSocket,
+            Block block,
+            long remoteNonce,
+            CountDownLatch requestsReceived,
+            CountDownLatch releaseBlock
+    ) {
+
+        try (Socket socket =
+                     serverSocket.accept()) {
+
+            socket.setSoTimeout(
+                    5_000
+            );
+
+            BitcoinMessageStreamReader reader =
+                    new BitcoinMessageStreamReader(
+                            new BitcoinMessageDecoder(
+                                    PARAMETERS
+                            )
+                    );
+
+            BitcoinMessageEncoder encoder =
+                    new BitcoinMessageEncoder(
+                            PARAMETERS
+                    );
+
+            BufferedInputStream input =
+                    new BufferedInputStream(
+                            socket.getInputStream()
+                    );
+
+            BufferedOutputStream output =
+                    new BufferedOutputStream(
+                            socket.getOutputStream()
+                    );
+
+            performHandshake(
+                    reader,
+                    encoder,
+                    input,
+                    output,
+                    remoteNonce
+            );
+
+            assertRequestedBlock(
+                    reader,
+                    input,
+                    block.hash()
+            );
+
+            requestsReceived.countDown();
+
+            assertTrue(
+                    releaseBlock.await(
+                            5,
+                            TimeUnit.SECONDS
+                    ),
+                    "Timed out waiting to release stalled block"
+            );
+
+            output.write(
+                    encoder.encode(
+                            BitcoinMessages.block(
+                                    new BlockMessage(
+                                            block
+                                    )
+                            )
+                    )
+            );
+
+            output.flush();
+
+        } catch (Exception exception) {
+            throw new RuntimeException(
+                    exception
+            );
+        }
+    }
+
     private static void runSlidingWindowPeer(
             ServerSocket serverSocket,
             Block firstBlock,
@@ -2895,24 +3849,48 @@ class BlockSyncCoordinatorTest {
             );
 
             /*
-             * With multiple in-flight requests per peer, P1 may
-             * receive B3 while B1 is still outstanding.
+             * B1 and B3 are both assigned to this peer.
+             *
+             * Their download tasks execute concurrently, therefore
+             * PeerConnection guarantees complete-message serialization
+             * but does not guarantee which getdata reaches the wire first.
+             *
+             * Both requests must be present; their wire order is
+             * intentionally irrelevant.
              */
-            assertRequestedBlock(
-                    reader,
-                    input,
-                    firstBlock.hash()
+            Hash256 firstRequest =
+                    readRequestedBlockHash(
+                            reader,
+                            input
+                    );
+
+            Hash256 secondRequest =
+                    readRequestedBlockHash(
+                            reader,
+                            input
+                    );
+
+            assertNotEquals(
+                    firstRequest,
+                    secondRequest
             );
 
-            assertRequestedBlock(
-                    reader,
-                    input,
-                    thirdBlock.hash()
+            assertEquals(
+                    Set.of(
+                            firstBlock.hash(),
+                            thirdBlock.hash()
+                    ),
+                    Set.of(
+                            firstRequest,
+                            secondRequest
+                    )
             );
 
             /*
-             * Prove that the additional request was assigned
-             * before the slow peer was allowed to complete B2.
+             * At this point B3 has definitely been requested while
+             * the slow peer still holds B2.
+             *
+             * This is the actual work-conserving property being tested.
              */
             block3Requested.countDown();
 
@@ -2951,6 +3929,44 @@ class BlockSyncCoordinatorTest {
                     exception
             );
         }
+    }
+
+    private static Hash256 readRequestedBlockHash(
+            BitcoinMessageStreamReader reader,
+            BufferedInputStream input
+    ) throws Exception {
+
+        BitcoinMessage message =
+                reader.read(
+                                input
+                        )
+                        .orElseThrow();
+
+        assertEquals(
+                "getdata",
+                message.command()
+        );
+
+        GetDataMessage getData =
+                BitcoinMessages.decodeGetData(
+                        message
+                );
+
+        assertEquals(
+                1,
+                getData.size()
+        );
+
+        InventoryVector vector =
+                getData.inventory()
+                        .get(0);
+
+        assertEquals(
+                InventoryVector.MSG_WITNESS_BLOCK,
+                vector.type()
+        );
+
+        return vector.hash();
     }
 
     private static void runSlowWorkConservingPeer(
