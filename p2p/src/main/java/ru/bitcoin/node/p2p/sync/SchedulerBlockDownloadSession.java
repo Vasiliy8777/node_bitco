@@ -195,17 +195,104 @@ public final class SchedulerBlockDownloadSession
 
         while (true) {
 
-            Future<DownloadResult> future;
+            Optional<CompletedBlockDownload> completed =
+                    pollCompleted(
+                            COMPLETION_CHECK_INTERVAL
+                    );
+
+            if (completed.isPresent()) {
+                return completed.get();
+            }
+        }
+    }
+
+    @Override
+    public Optional<CompletedBlockDownload> pollCompleted(
+            Duration timeout
+    ) throws IOException {
+
+        Objects.requireNonNull(
+                timeout,
+                "timeout"
+        );
+
+        if (timeout.isNegative()) {
+            throw new IllegalArgumentException(
+                    "timeout must not be negative"
+            );
+        }
+
+        Future<DownloadResult> future;
+
+        synchronized (this) {
+
+            ensureOpen();
+
+            if (pendingCount == 0) {
+                throw new IllegalStateException(
+                        "No pending block downloads"
+                );
+            }
+
+            List<Peer> peers =
+                    peerManager.readyPeers();
+
+            if (!peers.isEmpty()) {
+                assignAvailable(
+                        peers
+                );
+            }
+
+            if (activeDownloads.isEmpty()) {
+
+                DownloadState failedState =
+                        firstIncomplete();
+
+                if (failedState == null) {
+                    throw new IllegalStateException(
+                            "Pending block count is inconsistent with download states"
+                    );
+                }
+
+                throw buildFailure(
+                        failedState
+                );
+            }
+        }
+
+        try {
+
+            future =
+                    completionService.poll(
+                            timeout.toNanos(),
+                            TimeUnit.NANOSECONDS
+                    );
+
+        } catch (ArithmeticException exception) {
+
+            throw new IllegalArgumentException(
+                    "timeout is too large",
+                    exception
+            );
+
+        } catch (InterruptedException exception) {
+
+            Thread.currentThread()
+                    .interrupt();
+
+            throw new IOException(
+                    "Block download interrupted",
+                    exception
+            );
+        }
+
+        if (future == null) {
 
             synchronized (this) {
 
                 ensureOpen();
 
-                if (pendingCount == 0) {
-                    throw new IllegalStateException(
-                            "No pending block downloads"
-                    );
-                }
+                failTimedOutPeers();
 
                 List<Peer> peers =
                         peerManager.readyPeers();
@@ -215,239 +302,101 @@ public final class SchedulerBlockDownloadSession
                             peers
                     );
                 }
-
-                if (activeDownloads.isEmpty()) {
-
-                    DownloadState failedState =
-                            firstIncomplete();
-
-                    if (failedState == null) {
-                        throw new IllegalStateException(
-                                "Pending block count is inconsistent with download states"
-                        );
-                    }
-
-                    throw buildFailure(
-                            failedState
-                    );
-                }
             }
 
-            try {
+            return Optional.empty();
+        }
 
-                future =
-                        completionService.poll(
-                                COMPLETION_CHECK_INTERVAL.toNanos(),
-                                TimeUnit.NANOSECONDS
-                        );
+        ActiveDownload activeDownload;
 
-            } catch (InterruptedException exception) {
+        synchronized (this) {
 
-                Thread.currentThread()
-                        .interrupt();
-
-                throw new IOException(
-                        "Block download interrupted",
-                        exception
-                );
-            }
-
-            /*
-             * No request completed during this polling interval.
-             *
-             * Evaluate download timeouts against one consistent
-             * in-flight snapshot and release timed-out peers.
-             */
-            if (future == null) {
-
-                synchronized (this) {
-
-                    ensureOpen();
-
-                    failTimedOutPeers();
-
-                    /*
-                     * Released blocks are now eligible for another
-                     * ready peer. Do not return anything to the
-                     * caller because no block completed.
-                     */
-                    List<Peer> peers =
-                            peerManager.readyPeers();
-
-                    if (!peers.isEmpty()) {
-                        assignAvailable(
-                                peers
-                        );
-                    }
-                }
-
-                continue;
-            }
-
-            ActiveDownload activeDownload;
-
-            synchronized (this) {
-
-                activeDownload =
-                        activeDownloads.remove(
-                                future
-                        );
-
-                if (activeDownload == null) {
-
-                    /*
-                     * Peer-wide timeout cleanup removes ownership
-                     * before cancelling its Futures.
-                     *
-                     * A cancelled task can subsequently appear in
-                     * CompletionService. Its tracker/session state
-                     * has already been released, so ignore it.
-                     */
-                    continue;
-                }
-            }
-
-            DownloadResult result;
-
-            try {
-
-                result =
-                        future.get();
-
-            } catch (CancellationException exception) {
-
-                throw new IOException(
-                        "Registered block download task was unexpectedly cancelled",
-                        exception
-                );
-
-            } catch (InterruptedException exception) {
-
-                Thread.currentThread()
-                        .interrupt();
-
-                throw new IOException(
-                        "Block download interrupted",
-                        exception
-                );
-
-            } catch (ExecutionException exception) {
-
-                throw new IOException(
-                        "Unexpected block download task failure",
-                        exception.getCause()
-                );
-            }
-
-            synchronized (this) {
-
-                if (result.peer()
-                        != activeDownload.peer()) {
-
-                    throw new IOException(
-                            "Completed block download task returned a different peer"
-                    );
-                }
-
-                if (result.state()
-                        != activeDownload.state()) {
-
-                    throw new IOException(
-                            "Completed block download task returned a different download state"
-                    );
-                }
-
-                Peer peer =
-                        result.peer();
-
-                DownloadState state =
-                        result.state();
-
-                state.inFlight =
-                        false;
-
-                inFlightTracker.remove(
-                        peer,
-                        state.blockHash
-                );
-
-                if (result.failure() != null) {
-
-                    state.failures.add(
-                            result.failure()
+            activeDownload =
+                    activeDownloads.remove(
+                            future
                     );
 
-                    /*
-                     * This peer has already been recorded in
-                     * attemptedPeers. The same block may therefore
-                     * be assigned to another ready peer.
-                     */
-                    List<Peer> peers =
-                            peerManager.readyPeers();
-
-                    if (!peers.isEmpty()) {
-                        assignAvailable(
-                                peers
-                        );
-                    }
-
-                    continue;
-                }
-
-                Block block =
-                        result.block();
-
-                if (!state.blockHash.equals(
-                        block.hash()
-                )) {
-
-                    IOException failure =
-                            new IOException(
-                                    "Peer returned unexpected block: expected "
-                                            + state.blockHash.toDisplayHex()
-                                            + ", actual "
-                                            + block.hash().toDisplayHex()
-                            );
-
-                    state.failures.add(
-                            failure
-                    );
-
-                    /*
-                     * Wrong block is an unsuccessful attempt.
-                     * Keep the requested hash pending so another
-                     * peer can supply it.
-                     */
-                    List<Peer> peers =
-                            peerManager.readyPeers();
-
-                    if (!peers.isEmpty()) {
-                        assignAvailable(
-                                peers
-                        );
-                    }
-
-                    continue;
-                }
-
-                if (state.completed) {
-                    throw new IllegalStateException(
-                            "Block download completed more than once: "
-                                    + state.blockHash.toDisplayHex()
-                    );
-                }
-
-                state.completed =
-                        true;
-
-                pendingCount =
-                        Math.decrementExact(
-                                pendingCount
-                        );
+            if (activeDownload == null) {
 
                 /*
-                 * Completion freed one per-peer slot.
+                 * A peer-wide cleanup may already have removed
+                 * ownership before this cancelled Future reached
+                 * CompletionService.
                  */
+                return Optional.empty();
+            }
+        }
+
+        DownloadResult result;
+
+        try {
+
+            result =
+                    future.get();
+
+        } catch (CancellationException exception) {
+
+            throw new IOException(
+                    "Registered block download task was unexpectedly cancelled",
+                    exception
+            );
+
+        } catch (InterruptedException exception) {
+
+            Thread.currentThread()
+                    .interrupt();
+
+            throw new IOException(
+                    "Block download interrupted",
+                    exception
+            );
+
+        } catch (ExecutionException exception) {
+
+            throw new IOException(
+                    "Unexpected block download task failure",
+                    exception.getCause()
+            );
+        }
+
+        synchronized (this) {
+
+            if (result.peer()
+                    != activeDownload.peer()) {
+
+                throw new IOException(
+                        "Completed block download task returned a different peer"
+                );
+            }
+
+            if (result.state()
+                    != activeDownload.state()) {
+
+                throw new IOException(
+                        "Completed block download task returned a different download state"
+                );
+            }
+
+            Peer peer =
+                    result.peer();
+
+            DownloadState state =
+                    result.state();
+
+            state.inFlight =
+                    false;
+
+            inFlightTracker.remove(
+                    peer,
+                    state.blockHash
+            );
+
+            if (result.failure() != null) {
+
+                state.failures.add(
+                        result.failure()
+                );
+
                 List<Peer> peers =
                         peerManager.readyPeers();
 
@@ -457,12 +406,71 @@ public final class SchedulerBlockDownloadSession
                     );
                 }
 
-                return new CompletedBlockDownload(
-                        state.index,
-                        state.blockHash,
-                        block
+                return Optional.empty();
+            }
+
+            Block block =
+                    result.block();
+
+            if (!state.blockHash.equals(
+                    block.hash()
+            )) {
+
+                IOException failure =
+                        new IOException(
+                                "Peer returned unexpected block: expected "
+                                        + state.blockHash.toDisplayHex()
+                                        + ", actual "
+                                        + block.hash().toDisplayHex()
+                        );
+
+                state.failures.add(
+                        failure
+                );
+
+                List<Peer> peers =
+                        peerManager.readyPeers();
+
+                if (!peers.isEmpty()) {
+                    assignAvailable(
+                            peers
+                    );
+                }
+
+                return Optional.empty();
+            }
+
+            if (state.completed) {
+                throw new IllegalStateException(
+                        "Block download completed more than once: "
+                                + state.blockHash.toDisplayHex()
                 );
             }
+
+            state.completed =
+                    true;
+
+            pendingCount =
+                    Math.decrementExact(
+                            pendingCount
+                    );
+
+            List<Peer> peers =
+                    peerManager.readyPeers();
+
+            if (!peers.isEmpty()) {
+                assignAvailable(
+                        peers
+                );
+            }
+
+            return Optional.of(
+                    new CompletedBlockDownload(
+                            state.index,
+                            state.blockHash,
+                            block
+                    )
+            );
         }
     }
 
@@ -1082,6 +1090,30 @@ public final class SchedulerBlockDownloadSession
         }
 
         return released;
+    }
+
+    @Override
+    public synchronized void failPeer(
+            Peer peer,
+            IOException failure
+    ) throws IOException {
+
+        ensureOpen();
+
+        Objects.requireNonNull(
+                peer,
+                "peer"
+        );
+
+        Objects.requireNonNull(
+                failure,
+                "failure"
+        );
+
+        failPeerDownloads(
+                peer,
+                failure
+        );
     }
 
     @Override

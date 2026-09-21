@@ -9,14 +9,12 @@ import ru.bitcoin.node.chain.ReorganizationPlan;
 import ru.bitcoin.node.chain.ReorganizationPlanner;
 import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.p2p.Peer;
-import ru.bitcoin.node.p2p.sync.BlockDownloadScheduler;
-import ru.bitcoin.node.p2p.sync.BlockDownloadSession;
-import ru.bitcoin.node.p2p.sync.BlockDownloadStallTracker;
-import ru.bitcoin.node.p2p.sync.CompletedBlockDownload;
+import ru.bitcoin.node.p2p.sync.*;
 import ru.bitcoin.node.protocol.block.Block;
 import ru.bitcoin.node.storage.block.BlockStore;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.*;
 
 public final class BlockSyncCoordinator {
@@ -30,6 +28,8 @@ public final class BlockSyncCoordinator {
      * in-flight request limit.
      */
     private static final int DEFAULT_DOWNLOAD_WINDOW = 1024;
+    private static final Duration DOWNLOAD_COMPLETION_POLL_INTERVAL =
+            Duration.ofMillis(250);
     private final int downloadWindow;
     private final BlockDownloadScheduler blockDownloadScheduler;
     private final NodeValidationService validationService;
@@ -39,7 +39,7 @@ public final class BlockSyncCoordinator {
 
     private final BlockDownloadWindowStallDetector stallDetector;
     private final BlockDownloadStallTracker stallTracker;
-
+    private final BlockDownloadStallTimeoutEvaluator stallTimeoutEvaluator;
 
     public BlockSyncCoordinator(
             BlockDownloadScheduler blockDownloadScheduler,
@@ -86,6 +86,37 @@ public final class BlockSyncCoordinator {
             int downloadWindow,
             BlockDownloadStallTracker stallTracker
     ) {
+        this(
+                blockDownloadScheduler,
+                validationService,
+                headerChainState,
+                lookup,
+                blockStore,
+                downloadWindow,
+                stallTracker,
+                new BlockDownloadStallTimeoutEvaluator(
+                        stallTracker,
+                        new BlockDownloadStallTimeoutPolicy()
+                )
+        );
+    }
+
+    BlockSyncCoordinator(
+            BlockDownloadScheduler blockDownloadScheduler,
+            NodeValidationService validationService,
+            HeaderChainState headerChainState,
+            BlockIndexLookup lookup,
+            BlockStore blockStore,
+            int downloadWindow,
+            BlockDownloadStallTracker stallTracker,
+            BlockDownloadStallTimeoutEvaluator stallTimeoutEvaluator
+    ) {
+        if (downloadWindow <= 0) {
+            throw new IllegalArgumentException(
+                    "downloadWindow must be positive"
+            );
+        }
+
         this.blockDownloadScheduler =
                 Objects.requireNonNull(
                         blockDownloadScheduler,
@@ -116,12 +147,6 @@ public final class BlockSyncCoordinator {
                         "blockStore"
                 );
 
-        if (downloadWindow <= 0) {
-            throw new IllegalArgumentException(
-                    "downloadWindow must be positive"
-            );
-        }
-
         this.downloadWindow =
                 downloadWindow;
 
@@ -132,6 +157,12 @@ public final class BlockSyncCoordinator {
                 Objects.requireNonNull(
                         stallTracker,
                         "stallTracker"
+                );
+
+        this.stallTimeoutEvaluator =
+                Objects.requireNonNull(
+                        stallTimeoutEvaluator,
+                        "stallTimeoutEvaluator"
                 );
     }
 
@@ -421,8 +452,72 @@ public final class BlockSyncCoordinator {
                         )
                 );
 
+                BlockDownloadStallTimeoutEvaluator.Evaluation
+                        stallEvaluation =
+                        stallTimeoutEvaluator.evaluate();
+
+                if (stallEvaluation.timedOut()) {
+
+                    Peer timedOutPeer =
+                            stallEvaluation.peer();
+
+                    IOException stallFailure =
+                            new IOException(
+                                    "Peer stalled block download window for "
+                                            + stallEvaluation.stallingAge()
+                                            + " with timeout "
+                                            + stallEvaluation.timeout()
+                            );
+
+                    /*
+                     * Release every block currently assigned to the
+                     * stalling peer before disconnecting it.
+                     *
+                     * The session keeps those blocks pending so they
+                     * can be reassigned to another ready peer.
+                     */
+                    session.failPeer(
+                            timedOutPeer,
+                            stallFailure
+                    );
+
+                    try {
+                        timedOutPeer.close();
+                    } catch (IOException closeException) {
+                        stallFailure.addSuppressed(
+                                closeException
+                        );
+                    }
+
+                    /*
+                     * A real stall timeout was handled, therefore
+                     * increase the adaptive timeout for a subsequent
+                     * stall event.
+                     */
+                    stallTimeoutEvaluator.timeoutHandled();
+
+                    stallTracker.clear(
+                            timedOutPeer
+                    );
+
+                    /*
+                     * Re-enter the coordinator loop. The session will
+                     * assign the released blocks to another ready peer.
+                     */
+                    continue;
+                }
+
+                Optional<CompletedBlockDownload> completedOptional =
+                        session.pollCompleted(
+                                DOWNLOAD_COMPLETION_POLL_INTERVAL
+                        );
+
+                if (completedOptional.isEmpty()) {
+                    continue;
+                }
+
                 CompletedBlockDownload completed =
-                        session.awaitCompleted();
+                        completedOptional.get();
 
                 Hash256 completedHash =
                         completed.requestedHash();

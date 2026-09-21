@@ -1,5 +1,7 @@
 package ru.bitcoin.node.app.sync;
 
+import ru.bitcoin.node.p2p.sync.BlockDownloadStallTimeoutEvaluator;
+import ru.bitcoin.node.p2p.sync.BlockDownloadStallTimeoutPolicy;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import ru.bitcoin.node.app.NodeValidationService;
@@ -2923,6 +2925,15 @@ class BlockSyncCoordinatorTest {
             BlockDownloadStallTracker stallTracker =
                     new BlockDownloadStallTracker();
 
+            BlockDownloadStallTimeoutPolicy stallTimeoutPolicy =
+                    new BlockDownloadStallTimeoutPolicy();
+
+            BlockDownloadStallTimeoutEvaluator stallTimeoutEvaluator =
+                    new BlockDownloadStallTimeoutEvaluator(
+                            stallTracker,
+                            stallTimeoutPolicy
+                    );
+
             BlockSyncCoordinator coordinator =
                     new BlockSyncCoordinator(
                             scheduler,
@@ -2931,7 +2942,8 @@ class BlockSyncCoordinatorTest {
                             lookup,
                             blockStore,
                             2,
-                            stallTracker
+                            stallTracker,
+                            stallTimeoutEvaluator
                     );
 
             CompletableFuture<List<BlockIndex>> synchronization =

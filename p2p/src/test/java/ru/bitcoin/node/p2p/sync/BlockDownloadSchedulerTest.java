@@ -17,6 +17,7 @@ import ru.bitcoin.node.protocol.network.NetworkParametersRegistry;
 
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
+import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
@@ -991,6 +992,407 @@ class BlockDownloadSchedulerTest {
                  * failure paths, so the server task cannot hang.
                  */
                 secondCompletionObserved.countDown();
+                releaseServer.countDown();
+            }
+
+            server.get(
+                    5,
+                    TimeUnit.SECONDS
+            );
+        }
+    }
+
+    @Test
+    void sessionShouldReleasePeerDownloadsForExternalFailure()
+            throws Exception {
+
+        Block block =
+                blocks(1)
+                        .get(0);
+
+        try (ServerSocket failedServerSocket =
+                     new ServerSocket(0);
+
+             ServerSocket healthyServerSocket =
+                     new ServerSocket(0);
+
+             PeerManager peerManager =
+                     new PeerManager()) {
+
+            CountDownLatch failedRequestReceived =
+                    new CountDownLatch(1);
+
+            CountDownLatch releaseFailedServer =
+                    new CountDownLatch(1);
+
+            CountDownLatch releaseHealthyServer =
+                    new CountDownLatch(1);
+
+            CompletableFuture<Void> failedServer =
+                    CompletableFuture.runAsync(
+                            () -> runStalledPeer(
+                                    failedServerSocket,
+                                    block.hash(),
+                                    failedRequestReceived,
+                                    releaseFailedServer
+                            )
+                    );
+
+            CompletableFuture<Void> healthyServer =
+                    CompletableFuture.runAsync(
+                            () -> runHealthyRetryPeer(
+                                    healthyServerSocket,
+                                    block,
+                                    releaseHealthyServer
+                            )
+                    );
+
+            Peer failedPeer =
+                    connectPeer(
+                            failedServerSocket.getLocalPort()
+                    );
+
+            Peer healthyPeer =
+                    connectPeer(
+                            healthyServerSocket.getLocalPort()
+                    );
+
+            /*
+             * The first assignment must go to failedPeer.
+             */
+            peerManager.add(
+                    failedPeer
+            );
+
+            peerManager.add(
+                    healthyPeer
+            );
+
+            try (SchedulerBlockDownloadSession session =
+                         new SchedulerBlockDownloadSession(
+                                 peerManager,
+                                 new BlockDownloadService(
+                                         peerManager
+                                 ),
+                                 new BlockDownloadTimeoutPolicy(
+                                         Duration.ofMinutes(
+                                                 10
+                                         )
+                                 )
+                         )) {
+
+                session.submit(
+                        List.of(
+                                block.hash()
+                        )
+                );
+
+                assertTrue(
+                        failedRequestReceived.await(
+                                5,
+                                TimeUnit.SECONDS
+                        )
+                );
+
+                assertEquals(
+                        1,
+                        session.pendingCount()
+                );
+
+                assertSame(
+                        failedPeer,
+                        session.inFlightPeer(
+                                        block.hash()
+                                )
+                                .orElseThrow()
+                );
+
+                IOException stallFailure =
+                        new IOException(
+                                "Peer stalled block download window"
+                        );
+
+                /*
+                 * This is the NEW contract.
+                 *
+                 * It must release all downloads owned by failedPeer
+                 * without marking the requested blocks completed.
+                 */
+                session.failPeer(
+                        failedPeer,
+                        stallFailure
+                );
+
+                assertEquals(
+                        1,
+                        session.pendingCount()
+                );
+
+                assertTrue(
+                        session.inFlightPeer(
+                                        block.hash()
+                                )
+                                .isEmpty()
+                );
+
+                /*
+                 * Closing the peer is intentionally separate from
+                 * releasing session ownership.
+                 *
+                 * BlockSyncCoordinator will own the stall-disconnect
+                 * decision.
+                 */
+                failedPeer.close();
+
+                /*
+                 * awaitCompleted() must assign the now-free block to
+                 * the remaining ready peer.
+                 */
+                CompletedBlockDownload completed =
+                        session.awaitCompleted();
+
+                assertEquals(
+                        0,
+                        completed.index()
+                );
+
+                assertEquals(
+                        block.hash(),
+                        completed.requestedHash()
+                );
+
+                assertEquals(
+                        block.hash(),
+                        completed.block()
+                                .hash()
+                );
+
+                assertEquals(
+                        0,
+                        session.pendingCount()
+                );
+
+                assertFalse(
+                        failedPeer.isReady()
+                );
+
+                assertTrue(
+                        healthyPeer.isReady()
+                );
+
+            } finally {
+
+                releaseFailedServer.countDown();
+                releaseHealthyServer.countDown();
+            }
+
+            failedServer.get(
+                    5,
+                    TimeUnit.SECONDS
+            );
+
+            healthyServer.get(
+                    5,
+                    TimeUnit.SECONDS
+            );
+        }
+    }
+
+    @Test
+    void sessionPollCompletedShouldReturnEmptyWhileBlockIsStillInFlight()
+            throws Exception {
+
+        Block block =
+                blocks(1)
+                        .get(0);
+
+        try (ServerSocket serverSocket =
+                     new ServerSocket(0);
+
+             PeerManager peerManager =
+                     new PeerManager()) {
+
+            CountDownLatch requestReceived =
+                    new CountDownLatch(1);
+
+            CountDownLatch releaseServer =
+                    new CountDownLatch(1);
+
+            CompletableFuture<Void> server =
+                    CompletableFuture.runAsync(
+                            () -> runStalledPeer(
+                                    serverSocket,
+                                    block.hash(),
+                                    requestReceived,
+                                    releaseServer
+                            )
+                    );
+
+            try {
+                Peer peer =
+                        connectPeer(
+                                serverSocket.getLocalPort()
+                        );
+
+                peerManager.add(
+                        peer
+                );
+
+                try (SchedulerBlockDownloadSession session =
+                             new SchedulerBlockDownloadSession(
+                                     peerManager,
+                                     new BlockDownloadService(
+                                             peerManager
+                                     ),
+                                     new BlockDownloadTimeoutPolicy(
+                                             Duration.ofMinutes(10)
+                                     )
+                             )) {
+
+                    session.submit(
+                            List.of(
+                                    block.hash()
+                            )
+                    );
+
+                    assertTrue(
+                            requestReceived.await(
+                                    5,
+                                    TimeUnit.SECONDS
+                            )
+                    );
+
+                    Optional<CompletedBlockDownload> completed =
+                            session.pollCompleted(
+                                    Duration.ofMillis(50)
+                            );
+
+                    assertTrue(
+                            completed.isEmpty()
+                    );
+
+                    assertEquals(
+                            1,
+                            session.pendingCount()
+                    );
+
+                    assertEquals(
+                            Optional.of(peer),
+                            session.inFlightPeer(
+                                    block.hash()
+                            )
+                    );
+
+                    assertTrue(
+                            peer.isReady()
+                    );
+                }
+
+            } finally {
+
+                releaseServer.countDown();
+            }
+
+            server.get(
+                    5,
+                    TimeUnit.SECONDS
+            );
+        }
+    }
+
+    @Test
+    void sessionPollCompletedShouldReturnWithoutCancellingHealthyInFlightDownload()
+            throws Exception {
+
+        Block block =
+                blocks(1)
+                        .get(0);
+
+        try (ServerSocket serverSocket =
+                     new ServerSocket(0);
+
+             PeerManager peerManager =
+                     new PeerManager()) {
+
+            CountDownLatch requestReceived =
+                    new CountDownLatch(1);
+
+            CountDownLatch releaseServer =
+                    new CountDownLatch(1);
+
+            CompletableFuture<Void> server =
+                    CompletableFuture.runAsync(
+                            () -> runStalledPeer(
+                                    serverSocket,
+                                    block.hash(),
+                                    requestReceived,
+                                    releaseServer
+                            )
+                    );
+
+            try {
+
+                Peer peer =
+                        connectPeer(
+                                serverSocket.getLocalPort()
+                        );
+
+                peerManager.add(
+                        peer
+                );
+
+                try (SchedulerBlockDownloadSession session =
+                             new SchedulerBlockDownloadSession(
+                                     peerManager,
+                                     new BlockDownloadService(
+                                             peerManager
+                                     ),
+                                     new BlockDownloadTimeoutPolicy(
+                                             Duration.ofMinutes(10)
+                                     )
+                             )) {
+
+                    session.submit(
+                            List.of(
+                                    block.hash()
+                            )
+                    );
+
+                    assertTrue(
+                            requestReceived.await(
+                                    5,
+                                    TimeUnit.SECONDS
+                            )
+                    );
+
+                    Optional<CompletedBlockDownload> completed =
+                            session.pollCompleted(
+                                    Duration.ofMillis(50)
+                            );
+
+                    assertTrue(
+                            completed.isEmpty()
+                    );
+
+                    assertEquals(
+                            1,
+                            session.pendingCount()
+                    );
+
+                    assertEquals(
+                            Optional.of(peer),
+                            session.inFlightPeer(
+                                    block.hash()
+                            )
+                    );
+
+                    assertTrue(
+                            peer.isReady()
+                    );
+                }
+
+            } finally {
+
                 releaseServer.countDown();
             }
 
