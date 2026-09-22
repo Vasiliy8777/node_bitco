@@ -189,6 +189,16 @@ public final class PeerConnection implements AutoCloseable {
         return reader.read(input);
     }
 
+    void disableReadTimeout()
+            throws IOException {
+
+        ensureConnected();
+
+        socket.setSoTimeout(
+                0
+        );
+    }
+
     public boolean isConnected() {
         return socket != null
                 && socket.isConnected()

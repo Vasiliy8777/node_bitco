@@ -233,6 +233,18 @@ public final class Peer implements AutoCloseable {
             );
         }
 
+        /*
+         * The connection read timeout protects the handshake
+         * from a peer that connects but never completes the
+         * protocol negotiation.
+         *
+         * After READY the connection becomes long-lived.
+         * Normal Bitcoin peers may remain silent for longer
+         * than the handshake timeout, so socket inactivity
+         * must not be interpreted as a disconnect.
+         */
+        connection.disableReadTimeout();
+
         messageReader.start();
     }
 
