@@ -1,36 +1,56 @@
 package ru.bitcoin.node.app;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.core.env.MapPropertySource;
+import ru.bitcoin.node.app.config.NetworkConfiguration;
 import ru.bitcoin.node.protocol.network.BitcoinNetwork;
 import ru.bitcoin.node.protocol.network.NetworkParameters;
 
+import java.util.Map;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-@SpringBootTest(
-        classes = BitcoinNodeApplication.class,
-        properties = {
-                "bitcoin.network=regtest"
-        }
-)
 class NetworkConfigurationTest {
-
-    @Autowired
-    private NetworkParameters networkParameters;
 
     @Test
     void shouldConfigureRegtest() {
 
-        assertEquals(
-                BitcoinNetwork.REGTEST,
-                networkParameters.network()
-        );
+        try (var context =
+                     new AnnotationConfigApplicationContext()) {
 
-        assertEquals(
-                18444,
-                networkParameters.defaultPort()
-        );
+            context.getEnvironment()
+                    .getPropertySources()
+                    .addFirst(
+                            new MapPropertySource(
+                                    "network-test",
+                                    Map.of(
+                                            "bitcoin.network",
+                                            "regtest"
+                                    )
+                            )
+                    );
+
+            context.register(
+                    NetworkConfiguration.class
+            );
+
+            context.refresh();
+
+            NetworkParameters networkParameters =
+                    context.getBean(
+                            NetworkParameters.class
+                    );
+
+            assertEquals(
+                    BitcoinNetwork.REGTEST,
+                    networkParameters.network()
+            );
+
+            assertEquals(
+                    18444,
+                    networkParameters.defaultPort()
+            );
+        }
     }
 }

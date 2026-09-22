@@ -209,6 +209,36 @@ public final class BitcoinMessages {
         );
     }
 
+    public static BitcoinMessage inv(
+            InvMessage invMessage
+    ) {
+        if (invMessage == null) {
+            throw new IllegalArgumentException(
+                    "invMessage must not be null"
+            );
+        }
+
+        return new BitcoinMessage(
+                "inv",
+                InvMessageCodec.encode(
+                        invMessage
+                )
+        );
+    }
+
+    public static InvMessage decodeInv(
+            BitcoinMessage message
+    ) {
+        requireCommand(
+                message,
+                "inv"
+        );
+
+        return InvMessageCodec.decode(
+                message.payload()
+        );
+    }
+
     public static BitcoinMessage getData(
             GetDataMessage getDataMessage
     ) {

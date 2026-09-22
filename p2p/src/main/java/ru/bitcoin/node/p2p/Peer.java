@@ -14,6 +14,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
 public final class Peer implements AutoCloseable {
     private final List<PeerCloseListener> closeListeners =
             new CopyOnWriteArrayList<>();
+    private final List<PeerInventoryListener> inventoryListeners =
+            new CopyOnWriteArrayList<>();
     private final Object lifecycleLock =
             new Object();
 
@@ -541,13 +543,61 @@ public final class Peer implements AutoCloseable {
 
         switch (message.command()) {
 
-            case "ping" -> handlePing(message);
+            case "ping" ->
+                    handlePing(
+                            message
+                    );
+
+            case "inv" ->
+                    handleInv(
+                            message
+                    );
 
             default -> {
                 /*
-                 * Other post-handshake messages
-                 * are currently handled by higher layers
-                 * or ignored if unsupported.
+                 * Unsupported post-handshake messages
+                 * are ignored at the Peer layer.
+                 */
+            }
+        }
+    }
+
+    private void handleInv(
+            BitcoinMessage message
+    ) throws IOException {
+
+        final InvMessage inventory;
+
+        try {
+
+            inventory =
+                    BitcoinMessages.decodeInv(
+                            message
+                    );
+
+        } catch (IllegalArgumentException exception) {
+
+            throw new IOException(
+                    "Invalid inv message",
+                    exception
+            );
+        }
+
+        for (PeerInventoryListener listener :
+                inventoryListeners) {
+
+            try {
+
+                listener.onInventory(
+                        this,
+                        inventory
+                );
+
+            } catch (RuntimeException ignored) {
+
+                /*
+                 * An application-level inventory observer
+                 * must not terminate the peer reader thread.
                  */
             }
         }
@@ -598,6 +648,28 @@ public final class Peer implements AutoCloseable {
 
         connection.send(
                 message
+        );
+    }
+
+    public void addInventoryListener(
+            PeerInventoryListener listener
+    ) {
+        inventoryListeners.add(
+                java.util.Objects.requireNonNull(
+                        listener,
+                        "listener"
+                )
+        );
+    }
+
+    public void removeInventoryListener(
+            PeerInventoryListener listener
+    ) {
+        inventoryListeners.remove(
+                java.util.Objects.requireNonNull(
+                        listener,
+                        "listener"
+                )
         );
     }
 
