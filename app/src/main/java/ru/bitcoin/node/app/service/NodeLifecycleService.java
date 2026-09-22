@@ -183,6 +183,24 @@ public final class NodeLifecycleService
 
             ensureNotStopping();
 
+            /*
+             * Header synchronization has completed successfully.
+             *
+             * Start long-lived outbound supervision before block IBD so
+             * loss of the current peer does not make block synchronization
+             * terminal merely because PeerManager temporarily contains
+             * zero READY peers.
+             *
+             * The block-download scheduler keeps unfinished blocks pending
+             * and will discover a replacement peer through PeerManager
+             * after OutboundPeerSupervisor reconnects.
+             */
+            outboundPeerSupervisor.start(
+                    activeOutboundConnection
+            );
+
+            ensureNotStopping();
+
             synchronizeBlocks();
 
             ensureNotStopping();
@@ -197,17 +215,6 @@ public final class NodeLifecycleService
                     return;
                 }
             }
-
-            /*
-             * Initial synchronization is complete.
-             * From this point the outbound supervisor owns
-             * long-lived outbound reconnection.
-             */
-            outboundPeerSupervisor.start(
-                    activeOutboundConnection
-            );
-
-            ensureNotStopping();
 
             setState(
                     NodeLifecycleState.RUNNING
@@ -523,6 +530,17 @@ public final class NodeLifecycleService
 
         try {
 
+            blockSyncCoordinator.cancel();
+
+        } catch (RuntimeException closeException) {
+
+            exception.addSuppressed(
+                    closeException
+            );
+        }
+
+        try {
+
             peerManager.close();
 
         } catch (IOException closeException) {
@@ -599,6 +617,27 @@ public final class NodeLifecycleService
                             "Failed to stop outbound peer supervisor",
                             exception
                     );
+        }
+
+        try {
+
+            blockSyncCoordinator.cancel();
+
+        } catch (RuntimeException exception) {
+
+            IOException cancellationFailure =
+                    new IOException(
+                            "Failed to cancel block synchronization",
+                            exception
+                    );
+
+            if (closeFailure == null) {
+                closeFailure = cancellationFailure;
+            } else {
+                closeFailure.addSuppressed(
+                        cancellationFailure
+                );
+            }
         }
 
         try {

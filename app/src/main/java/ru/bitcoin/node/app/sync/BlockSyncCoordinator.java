@@ -18,6 +18,10 @@ import java.time.Duration;
 import java.util.*;
 
 public final class BlockSyncCoordinator {
+
+    private final Object lifecycleLock = new Object();
+    private boolean cancelled;
+    private BlockDownloadSession activeSession;
     /*
      * Bitcoin Core BLOCK_DOWNLOAD_WINDOW.
      *
@@ -177,6 +181,8 @@ public final class BlockSyncCoordinator {
             int maxBlocks
     ) throws IOException {
 
+        ensureNotCancelled();
+
         if (maxBlocks <= 0) {
             throw new IllegalArgumentException(
                     "maxBlocks must be positive"
@@ -243,8 +249,9 @@ public final class BlockSyncCoordinator {
         int nextToExpose = 0;
         int nextToProcess = 0;
 
-        try (BlockDownloadSession session =
-                     blockDownloadScheduler.openSession()) {
+        BlockDownloadSession session = openActiveSession();
+
+        try (session) {
 
             while (nextToProcess
                     < blocksToDownload.size()) {
@@ -567,6 +574,7 @@ public final class BlockSyncCoordinator {
             }
         } finally {
 
+            clearActiveSession(session);
             stallTracker.clear();
         }
 
@@ -604,4 +612,63 @@ public final class BlockSyncCoordinator {
                 blocksToDownload
         );
     }
+    public void cancel() {
+
+        BlockDownloadSession sessionToClose;
+
+        synchronized (lifecycleLock) {
+
+            cancelled = true;
+            sessionToClose = activeSession;
+        }
+
+        if (sessionToClose != null) {
+            sessionToClose.close();
+        }
+    }
+
+    private void ensureNotCancelled()
+            throws IOException {
+
+        synchronized (lifecycleLock) {
+
+            if (cancelled) {
+                throw new IOException(
+                        "Block synchronization cancelled"
+                );
+            }
+        }
+    }
+
+    private BlockDownloadSession openActiveSession()
+            throws IOException {
+
+        synchronized (lifecycleLock) {
+
+            if (cancelled) {
+                throw new IOException(
+                        "Block synchronization cancelled"
+                );
+            }
+
+            BlockDownloadSession session =
+                    blockDownloadScheduler.openSession();
+
+            activeSession = session;
+            return session;
+        }
+    }
+
+    private void clearActiveSession(
+            BlockDownloadSession session
+    ) {
+
+        synchronized (lifecycleLock) {
+
+            if (activeSession == session) {
+                activeSession = null;
+            }
+        }
+    }
+
 }

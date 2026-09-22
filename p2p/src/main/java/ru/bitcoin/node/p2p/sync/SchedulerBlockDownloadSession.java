@@ -130,12 +130,6 @@ public final class SchedulerBlockDownloadSession
         List<Peer> peers =
                 peerManager.readyPeers();
 
-        if (peers.isEmpty()) {
-            throw new IOException(
-                    "No ready peers available for block download"
-            );
-        }
-
         /*
          * Validate all integer arithmetic before changing
          * session state.
@@ -180,13 +174,16 @@ public final class SchedulerBlockDownloadSession
         pendingCount =
                 prospectivePendingCount;
 
-        ensureExecutor(
-                peers.size()
-        );
+        if (!peers.isEmpty()) {
 
-        assignAvailable(
-                peers
-        );
+            ensureExecutor(
+                    peers.size()
+            );
+
+            assignAvailable(
+                    peers
+            );
+        }
     }
 
     @Override
@@ -224,6 +221,8 @@ public final class SchedulerBlockDownloadSession
 
         Future<DownloadResult> future;
 
+        boolean waitForReadyPeer = false;
+
         synchronized (this) {
 
             ensureOpen();
@@ -238,6 +237,11 @@ public final class SchedulerBlockDownloadSession
                     peerManager.readyPeers();
 
             if (!peers.isEmpty()) {
+
+                ensureExecutor(
+                        peers.size()
+                );
+
                 assignAvailable(
                         peers
                 );
@@ -254,10 +258,36 @@ public final class SchedulerBlockDownloadSession
                     );
                 }
 
-                throw buildFailure(
-                        failedState
-                );
+                /*
+                 * Zero READY peers is a temporary, recoverable state.
+                 *
+                 * Keep all incomplete blocks pending. A later polling
+                 * iteration will see a replacement peer added to
+                 * PeerManager by outbound reconnection.
+                 */
+                if (peers.isEmpty()) {
+
+                    waitForReadyPeer = true;
+
+                } else {
+
+                    /*
+                     * READY peers exist, but no work is active and the
+                     * available peers have already been exhausted for
+                     * this block. Preserve the existing terminal-failure
+                     * behaviour for that case.
+                     */
+                    throw buildFailure(
+                            failedState
+                    );
+                }
             }
+        }
+
+        if (waitForReadyPeer) {
+            return waitWithoutReadyPeer(
+                    timeout
+            );
         }
 
         try {
@@ -474,6 +504,70 @@ public final class SchedulerBlockDownloadSession
         }
     }
 
+    private Optional<CompletedBlockDownload> waitWithoutReadyPeer(
+            Duration timeout
+    ) throws IOException {
+
+        if (timeout.isZero()) {
+            return Optional.empty();
+        }
+
+        final long timeoutNanos;
+
+        try {
+
+            timeoutNanos =
+                    timeout.toNanos();
+
+        } catch (ArithmeticException exception) {
+
+            throw new IllegalArgumentException(
+                    "timeout is too large",
+                    exception
+            );
+        }
+
+        long timeoutMillis =
+                TimeUnit.NANOSECONDS.toMillis(
+                        timeoutNanos
+                );
+
+        int nanosRemainder =
+                (int) (
+                        timeoutNanos
+                                - TimeUnit.MILLISECONDS.toNanos(
+                                timeoutMillis
+                        )
+                );
+
+        synchronized (this) {
+
+            ensureOpen();
+
+            try {
+
+                wait(
+                        timeoutMillis,
+                        nanosRemainder
+                );
+
+            } catch (InterruptedException exception) {
+
+                Thread.currentThread()
+                        .interrupt();
+
+                throw new IOException(
+                        "Block download interrupted",
+                        exception
+                );
+            }
+
+            ensureOpen();
+        }
+
+        return Optional.empty();
+    }
+
     @Override
     public synchronized int pendingCount() {
         return pendingCount;
@@ -492,6 +586,12 @@ public final class SchedulerBlockDownloadSession
             }
 
             closed = true;
+
+            /*
+             * Wake pollCompleted() immediately if it is currently
+             * waiting for a replacement READY peer.
+             */
+            notifyAll();
 
             futures =
                     new ArrayList<>(

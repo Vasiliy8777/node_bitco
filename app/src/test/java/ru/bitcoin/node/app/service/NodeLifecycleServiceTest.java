@@ -1451,6 +1451,544 @@ class NodeLifecycleServiceTest {
         }
     }
 
+    @Test
+    void shouldReconnectAndResumeBlockSynchronizationWhenPeerDisconnectsDuringIbd()
+            throws Exception {
+
+        NetworkParameters parameters =
+                NetworkParametersRegistry.regtest();
+
+        Block genesisBlock =
+                GenesisBlockFactory.create(
+                        parameters
+                );
+
+        BlockIndex genesis =
+                BlockIndexFactory.createGenesis(
+                        genesisBlock.header()
+                );
+
+        Block block1 =
+                child(
+                        genesis,
+                        1
+                );
+
+        try (ServerSocket serverSocket =
+                     new ServerSocket(0);
+
+             var context =
+                     new AnnotationConfigApplicationContext()) {
+
+            CompletableFuture<Void> firstGetDataReceived =
+                    new CompletableFuture<>();
+
+            CompletableFuture<Void> secondGetDataReceived =
+                    new CompletableFuture<>();
+
+            CompletableFuture<Void> server =
+                    CompletableFuture.runAsync(
+                            () -> runIbdReconnectPeer(
+                                    serverSocket,
+                                    parameters,
+                                    block1,
+                                    firstGetDataReceived,
+                                    secondGetDataReceived
+                            )
+                    );
+
+            context.getEnvironment()
+                    .getPropertySources()
+                    .addFirst(
+                            new MapPropertySource(
+                                    "lifecycle-ibd-reconnect-test",
+                                    Map.of(
+                                            "bitcoin.data-directory",
+                                            directory
+                                                    .resolve(
+                                                            "ibd-reconnect"
+                                                    )
+                                                    .toString(),
+                                            "bitcoin.network",
+                                            "regtest"
+                                    )
+                            )
+                    );
+
+            context.register(
+                    NetworkConfiguration.class,
+                    NodeConfiguration.class
+            );
+
+            context.refresh();
+
+            PeerAddressManager addressManager =
+                    context.getBean(
+                            PeerAddressManager.class
+                    );
+
+            PeerAddress peerAddress =
+                    new PeerAddress(
+                            InetAddress.getByName(
+                                    "127.0.0.1"
+                            ),
+                            serverSocket.getLocalPort(),
+                            0L
+                    );
+
+            addressManager.add(
+                    peerAddress,
+                    Instant.ofEpochSecond(
+                            1_700_000_000L
+                    )
+            );
+
+            NodeLifecycleService lifecycle =
+                    context.getBean(
+                            NodeLifecycleService.class
+                    );
+
+            NodeValidationService validationService =
+                    context.getBean(
+                            NodeValidationService.class
+                    );
+
+            NodeSyncInfrastructure syncInfrastructure =
+                    context.getBean(
+                            NodeSyncInfrastructure.class
+                    );
+
+            PeerManager peerManager =
+                    context.getBean(
+                            PeerManager.class
+                    );
+
+            Thread lifecycleThread =
+                    startLifecycle(
+                            lifecycle
+                    );
+
+            try {
+
+                /*
+                 * Peer A must reach block synchronization and receive
+                 * the original block request before disconnecting.
+                 */
+                firstGetDataReceived.get(
+                        5,
+                        TimeUnit.SECONDS
+                );
+
+                assertEquals(
+                        NodeLifecycleState.SYNCHRONIZING_BLOCKS,
+                        lifecycle.state()
+                );
+
+                /*
+                 * OutboundPeerSupervisor must reconnect to the same known
+                 * address. Peer B must then receive the still-pending block.
+                 */
+                secondGetDataReceived.get(
+                        10,
+                        TimeUnit.SECONDS
+                );
+
+                /*
+                 * Peer B returns block1. IBD must continue from the existing
+                 * download session and eventually reach RUNNING.
+                 */
+                awaitRunning(
+                        lifecycle
+                );
+
+                assertTrue(
+                        lifecycleThread.isAlive()
+                );
+
+                assertEquals(
+                        NodeLifecycleState.RUNNING,
+                        lifecycle.state()
+                );
+
+                assertTrue(
+                        lifecycle.failure()
+                                .isEmpty()
+                );
+
+                assertEquals(
+                        block1.hash(),
+                        validationService
+                                .activeTip()
+                                .hash()
+                );
+
+                assertEquals(
+                        1L,
+                        validationService
+                                .activeTip()
+                                .height()
+                );
+
+                assertEquals(
+                        block1.hash(),
+                        syncInfrastructure
+                                .headerChainState()
+                                .bestHeaderTip()
+                                .hash()
+                );
+
+                assertEquals(
+                        validationService
+                                .activeTip()
+                                .hash(),
+                        syncInfrastructure
+                                .headerChainState()
+                                .bestHeaderTip()
+                                .hash()
+                );
+
+                assertEquals(
+                        1,
+                        peerManager.readyPeers()
+                                .size()
+                );
+
+            } finally {
+
+                closeAndAwaitLifecycle(
+                        lifecycle,
+                        lifecycleThread
+                );
+            }
+
+            server.get(
+                    5,
+                    TimeUnit.SECONDS
+            );
+
+            assertTrue(
+                    peerManager.isEmpty()
+            );
+        }
+    }
+
+    private static void runIbdReconnectPeer(
+            ServerSocket serverSocket,
+            NetworkParameters parameters,
+            Block block,
+            CompletableFuture<Void> firstGetDataReceived,
+            CompletableFuture<Void> secondGetDataReceived
+    ) {
+
+        try {
+
+            /*
+             * ==========================================================
+             * PEER A
+             *
+             * Performs header synchronization normally, receives GETDATA
+             * for block1 and then disappears without returning the block.
+             * ==========================================================
+             */
+            try (Socket firstSocket =
+                         serverSocket.accept()) {
+
+                firstSocket.setSoTimeout(
+                        5_000
+                );
+
+                BufferedInputStream input =
+                        new BufferedInputStream(
+                                firstSocket.getInputStream()
+                        );
+
+                BufferedOutputStream output =
+                        new BufferedOutputStream(
+                                firstSocket.getOutputStream()
+                        );
+
+                BitcoinMessageStreamReader reader =
+                        new BitcoinMessageStreamReader(
+                                new BitcoinMessageDecoder(
+                                        parameters
+                                )
+                        );
+
+                BitcoinMessageEncoder encoder =
+                        new BitcoinMessageEncoder(
+                                parameters
+                        );
+
+                performHandshake(
+                        reader,
+                        encoder,
+                        input,
+                        output
+                );
+
+                /*
+                 * First GETHEADERS.
+                 */
+                BitcoinMessage firstGetHeaders =
+                        reader.read(
+                                input
+                        ).orElseThrow();
+
+                assertEquals(
+                        "getheaders",
+                        firstGetHeaders.command()
+                );
+
+                GetHeadersMessage firstRequest =
+                        GetHeadersMessageCodec.decode(
+                                firstGetHeaders.payload()
+                        );
+
+                assertFalse(
+                        firstRequest.locatorHashes()
+                                .isEmpty()
+                );
+
+                /*
+                 * Announce block1 header.
+                 */
+                output.write(
+                        encoder.encode(
+                                BitcoinMessages.headers(
+                                        new HeadersMessage(
+                                                List.of(
+                                                        block.header()
+                                                )
+                                        )
+                                )
+                        )
+                );
+
+                output.flush();
+
+                /*
+                 * Header synchronizer asks again from block1.
+                 */
+                BitcoinMessage secondGetHeaders =
+                        reader.read(
+                                input
+                        ).orElseThrow();
+
+                assertEquals(
+                        "getheaders",
+                        secondGetHeaders.command()
+                );
+
+                GetHeadersMessage secondRequest =
+                        GetHeadersMessageCodec.decode(
+                                secondGetHeaders.payload()
+                        );
+
+                assertEquals(
+                        block.hash(),
+                        secondRequest.locatorHashes()
+                                .get(0)
+                );
+
+                /*
+                 * Empty HEADERS terminates header synchronization.
+                 */
+                output.write(
+                        encoder.encode(
+                                BitcoinMessages.headers(
+                                        new HeadersMessage(
+                                                List.of()
+                                        )
+                                )
+                        )
+                );
+
+                output.flush();
+
+                /*
+                 * Block IBD starts.
+                 */
+                BitcoinMessage getDataWire =
+                        reader.read(
+                                input
+                        ).orElseThrow();
+
+                assertEquals(
+                        "getdata",
+                        getDataWire.command()
+                );
+
+                GetDataMessage getData =
+                        BitcoinMessages.decodeGetData(
+                                getDataWire
+                        );
+
+                assertEquals(
+                        1,
+                        getData.size()
+                );
+
+                InventoryVector requested =
+                        getData.inventory()
+                                .get(0);
+
+                assertEquals(
+                        InventoryVector.MSG_WITNESS_BLOCK,
+                        requested.type()
+                );
+
+                assertEquals(
+                        block.hash(),
+                        requested.hash()
+                );
+
+                /*
+                 * Signal the test only after Peer A really owns the
+                 * outstanding block request.
+                 */
+                firstGetDataReceived.complete(
+                        null
+                );
+
+                /*
+                 * Deliberately DO NOT send BLOCK.
+                 *
+                 * Leaving this try block closes the TCP connection.
+                 */
+            }
+
+            /*
+             * ==========================================================
+             * PEER B
+             *
+             * This connection must be created by OutboundPeerSupervisor.
+             * It receives the SAME pending block request and completes IBD.
+             * ==========================================================
+             */
+            try (Socket secondSocket =
+                         serverSocket.accept()) {
+
+                secondSocket.setSoTimeout(
+                        10_000
+                );
+
+                BufferedInputStream input =
+                        new BufferedInputStream(
+                                secondSocket.getInputStream()
+                        );
+
+                BufferedOutputStream output =
+                        new BufferedOutputStream(
+                                secondSocket.getOutputStream()
+                        );
+
+                BitcoinMessageStreamReader reader =
+                        new BitcoinMessageStreamReader(
+                                new BitcoinMessageDecoder(
+                                        parameters
+                                )
+                        );
+
+                BitcoinMessageEncoder encoder =
+                        new BitcoinMessageEncoder(
+                                parameters
+                        );
+
+                performHandshake(
+                        reader,
+                        encoder,
+                        input,
+                        output
+                );
+
+                /*
+                 * Header sync must NOT restart here.
+                 *
+                 * The existing header chain already knows block1.
+                 * SchedulerBlockDownloadSession should simply assign the
+                 * unfinished block body to this new Peer instance.
+                 */
+                BitcoinMessage getDataWire =
+                        reader.read(
+                                input
+                        ).orElseThrow();
+
+                assertEquals(
+                        "getdata",
+                        getDataWire.command(),
+                        "Replacement peer should resume block download without restarting header sync"
+                );
+
+                GetDataMessage getData =
+                        BitcoinMessages.decodeGetData(
+                                getDataWire
+                        );
+
+                assertEquals(
+                        1,
+                        getData.size()
+                );
+
+                InventoryVector requested =
+                        getData.inventory()
+                                .get(0);
+
+                assertEquals(
+                        InventoryVector.MSG_WITNESS_BLOCK,
+                        requested.type()
+                );
+
+                assertEquals(
+                        block.hash(),
+                        requested.hash(),
+                        "Replacement peer must receive the same pending block"
+                );
+
+                secondGetDataReceived.complete(
+                        null
+                );
+
+                /*
+                 * Complete the previously pending block download.
+                 */
+                output.write(
+                        encoder.encode(
+                                BitcoinMessages.block(
+                                        new BlockMessage(
+                                                block
+                                        )
+                                )
+                        )
+                );
+
+                output.flush();
+
+                /*
+                 * Keep replacement connection alive until
+                 * lifecycle.close().
+                 */
+                assertEquals(
+                        -1,
+                        input.read()
+                );
+            }
+
+        } catch (Exception exception) {
+
+            firstGetDataReceived.completeExceptionally(
+                    exception
+            );
+
+            secondGetDataReceived.completeExceptionally(
+                    exception
+            );
+
+            throw new RuntimeException(
+                    exception
+            );
+        }
+    }
+
     private static void runBlockingBlockPeer(
             ServerSocket serverSocket,
             NetworkParameters parameters,
