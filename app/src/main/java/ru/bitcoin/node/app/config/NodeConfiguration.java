@@ -117,7 +117,9 @@ public class NodeConfiguration {
     @Bean
     public OutboundPeerSupervisor outboundPeerSupervisor(
             OutboundPeerManager outboundPeerManager,
-            NodeValidationService validationService
+            NodeValidationService validationService,
+            @Value("${bitcoin.p2p.target-outbound-peers:1}")
+            int targetOutboundPeers
     ) {
 
         return new OutboundPeerSupervisor(
@@ -126,7 +128,8 @@ public class NodeConfiguration {
                         validationService
                                 .activeTip()
                                 .height()
-                )
+                ),
+                targetOutboundPeers
         );
     }
 

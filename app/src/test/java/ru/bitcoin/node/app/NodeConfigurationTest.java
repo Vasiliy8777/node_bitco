@@ -12,6 +12,7 @@ import ru.bitcoin.node.app.sync.BlockSyncCoordinator;
 import ru.bitcoin.node.app.sync.NodeSyncInfrastructure;
 import ru.bitcoin.node.p2p.BitcoinClient;
 import ru.bitcoin.node.p2p.OutboundPeerManager;
+import ru.bitcoin.node.p2p.OutboundPeerSupervisor;
 import ru.bitcoin.node.p2p.PeerManager;
 import ru.bitcoin.node.p2p.address.PeerAddressManager;
 import ru.bitcoin.node.p2p.sync.BlockDownloadScheduler;
@@ -231,4 +232,70 @@ class NodeConfigurationTest {
             }
         }
     }
+
+    @Test
+    void outboundPeerSupervisorUsesSinglePeerByDefault() {
+        try (var context = createContext(Map.of())) {
+            OutboundPeerSupervisor supervisor =
+                    context.getBean(OutboundPeerSupervisor.class);
+
+            assertEquals(1, supervisor.targetOutboundPeers());
+        }
+    }
+
+    @Test
+    void outboundPeerSupervisorUsesConfiguredTargetPeerCount() {
+        try (var context = createContext(
+                Map.of("bitcoin.p2p.target-outbound-peers", "4")
+        )) {
+            OutboundPeerSupervisor supervisor =
+                    context.getBean(OutboundPeerSupervisor.class);
+
+            assertEquals(4, supervisor.targetOutboundPeers());
+        }
+    }
+
+    @Test
+    void outboundPeerSupervisorRejectsNonPositiveTargetPeerCount() {
+        Exception exception = assertThrows(
+                Exception.class,
+                () -> {
+                    try (var ignored = createContext(
+                            Map.of("bitcoin.p2p.target-outbound-peers", "0")
+                    )) {
+                        // Context creation itself must fail.
+                    }
+                }
+        );
+
+        assertNotNull(exception);
+    }
+
+    private AnnotationConfigApplicationContext createContext(
+            Map<String, Object> overrides
+    ) {
+        var context = new AnnotationConfigApplicationContext();
+
+        Map<String, Object> properties = new java.util.HashMap<>();
+        properties.put("bitcoin.data-directory", directory.toString());
+        properties.put("bitcoin.network", "regtest");
+        properties.putAll(overrides);
+
+        context.getEnvironment()
+                .getPropertySources()
+                .addFirst(
+                        new MapPropertySource(
+                                "node-test",
+                                properties
+                        )
+                );
+
+        context.register(
+                NetworkConfiguration.class,
+                NodeConfiguration.class
+        );
+        context.refresh();
+        return context;
+    }
+
 }

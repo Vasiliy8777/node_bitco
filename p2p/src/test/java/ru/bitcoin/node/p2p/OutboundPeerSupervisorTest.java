@@ -412,6 +412,177 @@ class OutboundPeerSupervisorTest {
         }
     }
 
+    @Test
+    void shouldFillMultipleOutboundSlotsWithoutDuplicateAddresses()
+            throws Exception {
+
+        try (ServerSocket firstServerSocket = new ServerSocket(0);
+             ServerSocket secondServerSocket = new ServerSocket(0)) {
+
+            CompletableFuture<Socket> firstAccepted =
+                    CompletableFuture.supplyAsync(
+                            () -> acceptAndHandshakeOnce(firstServerSocket)
+                    );
+
+            CompletableFuture<Socket> secondAccepted =
+                    CompletableFuture.supplyAsync(
+                            () -> acceptAndHandshakeOnce(secondServerSocket)
+                    );
+
+            PeerAddress firstAddress =
+                    new PeerAddress(
+                            InetAddress.getByName("127.0.0.1"),
+                            firstServerSocket.getLocalPort(),
+                            0L
+                    );
+
+            PeerAddress secondAddress =
+                    new PeerAddress(
+                            InetAddress.getByName("127.0.0.1"),
+                            secondServerSocket.getLocalPort(),
+                            0L
+                    );
+
+            PeerAddressManager addressManager =
+                    new PeerAddressManager();
+
+            Instant now =
+                    Instant.ofEpochSecond(1_700_000_000L);
+
+            addressManager.add(firstAddress, now);
+            addressManager.add(secondAddress, now);
+
+            PeerManager peerManager =
+                    new PeerManager();
+
+            OutboundPeerManager outboundPeerManager =
+                    new OutboundPeerManager(
+                            new BitcoinClient(PARAMETERS),
+                            peerManager,
+                            addressManager
+                    );
+
+            OutboundPeerConnection initialConnection =
+                    outboundPeerManager.connectOneWithAddress(
+                            100,
+                            List.of()
+                    );
+
+            OutboundPeerSupervisor supervisor =
+                    new OutboundPeerSupervisor(
+                            outboundPeerManager,
+                            () -> 101,
+                            2,
+                            Duration.ofMillis(25),
+                            Duration.ofMillis(100)
+                    );
+
+            try {
+                supervisor.start(initialConnection);
+
+                waitUntil(
+                        () -> supervisor.activeConnectionCount() == 2,
+                        Duration.ofSeconds(5)
+                );
+
+                assertEquals(2, supervisor.targetOutboundPeers());
+                assertEquals(2, supervisor.connections().size());
+                assertEquals(2, peerManager.readyPeers().size());
+
+                assertEquals(
+                        2L,
+                        supervisor.connections()
+                                .stream()
+                                .map(OutboundPeerConnection::address)
+                                .distinct()
+                                .count()
+                );
+
+                /*
+                 * Exactly one server accepted the initial connection at
+                 * height 100 and the other accepted the automatically filled
+                 * slot at height 101. Which address is selected first is not
+                 * part of the contract.
+                 */
+                Socket firstSocket = firstAccepted.get(5, TimeUnit.SECONDS);
+                Socket secondSocket = secondAccepted.get(5, TimeUnit.SECONDS);
+
+                assertFalse(firstSocket.isClosed());
+                assertFalse(secondSocket.isClosed());
+
+            } finally {
+                supervisor.close();
+                peerManager.close();
+            }
+        }
+    }
+
+    private static Socket acceptAndHandshakeOnce(
+            ServerSocket serverSocket
+    ) {
+        try {
+            Socket socket = serverSocket.accept();
+            socket.setSoTimeout(5_000);
+
+            BufferedInputStream input =
+                    new BufferedInputStream(socket.getInputStream());
+
+            BufferedOutputStream output =
+                    new BufferedOutputStream(socket.getOutputStream());
+
+            BitcoinMessageStreamReader reader =
+                    new BitcoinMessageStreamReader(
+                            new BitcoinMessageDecoder(PARAMETERS)
+                    );
+
+            BitcoinMessageEncoder encoder =
+                    new BitcoinMessageEncoder(PARAMETERS);
+
+            BitcoinMessage version =
+                    reader.read(input).orElseThrow();
+
+            assertEquals("version", version.command());
+
+            int startHeight =
+                    BitcoinMessages.decodeVersion(version).startHeight();
+
+            assertTrue(
+                    startHeight == 100 || startHeight == 101,
+                    "unexpected start height: " + startHeight
+            );
+
+            VersionMessage remoteVersion =
+                    new VersionMessage(
+                            VersionMessage.CURRENT_PROTOCOL_VERSION,
+                            VersionMessage.DEFAULT_SERVICES,
+                            1_700_000_000L,
+                            NetworkAddress.unspecified(),
+                            NetworkAddress.unspecified(),
+                            0x123456789ABCDEFL,
+                            "/outbound-supervisor-multi-test/",
+                            321,
+                            true
+                    );
+
+            output.write(encoder.encode(BitcoinMessages.version(remoteVersion)));
+            output.flush();
+
+            assertEquals("wtxidrelay", reader.read(input).orElseThrow().command());
+            assertEquals("sendaddrv2", reader.read(input).orElseThrow().command());
+            assertEquals("verack", reader.read(input).orElseThrow().command());
+
+            output.write(encoder.encode(BitcoinMessages.wtxidRelay()));
+            output.write(encoder.encode(BitcoinMessages.sendAddrV2()));
+            output.write(encoder.encode(BitcoinMessages.verack()));
+            output.flush();
+
+            return socket;
+
+        } catch (Exception exception) {
+            throw new RuntimeException(exception);
+        }
+    }
+
     private static void runReconnectServer(
             ServerSocket serverSocket,
             AtomicInteger acceptedConnections,

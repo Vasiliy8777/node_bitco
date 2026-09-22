@@ -1,3 +1,9 @@
 bitcoin:
+  network: regtest
+  data-directory: C:/bitcoin-java-node
+
   node:
     auto-start: true
+  p2p:
+    target-outbound-peers: 3
+    peers: 127.0.0.1:18444,127.0.0.1:18454,127.0.0.1:18464
