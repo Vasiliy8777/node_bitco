@@ -259,23 +259,42 @@ public final class SchedulerBlockDownloadSession
                 }
 
                 /*
-                 * Zero READY peers is a temporary, recoverable state.
+                 * IMPORTANT:
                  *
-                 * Keep all incomplete blocks pending. A later polling
-                 * iteration will see a replacement peer added to
-                 * PeerManager by outbound reconnection.
+                 * Do not use the peer snapshot captured before assignAvailable().
+                 *
+                 * A peer can disconnect between peerManager.readyPeers() and this
+                 * point. In that case assignAvailable() correctly skips the now
+                 * CLOSED peer, but the old snapshot still contains it.
+                 *
+                 * Using that stale snapshot here would incorrectly turn a temporary
+                 * zero-peer reconnect window into a terminal block-download failure.
                  */
-                if (peers.isEmpty()) {
+                List<Peer> currentReadyPeers =
+                        peerManager.readyPeers();
 
+                if (currentReadyPeers.isEmpty()) {
+
+                    /*
+                     * No READY peers exist right now.
+                     *
+                     * This is recoverable: OutboundPeerSupervisor may install a
+                     * replacement Peer. Keep the incomplete block pending and allow
+                     * the next poll iteration to assign it to that new Peer instance.
+                     */
                     waitForReadyPeer = true;
 
                 } else {
 
                     /*
-                     * READY peers exist, but no work is active and the
-                     * available peers have already been exhausted for
-                     * this block. Preserve the existing terminal-failure
-                     * behaviour for that case.
+                     * READY peers still genuinely exist.
+                     *
+                     * assignAvailable() has already had an opportunity to assign the
+                     * incomplete work. If nothing is active now, the available peers
+                     * have been exhausted for this block (for example they returned
+                     * NOTFOUND).
+                     *
+                     * Preserve terminal failure for that case.
                      */
                     throw buildFailure(
                             failedState
