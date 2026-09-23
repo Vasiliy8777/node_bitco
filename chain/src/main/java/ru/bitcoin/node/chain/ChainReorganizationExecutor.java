@@ -23,6 +23,7 @@ public final class ChainReorganizationExecutor {
     private final UtxoStore utxoStore;
     private final ChainTransitionManager transitionManager;
     private final NetworkParameters networkParameters;
+    private final InvalidBlockObserver invalidBlockObserver;
 
     public ChainReorganizationExecutor(
             BlockStore blockStore,
@@ -31,6 +32,26 @@ public final class ChainReorganizationExecutor {
             ChainTransitionManager transitionManager,
             NetworkParameters networkParameters,
             BlockIndexLookup blockIndexLookup
+    ) {
+        this(
+                blockStore,
+                undoStore,
+                utxoStore,
+                transitionManager,
+                networkParameters,
+                blockIndexLookup,
+                InvalidBlockObserver.noop()
+        );
+    }
+
+    public ChainReorganizationExecutor(
+            BlockStore blockStore,
+            UndoStore undoStore,
+            UtxoStore utxoStore,
+            ChainTransitionManager transitionManager,
+            NetworkParameters networkParameters,
+            BlockIndexLookup blockIndexLookup,
+            InvalidBlockObserver invalidBlockObserver
     ) {
         if (blockStore == null) {
             throw new IllegalArgumentException(
@@ -70,6 +91,11 @@ public final class ChainReorganizationExecutor {
         this.utxoStore = utxoStore;
         this.transitionManager = transitionManager;
         this.networkParameters = networkParameters;
+        this.invalidBlockObserver =
+                java.util.Objects.requireNonNull(
+                        invalidBlockObserver,
+                        "invalidBlockObserver"
+                );
     }
 
     public void execute(
@@ -114,7 +140,8 @@ public final class ChainReorganizationExecutor {
                         connectBlocks,
                         utxoStore,
                         networkParameters,
-                        blockIndexLookup
+                        blockIndexLookup,
+                        invalidBlockObserver
                 );
 
         /*

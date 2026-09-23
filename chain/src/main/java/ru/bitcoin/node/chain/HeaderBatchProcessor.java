@@ -11,11 +11,26 @@ public final class HeaderBatchProcessor {
     private final HeaderProcessor headerProcessor;
     private final HeaderChainState headerChainState;
     private final KnownHeaderStorage headerStorage;
+    private final BlockFailureResolver failureResolver;
 
     public HeaderBatchProcessor(
             HeaderProcessor headerProcessor,
             HeaderChainState headerChainState,
             KnownHeaderStorage headerStorage
+    ) {
+        this(
+                headerProcessor,
+                headerChainState,
+                headerStorage,
+                null
+        );
+    }
+
+    public HeaderBatchProcessor(
+            HeaderProcessor headerProcessor,
+            HeaderChainState headerChainState,
+            KnownHeaderStorage headerStorage,
+            BlockFailureResolver failureResolver
     ) {
         if (headerProcessor == null) {
             throw new IllegalArgumentException(
@@ -43,6 +58,9 @@ public final class HeaderBatchProcessor {
 
         this.headerStorage =
                 headerStorage;
+
+        this.failureResolver =
+                failureResolver;
     }
 
     public List<BlockIndex> process(
@@ -74,8 +92,13 @@ public final class HeaderBatchProcessor {
                             header
                     );
 
+            boolean failed =
+                    failureResolver != null
+                            && failureResolver.isFailed(index);
+
             boolean better =
-                    headerChainState.isBetterThanBest(
+                    !failed
+                            && headerChainState.isBetterThanBest(
                             index
                     );
 

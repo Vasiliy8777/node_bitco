@@ -447,7 +447,7 @@ class OutboundPeerSupervisorTest {
                     new PeerAddressManager();
 
             Instant now =
-                    Instant.ofEpochSecond(1_700_000_000L);
+                    Instant.now();
 
             addressManager.add(firstAddress, now);
             addressManager.add(secondAddress, now);

@@ -5,6 +5,7 @@ import ru.bitcoin.node.chain.*;
 import ru.bitcoin.node.chain.storage.KnownHeaderStorage;
 import ru.bitcoin.node.consensus.time.AdjustedTime;
 import ru.bitcoin.node.protocol.network.NetworkParameters;
+import ru.bitcoin.node.storage.block.RocksDbBlockFailureStore;
 import ru.bitcoin.node.storage.block.RocksDbBlockIndexStore;
 import ru.bitcoin.node.storage.block.RocksDbBlockStore;
 import ru.bitcoin.node.storage.chain.RocksDbChainStateStore;
@@ -60,6 +61,12 @@ public final class NodeSyncInfrastructure {
                         blockIndexStore
                 );
 
+        BlockFailureResolver failureResolver =
+                new BlockFailureResolver(
+                        blockIndexLookup,
+                        new RocksDbBlockFailureStore(database)
+                );
+
         this.headerChainState =
                 new HeaderChainStateLoader(
                         blockIndexStore,
@@ -91,7 +98,8 @@ public final class NodeSyncInfrastructure {
                 new HeaderBatchProcessor(
                         headerProcessor,
                         headerChainState,
-                        headerStorage
+                        headerStorage,
+                        failureResolver
                 );
 
         this.headerSyncService =

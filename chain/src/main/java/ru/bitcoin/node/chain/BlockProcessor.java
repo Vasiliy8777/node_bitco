@@ -20,6 +20,8 @@ public final class BlockProcessor {
     private final ChainReorganizationExecutor executor;
     private final NetworkParameters parameters;
     private final AdjustedTime adjustedTime;
+    private final BlockFailureManager failureManager;
+    private final BlockFailureResolver failureResolver;
 
     public BlockProcessor(
             ChainState chainState,
@@ -29,12 +31,69 @@ public final class BlockProcessor {
             NetworkParameters parameters,
             AdjustedTime adjustedTime
     ) {
-        this.chainState = Objects.requireNonNull(chainState, "chainState");
-        this.lookup = Objects.requireNonNull(lookup, "lookup");
-        this.storage = Objects.requireNonNull(storage, "storage");
-        this.executor = Objects.requireNonNull(executor, "executor");
-        this.parameters = Objects.requireNonNull(parameters, "parameters");
-        this.adjustedTime = Objects.requireNonNull(adjustedTime, "adjustedTime");
+        this(
+                chainState,
+                lookup,
+                storage,
+                executor,
+                parameters,
+                adjustedTime,
+                null,
+                null
+        );
+    }
+
+    public BlockProcessor(
+            ChainState chainState,
+            BlockIndexLookup lookup,
+            KnownBlockStorage storage,
+            ChainReorganizationExecutor executor,
+            NetworkParameters parameters,
+            AdjustedTime adjustedTime,
+            BlockFailureManager failureManager,
+            BlockFailureResolver failureResolver
+    ) {
+        this.chainState =
+                Objects.requireNonNull(
+                        chainState,
+                        "chainState"
+                );
+
+        this.lookup =
+                Objects.requireNonNull(
+                        lookup,
+                        "lookup"
+                );
+
+        this.storage =
+                Objects.requireNonNull(
+                        storage,
+                        "storage"
+                );
+
+        this.executor =
+                Objects.requireNonNull(
+                        executor,
+                        "executor"
+                );
+
+        this.parameters =
+                Objects.requireNonNull(
+                        parameters,
+                        "parameters"
+                );
+
+        this.adjustedTime =
+                Objects.requireNonNull(
+                        adjustedTime,
+                        "adjustedTime"
+                );
+
+        this.failureManager =
+                failureManager;
+
+        this.failureResolver =
+                failureResolver;
     }
 
     public BlockProcessingResult process(Block block) {
@@ -57,6 +116,16 @@ public final class BlockProcessor {
             ChainHeaderValidator.validate(
                     block.header(), parent, lookup, parameters, adjustedTime);
             BlockIndex candidate = BlockIndexFactory.createChild(parent, block.header());
+            if (failureResolver != null
+                    && failureResolver.isFailed(
+                    candidate
+            )) {
+                throw new IllegalArgumentException(
+                        "Block belongs to a permanently failed chain: "
+                                + candidate.hash()
+                                .toDisplayHex()
+                );
+            }
             ru.bitcoin.node.consensus.block.WitnessCommitmentValidator.validate(
                     block, candidate.height() >= parameters.segwitHeight());
             ru.bitcoin.node.consensus.block.SignetBlockValidator.validate(block, parameters);
@@ -68,7 +137,11 @@ public final class BlockProcessor {
             if (update == null) {
                 return BlockProcessingResult.STORED_SIDE_CHAIN_CONTEXT_PENDING;
             }
-            executor.execute(update);
+
+            executor.execute(
+                    update
+            );
+
             return BlockProcessingResult.CONNECTED;
         }
     }

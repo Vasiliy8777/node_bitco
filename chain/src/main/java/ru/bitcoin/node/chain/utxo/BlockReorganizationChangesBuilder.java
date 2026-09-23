@@ -3,6 +3,10 @@ package ru.bitcoin.node.chain.utxo;
 import ru.bitcoin.node.chain.AncestorMedianTimePastResolver;
 import ru.bitcoin.node.chain.BlockIndex;
 import ru.bitcoin.node.chain.BlockIndexLookup;
+import ru.bitcoin.node.chain.InvalidBlockObserver;
+import ru.bitcoin.node.consensus.block.BlockValidationException;
+import ru.bitcoin.node.consensus.transaction.TransactionValidationException;
+import ru.bitcoin.node.script.ScriptExecutionException;
 import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.protocol.network.NetworkParameters;
 import ru.bitcoin.node.storage.undo.BlockUndoData;
@@ -24,6 +28,24 @@ public final class BlockReorganizationChangesBuilder {
             NetworkParameters networkParameters,
             BlockIndexLookup blockIndexLookup
     ) {
+        return build(
+                disconnectBlocks,
+                connectBlocks,
+                utxoStore,
+                networkParameters,
+                blockIndexLookup,
+                InvalidBlockObserver.noop()
+        );
+    }
+
+    public static BlockReorganizationChanges build(
+            List<BlockToDisconnect> disconnectBlocks,
+            List<BlockToConnect> connectBlocks,
+            UtxoStore utxoStore,
+            NetworkParameters networkParameters,
+            BlockIndexLookup blockIndexLookup,
+            InvalidBlockObserver invalidBlockObserver
+    ) {
         if (disconnectBlocks == null) {
             throw new IllegalArgumentException(
                     "disconnectBlocks must not be null"
@@ -43,6 +65,12 @@ public final class BlockReorganizationChangesBuilder {
         if (connectBlocks == null) {
             throw new IllegalArgumentException(
                     "connectBlocks must not be null"
+            );
+        }
+
+        if (invalidBlockObserver == null) {
+            throw new IllegalArgumentException(
+                    "invalidBlockObserver must not be null"
             );
         }
 
@@ -141,16 +169,25 @@ public final class BlockReorganizationChangesBuilder {
                             blockIndexLookup
                     );
 
-            BlockUndoData undoData =
-                    BlockConnectChangesBuilder.apply(
-                            blockToConnect.block(),
-                            blockToConnect.height(),
-                            blockToConnect.lockTimeCutoff(),
-                            blockToConnect.previousMedianTimePast(),
-                            overlay,
-                            networkParameters,
-                            medianTimePastResolver
-                    );
+            final BlockUndoData undoData;
+
+            try {
+                undoData =
+                        BlockConnectChangesBuilder.apply(
+                                blockToConnect.block(),
+                                blockToConnect.height(),
+                                blockToConnect.lockTimeCutoff(),
+                                blockToConnect.previousMedianTimePast(),
+                                overlay,
+                                networkParameters,
+                                medianTimePastResolver
+                        );
+            } catch (BlockValidationException
+                     | TransactionValidationException
+                     | ScriptExecutionException exception) {
+                invalidBlockObserver.onInvalidBlock(blockHash);
+                throw exception;
+            }
 
             if (connectedUndo.put(
                     blockHash,

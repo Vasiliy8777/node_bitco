@@ -67,8 +67,22 @@ public final class HeaderChainStateLoader {
 
         return Optional.of(
                 new HeaderChainState(
-                        bestHeaderTip
+                        bestHeaderTip,
+                        this::loadRequiredBestHeaderTip
                 )
         );
+    }
+
+    private BlockIndex loadRequiredBestHeaderTip() {
+        Hash256 hash = chainStateStore.loadBestHeaderTipHash()
+                .orElseThrow(() -> new IllegalStateException(
+                        "Best header state disappeared from persistent storage"));
+
+        StoredBlockIndex stored = blockIndexStore.find(hash)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Best header tip refers to missing block index: "
+                                + hash.toDisplayHex()));
+
+        return BlockIndexStorageMapper.fromStored(stored);
     }
 }

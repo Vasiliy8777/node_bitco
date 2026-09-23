@@ -4,6 +4,7 @@ import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.storage.rocksdb.RocksDbDatabase;
 import ru.bitcoin.node.storage.rocksdb.RocksDbWriteBatch;
 
+import java.util.List;
 import java.util.Optional;
 
 public final class RocksDbBlockIndexStore
@@ -85,6 +86,13 @@ public final class RocksDbBlockIndexStore
         return Optional.of(
                 blockIndex
         );
+    }
+
+    public List<StoredBlockIndex> findAll() {
+        return database.valuesByPrefix(BLOCK_INDEX_PREFIX)
+                .stream()
+                .map(StoredBlockIndexSerializer::deserialize)
+                .toList();
     }
 
     @Override

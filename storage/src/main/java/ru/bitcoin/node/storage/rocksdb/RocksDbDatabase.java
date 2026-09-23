@@ -8,6 +8,8 @@ import org.rocksdb.WriteOptions;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 
 public final class RocksDbDatabase
         implements AutoCloseable {
@@ -178,6 +180,25 @@ public final class RocksDbDatabase
             return !iterator.isValid();
         } catch (RocksDBException e) {
             throw new IllegalStateException("Failed to inspect RocksDB contents", e);
+        }
+    }
+
+    /** Returns copies of all values in one key namespace. */
+    public List<byte[]> valuesByPrefix(byte prefix) {
+        ensureOpen();
+        List<byte[]> values = new ArrayList<>();
+        try (var iterator = database.newIterator()) {
+            iterator.seek(new byte[]{prefix});
+            while (iterator.isValid()) {
+                byte[] key = iterator.key();
+                if (key.length == 0 || key[0] != prefix) break;
+                values.add(iterator.value().clone());
+                iterator.next();
+            }
+            iterator.status();
+            return List.copyOf(values);
+        } catch (RocksDBException e) {
+            throw new IllegalStateException("Failed to scan RocksDB namespace", e);
         }
     }
 

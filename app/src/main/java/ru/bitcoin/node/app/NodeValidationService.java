@@ -88,15 +88,54 @@ public final class NodeValidationService {
         this.time = Objects.requireNonNull(time);
         utxos = new RocksDbUtxoStore(database);
         var indexes = new RocksDbBlockIndexStore(database);
+        var failures =
+                new RocksDbBlockFailureStore(
+                        database
+                );
         var tips = new RocksDbChainStateStore(database);
         var undos = new RocksDbUndoStore(database);
         blocks = new RocksDbBlockStore(database);
         lookup = new StoredBlockIndexLookup(indexes);
+        var failureResolver =
+                new BlockFailureResolver(
+                        lookup,
+                        failures
+                );
+
+        var failureManager =
+                new BlockFailureManager(
+                        database,
+                        failures,
+                        indexes,
+                        tips,
+                        failureResolver
+                );
         chain = new ChainInitializer(database, parameters).initialize();
         var storage = new RocksDbChainTransitionStorage(database, utxos, undos, indexes, tips);
-        var executor = new ChainReorganizationExecutor(blocks, undos, utxos,
-                new ChainTransitionManager(chain, storage), parameters, lookup);
-        processor = new BlockProcessor(chain, lookup, new KnownBlockStorage(database, blocks, indexes), executor, parameters, time);
+        var executor = new ChainReorganizationExecutor(
+                blocks,
+                undos,
+                utxos,
+                new ChainTransitionManager(chain, storage),
+                parameters,
+                lookup,
+                failureManager::markFailed
+        );
+        processor =
+                new BlockProcessor(
+                        chain,
+                        lookup,
+                        new KnownBlockStorage(
+                                database,
+                                blocks,
+                                indexes
+                        ),
+                        executor,
+                        parameters,
+                        time,
+                        failureManager,
+                        failureResolver
+                );
         coins = point -> utxos.find(point).map(coin -> new UtxoEntry(coin.amount(), coin.scriptPubKey(), coin.height(), coin.coinbase()));
         poolTip = chain.activeTip();
         synchronized (chain) { mempool.revalidate(context(), coins, Set.of()); }

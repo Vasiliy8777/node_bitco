@@ -74,6 +74,237 @@ class NodeRelayServiceTest {
         }
     }
 
+    @Test
+    void announcesConnectedBlockAndServesItAfterGetData()
+            throws Exception {
+
+        var parameters =
+                NetworkParametersRegistry.regtest();
+
+        try (var db =
+                     new RocksDbDatabase(
+                             directory.resolve(
+                                     "block-relay"
+                             )
+                     );
+
+             var peers =
+                     new PeerManager()) {
+
+            var validation =
+                    new NodeValidationService(
+                            db,
+                            parameters,
+                            () -> 1_800_000_000L,
+                            new Mempool()
+                    );
+
+            var sync =
+                    new NodeSyncInfrastructure(
+                            db,
+                            parameters,
+                            () -> 1_800_000_000L
+                    );
+
+            var peer =
+                    mock(
+                            Peer.class
+                    );
+
+            when(
+                    peer.isReady()
+            ).thenReturn(
+                    true
+            );
+
+            var incoming =
+                    new AtomicReference<PeerMessageListener>();
+
+            doAnswer(invocation -> {
+
+                incoming.set(
+                        invocation.getArgument(
+                                0
+                        )
+                );
+
+                return null;
+
+            }).when(
+                    peer
+            ).addMessageListener(
+                    any()
+            );
+
+            var outbound =
+                    new LinkedBlockingQueue<BitcoinMessage>();
+
+            doAnswer(invocation -> {
+
+                outbound.add(
+                        invocation.getArgument(
+                                0
+                        )
+                );
+
+                return null;
+
+            }).when(
+                    peer
+            ).send(
+                    any()
+            );
+
+            peers.add(
+                    peer
+            );
+
+            try (var relay =
+                         new NodeRelayService(
+                                 validation,
+                                 sync,
+                                 peers
+                         )) {
+
+                var mining =
+                        new ru.bitcoin.node.app.rpc.MiningController(
+                                validation,
+                                relay,
+                                parameters,
+                                () -> true,
+                                new byte[]{0x51},
+                                4_000_000,
+                                new ru.bitcoin.node.mempool.FeeRate(
+                                        0
+                                )
+                        );
+
+                /*
+                 * Use the real mining-template path already used
+                 * by MiningRpcTest.
+                 */
+                Map<?, ?> template =
+                        mining.getBlockTemplate(
+                                Map.of(
+                                        "rules",
+                                        List.of(
+                                                "segwit"
+                                        )
+                                )
+                        );
+
+                var mined =
+                        MiningRpcTest.mineTemplate(
+                                template
+                        );
+
+                /*
+                 * Local mining submission must connect the block.
+                 */
+                assertEquals(
+                        ru.bitcoin.node.chain.BlockProcessingResult.CONNECTED,
+                        relay.submitBlock(
+                                mined
+                        )
+                );
+
+                assertEquals(
+                        mined.hash(),
+                        validation.activeTip()
+                                .hash()
+                );
+
+                assertEquals(
+                        mined.hash(),
+                        sync.headerChainState()
+                                .bestHeaderTip()
+                                .hash()
+                );
+
+                /*
+                 * A READY peer must receive an INV for the newly
+                 * connected block.
+                 */
+                BitcoinMessage announcement =
+                        take(
+                                outbound
+                        );
+
+                assertEquals(
+                        "inv",
+                        announcement.command()
+                );
+
+                InvMessage inventory =
+                        BitcoinMessages.decodeInv(
+                                announcement
+                        );
+
+                assertEquals(
+                        1,
+                        inventory.inventory()
+                                .size()
+                );
+
+                InventoryVector announced =
+                        inventory.inventory()
+                                .getFirst();
+
+                assertEquals(
+                        InventoryVector.MSG_BLOCK,
+                        announced.type()
+                );
+
+                assertEquals(
+                        mined.hash(),
+                        announced.hash()
+                );
+
+                /*
+                 * Simulate Bitcoin Core requesting the announced
+                 * block with witness serialization.
+                 */
+                incoming.get()
+                        .onMessage(
+                                peer,
+                                BitcoinMessages.getData(
+                                        new GetDataMessage(
+                                                List.of(
+                                                        new InventoryVector(
+                                                                InventoryVector.MSG_WITNESS_BLOCK,
+                                                                mined.hash()
+                                                        )
+                                                )
+                                        )
+                                )
+                        );
+
+                BitcoinMessage blockMessage =
+                        take(
+                                outbound
+                        );
+
+                assertEquals(
+                        "block",
+                        blockMessage.command()
+                );
+
+                assertArrayEquals(
+                        ru.bitcoin.node.protocol.serialization.BlockSerializer.serialize(
+                                mined
+                        ),
+                        blockMessage.payload()
+                );
+            }
+
+            verify(
+                    peer
+            ).removeMessageListener(
+                    incoming.get()
+            );
+        }
+    }
+
     private static BitcoinMessage take(BlockingQueue<BitcoinMessage> queue) throws InterruptedException {
         var message = queue.poll(5, TimeUnit.SECONDS);
         assertNotNull(message, "Expected network message");
