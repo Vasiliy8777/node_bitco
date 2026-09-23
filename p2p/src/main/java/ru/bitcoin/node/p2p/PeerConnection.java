@@ -27,7 +27,7 @@ public final class PeerConnection implements AutoCloseable {
     private final int connectTimeoutMillis;
     private final int readTimeoutMillis;
 
-    private Socket socket;
+    private volatile Socket socket;
     private InputStream input;
     private OutputStream output;
 
@@ -229,6 +229,9 @@ public final class PeerConnection implements AutoCloseable {
 
     @Override
     public void close() throws IOException {
+        // Closing the socket interrupts a blocked writer; waiting for sendLock first can deadlock shutdown.
+        Socket closingSocket = socket;
+        if (closingSocket != null) closingSocket.close();
         synchronized (sendLock) {
             Socket currentSocket =
                     socket;

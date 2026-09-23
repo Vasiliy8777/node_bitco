@@ -26,6 +26,36 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class PeerConnectionTest {
 
     @Test
+    void closeInterruptsWriterWhenRemoteStopsReading() throws Exception {
+        try (var listener = new ServerSocket()) {
+            listener.setReceiveBufferSize(1024);
+            listener.bind(new java.net.InetSocketAddress("127.0.0.1", 0));
+            var accepted = CompletableFuture.supplyAsync(() -> {
+                try { return listener.accept(); }
+                catch (java.io.IOException exception) { throw new java.io.UncheckedIOException(exception); }
+            });
+            try (var connection = new PeerConnection(NetworkParametersRegistry.regtest())) {
+                connection.connect("127.0.0.1", listener.getLocalPort());
+                try (var remote = accepted.get(5, TimeUnit.SECONDS)) {
+                    var started = new CountDownLatch(1);
+                    var writer = CompletableFuture.runAsync(() -> {
+                        var message = new BitcoinMessage("block", new byte[4_000_000]);
+                        started.countDown();
+                        try {
+                            for (int i = 0; i < 100; i++) connection.send(message);
+                            throw new AssertionError("Remote is not reading; writes should block");
+                        } catch (java.io.IOException | IllegalStateException expected) { }
+                    });
+                    assertTrue(started.await(5, TimeUnit.SECONDS));
+                    assertThrows(java.util.concurrent.TimeoutException.class, () -> writer.get(200, TimeUnit.MILLISECONDS));
+                    org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(java.time.Duration.ofSeconds(2), connection::close);
+                    writer.get(2, TimeUnit.SECONDS);
+                }
+            }
+        }
+    }
+
+    @Test
     void shouldConnectSendAndReceiveBitcoinMessages()
             throws Exception {
 

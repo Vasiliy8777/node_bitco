@@ -591,6 +591,10 @@ public final class BlockSyncCoordinator {
             BlockIndex finalTip =
                     validationService.activeTip();
 
+            // A concurrently submitted local block may already extend this download's target.
+            while (finalTip.height() > bestHeaderTip.height()) {
+                finalTip = Objects.requireNonNull(lookup.find(finalTip.previousBlockHash()), "Missing active ancestor");
+            }
             if (!finalTip.hash().equals(
                     bestHeaderTip.hash()
             )) {

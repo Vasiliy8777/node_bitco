@@ -614,13 +614,7 @@ class NodeLifecycleServiceTest {
 
             output.flush();
 
-            /*
-             * Keep connection alive until lifecycle.close().
-             */
-            assertEquals(
-                    -1,
-                    input.read()
-            );
+            answerLiveHeaderPolls(reader, encoder, input, output);
 
         } catch (Exception exception) {
 
@@ -1963,14 +1957,7 @@ class NodeLifecycleServiceTest {
 
                 output.flush();
 
-                /*
-                 * Keep replacement connection alive until
-                 * lifecycle.close().
-                 */
-                assertEquals(
-                        -1,
-                        input.read()
-                );
+                answerLiveHeaderPolls(reader, encoder, input, output);
             }
 
         } catch (Exception exception) {
@@ -2358,6 +2345,101 @@ class NodeLifecycleServiceTest {
                     exception
             );
         }
+    }
+
+    private static void answerLiveHeaderPolls(BitcoinMessageStreamReader reader, BitcoinMessageEncoder encoder,
+                                              BufferedInputStream input, BufferedOutputStream output) throws IOException {
+        while (true) {
+            var message = reader.read(input);
+            if (message.isEmpty()) return;
+            assertEquals("getheaders", message.get().command());
+            output.write(encoder.encode(BitcoinMessages.headers(new HeadersMessage(List.of()))));
+            output.flush();
+        }
+    }
+
+    @Test
+    void followsAnnouncementsAndReorganizationAfterRunningAndRefreshesMiningTemplate() throws Exception {
+        var parameters = NetworkParametersRegistry.regtest();
+        var genesis = BlockIndexFactory.createGenesis(GenesisBlockFactory.create(parameters).header());
+        var first = child(genesis, 1);
+        var fork = child(genesis, 2);
+        var forkTip = child(BlockIndexFactory.createChild(genesis, fork.header()), 3);
+        var branch = new java.util.concurrent.atomic.AtomicReference<List<Block>>(List.of());
+        var sender = new CompletableFuture<java.util.function.Consumer<BitcoinMessage>>();
+        var allBlocks = Map.of(first.hash(), first, fork.hash(), fork, forkTip.hash(), forkTip);
+        try (var serverSocket = new ServerSocket(0); var context = new AnnotationConfigApplicationContext()) {
+            var server = CompletableFuture.runAsync(() -> {
+                try (var socket = serverSocket.accept()) {
+                    socket.setSoTimeout(10_000);
+                    var input = new BufferedInputStream(socket.getInputStream());
+                    var output = new BufferedOutputStream(socket.getOutputStream());
+                    var encoder = new BitcoinMessageEncoder(parameters);
+                    var reader = new BitcoinMessageStreamReader(new BitcoinMessageDecoder(parameters));
+                    performHandshake(reader, encoder, input, output);
+                    java.util.function.Consumer<BitcoinMessage> send = message -> {
+                        synchronized (output) {
+                            try { output.write(encoder.encode(message)); output.flush(); }
+                            catch (IOException exception) { throw new java.io.UncheckedIOException(exception); }
+                        }
+                    };
+                    sender.complete(send);
+                    while (true) {
+                        var wire = reader.read(input);
+                        if (wire.isEmpty()) return;
+                        var message = wire.get();
+                        if (message.command().equals("getheaders")) {
+                            var request = GetHeadersMessageCodec.decode(message.payload());
+                            var current = branch.get();
+                            int start = 0;
+                            for (int i = current.size() - 1; i >= 0; i--) {
+                                if (request.locatorHashes().contains(current.get(i).hash())) { start = i + 1; break; }
+                            }
+                            send.accept(BitcoinMessages.headers(new HeadersMessage(current.subList(start, current.size())
+                                    .stream().map(Block::header).toList())));
+                        } else if (message.command().equals("getdata")) {
+                            for (var vector : BitcoinMessages.decodeGetData(message).inventory())
+                                send.accept(BitcoinMessages.block(new BlockMessage(allBlocks.get(vector.hash()))));
+                        } else fail("Unexpected message: " + message.command());
+                    }
+                } catch (Exception exception) { throw new RuntimeException(exception); }
+            });
+            context.getEnvironment().getPropertySources().addFirst(new MapPropertySource("live-sync", Map.of(
+                    "bitcoin.data-directory", directory.toString(), "bitcoin.network", "regtest",
+                    "bitcoin.p2p.peers", "127.0.0.1:" + serverSocket.getLocalPort())));
+            context.register(NetworkConfiguration.class, NodeConfiguration.class);
+            context.refresh();
+            var lifecycle = context.getBean(NodeLifecycleService.class);
+            var validation = context.getBean(NodeValidationService.class);
+            var thread = startLifecycle(lifecycle);
+            try {
+                awaitRunning(lifecycle);
+                var send = sender.get(5, TimeUnit.SECONDS);
+                branch.set(List.of(first));
+                var announcement = BitcoinMessages.inv(new InvMessage(List.of(new InventoryVector(InventoryVector.MSG_BLOCK, first.hash()))));
+                send.accept(announcement);
+                awaitTip(validation, first.hash());
+                var template = validation.createMiningTemplate(new byte[]{0x51}, new byte[8], 4_000_000,
+                        new ru.bitcoin.node.mempool.FeeRate(0));
+                assertEquals(first.hash(), template.header().previousBlockHash());
+                send.accept(announcement); // Duplicate announcements must not reapply the block.
+                branch.set(List.of(fork, forkTip));
+                send.accept(BitcoinMessages.inv(new InvMessage(List.of(new InventoryVector(InventoryVector.MSG_BLOCK, forkTip.hash())))));
+                awaitTip(validation, forkTip.hash());
+                assertEquals(2, validation.activeTip().height());
+                assertEquals(forkTip.hash(), validation.createMiningTemplate(new byte[]{0x51}, new byte[8], 4_000_000,
+                        new ru.bitcoin.node.mempool.FeeRate(0)).header().previousBlockHash());
+                assertTrue(lifecycle.failure().isEmpty());
+            } finally { closeAndAwaitLifecycle(lifecycle, thread); }
+            server.get(5, TimeUnit.SECONDS);
+        }
+    }
+
+    private static void awaitTip(NodeValidationService validation, Hash256 expected) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(8);
+        while (!validation.activeTip().hash().equals(expected) && System.nanoTime() < deadline)
+            validation.awaitRevision(validation.revision(), 100);
+        assertEquals(expected, validation.activeTip().hash());
     }
 
     private static Thread startLifecycle(

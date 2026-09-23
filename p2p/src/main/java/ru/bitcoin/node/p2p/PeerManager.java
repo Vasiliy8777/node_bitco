@@ -10,6 +10,17 @@ public final class PeerManager
 
     private final List<Peer> peers =
             new ArrayList<>();
+    private final List<java.util.function.Consumer<Peer>> listeners = new ArrayList<>();
+
+    /** Callbacks only attach nonblocking observers; called under the manager lock. */
+    public synchronized void addPeerListener(java.util.function.Consumer<Peer> listener) {
+        listeners.add(Objects.requireNonNull(listener));
+        peers.forEach(listener);
+    }
+
+    public synchronized void removePeerListener(java.util.function.Consumer<Peer> listener) {
+        listeners.remove(listener);
+    }
 
     public synchronized void add(
             Peer peer
@@ -54,6 +65,7 @@ public final class PeerManager
         peer.addCloseListener(
                 this::onPeerClosed
         );
+        if (peers.contains(peer)) listeners.forEach(listener -> listener.accept(peer));
     }
 
     private void onPeerClosed(

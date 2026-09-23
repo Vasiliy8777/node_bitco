@@ -16,6 +16,10 @@
     <artifactId>app</artifactId>
 
     <dependencies>
+        <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
 
         <!-- Spring Boot -->
         <dependency>

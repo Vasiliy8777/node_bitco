@@ -23,7 +23,7 @@ public final class HeaderSyncService {
                 headerBatchProcessor;
     }
 
-    public List<BlockIndex> process(
+    public synchronized List<BlockIndex> process(
             HeadersMessage message
     ) {
         if (message == null) {

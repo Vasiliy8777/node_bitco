@@ -35,6 +35,11 @@ import java.util.List;
 @Configuration
 @ConditionalOnProperty(name = "bitcoin.data-directory")
 public class NodeConfiguration {
+    @Bean(destroyMethod = "close")
+    public ru.bitcoin.node.app.service.NodeRelayService nodeRelayService(NodeValidationService validation,
+            NodeSyncInfrastructure infrastructure, PeerManager peers) {
+        return new ru.bitcoin.node.app.service.NodeRelayService(validation, infrastructure, peers);
+    }
 
     @Bean(destroyMethod = "close")
     public RocksDbDatabase chainDatabase(
@@ -229,12 +234,13 @@ public class NodeConfiguration {
             OutboundPeerSupervisor outboundPeerSupervisor,
             PeerManager peerManager,
             BlockSyncCoordinator blockSyncCoordinator,
-            NetworkParameters parameters
+            NetworkParameters parameters,
+            @Value("${bitcoin.p2p.header-response-timeout-millis:10000}") long headerTimeoutMillis
     ) {
 
         Duration headerResponseTimeout =
-                Duration.ofSeconds(
-                        parameters.targetSpacingSeconds()
+                Duration.ofMillis(
+                        headerTimeoutMillis
                 );
 
         return new NodeLifecycleService(

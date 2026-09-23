@@ -12,6 +12,15 @@ import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 public final class Peer implements AutoCloseable {
+    private final List<PeerMessageListener> messageListeners = new CopyOnWriteArrayList<>();
+
+    public void addMessageListener(PeerMessageListener listener) {
+        messageListeners.add(java.util.Objects.requireNonNull(listener));
+    }
+
+    public void removeMessageListener(PeerMessageListener listener) {
+        messageListeners.remove(listener);
+    }
     private final List<PeerCloseListener> closeListeners =
             new CopyOnWriteArrayList<>();
     private final List<PeerInventoryListener> inventoryListeners =
@@ -555,9 +564,15 @@ public final class Peer implements AutoCloseable {
 
             default -> {
                 /*
-                 * Unsupported post-handshake messages
-                 * are ignored at the Peer layer.
+                 * Application handlers observe other unsolicited messages below.
                  */
+            }
+        }
+        for (PeerMessageListener listener : messageListeners) {
+            try {
+                listener.onMessage(this, message);
+            } catch (RuntimeException ignored) {
+                // One observer must not terminate the reader or suppress another observer.
             }
         }
     }

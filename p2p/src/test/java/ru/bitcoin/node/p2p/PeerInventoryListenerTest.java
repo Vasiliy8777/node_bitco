@@ -17,7 +17,6 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -131,6 +130,7 @@ class PeerInventoryListenerTest {
 
         AtomicInteger calls =
                 new AtomicInteger();
+        CompletableFuture<Void> dispatched = new CompletableFuture<>();
 
         try (ServerSocket serverSocket =
                      new ServerSocket(0)) {
@@ -172,6 +172,7 @@ class PeerInventoryListenerTest {
                 peer.removeInventoryListener(
                         listener
                 );
+                peer.addInventoryListener((source, inventory) -> dispatched.complete(null));
 
                 peer.connect(
                         "127.0.0.1",
@@ -185,14 +186,7 @@ class PeerInventoryListenerTest {
                         TimeUnit.SECONDS
                 );
 
-                /*
-                 * The server sends INV before completing its
-                 * future. Give the existing background reader
-                 * a small bounded opportunity to dispatch it.
-                 */
-                Thread.sleep(
-                        100
-                );
+                dispatched.get(5, TimeUnit.SECONDS);
 
                 assertEquals(
                         0,
@@ -277,15 +271,7 @@ class PeerInventoryListenerTest {
                         successfulCalls.get()
                 );
 
-                /*
-                 * If the first listener exception had escaped
-                 * into PeerMessageReader, this peer would have
-                 * been closed.
-                 */
-                assertTrue(
-                        peer.isReady()
-                );
-
+                // The server also requires PONG after INV: the reader must survive.
                 server.get(
                         5,
                         TimeUnit.SECONDS
@@ -438,13 +424,9 @@ class PeerInventoryListenerTest {
 
             output.flush();
 
-            /*
-             * Keep the socket alive briefly so EOF does not
-             * race with INV dispatch.
-             */
-            Thread.sleep(
-                    100
-            );
+            output.write(encoder.encode(BitcoinMessages.ping(new PingMessage(42L))));
+            output.flush();
+            assertEquals("pong", reader.read(input).orElseThrow().command());
 
         } catch (Exception exception) {
 

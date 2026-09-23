@@ -1,0 +1,106 @@
+# Solo mining через Stratum V1
+
+`StratumServer` принимает TCP-соединения майнеров, выдаёт задания и проверяет shares.
+Найденный блок проходит тот же `NodeValidationService`, что и входящие сетевые блоки,
+и публикуется через `NodeRelayService`. RPC для работы Stratum включать не требуется.
+
+## Настройка
+
+Дополнение к обычной конфигурации синхронизирующейся ноды:
+
+```yaml
+bitcoin:
+  stratum:
+    enabled: true
+    bind: 127.0.0.1
+    port: 3333
+    user: miner
+    password: ${BITCOIN_STRATUM_PASSWORD}
+    difficulty: 65536
+    maximum-connections: 64
+  mining:
+    payout-script: ${BITCOIN_PAYOUT_SCRIPT}
+    maximum-weight: 3996000
+    minimum-fee-sat-per-kvb: 1000
+```
+
+`payout-script` — hex scriptPubKey получения coinbase, не адрес в формате bech32/base58.
+В режиме Stratum именно этот script задаёт фактическую выплату блока. Пароль и непустой
+script обязательны. Сервис выключен по умолчанию; значения по умолчанию для остальных
+полей приведены выше.
+
+На майнере укажите `stratum+tcp://адрес-ноды:3333`, worker `miner.rig01` и заданный пароль.
+Допускается имя `miner` либо имя с префиксом `miner.`. Один worker закрепляется за
+соединением. Для оборудования в локальной сети задайте LAN-адрес ноды в `bind`.
+Stratum V1 передаёт пароль открытым текстом; этот endpoint предназначен для доверенной
+сети или защищённого туннеля, TLS в сервере не реализован.
+
+Для CPU-проверок **только в regtest** можно использовать `payout-script: "51"`
+и `difficulty: 0.0000000001`. `51` означает OP_TRUE, а не принадлежащий вам адрес;
+не используйте такой payout script для реальной награды.
+
+## Протокол и задания
+
+Поддерживаются `mining.subscribe`, `mining.authorize`, `mining.submit`, уведомления
+`mining.set_difficulty` и `mining.notify`. Extranonce1 уникален для соединения и занимает
+8 байт, extranonce2 также занимает 8 байт. Новое соединение получает новый extranonce1.
+Возобновление старой сессии не поддержано.
+
+Coinbase в notify передаётся без witness для вычисления txid. При восстановлении блока
+сохраняются witness reserved value и commitment; Merkle-ветка вычисляется по txid.
+Prevhash имеет порядок слов Stratum V1; version, nbits, ntime и nonce передаются
+в стандартных для V1 восьмизначных hex-полях.
+
+Шаблоны общие для соединений, а coinbase различается extranonce. Проверка обновления
+выполняется раз в секунду. Смена родителя немедленно делает старые shares неприемлемыми;
+следующий доступный шаблон отправляется с `clean_jobs: true`. Изменения mempool обновляют
+шаблон не чаще раза в пять секунд, время — раз в тридцать секунд. При том же родителе
+старые задания сохраняются в пределах восьми jobs и двух минут.
+
+До готовности ноды к майнингу задания не выдаются. Если готовность потеряна, выданные
+jobs удаляются, а соединения с работающими майнерами закрываются после отправки уже
+подготовленных ответов. Майнер должен переподключиться. Signet не поддерживается без
+подписания challenge; для testnet запрещено изменение ntime внутри задания, чтобы
+не нарушить правила минимальной сложности.
+
+Сложность shares фиксирована конфигурацией. Vardiff и version rolling пока не реализованы;
+`mining.configure` явно возвращает `false` для запрашиваемых расширений,
+`mining.suggest_difficulty` возвращает `false`. Не все прошивки ASIC умеют работать без
+этих расширений; проверка с физическим оборудованием ещё нужна.
+
+## Проверка shares и ограничения
+
+Проверяются авторизация, принадлежность worker, выдача и актуальность job, размеры
+extranonce и hex-полей, диапазон времени, SHA256d и target. Повтор принятой share
+отклоняется даже при другом регистре hex. Настоящий блок принимается и тогда, когда
+настроенный share target труднее сетевого — это существенно для regtest.
+
+`mining.submit` возвращает `true` для принятой share; если она также является блоком,
+ответ отправляется после контекстной проверки и локального подключения блока.
+Счета пула, распределение наград и платежи не ведутся: это solo-mining endpoint.
+
+Пределы на соединение: строка запроса 16 KiB, очередь отправки 32 сообщения,
+100 запросов в секунду, 180 секунд без входящих данных, 10 секунд на заблокированную
+отправку. Хранятся до 8192 принятых shares между сменами родителя; при достижении
+предела нужно переподключение. Подбирайте difficulty под хешрейт, чтобы частота shares
+оставалась умеренной. Число соединений ограничено конфигурацией.
+
+`StratumServer.statistics()` возвращает число соединений, принятых/отклонённых shares
+и локально подключённых блоков. Это Java API; отдельного HTTP endpoint статистики нет.
+
+## Проверка реализации
+
+```powershell
+.\mvnw.cmd -o test -q
+.\mvnw.cmd -o -pl app -am test '-Dtest=MiningJobTest,StratumIntegrationTest,BitcoinCoreMiningRoundTripTest' '-Dsurefire.failIfNoSpecifiedTests=false' '-Dbitcoin.core.binary=C:/Program Files/Bitcoin/daemon/bitcoind.exe'
+```
+
+`MiningJobTest` проверяет порядок байтов, coinbase, witness commitment, Merkle-ветки,
+target и историю jobs. `StratumIntegrationTest` использует настоящий TCP-клиент,
+самостоятельно собирающий заголовок из notify, и проверяет авторизацию, shares,
+повторы, смену tip и потерю готовности. `BitcoinCoreMiningRoundTripTest` дополнительно
+проверяет приём Bitcoin Core блока с транзакцией, добытого через Stratum.
+
+Использованные первичные реализации и спецификация расширений:
+[Slush mining proxy](https://github.com/slush0/stratum-mining-proxy/blob/master/mining_libs/jobs.py),
+[Stratum extensions](https://github.com/slushpool/stratumprotocol/blob/master/stratum-extensions.mediawiki).

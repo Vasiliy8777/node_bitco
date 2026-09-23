@@ -30,6 +30,56 @@ public final class NodeValidationService {
     private final AdjustedTime time;
     private final RocksDbUtxoStore utxos;
     private BlockIndex poolTip;
+    private long revision;
+
+    public long revision() { synchronized (chain) { synchronizePool(); return revision; } }
+
+    public record MiningSnapshot(Block block, List<MempoolEntry> entries, long height, long medianTimePast, long revision) { }
+
+    public MiningSnapshot miningSnapshot(byte[] payout, byte[] extraNonce, long weight, FeeRate feeRate) {
+        synchronized (chain) {
+            Block block = createMiningTemplate(payout, extraNonce, weight, feeRate);
+            return new MiningSnapshot(block, mempool.entries(), chain.activeTip().height() + 1,
+                    MedianTimePast.calculate(chain.activeTip(), lookup), revision);
+        }
+    }
+
+    public void awaitRevision(long previous, long timeoutMillis) throws InterruptedException {
+        synchronized (chain) {
+            if (revision == previous) chain.wait(timeoutMillis);
+        }
+    }
+
+    public Optional<Block> findBlock(Hash256 hash) {
+        synchronized (chain) {
+            var candidate = lookup.find(hash);
+            if (candidate == null) return Optional.empty();
+            var cursor = chain.activeTip();
+            while (cursor.height() > candidate.height())
+                cursor = Objects.requireNonNull(lookup.find(cursor.previousBlockHash()), "Missing active ancestor");
+            return cursor.hash().equals(hash) ? blocks.find(hash) : Optional.empty();
+        }
+    }
+
+    /** Only returns active-chain headers, in forward order, bounded to the wire limit. */
+    public List<ru.bitcoin.node.protocol.block.BlockHeader> headers(List<Hash256> locator, Hash256 stop) {
+        synchronized (chain) {
+            Set<Hash256> wanted = new HashSet<>(locator);
+            var result = new ArrayDeque<ru.bitcoin.node.protocol.block.BlockHeader>();
+            var cursor = chain.activeTip();
+            while (cursor.height() > 0 && !wanted.contains(cursor.hash())) {
+                result.addFirst(cursor.header());
+                if (result.size() > 2000) result.removeLast();
+                cursor = Objects.requireNonNull(lookup.find(cursor.previousBlockHash()), "Missing active ancestor");
+            }
+            var answer = new ArrayList<ru.bitcoin.node.protocol.block.BlockHeader>();
+            for (var header : result) {
+                answer.add(header);
+                if (header.hash().equals(stop)) break;
+            }
+            return List.copyOf(answer);
+        }
+    }
 
     public NodeValidationService(RocksDbDatabase database, NetworkParameters parameters,
                                  AdjustedTime time, Mempool mempool) {
@@ -66,7 +116,10 @@ public final class NodeValidationService {
         synchronized (chain) {
             synchronizePool();
             mempool.expire();
-            return mempool.admit(transaction, context(), coins);
+            var entry = mempool.admit(transaction, context(), coins);
+            revision++;
+            chain.notifyAll();
+            return entry;
         }
     }
     public List<MempoolEntry> mempoolEntries() {
@@ -76,7 +129,10 @@ public final class NodeValidationService {
         synchronized (chain) {
             synchronizePool();
             mempool.expire();
-            return mempool.admitPackage(transactions, context(), coins);
+            var entries = mempool.admitPackage(transactions, context(), coins);
+            revision++;
+            chain.notifyAll();
+            return entries;
         }
     }
     public BlockIndex activeTip() { synchronized (chain) { return chain.activeTip(); } }
@@ -117,6 +173,8 @@ public final class NodeValidationService {
         }
         mempool.reconcile(context(), coins, confirmed, retry);
         poolTip = tip;
+        revision++;
+        chain.notifyAll();
     }
     private Block requireBlock(BlockIndex index) {
         return blocks.find(index.hash()).orElseThrow(() -> new IllegalStateException("Missing chain-update block: " + index.hash()));

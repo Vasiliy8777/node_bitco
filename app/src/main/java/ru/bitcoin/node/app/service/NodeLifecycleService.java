@@ -55,6 +55,11 @@ public final class NodeLifecycleService
             NodeLifecycleState.NEW;
 
     private Throwable failure;
+    private final ru.bitcoin.node.app.sync.LiveChainSynchronizer liveSync;
+
+    public boolean isMiningReady() {
+        return isRunning() && liveSync.isCurrent();
+    }
 
     public NodeLifecycleService(
             NodeValidationService validationService,
@@ -128,6 +133,8 @@ public final class NodeLifecycleService
                     "headerResponseTimeout must be positive"
             );
         }
+        liveSync = new ru.bitcoin.node.app.sync.LiveChainSynchronizer(peerManager,
+                syncInfrastructure, blockSyncCoordinator, validationService, headerResponseTimeout);
     }
 
     @Override
@@ -220,7 +227,7 @@ public final class NodeLifecycleService
                     NodeLifecycleState.RUNNING
             );
 
-            awaitShutdown();
+            liveSync.run();
 
         } catch (IOException | RuntimeException exception) {
 
@@ -415,31 +422,6 @@ public final class NodeLifecycleService
         }
     }
 
-    private void awaitShutdown()
-            throws IOException {
-
-        synchronized (this) {
-
-            while (state == NodeLifecycleState.RUNNING) {
-
-                try {
-
-                    wait();
-
-                } catch (InterruptedException exception) {
-
-                    Thread.currentThread()
-                            .interrupt();
-
-                    throw new IOException(
-                            "Interrupted while waiting for node shutdown",
-                            exception
-                    );
-                }
-            }
-        }
-    }
-
     private void setState(
             NodeLifecycleState newState
     ) {
@@ -487,6 +469,7 @@ public final class NodeLifecycleService
                 exception,
                 "exception"
         );
+        liveSync.close();
 
         NodeLifecycleState previousState;
 
@@ -570,6 +553,8 @@ public final class NodeLifecycleService
     @Override
     public void close()
             throws IOException {
+
+        liveSync.close();
 
         NodeLifecycleState previousState;
 
