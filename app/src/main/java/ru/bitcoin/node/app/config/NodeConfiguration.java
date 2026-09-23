@@ -14,6 +14,7 @@ import ru.bitcoin.node.consensus.time.AdjustedTime;
 import ru.bitcoin.node.mempool.Mempool;
 import ru.bitcoin.node.p2p.*;
 import ru.bitcoin.node.p2p.address.PeerAddressManager;
+import ru.bitcoin.node.p2p.address.PeerAddressProtocol;
 import ru.bitcoin.node.p2p.sync.BlockDownloadScheduler;
 import ru.bitcoin.node.p2p.sync.BlockDownloadService;
 import ru.bitcoin.node.p2p.sync.BlockDownloadTimeoutPolicy;
@@ -307,5 +308,26 @@ public class NodeConfiguration {
                 true,
                 maxInboundPeers
         );
+    }
+
+    @Bean
+    public PeerAddressProtocol peerAddressProtocol(
+            PeerAddressManager peerAddressManager,
+            PeerManager peerManager
+    ) {
+
+        PeerAddressProtocol protocol =
+                new PeerAddressProtocol(
+                        peerAddressManager
+                );
+
+        peerManager.addPeerListener(
+                peer ->
+                        peer.addMessageListener(
+                                protocol
+                        )
+        );
+
+        return protocol;
     }
 }

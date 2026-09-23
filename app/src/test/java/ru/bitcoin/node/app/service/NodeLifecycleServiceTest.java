@@ -73,7 +73,9 @@ class NodeLifecycleServiceTest {
                                             "bitcoin.data-directory",
                                             directory.toString(),
                                             "bitcoin.network",
-                                            "regtest"
+                                            "regtest",
+                                            "bitcoin.p2p.listen",
+                                            "false"
                                     )
                             )
                     );
@@ -174,7 +176,9 @@ class NodeLifecycleServiceTest {
                                             "bitcoin.data-directory",
                                             directory.toString(),
                                             "bitcoin.network",
-                                            "regtest"
+                                            "regtest",
+                                            "bitcoin.p2p.listen",
+                                            "false"
                                     )
                             )
                     );
@@ -260,7 +264,9 @@ class NodeLifecycleServiceTest {
                                                     .resolve("e2e")
                                                     .toString(),
                                             "bitcoin.network",
-                                            "regtest"
+                                            "regtest",
+                                            "bitcoin.p2p.listen",
+                                            "false"
                                     )
                             )
                     );
@@ -778,7 +784,9 @@ class NodeLifecycleServiceTest {
                                                     )
                                                     .toString(),
                                             "bitcoin.network",
-                                            "regtest"
+                                            "regtest",
+                                            "bitcoin.p2p.listen",
+                                            "false"
                                     )
                             )
                     );
@@ -1012,7 +1020,9 @@ class NodeLifecycleServiceTest {
                                             "bitcoin.network",
                                             "regtest",
                                             "bitcoin.p2p.header-response-timeout-millis",
-                                            "150"
+                                            "150",
+                                            "bitcoin.p2p.listen",
+                                            "false"
                                     )
                             )
                     );
@@ -1207,7 +1217,9 @@ class NodeLifecycleServiceTest {
                                             "bitcoin.network",
                                             "regtest",
                                             "bitcoin.p2p.header-response-timeout-millis",
-                                            "5000"
+                                            "5000",
+                                            "bitcoin.p2p.listen",
+                                            "false"
                                     )
                             )
                     );
@@ -1347,7 +1359,9 @@ class NodeLifecycleServiceTest {
                                                     )
                                                     .toString(),
                                             "bitcoin.network",
-                                            "regtest"
+                                            "regtest",
+                                            "bitcoin.p2p.listen",
+                                            "false"
                                     )
                             )
                     );
@@ -1504,7 +1518,9 @@ class NodeLifecycleServiceTest {
                                                     )
                                                     .toString(),
                                             "bitcoin.network",
-                                            "regtest"
+                                            "regtest",
+                                            "bitcoin.p2p.listen",
+                                            "false"
                                     )
                             )
                     );
@@ -2404,9 +2420,23 @@ class NodeLifecycleServiceTest {
                     }
                 } catch (Exception exception) { throw new RuntimeException(exception); }
             });
-            context.getEnvironment().getPropertySources().addFirst(new MapPropertySource("live-sync", Map.of(
-                    "bitcoin.data-directory", directory.toString(), "bitcoin.network", "regtest",
-                    "bitcoin.p2p.peers", "127.0.0.1:" + serverSocket.getLocalPort())));
+            context.getEnvironment()
+                    .getPropertySources()
+                    .addFirst(
+                            new MapPropertySource(
+                                    "live-sync",
+                                    Map.of(
+                                            "bitcoin.data-directory",
+                                            directory.toString(),
+                                            "bitcoin.network",
+                                            "regtest",
+                                            "bitcoin.p2p.peers",
+                                            "127.0.0.1:" + serverSocket.getLocalPort(),
+                                            "bitcoin.p2p.listen",
+                                            "false"
+                                    )
+                            )
+                    );
             context.register(NetworkConfiguration.class, NodeConfiguration.class);
             context.refresh();
             var lifecycle = context.getBean(NodeLifecycleService.class);
