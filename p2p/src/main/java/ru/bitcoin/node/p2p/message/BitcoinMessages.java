@@ -359,6 +359,28 @@ public final class BitcoinMessages {
         );
     }
 
+    public static BitcoinMessage getAddr() {
+        return new BitcoinMessage(
+                "getaddr",
+                new byte[0]
+        );
+    }
+
+    public static void validateGetAddr(
+            BitcoinMessage message
+    ) {
+        requireCommand(
+                message,
+                "getaddr"
+        );
+
+        if (message.payloadLength() != 0) {
+            throw new IllegalArgumentException(
+                    "getaddr message must have empty payload"
+            );
+        }
+    }
+
     private static void requireCommand(
             BitcoinMessage message,
             String expectedCommand
