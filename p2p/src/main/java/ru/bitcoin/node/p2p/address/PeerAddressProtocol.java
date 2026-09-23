@@ -38,6 +38,7 @@ public final class PeerAddressProtocol
     public PeerAddressProtocol(
             PeerAddressManager addressManager
     ) {
+
         this.addressManager =
                 Objects.requireNonNull(
                         addressManager,
@@ -50,6 +51,7 @@ public final class PeerAddressProtocol
             Peer peer,
             BitcoinMessage message
     ) {
+
         Objects.requireNonNull(
                 peer,
                 "peer"
@@ -60,23 +62,43 @@ public final class PeerAddressProtocol
                 "message"
         );
 
-        switch (message.command()) {
+        try {
 
-            case "addr" ->
-                    handleAddr(message);
+            switch (message.command()) {
 
-            case "addrv2" ->
-                    handleAddrV2(message);
+                case "addr" ->
+                        handleAddr(
+                                message
+                        );
 
-            case "getaddr" ->
-                    handleGetAddr(
-                            peer,
-                            message
-                    );
+                case "addrv2" ->
+                        handleAddrV2(
+                                message
+                        );
 
-            default -> {
-                // Not an address-discovery message.
+                case "getaddr" ->
+                        handleGetAddr(
+                                peer,
+                                message
+                        );
+
+                default -> {
+                    // Not an address-discovery message.
+                }
             }
+
+        } catch (PeerAddressProtocolException exception) {
+
+            throw exception;
+
+        } catch (IllegalArgumentException exception) {
+
+            throw new PeerAddressProtocolException(
+                    "Invalid "
+                            + message.command()
+                            + " message",
+                    exception
+            );
         }
     }
 
@@ -96,7 +118,9 @@ public final class PeerAddressProtocol
                 addrMessage.addresses()) {
 
             PeerAddress peerAddress =
-                    toPeerAddress(entry);
+                    toPeerAddress(
+                            entry
+                    );
 
             if (peerAddress != null) {
 
@@ -124,7 +148,9 @@ public final class PeerAddressProtocol
                 addrV2Message.addresses()) {
 
             PeerAddress peerAddress =
-                    toPeerAddress(entry);
+                    toPeerAddress(
+                            entry
+                    );
 
             if (peerAddress != null) {
 
@@ -145,24 +171,31 @@ public final class PeerAddressProtocol
                 message
         );
 
-        List<KnownPeerAddress> knownAddresses =
-                addressManager.addresses();
-
-        if (knownAddresses.isEmpty()) {
+        /*
+         * Bitcoin Core only responds to GETADDR from
+         * inbound connections.
+         *
+         * Responding on outbound connections makes
+         * AddrMan fingerprinting substantially easier.
+         */
+        if (!peer.isInboundConnection()) {
             return;
         }
 
-        int count =
-                Math.min(
-                        MAX_GETADDR_RESPONSE,
-                        knownAddresses.size()
-                );
+        /*
+         * At most one GETADDR response is permitted
+         * for the lifetime of a connection.
+         */
+        if (!peer.markGetAddrReceived()) {
+            return;
+        }
 
         List<KnownPeerAddress> selected =
-                knownAddresses.subList(
-                        0,
-                        count
-                );
+                addressManager.getAddr();
+
+        if (selected.isEmpty()) {
+            return;
+        }
 
         try {
 
@@ -208,7 +241,9 @@ public final class PeerAddressProtocol
 
             entries.add(
                     AddrEntry.fromIp(
-                            timestamp(known),
+                            timestamp(
+                                    known
+                            ),
                             address.services(),
                             address.address(),
                             address.port()
@@ -216,16 +251,17 @@ public final class PeerAddressProtocol
             );
         }
 
-        if (!entries.isEmpty()) {
-
-            peer.send(
-                    BitcoinMessages.addr(
-                            new AddrMessage(
-                                    entries
-                            )
-                    )
-            );
+        if (entries.isEmpty()) {
+            return;
         }
+
+        peer.send(
+                BitcoinMessages.addr(
+                        new AddrMessage(
+                                entries
+                        )
+                )
+        );
     }
 
     private void sendAddrV2(
@@ -267,7 +303,9 @@ public final class PeerAddressProtocol
 
             entries.add(
                     new AddrV2Entry(
-                            timestamp(known),
+                            timestamp(
+                                    known
+                            ),
                             address.services(),
                             networkId,
                             raw,
@@ -276,16 +314,17 @@ public final class PeerAddressProtocol
             );
         }
 
-        if (!entries.isEmpty()) {
-
-            peer.send(
-                    BitcoinMessages.addrV2(
-                            new AddrV2Message(
-                                    entries
-                            )
-                    )
-            );
+        if (entries.isEmpty()) {
+            return;
         }
+
+        peer.send(
+                BitcoinMessages.addrV2(
+                        new AddrV2Message(
+                                entries
+                        )
+                )
+        );
     }
 
     private static PeerAddress toPeerAddress(
@@ -331,7 +370,9 @@ public final class PeerAddressProtocol
 
         AddrV2Network network =
                 entry.network()
-                        .orElse(null);
+                        .orElse(
+                                null
+                        );
 
         if (network != AddrV2Network.IPV4
                 && network != AddrV2Network.IPV6) {
@@ -339,8 +380,8 @@ public final class PeerAddressProtocol
             /*
              * Current PeerAddress is InetAddress-based.
              *
-             * Tor v3, I2P, CJDNS and Yggdrasil require the
-             * future multi-network AddrMan model.
+             * Tor v3, I2P and CJDNS require the future
+             * multi-network AddrMan model.
              */
             return null;
         }
@@ -383,7 +424,10 @@ public final class PeerAddressProtocol
         for (int i = 0; i < 10; i++) {
 
             if (address[i] != 0) {
-                mappedIpv4 = false;
+
+                mappedIpv4 =
+                        false;
+
                 break;
             }
         }

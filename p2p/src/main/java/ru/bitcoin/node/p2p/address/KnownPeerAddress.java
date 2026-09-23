@@ -16,6 +16,11 @@ public final class KnownPeerAddress {
 
     private int attempts;
 
+    private AddrManState state =
+            AddrManState.NEW;
+
+    private int newBucketReferences;
+
     KnownPeerAddress(
             PeerAddress peerAddress,
             Instant firstSeen
@@ -62,6 +67,22 @@ public final class KnownPeerAddress {
 
     public synchronized int attempts() {
         return attempts;
+    }
+
+    public synchronized AddrManState state() {
+        return state;
+    }
+
+    public synchronized boolean isNew() {
+        return state == AddrManState.NEW;
+    }
+
+    public synchronized boolean isTried() {
+        return state == AddrManState.TRIED;
+    }
+
+    public synchronized int newBucketReferences() {
+        return newBucketReferences;
     }
 
     synchronized void seen(
@@ -125,6 +146,35 @@ public final class KnownPeerAddress {
                 time;
 
         attempts =
+                0;
+    }
+
+    synchronized void promoteToTried() {
+        state =
+                AddrManState.TRIED;
+
+        newBucketReferences =
+                0;
+    }
+
+    synchronized void demoteToNew() {
+        state =
+                AddrManState.NEW;
+    }
+
+    synchronized void incrementNewBucketReferences() {
+        newBucketReferences++;
+    }
+
+    synchronized void decrementNewBucketReferences() {
+
+        if (newBucketReferences > 0) {
+            newBucketReferences--;
+        }
+    }
+
+    synchronized void resetNewBucketReferences() {
+        newBucketReferences =
                 0;
     }
 }

@@ -37,6 +37,10 @@ public final class Peer implements AutoCloseable {
 
     private boolean remoteWantsAddrV2;
 
+    private volatile boolean inboundConnection;
+
+    private boolean getAddrReceived;
+
     private boolean localWtxidRelaySent;
 
     private boolean localSendAddrV2Sent;
@@ -213,6 +217,8 @@ public final class Peer implements AutoCloseable {
                 port
         );
 
+        inboundConnection = false;
+
         state =
                 PeerState.CONNECTED;
     }
@@ -230,6 +236,8 @@ public final class Peer implements AutoCloseable {
         connection.accept(
                 socket
         );
+
+        inboundConnection = true;
 
         state =
                 PeerState.CONNECTED;
@@ -586,11 +594,33 @@ public final class Peer implements AutoCloseable {
                  */
             }
         }
-        for (PeerMessageListener listener : messageListeners) {
+        for (PeerMessageListener listener :
+                messageListeners) {
+
             try {
-                listener.onMessage(this, message);
+
+                listener.onMessage(
+                        this,
+                        message
+                );
+
+            } catch (PeerProtocolException exception) {
+
+                throw new IOException(
+                        "Peer protocol handler rejected "
+                                + message.command()
+                                + " message",
+                        exception
+                );
+
             } catch (RuntimeException ignored) {
-                // One observer must not terminate the reader or suppress another observer.
+
+                /*
+                 * Ordinary observers are isolated from the
+                 * reader thread. One broken observer must not
+                 * suppress subsequent observers or disconnect
+                 * an otherwise valid peer.
+                 */
             }
         }
     }
@@ -732,6 +762,30 @@ public final class Peer implements AutoCloseable {
 
     public boolean remoteWtxidRelay() {
         return remoteWtxidRelay;
+    }
+
+    public boolean isInboundConnection() {
+        return inboundConnection;
+    }
+
+    /**
+     * Marks the first GETADDR received from this peer.
+     *
+     * @return true only for the first GETADDR on this connection.
+     */
+    public synchronized boolean markGetAddrReceived() {
+
+        if (getAddrReceived) {
+            return false;
+        }
+
+        getAddrReceived = true;
+
+        return true;
+    }
+
+    public synchronized boolean getAddrReceived() {
+        return getAddrReceived;
     }
 
     public boolean remoteWantsAddrV2() {

@@ -10,6 +10,7 @@ public final class OutboundPeerSelector {
     public OutboundPeerSelector(
             PeerAddressManager addressManager
     ) {
+
         this.addressManager =
                 Objects.requireNonNull(
                         addressManager,
@@ -19,9 +20,6 @@ public final class OutboundPeerSelector {
 
     public List<PeerAddress> candidates() {
 
-        return addressManager.addresses()
-                .stream()
-                .map(KnownPeerAddress::peerAddress)
-                .toList();
+        return addressManager.candidates();
     }
 }
