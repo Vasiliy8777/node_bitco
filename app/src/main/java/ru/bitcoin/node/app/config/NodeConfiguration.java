@@ -12,10 +12,7 @@ import ru.bitcoin.node.app.sync.BlockSyncCoordinator;
 import ru.bitcoin.node.app.sync.NodeSyncInfrastructure;
 import ru.bitcoin.node.consensus.time.AdjustedTime;
 import ru.bitcoin.node.mempool.Mempool;
-import ru.bitcoin.node.p2p.BitcoinClient;
-import ru.bitcoin.node.p2p.OutboundPeerManager;
-import ru.bitcoin.node.p2p.OutboundPeerSupervisor;
-import ru.bitcoin.node.p2p.PeerManager;
+import ru.bitcoin.node.p2p.*;
 import ru.bitcoin.node.p2p.address.PeerAddressManager;
 import ru.bitcoin.node.p2p.sync.BlockDownloadScheduler;
 import ru.bitcoin.node.p2p.sync.BlockDownloadService;
@@ -233,15 +230,26 @@ public class NodeConfiguration {
             OutboundPeerManager outboundPeerManager,
             OutboundPeerSupervisor outboundPeerSupervisor,
             PeerManager peerManager,
+            BitcoinServer bitcoinServer,
             BlockSyncCoordinator blockSyncCoordinator,
             NetworkParameters parameters,
-            @Value("${bitcoin.p2p.header-response-timeout-millis:10000}") long headerTimeoutMillis
+            @Value("${bitcoin.p2p.listen:true}")
+            boolean listen,
+            @Value("${bitcoin.p2p.port:0}")
+            int listenPort,
+            @Value("${bitcoin.p2p.header-response-timeout-millis:10000}")
+            long headerTimeoutMillis
     ) {
 
         Duration headerResponseTimeout =
                 Duration.ofMillis(
                         headerTimeoutMillis
                 );
+
+        int effectiveListenPort =
+                listenPort == 0
+                        ? parameters.defaultPort()
+                        : listenPort;
 
         return new NodeLifecycleService(
                 validationService,
@@ -251,8 +259,11 @@ public class NodeConfiguration {
                 outboundPeerManager,
                 outboundPeerSupervisor,
                 peerManager,
+                bitcoinServer,
                 blockSyncCoordinator,
-                headerResponseTimeout
+                headerResponseTimeout,
+                listen,
+                effectiveListenPort
         );
     }
 
@@ -279,6 +290,22 @@ public class NodeConfiguration {
     ) {
         return new NodeLifecycleSpringAdapter(
                 runner
+        );
+    }
+
+    @Bean
+    public BitcoinServer bitcoinServer(
+            NetworkParameters parameters,
+            PeerManager peerManager,
+            @Value("${bitcoin.p2p.max-inbound-peers:32}")
+            int maxInboundPeers
+    ) {
+        return new BitcoinServer(
+                parameters,
+                peerManager,
+                ru.bitcoin.node.p2p.message.VersionMessage.DEFAULT_SERVICES,
+                true,
+                maxInboundPeers
         );
     }
 }

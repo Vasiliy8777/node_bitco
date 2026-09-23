@@ -8,11 +8,7 @@ import ru.bitcoin.node.app.sync.HeaderSyncCoordinator;
 import ru.bitcoin.node.app.sync.NodeSyncInfrastructure;
 import ru.bitcoin.node.chain.BlockIndex;
 import ru.bitcoin.node.common.types.Hash256;
-import ru.bitcoin.node.p2p.OutboundPeerConnection;
-import ru.bitcoin.node.p2p.OutboundPeerManager;
-import ru.bitcoin.node.p2p.OutboundPeerSupervisor;
-import ru.bitcoin.node.p2p.Peer;
-import ru.bitcoin.node.p2p.PeerManager;
+import ru.bitcoin.node.p2p.*;
 import ru.bitcoin.node.p2p.address.PeerAddress;
 import ru.bitcoin.node.p2p.address.PeerAddressManager;
 import ru.bitcoin.node.p2p.sync.HeaderSynchronizer;
@@ -47,6 +43,11 @@ public final class NodeLifecycleService
     private final OutboundPeerSupervisor outboundPeerSupervisor;
     private final PeerManager peerManager;
 
+    private final BitcoinServer bitcoinServer;
+
+    private final boolean listen;
+    private final int listenPort;
+
     private final BlockSyncCoordinator blockSyncCoordinator;
 
     private final Duration headerResponseTimeout;
@@ -69,8 +70,11 @@ public final class NodeLifecycleService
             OutboundPeerManager outboundPeerManager,
             OutboundPeerSupervisor outboundPeerSupervisor,
             PeerManager peerManager,
+            BitcoinServer bitcoinServer,
             BlockSyncCoordinator blockSyncCoordinator,
-            Duration headerResponseTimeout
+            Duration headerResponseTimeout,
+            boolean listen,
+            int listenPort
     ) {
         this.validationService =
                 Objects.requireNonNull(
@@ -114,6 +118,12 @@ public final class NodeLifecycleService
                         "peerManager"
                 );
 
+        this.bitcoinServer =
+                Objects.requireNonNull(
+                        bitcoinServer,
+                        "bitcoinServer"
+                );
+
         this.blockSyncCoordinator =
                 Objects.requireNonNull(
                         blockSyncCoordinator,
@@ -133,6 +143,19 @@ public final class NodeLifecycleService
                     "headerResponseTimeout must be positive"
             );
         }
+        if (listenPort <= 0
+                || listenPort > 65535) {
+
+            throw new IllegalArgumentException(
+                    "listenPort must be between 1 and 65535"
+            );
+        }
+
+        this.listen =
+                listen;
+
+        this.listenPort =
+                listenPort;
         liveSync = new ru.bitcoin.node.app.sync.LiveChainSynchronizer(peerManager,
                 syncInfrastructure, blockSyncCoordinator, validationService, headerResponseTimeout);
     }
@@ -174,6 +197,21 @@ public final class NodeLifecycleService
                     Math.toIntExact(
                             activeHeight
                     );
+
+            if (listen) {
+
+                bitcoinServer.start(
+                        listenPort,
+                        startHeight
+                );
+
+                log.info(
+                        "Bitcoin P2P server listening on port {}",
+                        bitcoinServer.localPort()
+                );
+            }
+
+            ensureNotStopping();
 
             /*
              * Keep the exact outbound connection that
@@ -493,6 +531,17 @@ public final class NodeLifecycleService
                 exception
         );
 
+        try {
+
+            bitcoinServer.close();
+
+        } catch (IOException closeException) {
+
+            exception.addSuppressed(
+                    closeException
+            );
+        }
+
         /*
          * Stop reconnect activity before closing peers.
          *
@@ -584,6 +633,26 @@ public final class NodeLifecycleService
 
         IOException closeFailure =
                 null;
+
+        /*
+         * Stop accepting inbound connections first.
+         *
+         * Otherwise an inbound handshake could complete
+         * while the rest of the node is already shutting down
+         * and add another peer to PeerManager.
+         */
+        try {
+
+            bitcoinServer.close();
+
+        } catch (IOException exception) {
+
+            closeFailure =
+                    new IOException(
+                            "Failed to stop Bitcoin P2P server",
+                            exception
+                    );
+        }
 
         /*
          * IMPORTANT:
