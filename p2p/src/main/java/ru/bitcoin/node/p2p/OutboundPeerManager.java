@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Supplier;
 
 public final class OutboundPeerManager {
@@ -15,6 +16,7 @@ public final class OutboundPeerManager {
     private final BitcoinClient bitcoinClient;
     private final PeerManager peerManager;
     private final PeerAddressManager addressManager;
+    private final OutboundPeerSelector selector;
     private final Supplier<Instant> clock;
 
     public OutboundPeerManager(
@@ -40,6 +42,7 @@ public final class OutboundPeerManager {
             OutboundPeerSelector selector,
             Supplier<Instant> clock
     ) {
+
         this.bitcoinClient =
                 Objects.requireNonNull(
                         bitcoinClient,
@@ -56,6 +59,12 @@ public final class OutboundPeerManager {
                 Objects.requireNonNull(
                         addressManager,
                         "addressManager"
+                );
+
+        this.selector =
+                Objects.requireNonNull(
+                        selector,
+                        "selector"
                 );
 
         this.clock =
@@ -103,7 +112,7 @@ public final class OutboundPeerManager {
                 "excludedAddresses"
         );
 
-        java.util.Set<PeerAddress> attempted =
+        Set<PeerAddress> attempted =
                 new java.util.LinkedHashSet<>(
                         excludedAddresses
                 );
@@ -116,7 +125,7 @@ public final class OutboundPeerManager {
         while (true) {
 
             PeerAddress address =
-                    addressManager.select(
+                    selector.select(
                                     attempted
                             )
                             .orElse(

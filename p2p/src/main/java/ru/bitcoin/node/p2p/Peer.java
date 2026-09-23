@@ -550,6 +550,11 @@ public final class Peer implements AutoCloseable {
         return state == PeerState.READY;
     }
 
+    public InetSocketAddress remoteAddress() {
+
+        return connection.remoteAddress();
+    }
+
     public VersionMessage remoteVersion() {
         if (remoteVersion == null) {
             throw new IllegalStateException(

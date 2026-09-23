@@ -1,9 +1,10 @@
 package ru.bitcoin.node.p2p.address;
 
-import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 
-public final class OutboundPeerSelector {
+public class OutboundPeerSelector {
 
     private final PeerAddressManager addressManager;
 
@@ -18,8 +19,22 @@ public final class OutboundPeerSelector {
                 );
     }
 
-    public List<PeerAddress> candidates() {
+    public Optional<PeerAddress> select(
+            Set<PeerAddress> excludedAddresses
+    ) {
 
-        return addressManager.candidates();
+        Objects.requireNonNull(
+                excludedAddresses,
+                "excludedAddresses"
+        );
+
+        return addressManager.select(
+                excludedAddresses
+        );
+    }
+
+    public Optional<PeerAddress> select() {
+
+        return addressManager.select();
     }
 }

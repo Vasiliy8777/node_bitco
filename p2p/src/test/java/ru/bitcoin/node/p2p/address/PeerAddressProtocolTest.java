@@ -1,16 +1,14 @@
-package ru.bitcoin.node.app.address;
+package ru.bitcoin.node.p2p.address;
 
 import org.junit.jupiter.api.Test;
 import ru.bitcoin.node.p2p.Peer;
 import ru.bitcoin.node.p2p.PeerConnection;
-import ru.bitcoin.node.p2p.address.KnownPeerAddress;
-import ru.bitcoin.node.p2p.address.PeerAddress;
-import ru.bitcoin.node.p2p.address.PeerAddressManager;
-import ru.bitcoin.node.p2p.address.PeerAddressProtocol;
 import ru.bitcoin.node.p2p.message.*;
 import ru.bitcoin.node.protocol.network.NetworkParametersRegistry;
 
 import java.net.InetAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.time.Instant;
 import java.util.List;
 
@@ -237,10 +235,20 @@ class PeerAddressProtocolTest {
                         manager
                 );
 
-        try (PeerConnection connection =
+        try (ServerSocket serverSocket =
+                     new ServerSocket(
+                             0,
+                             1,
+                             InetAddress.getByName(
+                                     "127.0.0.1"
+                             )
+                     );
+
+             PeerConnection connection =
                      new PeerConnection(
                              NetworkParametersRegistry.regtest()
                      );
+
              Peer peer =
                      new Peer(
                              connection,
@@ -249,51 +257,76 @@ class PeerAddressProtocolTest {
                              true
                      )) {
 
-            AddrEntry entry =
-                    AddrEntry.fromIp(
-                            1_700_000_000L,
-                            9L,
-                            InetAddress.getByName(
-                                    "192.0.2.10"
-                            ),
-                            8333
-                    );
-
-            protocol.onMessage(
-                    peer,
-                    BitcoinMessages.addr(
-                            new AddrMessage(
-                                    List.of(entry)
-                            )
-                    )
+            peer.connect(
+                    "127.0.0.1",
+                    serverSocket.getLocalPort()
             );
 
-            assertEquals(
-                    1,
-                    manager.size()
-            );
+            try (Socket accepted =
+                         serverSocket.accept()) {
 
-            KnownPeerAddress known =
-                    manager.addresses()
-                            .get(0);
+                AddrEntry entry =
+                        AddrEntry.fromIp(
+                                1_700_000_000L,
+                                9L,
+                                InetAddress.getByName(
+                                        "192.0.2.10"
+                                ),
+                                8333
+                        );
 
-            assertEquals(
-                    "192.0.2.10",
-                    known.peerAddress()
-                            .hostAddress()
-            );
+                protocol.onMessage(
+                        peer,
+                        BitcoinMessages.addr(
+                                new AddrMessage(
+                                        List.of(
+                                                entry
+                                        )
+                                )
+                        )
+                );
 
-            assertEquals(
-                    8333,
-                    known.peerAddress()
-                            .port()
-            );
+                assertEquals(
+                        1,
+                        manager.size()
+                );
 
-            assertEquals(
-                    9L,
-                    known.peerAddress()
-                            .services()
-            );
+                KnownPeerAddress known =
+                        manager.addresses()
+                                .get(0);
+
+                assertEquals(
+                        "192.0.2.10",
+                        known.peerAddress()
+                                .hostAddress()
+                );
+
+                assertEquals(
+                        8333,
+                        known.peerAddress()
+                                .port()
+                );
+
+                assertEquals(
+                        9L,
+                        known.peerAddress()
+                                .services()
+                );
+
+                /*
+                 * Critical source-aware AddrMan assertion:
+                 *
+                 * 192.0.2.10 is the advertised endpoint,
+                 * while 127.0.0.1 is the peer that supplied it.
+                 */
+                assertEquals(
+                        InetAddress.getByName(
+                                "127.0.0.1"
+                        ),
+                        known.source()
+                                .address()
+                );
+            }
         }
     }
 
@@ -309,10 +342,20 @@ class PeerAddressProtocolTest {
                         manager
                 );
 
-        try (PeerConnection connection =
+        try (ServerSocket serverSocket =
+                     new ServerSocket(
+                             0,
+                             1,
+                             InetAddress.getByName(
+                                     "127.0.0.1"
+                             )
+                     );
+
+             PeerConnection connection =
                      new PeerConnection(
                              NetworkParametersRegistry.regtest()
                      );
+
              Peer peer =
                      new Peer(
                              connection,
@@ -321,53 +364,72 @@ class PeerAddressProtocolTest {
                              true
                      )) {
 
-            AddrV2Entry entry =
-                    new AddrV2Entry(
-                            1_700_000_000L,
-                            9L,
-                            AddrV2Network.IPV4.id(),
-                            InetAddress.getByName(
-                                            "192.0.2.20"
-                                    )
-                                    .getAddress(),
-                            8333
-                    );
-
-            protocol.onMessage(
-                    peer,
-                    BitcoinMessages.addrV2(
-                            new AddrV2Message(
-                                    List.of(entry)
-                            )
-                    )
+            peer.connect(
+                    "127.0.0.1",
+                    serverSocket.getLocalPort()
             );
 
-            assertEquals(
-                    1,
-                    manager.size()
-            );
+            try (Socket accepted =
+                         serverSocket.accept()) {
 
-            KnownPeerAddress known =
-                    manager.addresses()
-                            .get(0);
+                AddrV2Entry entry =
+                        new AddrV2Entry(
+                                1_700_000_000L,
+                                9L,
+                                AddrV2Network.IPV4.id(),
+                                InetAddress.getByName(
+                                                "192.0.2.20"
+                                        )
+                                        .getAddress(),
+                                8333
+                        );
 
-            assertEquals(
-                    "192.0.2.20",
-                    known.peerAddress()
-                            .hostAddress()
-            );
+                protocol.onMessage(
+                        peer,
+                        BitcoinMessages.addrV2(
+                                new AddrV2Message(
+                                        List.of(
+                                                entry
+                                        )
+                                )
+                        )
+                );
 
-            assertEquals(
-                    8333,
-                    known.peerAddress()
-                            .port()
-            );
+                assertEquals(
+                        1,
+                        manager.size()
+                );
 
-            assertEquals(
-                    9L,
-                    known.peerAddress()
-                            .services()
-            );
+                KnownPeerAddress known =
+                        manager.addresses()
+                                .get(0);
+
+                assertEquals(
+                        "192.0.2.20",
+                        known.peerAddress()
+                                .hostAddress()
+                );
+
+                assertEquals(
+                        8333,
+                        known.peerAddress()
+                                .port()
+                );
+
+                assertEquals(
+                        9L,
+                        known.peerAddress()
+                                .services()
+                );
+
+                assertEquals(
+                        InetAddress.getByName(
+                                "127.0.0.1"
+                        ),
+                        known.source()
+                                .address()
+                );
+            }
         }
     }
 
@@ -383,10 +445,20 @@ class PeerAddressProtocolTest {
                         manager
                 );
 
-        try (PeerConnection connection =
+        try (ServerSocket serverSocket =
+                     new ServerSocket(
+                             0,
+                             1,
+                             InetAddress.getByName(
+                                     "127.0.0.1"
+                             )
+                     );
+
+             PeerConnection connection =
                      new PeerConnection(
                              NetworkParametersRegistry.regtest()
                      );
+
              Peer peer =
                      new Peer(
                              connection,
@@ -395,60 +467,72 @@ class PeerAddressProtocolTest {
                              true
                      )) {
 
-            AddrV2Entry unknown =
-                    new AddrV2Entry(
-                            1_700_000_000L,
-                            9L,
-                            0x07,
-                            new byte[]{
-                                    1, 2, 3, 4, 5
-                            },
-                            8333
-                    );
-
-            AddrV2Entry ipv4 =
-                    new AddrV2Entry(
-                            1_700_000_001L,
-                            9L,
-                            AddrV2Network.IPV4.id(),
-                            InetAddress.getByName(
-                                            "192.0.2.30"
-                                    )
-                                    .getAddress(),
-                            8333
-                    );
-
-            protocol.onMessage(
-                    peer,
-                    BitcoinMessages.addrV2(
-                            new AddrV2Message(
-                                    List.of(
-                                            unknown,
-                                            ipv4
-                                    )
-                            )
-                    )
+            peer.connect(
+                    "127.0.0.1",
+                    serverSocket.getLocalPort()
             );
 
-            /*
-             * Unknown BIP155 network must be ignored,
-             * but it must not prevent the following
-             * supported address from being processed.
-             */
-            assertEquals(
-                    1,
-                    manager.size()
-            );
+            try (Socket accepted =
+                         serverSocket.accept()) {
 
-            KnownPeerAddress known =
-                    manager.addresses()
-                            .get(0);
+                AddrV2Entry unknown =
+                        new AddrV2Entry(
+                                1_700_000_000L,
+                                9L,
+                                0x07,
+                                new byte[]{
+                                        1, 2, 3, 4, 5
+                                },
+                                8333
+                        );
 
-            assertEquals(
-                    "192.0.2.30",
-                    known.peerAddress()
-                            .hostAddress()
-            );
+                AddrV2Entry ipv4 =
+                        new AddrV2Entry(
+                                1_700_000_001L,
+                                9L,
+                                AddrV2Network.IPV4.id(),
+                                InetAddress.getByName(
+                                                "192.0.2.30"
+                                        )
+                                        .getAddress(),
+                                8333
+                        );
+
+                protocol.onMessage(
+                        peer,
+                        BitcoinMessages.addrV2(
+                                new AddrV2Message(
+                                        List.of(
+                                                unknown,
+                                                ipv4
+                                        )
+                                )
+                        )
+                );
+
+                assertEquals(
+                        1,
+                        manager.size()
+                );
+
+                KnownPeerAddress known =
+                        manager.addresses()
+                                .get(0);
+
+                assertEquals(
+                        "192.0.2.30",
+                        known.peerAddress()
+                                .hostAddress()
+                );
+
+                assertEquals(
+                        InetAddress.getByName(
+                                "127.0.0.1"
+                        ),
+                        known.source()
+                                .address()
+                );
+            }
         }
     }
 }

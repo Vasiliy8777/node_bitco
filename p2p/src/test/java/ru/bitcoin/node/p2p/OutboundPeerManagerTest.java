@@ -1,6 +1,7 @@
 package ru.bitcoin.node.p2p;
 
 import org.junit.jupiter.api.Test;
+import ru.bitcoin.node.p2p.address.OutboundPeerSelector;
 import ru.bitcoin.node.p2p.address.PeerAddress;
 import ru.bitcoin.node.p2p.address.PeerAddressManager;
 import ru.bitcoin.node.p2p.codec.BitcoinMessageDecoder;
@@ -20,6 +21,7 @@ import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.time.Instant;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -45,8 +47,8 @@ class OutboundPeerManagerTest {
                     unusedServer.getLocalPort();
 
             /*
-             * Reserve a free port and then close it so that
-             * the first outbound connection is refused.
+             * Reserve a free port and close it so that an outbound
+             * connection to this endpoint is refused.
              */
             unusedServer.close();
 
@@ -83,13 +85,14 @@ class OutboundPeerManagerTest {
                             1_700_000_000L
                     );
 
+            /*
+             * Only the failing endpoint is initially available.
+             *
+             * AddrMan selection is randomized, so adding both addresses
+             * before connectOne() would make this test nondeterministic.
+             */
             addressManager.add(
                     failedAddress,
-                    discoveredAt
-            );
-
-            addressManager.add(
-                    successfulAddress,
                     discoveredAt
             );
 
@@ -111,12 +114,64 @@ class OutboundPeerManagerTest {
                             ),
                             peerManager,
                             addressManager,
-                            new ru.bitcoin.node.p2p.address.OutboundPeerSelector(
-                                    addressManager
+                            new DeterministicOutboundPeerSelector(
+                                    addressManager,
+                                    failedAddress,
+                                    successfulAddress
                             ),
                             () -> base.plusSeconds(
                                     clockCalls.getAndIncrement()
                             )
+                    );
+
+            /*
+             * We need the successful address to become available only
+             * after the first failed connection attempt.
+             *
+             * The injected clock is called when markAttempt() is made.
+             * Add the replacement address immediately after observing
+             * that first attempt.
+             */
+            CompletableFuture<Void> addSuccessfulAddress =
+                    CompletableFuture.runAsync(
+                            () -> {
+
+                                long deadline =
+                                        System.nanoTime()
+                                                + TimeUnit.SECONDS
+                                                .toNanos(
+                                                        5
+                                                );
+
+                                while (System.nanoTime()
+                                        < deadline) {
+
+                                    var known =
+                                            addressManager.find(
+                                                    failedAddress
+                                            );
+
+                                    if (known.isPresent()
+                                            && known.get()
+                                            .attempts() > 0) {
+
+                                        addressManager.add(
+                                                successfulAddress,
+                                                discoveredAt.plusSeconds(
+                                                        1
+                                                )
+                                        );
+
+                                        return;
+                                    }
+
+                                    Thread.onSpinWait();
+                                }
+
+                                throw new AssertionError(
+                                        "Failing address was not attempted"
+                                );
+                            }
                     );
 
             try {
@@ -125,6 +180,11 @@ class OutboundPeerManagerTest {
                         outbound.connectOne(
                                 100
                         );
+
+                addSuccessfulAddress.get(
+                        5,
+                        TimeUnit.SECONDS
+                );
 
                 assertTrue(
                         peer.isReady()
@@ -440,6 +500,52 @@ class OutboundPeerManagerTest {
             throw new RuntimeException(
                     exception
             );
+        }
+    }
+
+    private static final class DeterministicOutboundPeerSelector
+            extends OutboundPeerSelector {
+
+        private final Queue<PeerAddress> addresses;
+
+        private DeterministicOutboundPeerSelector(
+                PeerAddressManager addressManager,
+                PeerAddress... addresses
+        ) {
+
+            super(
+                    addressManager
+            );
+
+            this.addresses =
+                    new ArrayDeque<>(
+                            Arrays.asList(
+                                    addresses
+                            )
+                    );
+        }
+
+        @Override
+        public Optional<PeerAddress> select(
+                Set<PeerAddress> excludedAddresses
+        ) {
+
+            while (!addresses.isEmpty()) {
+
+                PeerAddress candidate =
+                        addresses.remove();
+
+                if (!excludedAddresses.contains(
+                        candidate
+                )) {
+
+                    return Optional.of(
+                            candidate
+                    );
+                }
+            }
+
+            return Optional.empty();
         }
     }
 }

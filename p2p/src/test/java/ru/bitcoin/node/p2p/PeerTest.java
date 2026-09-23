@@ -13,6 +13,7 @@ import ru.bitcoin.node.protocol.network.NetworkParametersRegistry;
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.IOException;
+import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.concurrent.*;
@@ -1587,6 +1588,116 @@ class PeerTest {
             assertEquals(
                     PeerState.CONNECTED,
                     peer.state()
+            );
+        }
+    }
+
+    @Test
+    void shouldExposeRemoteAddressAfterOutboundConnect()
+            throws Exception {
+
+        InetAddress loopback =
+                InetAddress.getByName(
+                        "127.0.0.1"
+                );
+
+        try (ServerSocket serverSocket =
+                     new ServerSocket(
+                             0,
+                             1,
+                             loopback
+                     );
+
+             PeerConnection connection =
+                     connection();
+
+             Peer peer =
+                     new Peer(
+                             connection,
+                             VersionMessage.DEFAULT_SERVICES,
+                             0,
+                             true,
+                             LOCAL_NONCE
+                     )) {
+
+            peer.connect(
+                    "127.0.0.1",
+                    serverSocket.getLocalPort()
+            );
+
+            try (Socket accepted =
+                         serverSocket.accept()) {
+
+                assertEquals(
+                        loopback,
+                        peer.remoteAddress()
+                                .getAddress()
+                );
+
+                assertEquals(
+                        serverSocket.getLocalPort(),
+                        peer.remoteAddress()
+                                .getPort()
+                );
+            }
+        }
+    }
+
+    @Test
+    void shouldExposeRemoteAddressAfterInboundAccept()
+            throws Exception {
+
+        InetAddress loopback =
+                InetAddress.getByName(
+                        "127.0.0.1"
+                );
+
+        try (ServerSocket serverSocket =
+                     new ServerSocket(
+                             0,
+                             1,
+                             loopback
+                     );
+
+             Socket client =
+                     new Socket(
+                             loopback,
+                             serverSocket.getLocalPort()
+                     );
+
+             Socket accepted =
+                     serverSocket.accept();
+
+             PeerConnection connection =
+                     connection();
+
+             Peer peer =
+                     new Peer(
+                             connection,
+                             VersionMessage.DEFAULT_SERVICES,
+                             0,
+                             true,
+                             LOCAL_NONCE
+                     )) {
+
+            peer.accept(
+                    accepted
+            );
+
+            assertEquals(
+                    client.getLocalAddress(),
+                    peer.remoteAddress()
+                            .getAddress()
+            );
+
+            assertEquals(
+                    client.getLocalPort(),
+                    peer.remoteAddress()
+                            .getPort()
+            );
+
+            assertTrue(
+                    peer.isInboundConnection()
             );
         }
     }

@@ -68,11 +68,13 @@ public final class PeerAddressProtocol
 
                 case "addr" ->
                         handleAddr(
+                                peer,
                                 message
                         );
 
                 case "addrv2" ->
                         handleAddrV2(
+                                peer,
                                 message
                         );
 
@@ -103,6 +105,29 @@ public final class PeerAddressProtocol
     }
 
     private void handleAddr(
+            Peer peer,
+            BitcoinMessage message
+    ) {
+
+        handleAddr(
+                sourceOf(peer),
+                message
+        );
+    }
+
+    private void handleAddrV2(
+            Peer peer,
+            BitcoinMessage message
+    ) {
+
+        handleAddrV2(
+                sourceOf(peer),
+                message
+        );
+    }
+
+    private void handleAddr(
+            PeerAddressSource source,
             BitcoinMessage message
     ) {
 
@@ -126,6 +151,7 @@ public final class PeerAddressProtocol
 
                 addressManager.add(
                         peerAddress,
+                        source,
                         receivedAt
                 );
             }
@@ -133,6 +159,7 @@ public final class PeerAddressProtocol
     }
 
     private void handleAddrV2(
+            PeerAddressSource source,
             BitcoinMessage message
     ) {
 
@@ -156,10 +183,38 @@ public final class PeerAddressProtocol
 
                 addressManager.add(
                         peerAddress,
+                        source,
                         receivedAt
                 );
             }
         }
+    }
+
+    private static PeerAddressSource sourceOf(
+            Peer peer
+    ) {
+
+        Objects.requireNonNull(
+                peer,
+                "peer"
+        );
+
+        java.net.InetSocketAddress remote =
+                peer.remoteAddress();
+
+        java.net.InetAddress address =
+                remote.getAddress();
+
+        if (address == null) {
+
+            throw new PeerAddressProtocolException(
+                    "Connected peer has unresolved remote address"
+            );
+        }
+
+        return PeerAddressSource.of(
+                address
+        );
     }
 
     private void handleGetAddr(
