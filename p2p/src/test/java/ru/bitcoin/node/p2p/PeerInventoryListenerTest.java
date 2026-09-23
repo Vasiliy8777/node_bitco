@@ -22,6 +22,22 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class PeerInventoryListenerTest {
 
+    @Test void managedPeerDoesNotConsumeAnnouncementsBeforeListenersAreAttached() throws Exception {
+        var hash = Hash256.fromDisplayHex("11".repeat(32));
+        var received = new CompletableFuture<InvMessage>();
+        try (var listener = new ServerSocket(0); var manager = new PeerManager()) {
+            var remote = CompletableFuture.runAsync(() -> runInventoryPeer(listener, hash));
+            try (var peer = new BitcoinClient(PARAMETERS).connectManaged("127.0.0.1", listener.getLocalPort(), 0)) {
+                // Registration may be delayed arbitrarily: the socket retains the early INV and PING.
+                assertTrue(peer.isReady());
+                manager.addPeerListener(connected -> connected.addInventoryListener((source, inv) -> received.complete(inv)));
+                manager.add(peer);
+                assertEquals(hash, received.get(5, TimeUnit.SECONDS).inventory().getFirst().hash());
+                remote.get(5, TimeUnit.SECONDS);
+            }
+        }
+    }
+
     private static final NetworkParameters PARAMETERS =
             NetworkParametersRegistry.regtest();
 

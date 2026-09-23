@@ -2,6 +2,8 @@
 
 ## Запуск Bitcoin-ноды и майнинга
 
+- [Аудит готовности: консенсус, политики, P2P и условия начала майнинга](docs/readiness-audit.md).
+
 - [Синхронизация, конфигурация ноды и mining RPC](docs/mining-node.md).
 - [Подключение solo-майнеров через Stratum V1](docs/stratum.md): авторизация,
   payout script, автоматическая сложность shares (vardiff) и version rolling.

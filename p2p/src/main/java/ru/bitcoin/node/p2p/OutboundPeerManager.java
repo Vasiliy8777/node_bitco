@@ -159,7 +159,7 @@ public final class OutboundPeerManager {
             try {
 
                 Peer peer =
-                        peerConnector.connect(
+                        peerConnector.connectManaged(
                                 address.hostAddress(),
                                 address.port(),
                                 startHeight

@@ -348,7 +348,7 @@ public final class BitcoinServer
                     socket
             );
 
-            peer.handshake();
+            peer.handshake(false);
 
             if (!peer.isReady()) {
                 throw new IOException(

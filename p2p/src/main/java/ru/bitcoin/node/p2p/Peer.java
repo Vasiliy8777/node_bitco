@@ -245,6 +245,12 @@ public final class Peer implements AutoCloseable {
 
     public void handshake()
             throws IOException {
+        handshake(true);
+    }
+
+    private boolean readerDeferred;
+
+    void handshake(boolean startReader) throws IOException {
 
         if (state != PeerState.CONNECTED) {
             throw new IllegalStateException(
@@ -282,7 +288,15 @@ public final class Peer implements AutoCloseable {
          */
         connection.disableReadTimeout();
 
-        messageReader.start();
+        readerDeferred = !startReader;
+        if (startReader) messageReader.start();
+    }
+
+    synchronized void startManagedReader() {
+        if (readerDeferred && isReady()) {
+            readerDeferred = false;
+            messageReader.start();
+        }
     }
 
     private void sendVersion()

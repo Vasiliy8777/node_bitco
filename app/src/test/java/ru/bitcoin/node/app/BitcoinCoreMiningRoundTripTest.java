@@ -53,7 +53,7 @@ class BitcoinCoreMiningRoundTripTest {
             try (var context = new AnnotationConfigApplicationContext()) {
                 context.getEnvironment().getPropertySources().addFirst(new MapPropertySource("core-round-trip", Map.of(
                         "bitcoin.data-directory", directory.resolve("java-node").toString(), "bitcoin.network", "regtest",
-                        "bitcoin.p2p.peers", "127.0.0.1:" + p2pPort)));
+                        "bitcoin.p2p.peers", "127.0.0.1:" + p2pPort, "bitcoin.p2p.listen", "false")));
                 context.register(NetworkConfiguration.class, NodeConfiguration.class);
                 context.refresh();
                 var lifecycle = context.getBean(NodeLifecycleService.class);

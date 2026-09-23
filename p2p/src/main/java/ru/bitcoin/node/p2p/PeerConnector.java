@@ -10,4 +10,9 @@ public interface PeerConnector {
             int port,
             int startHeight
     ) throws IOException;
+
+    /** Managed connections defer application reads until PeerManager has attached its listeners. */
+    default Peer connectManaged(String host, int port, int startHeight) throws IOException {
+        return connect(host, port, startHeight);
+    }
 }

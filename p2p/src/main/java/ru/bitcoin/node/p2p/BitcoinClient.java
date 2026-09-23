@@ -47,6 +47,15 @@ public final class BitcoinClient
             int startHeight
     ) throws IOException {
 
+        return connect(host, port, startHeight, true);
+    }
+
+    @Override public Peer connectManaged(String host, int port, int startHeight) throws IOException {
+        return connect(host, port, startHeight, false);
+    }
+
+    private Peer connect(String host, int port, int startHeight, boolean startReader) throws IOException {
+
         if (host == null || host.isBlank()) {
             throw new IllegalArgumentException(
                     "host must not be blank"
@@ -82,7 +91,7 @@ public final class BitcoinClient
                     port
             );
 
-            peer.handshake();
+            peer.handshake(startReader);
 
             if (!peer.isReady()) {
                 throw new IOException(

@@ -65,7 +65,10 @@ public final class PeerManager
         peer.addCloseListener(
                 this::onPeerClosed
         );
-        if (peers.contains(peer)) listeners.forEach(listener -> listener.accept(peer));
+        if (peers.contains(peer)) {
+            listeners.forEach(listener -> listener.accept(peer));
+            peer.startManagedReader();
+        }
     }
 
     private void onPeerClosed(
