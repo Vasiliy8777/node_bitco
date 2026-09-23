@@ -1,7 +1,5 @@
 package ru.bitcoin.node.p2p.address;
 
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -39,7 +37,7 @@ final class AddrManHasher {
                 digest.update(
                         Objects.requireNonNull(
                                 part,
-                                "hash part"
+                                "part"
                         )
                 );
             }
@@ -85,9 +83,14 @@ final class AddrManHasher {
 
         ByteBuffer buffer =
                 ByteBuffer.allocate(
-                        ip.length
+                        1
+                                + ip.length
                                 + Integer.BYTES
                 );
+
+        buffer.put(
+                (byte) ip.length
+        );
 
         buffer.put(
                 ip
@@ -109,17 +112,41 @@ final class AddrManHasher {
                 "address"
         );
 
-        byte[] raw =
+        return groupBytes(
                 address.address()
-                        .getAddress();
+        );
+    }
+
+    static byte[] groupBytes(
+            PeerAddressSource source
+    ) {
+
+        Objects.requireNonNull(
+                source,
+                "source"
+        );
+
+        return groupBytes(
+                source.address()
+        );
+    }
+
+    private static byte[] groupBytes(
+            java.net.InetAddress address
+    ) {
+
+        byte[] raw =
+                address.getAddress();
 
         /*
-         * IPv4 network group: /16.
+         * Current project is still IP-only.
          *
-         * IPv6 network group: /32.
+         * IPv4 group: /16.
+         * IPv6 group: /32.
          *
-         * This keeps nearby addresses together so that one
-         * network cannot trivially occupy the entire AddrMan.
+         * Later the network-address abstraction will replace
+         * this with Core-compatible NetGroup behavior for all
+         * supported networks.
          */
         if (raw.length == 4) {
 

@@ -4,9 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import java.net.InetAddress;
 import java.time.Instant;
-import java.util.HashSet;
-import java.util.Random;
-import java.util.Set;
+import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -370,6 +368,277 @@ class AddrManTest {
                 8,
                 PeerAddressManager.MAX_NEW_REFERENCES
         );
+    }
+
+    @Test
+    void selectReturnsKnownAddress()
+            throws Exception {
+
+        PeerAddressManager manager =
+                manager();
+
+        PeerAddress first =
+                address(
+                        "192.0.2.40",
+                        8333
+                );
+
+        manager.add(
+                first,
+                NOW
+        );
+
+        assertEquals(
+                first,
+                manager.select()
+                        .orElseThrow()
+        );
+    }
+
+    @Test
+    void selectHonorsExcludedAddresses()
+            throws Exception {
+
+        PeerAddressManager manager =
+                manager();
+
+        PeerAddress first =
+                address(
+                        "192.0.2.41",
+                        8333
+                );
+
+        PeerAddress second =
+                address(
+                        "198.51.100.41",
+                        8333
+                );
+
+        manager.add(
+                first,
+                NOW
+        );
+
+        manager.add(
+                second,
+                NOW
+        );
+
+        PeerAddress selected =
+                manager.select(
+                                Set.of(
+                                        first
+                                )
+                        )
+                        .orElseThrow();
+
+        assertEquals(
+                second,
+                selected
+        );
+    }
+
+    @Test
+    void selectReturnsEmptyWhenEverythingIsExcluded()
+            throws Exception {
+
+        PeerAddressManager manager =
+                manager();
+
+        PeerAddress first =
+                address(
+                        "192.0.2.42",
+                        8333
+                );
+
+        manager.add(
+                first,
+                NOW
+        );
+
+        assertTrue(
+                manager.select(
+                                Set.of(
+                                        first
+                                )
+                        )
+                        .isEmpty()
+        );
+    }
+
+    @Test
+    void sourceIsStoredWithNewAddress()
+            throws Exception {
+
+        PeerAddressManager manager =
+                manager();
+
+        PeerAddress address =
+                address(
+                        "192.0.2.43",
+                        8333
+                );
+
+        PeerAddressSource source =
+                PeerAddressSource.of(
+                        InetAddress.getByName(
+                                "203.0.113.10"
+                        )
+                );
+
+        KnownPeerAddress known =
+                manager.add(
+                        address,
+                        source,
+                        NOW
+                );
+
+        assertEquals(
+                source,
+                known.source()
+        );
+    }
+
+    @Test
+    void successMovesSelectedAddressToTried()
+            throws Exception {
+
+        PeerAddressManager manager =
+                manager();
+
+        PeerAddress address =
+                address(
+                        "192.0.2.44",
+                        8333
+                );
+
+        manager.add(
+                address,
+                NOW
+        );
+
+        PeerAddress selected =
+                manager.select()
+                        .orElseThrow();
+
+        manager.markAttempt(
+                selected,
+                NOW.plusSeconds(
+                        1
+                )
+        );
+
+        manager.markSuccess(
+                selected,
+                NOW.plusSeconds(
+                        2
+                )
+        );
+
+        KnownPeerAddress known =
+                manager.find(
+                        address
+                ).orElseThrow();
+
+        assertTrue(
+                known.isTried()
+        );
+
+        assertEquals(
+                0,
+                known.attempts()
+        );
+    }
+
+    @Test
+    void constantsMatchCoreAddrManStructure() {
+
+        assertEquals(
+                1024,
+                PeerAddressManager.NEW_BUCKET_COUNT
+        );
+
+        assertEquals(
+                256,
+                PeerAddressManager.TRIED_BUCKET_COUNT
+        );
+
+        assertEquals(
+                64,
+                PeerAddressManager.BUCKET_SIZE
+        );
+
+        assertEquals(
+                8,
+                PeerAddressManager.MAX_NEW_REFERENCES
+        );
+
+        assertEquals(
+                64,
+                PeerAddressManager.NEW_BUCKETS_PER_SOURCE_GROUP
+        );
+
+        assertEquals(
+                8,
+                PeerAddressManager.TRIED_BUCKETS_PER_GROUP
+        );
+    }
+
+    @Test
+    void bucketCollisionMustNotForgetKnownAddress()
+            throws Exception {
+
+        PeerAddressManager manager =
+                manager();
+
+        List<PeerAddress> added =
+                new ArrayList<>();
+
+        /*
+         * Add many endpoints from the same network group.
+         * With only 64 slots per bucket this forces collisions.
+         */
+        for (int port = 10_000;
+             port < 10_200;
+             port++) {
+
+            PeerAddress address =
+                    new PeerAddress(
+                            InetAddress.getByName(
+                                    "127.0.0.1"
+                            ),
+                            port,
+                            0L
+                    );
+
+            manager.add(
+                    address,
+                    NOW
+            );
+
+            added.add(
+                    address
+            );
+        }
+
+        assertEquals(
+                added.size(),
+                manager.size()
+        );
+
+        for (PeerAddress address :
+                added) {
+
+            assertTrue(
+                    manager.find(
+                                    address
+                            )
+                            .isPresent(),
+                    () ->
+                            "AddrMan forgot known address after bucket collision: "
+                                    + address
+            );
+        }
     }
 
     private static PeerAddressManager manager() {

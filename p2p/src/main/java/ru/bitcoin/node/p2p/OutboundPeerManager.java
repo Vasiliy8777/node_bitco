@@ -15,7 +15,6 @@ public final class OutboundPeerManager {
     private final BitcoinClient bitcoinClient;
     private final PeerManager peerManager;
     private final PeerAddressManager addressManager;
-    private final OutboundPeerSelector selector;
     private final Supplier<Instant> clock;
 
     public OutboundPeerManager(
@@ -59,12 +58,6 @@ public final class OutboundPeerManager {
                         "addressManager"
                 );
 
-        this.selector =
-                Objects.requireNonNull(
-                        selector,
-                        "selector"
-                );
-
         this.clock =
                 Objects.requireNonNull(
                         clock,
@@ -99,6 +92,7 @@ public final class OutboundPeerManager {
     ) throws IOException {
 
         if (startHeight < 0) {
+
             throw new IllegalArgumentException(
                     "startHeight must not be negative"
             );
@@ -109,31 +103,42 @@ public final class OutboundPeerManager {
                 "excludedAddresses"
         );
 
-        List<PeerAddress> candidates =
-                selector.candidates()
-                        .stream()
-                        .filter(
-                                candidate ->
-                                        !excludedAddresses.contains(
-                                                candidate
-                                        )
-                        )
-                        .toList();
-
-        if (candidates.isEmpty()) {
-            throw new IOException(
-                    "No known peer addresses available"
-            );
-        }
+        java.util.Set<PeerAddress> attempted =
+                new java.util.LinkedHashSet<>(
+                        excludedAddresses
+                );
 
         IOException failure =
                 new IOException(
-                        "Unable to connect to any of "
-                                + candidates.size()
-                                + " known peer address(es)"
+                        "Unable to connect to any known peer address"
                 );
 
-        for (PeerAddress address : candidates) {
+        while (true) {
+
+            PeerAddress address =
+                    addressManager.select(
+                                    attempted
+                            )
+                            .orElse(
+                                    null
+                            );
+
+            if (address == null) {
+
+                if (attempted.size()
+                        == excludedAddresses.size()) {
+
+                    throw new IOException(
+                            "No known peer addresses available"
+                    );
+                }
+
+                throw failure;
+            }
+
+            attempted.add(
+                    address
+            );
 
             addressManager.markAttempt(
                     address,
@@ -152,8 +157,11 @@ public final class OutboundPeerManager {
                 if (!peer.isReady()) {
 
                     try {
+
                         peer.close();
+
                     } catch (IOException closeException) {
+
                         failure.addSuppressed(
                                 closeException
                         );
@@ -185,8 +193,11 @@ public final class OutboundPeerManager {
                 } catch (RuntimeException exception) {
 
                     try {
+
                         peer.close();
+
                     } catch (IOException closeException) {
+
                         exception.addSuppressed(
                                 closeException
                         );
@@ -207,8 +218,6 @@ public final class OutboundPeerManager {
                 );
             }
         }
-
-        throw failure;
     }
 
     private Instant now() {

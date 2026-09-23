@@ -8,6 +8,8 @@ public final class KnownPeerAddress {
 
     private PeerAddress peerAddress;
 
+    private final PeerAddressSource source;
+
     private final Instant firstSeen;
 
     private Instant lastSeen;
@@ -23,12 +25,20 @@ public final class KnownPeerAddress {
 
     KnownPeerAddress(
             PeerAddress peerAddress,
+            PeerAddressSource source,
             Instant firstSeen
     ) {
+
         this.peerAddress =
                 Objects.requireNonNull(
                         peerAddress,
                         "peerAddress"
+                );
+
+        this.source =
+                Objects.requireNonNull(
+                        source,
+                        "source"
                 );
 
         this.firstSeen =
@@ -43,6 +53,10 @@ public final class KnownPeerAddress {
 
     public synchronized PeerAddress peerAddress() {
         return peerAddress;
+    }
+
+    public PeerAddressSource source() {
+        return source;
     }
 
     public Instant firstSeen() {
@@ -89,6 +103,7 @@ public final class KnownPeerAddress {
             PeerAddress updatedAddress,
             Instant time
     ) {
+
         Objects.requireNonNull(
                 updatedAddress,
                 "updatedAddress"
@@ -123,6 +138,7 @@ public final class KnownPeerAddress {
     synchronized void attempted(
             Instant time
     ) {
+
         Objects.requireNonNull(
                 time,
                 "time"
@@ -137,6 +153,7 @@ public final class KnownPeerAddress {
     synchronized void succeeded(
             Instant time
     ) {
+
         Objects.requireNonNull(
                 time,
                 "time"
@@ -150,6 +167,7 @@ public final class KnownPeerAddress {
     }
 
     synchronized void promoteToTried() {
+
         state =
                 AddrManState.TRIED;
 
@@ -158,11 +176,13 @@ public final class KnownPeerAddress {
     }
 
     synchronized void demoteToNew() {
+
         state =
                 AddrManState.NEW;
     }
 
     synchronized void incrementNewBucketReferences() {
+
         newBucketReferences++;
     }
 
@@ -174,6 +194,7 @@ public final class KnownPeerAddress {
     }
 
     synchronized void resetNewBucketReferences() {
+
         newBucketReferences =
                 0;
     }

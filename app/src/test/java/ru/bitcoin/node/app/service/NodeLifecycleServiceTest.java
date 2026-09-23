@@ -754,11 +754,19 @@ class NodeLifecycleServiceTest {
              var context =
                      new AnnotationConfigApplicationContext()) {
 
+            CompletableFuture<Void> failingPeerReceivedGetHeaders =
+                    new CompletableFuture<>();
+
+            CompletableFuture<Void> allowFailingPeerDisconnect =
+                    new CompletableFuture<>();
+
             CompletableFuture<Void> failingServer =
                     CompletableFuture.runAsync(
                             () -> runFailingHeaderPeer(
                                     failingServerSocket,
-                                    parameters
+                                    parameters,
+                                    failingPeerReceivedGetHeaders,
+                                    allowFailingPeerDisconnect
                             )
                     );
 
@@ -821,17 +829,17 @@ class NodeLifecycleServiceTest {
                             0L
                     );
 
+            /*
+             * Only the failing peer is initially known.
+             *
+             * AddrMan selection is intentionally randomized, therefore
+             * inserting both peers before startup would make this test
+             * nondeterministic.
+             */
             addressManager.add(
                     failingAddress,
                     Instant.ofEpochSecond(
                             1_700_000_000L
-                    )
-            );
-
-            addressManager.add(
-                    healthyAddress,
-                    Instant.ofEpochSecond(
-                            1_700_000_001L
                     )
             );
 
@@ -866,6 +874,40 @@ class NodeLifecycleServiceTest {
                     );
 
             try {
+
+                /*
+                 * Prove that the first connection really reached the failing
+                 * peer and header synchronization has started there.
+                 */
+                failingPeerReceivedGetHeaders.get(
+                        5,
+                        TimeUnit.SECONDS
+                );
+
+                /*
+                 * Make the replacement available before the first peer
+                 * disappears. This removes the race between disconnect and
+                 * insertion of the replacement address.
+                 */
+                addressManager.add(
+                        healthyAddress,
+                        Instant.ofEpochSecond(
+                                1_700_000_001L
+                        )
+                );
+
+                /*
+                 * The failing peer may now disconnect. Lifecycle must retry
+                 * header synchronization using the newly available peer.
+                 */
+                allowFailingPeerDisconnect.complete(
+                        null
+                );
+
+                failingServer.get(
+                        5,
+                        TimeUnit.SECONDS
+                );
 
                 awaitRunning(
                         lifecycle
@@ -932,12 +974,15 @@ class NodeLifecycleServiceTest {
                                 .size()
                 );
 
-                failingServer.get(
-                        5,
-                        TimeUnit.SECONDS
-                );
-
             } finally {
+
+                /*
+                 * Never leave the failing peer blocked if an assertion above
+                 * fails before the normal release point.
+                 */
+                allowFailingPeerDisconnect.complete(
+                        null
+                );
 
                 closeAndAwaitLifecycle(
                         lifecycle,
@@ -988,11 +1033,15 @@ class NodeLifecycleServiceTest {
              var context =
                      new AnnotationConfigApplicationContext()) {
 
+            CompletableFuture<Void> silentPeerReceivedGetHeaders =
+                    new CompletableFuture<>();
+
             CompletableFuture<Void> silentServer =
                     CompletableFuture.runAsync(
                             () -> runSilentHeaderPeer(
                                     silentServerSocket,
-                                    parameters
+                                    parameters,
+                                    silentPeerReceivedGetHeaders
                             )
                     );
 
@@ -1057,17 +1106,14 @@ class NodeLifecycleServiceTest {
                             0L
                     );
 
+            /*
+             * The silent peer must be the only selectable address when
+             * startup begins.
+             */
             addressManager.add(
                     silentAddress,
                     Instant.ofEpochSecond(
                             1_700_000_000L
-                    )
-            );
-
-            addressManager.add(
-                    healthyAddress,
-                    Instant.ofEpochSecond(
-                            1_700_000_001L
                     )
             );
 
@@ -1097,6 +1143,26 @@ class NodeLifecycleServiceTest {
                     );
 
             try {
+
+                /*
+                 * Wait until header synchronization is definitely waiting
+                 * for HEADERS from the silent peer.
+                 */
+                silentPeerReceivedGetHeaders.get(
+                        5,
+                        TimeUnit.SECONDS
+                );
+
+                /*
+                 * Install the replacement before the 150 ms header timeout
+                 * expires.
+                 */
+                addressManager.add(
+                        healthyAddress,
+                        Instant.ofEpochSecond(
+                                1_700_000_001L
+                        )
+                );
 
                 awaitRunning(
                         lifecycle
@@ -2223,7 +2289,8 @@ class NodeLifecycleServiceTest {
 
     private static void runSilentHeaderPeer(
             ServerSocket serverSocket,
-            NetworkParameters parameters
+            NetworkParameters parameters,
+            CompletableFuture<Void> getHeadersReceived
     ) {
 
         try (Socket socket =
@@ -2282,11 +2349,27 @@ class NodeLifecycleServiceTest {
                             .isEmpty()
             );
 
+            /*
+             * Signal that HeaderSynchronizer is now waiting for HEADERS
+             * from this peer.
+             */
+            getHeadersReceived.complete(
+                    null
+            );
+
+            /*
+             * Header response timeout in this test is 150 ms.
+             * Stay connected and deliberately send no HEADERS.
+             */
             Thread.sleep(
                     500
             );
 
         } catch (Exception exception) {
+
+            getHeadersReceived.completeExceptionally(
+                    exception
+            );
 
             throw new RuntimeException(
                     exception
@@ -2296,7 +2379,9 @@ class NodeLifecycleServiceTest {
 
     private static void runFailingHeaderPeer(
             ServerSocket serverSocket,
-            NetworkParameters parameters
+            NetworkParameters parameters,
+            CompletableFuture<Void> getHeadersReceived,
+            CompletableFuture<Void> allowDisconnect
     ) {
 
         try (Socket socket =
@@ -2355,7 +2440,28 @@ class NodeLifecycleServiceTest {
                             .isEmpty()
             );
 
+            /*
+             * Tell the test that this peer really became the initial
+             * header-sync peer.
+             */
+            getHeadersReceived.complete(
+                    null
+            );
+
+            /*
+             * Do not disconnect until the replacement address has been
+             * inserted into AddrMan.
+             */
+            allowDisconnect.get(
+                    5,
+                    TimeUnit.SECONDS
+            );
+
         } catch (Exception exception) {
+
+            getHeadersReceived.completeExceptionally(
+                    exception
+            );
 
             throw new RuntimeException(
                     exception
