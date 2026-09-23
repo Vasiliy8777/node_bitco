@@ -9,8 +9,7 @@ public enum AddrV2Network {
     TORV2(0x03, 10),
     TORV3(0x04, 32),
     I2P(0x05, 32),
-    CJDNS(0x06, 16),
-    YGGDRASIL(0x07, 16);
+    CJDNS(0x06, 16);
 
     private final int id;
     private final int addressLength;
@@ -35,6 +34,7 @@ public enum AddrV2Network {
             int id
     ) {
         for (AddrV2Network network : values()) {
+
             if (network.id == id) {
                 return Optional.of(network);
             }

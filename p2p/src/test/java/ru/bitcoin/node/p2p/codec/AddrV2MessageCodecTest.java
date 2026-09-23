@@ -72,10 +72,6 @@ class AddrV2MessageCodecTest {
                         entry(
                                 AddrV2Network.CJDNS,
                                 16
-                        ),
-                        entry(
-                                AddrV2Network.YGGDRASIL,
-                                16
                         )
                 );
 
@@ -616,6 +612,122 @@ class AddrV2MessageCodecTest {
                 () -> new AddrV2Message(
                         entries
                 )
+        );
+    }
+
+    @Test
+    void networkIdSevenIsUnknownAndIgnoredForGossip() {
+
+        AddrV2Entry entry =
+                new AddrV2Entry(
+                        1_700_000_000L,
+                        1L,
+                        0x07,
+                        new byte[16],
+                        8333
+                );
+
+        AddrV2Message decoded =
+                AddrV2MessageCodec.decode(
+                        AddrV2MessageCodec.encode(
+                                new AddrV2Message(
+                                        List.of(entry)
+                                )
+                        )
+                );
+
+        AddrV2Entry result =
+                decoded.addresses()
+                        .get(0);
+
+        assertEquals(
+                0x07,
+                result.networkId()
+        );
+
+        assertTrue(
+                result.network().isEmpty()
+        );
+
+        assertFalse(
+                result.isKnownNetwork()
+        );
+
+        assertFalse(
+                result.isGossipEligible()
+        );
+    }
+
+    @Test
+    void unknownNetworkDoesNotPreventFollowingKnownAddressFromDecoding() {
+
+        AddrV2Entry unknown =
+                new AddrV2Entry(
+                        1_700_000_000L,
+                        1L,
+                        0x07,
+                        new byte[]{
+                                1, 2, 3, 4, 5
+                        },
+                        8333
+                );
+
+        AddrV2Entry ipv4 =
+                new AddrV2Entry(
+                        1_700_000_001L,
+                        9L,
+                        AddrV2Network.IPV4.id(),
+                        new byte[]{
+                                (byte) 192,
+                                0,
+                                2,
+                                10
+                        },
+                        8333
+                );
+
+        AddrV2Message decoded =
+                AddrV2MessageCodec.decode(
+                        AddrV2MessageCodec.encode(
+                                new AddrV2Message(
+                                        List.of(
+                                                unknown,
+                                                ipv4
+                                        )
+                                )
+                        )
+                );
+
+        assertEquals(
+                2,
+                decoded.size()
+        );
+
+        assertTrue(
+                decoded.addresses()
+                        .get(0)
+                        .network()
+                        .isEmpty()
+        );
+
+        assertEquals(
+                AddrV2Network.IPV4,
+                decoded.addresses()
+                        .get(1)
+                        .network()
+                        .orElseThrow()
+        );
+
+        assertArrayEquals(
+                new byte[]{
+                        (byte) 192,
+                        0,
+                        2,
+                        10
+                },
+                decoded.addresses()
+                        .get(1)
+                        .address()
         );
     }
 
