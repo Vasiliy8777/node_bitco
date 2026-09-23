@@ -66,11 +66,32 @@ public final class PeerAddressManager {
     private static final int MAX_FAILURES =
             10;
 
+    public static final int MAX_TRIED_COLLISIONS =
+            10;
+
+    public static final Duration TRIED_REPLACEMENT_WINDOW =
+            Duration.ofHours(
+                    4
+            );
+
+    public static final Duration TRIED_COLLISION_TEST_WINDOW =
+            Duration.ofMinutes(
+                    40
+            );
+
+    private static final Duration TRIED_COLLISION_CONNECT_GRACE =
+            Duration.ofSeconds(
+                    60
+            );
+
     private final Map<
             PeerAddressKey,
             KnownPeerAddress
             > addresses =
             new LinkedHashMap<>();
+
+    private final Set<PeerAddressKey> triedCollisions =
+            new LinkedHashSet<>();
 
     private final AddrManBucket[] newBuckets =
             buckets(
@@ -303,8 +324,7 @@ public final class PeerAddressManager {
                     PeerAddressKey.from(
                             peerAddress
                     ),
-                    known,
-                    time
+                    known
             );
         }
     }
@@ -334,7 +354,7 @@ public final class PeerAddressManager {
 
     /**
      * Select one outbound address from AddrMan.
-     *
+     * <p>
      * Tried and new tables are sampled separately. When both
      * contain entries, choose between them randomly, then apply
      * the address selection chance to candidates from that table.
@@ -643,8 +663,7 @@ public final class PeerAddressManager {
 
     private void promoteToTried(
             PeerAddressKey key,
-            KnownPeerAddress known,
-            Instant now
+            KnownPeerAddress known
     ) {
 
         PeerAddress address =
@@ -676,58 +695,55 @@ public final class PeerAddressManager {
                 key
         )) {
 
-            removeFromNew(
-                    key
+            moveToTried(
+                    key,
+                    known,
+                    bucketIndex,
+                    slotIndex
             );
 
-            bucket.put(
-                    slotIndex,
+            triedCollisions.remove(
                     key
             );
-
-            known.promoteToTried();
 
             return;
         }
 
-        KnownPeerAddress incumbent =
-                addresses.get(
-                        collision
-                );
-
         /*
-         * Full Core uses tried-collision tracking plus feeler
-         * connections before eviction. That subsystem is the
-         * next networking-security step.
+         * Do not immediately evict an existing TRIED entry.
          *
-         * For now only an objectively terrible incumbent may
-         * be displaced automatically.
+         * The successful NEW entry remains NEW and is queued
+         * as a tried collision. The networking layer will
+         * later test the incumbent with a feeler connection.
          */
-        if (incumbent != null
-                && isTerrible(
-                incumbent,
-                now
-        )) {
+        if (triedCollisions.size()
+                < MAX_TRIED_COLLISIONS) {
 
-            removeFromNew(
+            triedCollisions.add(
                     key
             );
-
-            bucket.put(
-                    slotIndex,
-                    key
-            );
-
-            incumbent.demoteToNew();
-
-            addNewReference(
-                    collision,
-                    incumbent,
-                    0
-            );
-
-            known.promoteToTried();
         }
+    }
+
+    private void moveToTried(
+            PeerAddressKey key,
+            KnownPeerAddress known,
+            int bucketIndex,
+            int slotIndex
+    ) {
+
+        removeFromNew(
+                key
+        );
+
+        triedBuckets[
+                bucketIndex
+                ].put(
+                slotIndex,
+                key
+        );
+
+        known.promoteToTried();
     }
 
     private boolean addNewReference(
@@ -1104,6 +1120,40 @@ public final class PeerAddressManager {
         );
     }
 
+    int triedBucketForTesting(
+            PeerAddress address
+    ) {
+
+        Objects.requireNonNull(
+                address,
+                "address"
+        );
+
+        return triedBucket(
+                address
+        );
+    }
+
+    int triedSlotForTesting(
+            PeerAddress address
+    ) {
+
+        Objects.requireNonNull(
+                address,
+                "address"
+        );
+
+        int bucket =
+                triedBucket(
+                        address
+                );
+
+        return triedSlot(
+                address,
+                bucket
+        );
+    }
+
     private KnownPeerAddress known(
             PeerAddress peerAddress
     ) {
@@ -1175,5 +1225,387 @@ public final class PeerAddressManager {
                 value,
                 (long) modulus
         );
+    }
+
+    public synchronized Optional<TriedCollision> selectTriedCollision() {
+
+        if (triedCollisions.isEmpty()) {
+            return Optional.empty();
+        }
+
+        List<PeerAddressKey> collisions =
+                new ArrayList<>(
+                        triedCollisions
+                );
+
+        PeerAddressKey candidateKey =
+                collisions.get(
+                        random.nextInt(
+                                collisions.size()
+                        )
+                );
+
+        KnownPeerAddress candidate =
+                addresses.get(
+                        candidateKey
+                );
+
+        if (candidate == null
+                || !candidate.isNew()) {
+
+            triedCollisions.remove(
+                    candidateKey
+            );
+
+            return Optional.empty();
+        }
+
+        Optional<Instant> candidateSuccess =
+                candidate.lastSuccess();
+
+        if (candidateSuccess.isEmpty()) {
+
+            triedCollisions.remove(
+                    candidateKey
+            );
+
+            return Optional.empty();
+        }
+
+        PeerAddress candidateAddress =
+                candidate.peerAddress();
+
+        int bucketIndex =
+                triedBucket(
+                        candidateAddress
+                );
+
+        int slotIndex =
+                triedSlot(
+                        candidateAddress,
+                        bucketIndex
+                );
+
+        PeerAddressKey incumbentKey =
+                triedBuckets[
+                        bucketIndex
+                        ].get(
+                        slotIndex
+                );
+
+        /*
+         * Collision disappeared. resolveTriedCollisions()
+         * will promote the candidate.
+         */
+        if (incumbentKey == null) {
+            return Optional.empty();
+        }
+
+        KnownPeerAddress incumbent =
+                addresses.get(
+                        incumbentKey
+                );
+
+        if (incumbent == null
+                || !incumbent.isTried()) {
+
+            return Optional.empty();
+        }
+
+        return Optional.of(
+                new TriedCollision(
+                        candidateAddress,
+                        incumbent.peerAddress(),
+                        candidateSuccess.get(),
+                        incumbent.lastAttempt()
+                                .orElse(
+                                        null
+                                )
+                )
+        );
+    }
+
+    public synchronized void resolveTriedCollisions(
+            Instant now
+    ) {
+
+        Objects.requireNonNull(
+                now,
+                "now"
+        );
+
+        var iterator =
+                triedCollisions.iterator();
+
+        while (iterator.hasNext()) {
+
+            PeerAddressKey candidateKey =
+                    iterator.next();
+
+            KnownPeerAddress candidate =
+                    addresses.get(
+                            candidateKey
+                    );
+
+            /*
+             * Candidate disappeared or is no longer NEW.
+             * The pending collision is stale.
+             */
+            if (candidate == null
+                    || !candidate.isNew()) {
+
+                iterator.remove();
+
+                continue;
+            }
+
+            Optional<Instant> candidateSuccess =
+                    candidate.lastSuccess();
+
+            /*
+             * A tried-collision candidate must have succeeded
+             * before it was queued.
+             */
+            if (candidateSuccess.isEmpty()) {
+
+                iterator.remove();
+
+                continue;
+            }
+
+            PeerAddress candidateAddress =
+                    candidate.peerAddress();
+
+            int bucketIndex =
+                    triedBucket(
+                            candidateAddress
+                    );
+
+            int slotIndex =
+                    triedSlot(
+                            candidateAddress,
+                            bucketIndex
+                    );
+
+            AddrManBucket bucket =
+                    triedBuckets[
+                            bucketIndex
+                            ];
+
+            PeerAddressKey incumbentKey =
+                    bucket.get(
+                            slotIndex
+                    );
+
+            /*
+             * The slot became free while the collision was pending.
+             * The candidate can enter TRIED immediately.
+             */
+            if (incumbentKey == null) {
+
+                moveToTried(
+                        candidateKey,
+                        candidate,
+                        bucketIndex,
+                        slotIndex
+                );
+
+                iterator.remove();
+
+                continue;
+            }
+
+            /*
+             * Defensive consistency case.
+             */
+            if (incumbentKey.equals(
+                    candidateKey
+            )) {
+
+                iterator.remove();
+
+                continue;
+            }
+
+            KnownPeerAddress incumbent =
+                    addresses.get(
+                            incumbentKey
+                    );
+
+            /*
+             * A TRIED slot must point to a valid TRIED entry.
+             * If it does not, repair the slot and promote candidate.
+             */
+            if (incumbent == null
+                    || !incumbent.isTried()) {
+
+                bucket.remove(
+                        slotIndex
+                );
+
+                moveToTried(
+                        candidateKey,
+                        candidate,
+                        bucketIndex,
+                        slotIndex
+                );
+
+                iterator.remove();
+
+                continue;
+            }
+
+            Optional<Instant> incumbentSuccess =
+                    incumbent.lastSuccess();
+
+            /*
+             * Bitcoin Core ADDRMAN_REPLACEMENT:
+             *
+             * If the incumbent successfully connected during the
+             * last four hours, it proved that it is alive.
+             * Cancel the collision.
+             */
+            if (incumbentSuccess.isPresent()) {
+
+                Duration sinceSuccess =
+                        Duration.between(
+                                incumbentSuccess.get(),
+                                now
+                        );
+
+                if (!sinceSuccess.isNegative()
+                        && sinceSuccess.compareTo(
+                        TRIED_REPLACEMENT_WINDOW
+                ) < 0) {
+
+                    iterator.remove();
+
+                    continue;
+                }
+            }
+
+            Optional<Instant> incumbentAttempt =
+                    incumbent.lastAttempt();
+
+            /*
+             * If the incumbent was tested recently but did not
+             * subsequently succeed, give it at least 60 seconds
+             * to finish connecting. After that grace period the
+             * candidate replaces it.
+             */
+            if (incumbentAttempt.isPresent()) {
+
+                Duration sinceAttempt =
+                        Duration.between(
+                                incumbentAttempt.get(),
+                                now
+                        );
+
+                if (!sinceAttempt.isNegative()
+                        && sinceAttempt.compareTo(
+                        TRIED_REPLACEMENT_WINDOW
+                ) < 0
+                        && sinceAttempt.compareTo(
+                        TRIED_COLLISION_CONNECT_GRACE
+                ) > 0) {
+
+                    replaceTried(
+                            candidateKey,
+                            candidate,
+                            incumbentKey,
+                            incumbent,
+                            bucketIndex,
+                            slotIndex
+                    );
+
+                    iterator.remove();
+
+                    continue;
+                }
+            }
+
+            /*
+             * Bitcoin Core ADDRMAN_TEST_WINDOW:
+             *
+             * If the collision could not be tested within forty
+             * minutes after the candidate's successful connection,
+             * replace the incumbent anyway.
+             */
+            Duration collisionAge =
+                    Duration.between(
+                            candidateSuccess.get(),
+                            now
+                    );
+
+            if (!collisionAge.isNegative()
+                    && collisionAge.compareTo(
+                    TRIED_COLLISION_TEST_WINDOW
+            ) > 0) {
+
+                replaceTried(
+                        candidateKey,
+                        candidate,
+                        incumbentKey,
+                        incumbent,
+                        bucketIndex,
+                        slotIndex
+                );
+
+                iterator.remove();
+            }
+        }
+    }
+
+    private void replaceTried(
+            PeerAddressKey candidateKey,
+            KnownPeerAddress candidate,
+            PeerAddressKey incumbentKey,
+            KnownPeerAddress incumbent,
+            int bucketIndex,
+            int slotIndex
+    ) {
+
+        AddrManBucket bucket =
+                triedBuckets[
+                        bucketIndex
+                        ];
+
+        /*
+         * Remove candidate's NEW references before it becomes TRIED.
+         */
+        removeFromNew(
+                candidateKey
+        );
+
+        /*
+         * The old TRIED entry goes back to NEW.
+         */
+        incumbent.demoteToNew();
+
+        bucket.put(
+                slotIndex,
+                candidateKey
+        );
+
+        candidate.promoteToTried();
+
+        /*
+         * Reinsert the evicted incumbent into NEW.
+         */
+        addNewReference(
+                incumbentKey,
+                incumbent,
+                0
+        );
+    }
+
+    public synchronized int triedCollisionCount() {
+
+        return triedCollisions.size();
+    }
+
+    public synchronized boolean hasTriedCollisions() {
+
+        return !triedCollisions.isEmpty();
     }
 }

@@ -641,6 +641,467 @@ class AddrManTest {
         }
     }
 
+    @Test
+    void shouldQueueTriedCollisionInsteadOfImmediatelyEvictingIncumbent()
+            throws Exception {
+
+        PeerAddressManager manager =
+                deterministicManager();
+
+        PeerAddress[] collision =
+                findTriedCollision(
+                        manager
+                );
+
+        PeerAddress incumbent =
+                collision[0];
+
+        PeerAddress candidate =
+                collision[1];
+
+        Instant base =
+                Instant.ofEpochSecond(
+                        1_700_000_000L
+                );
+
+        manager.add(
+                incumbent,
+                base
+        );
+
+        manager.markSuccess(
+                incumbent,
+                base
+        );
+
+        assertTrue(
+                manager.find(
+                                incumbent
+                        )
+                        .orElseThrow()
+                        .isTried()
+        );
+
+        manager.add(
+                candidate,
+                base.plusSeconds(
+                        1
+                )
+        );
+
+        manager.markSuccess(
+                candidate,
+                base.plusSeconds(
+                        1
+                )
+        );
+
+        assertTrue(
+                manager.find(
+                                incumbent
+                        )
+                        .orElseThrow()
+                        .isTried()
+        );
+
+        assertTrue(
+                manager.find(
+                                candidate
+                        )
+                        .orElseThrow()
+                        .isNew()
+        );
+
+        assertEquals(
+                1,
+                manager.triedCollisionCount()
+        );
+
+        assertTrue(
+                manager.hasTriedCollisions()
+        );
+
+        TriedCollision selected =
+                manager.selectTriedCollision()
+                        .orElseThrow();
+
+        assertEquals(
+                candidate,
+                selected.candidate()
+        );
+
+        assertEquals(
+                incumbent,
+                selected.incumbent()
+        );
+    }
+
+    @Test
+    void shouldKeepIncumbentWhenFeelerSucceeds()
+            throws Exception {
+
+        PeerAddressManager manager =
+                deterministicManager();
+
+        PeerAddress[] collision =
+                findTriedCollision(
+                        manager
+                );
+
+        PeerAddress incumbent =
+                collision[0];
+
+        PeerAddress candidate =
+                collision[1];
+
+        Instant base =
+                Instant.ofEpochSecond(
+                        1_700_000_000L
+                );
+
+        manager.add(
+                incumbent,
+                base
+        );
+
+        manager.markSuccess(
+                incumbent,
+                base
+        );
+
+        /*
+         * Make the incumbent's previous success old enough that
+         * the collision actually needs a feeler test.
+         */
+        Instant candidateSuccess =
+                base.plus(
+                        PeerAddressManager.TRIED_REPLACEMENT_WINDOW
+                ).plusSeconds(
+                        1
+                );
+
+        manager.add(
+                candidate,
+                candidateSuccess
+        );
+
+        manager.markSuccess(
+                candidate,
+                candidateSuccess
+        );
+
+        assertEquals(
+                1,
+                manager.triedCollisionCount()
+        );
+
+        /*
+         * Simulate a successful feeler connection.
+         */
+        Instant feelerSuccess =
+                candidateSuccess.plusSeconds(
+                        10
+                );
+
+        manager.markSuccess(
+                incumbent,
+                feelerSuccess
+        );
+
+        manager.resolveTriedCollisions(
+                feelerSuccess.plusSeconds(
+                        1
+                )
+        );
+
+        assertEquals(
+                0,
+                manager.triedCollisionCount()
+        );
+
+        assertTrue(
+                manager.find(
+                                incumbent
+                        )
+                        .orElseThrow()
+                        .isTried()
+        );
+
+        assertTrue(
+                manager.find(
+                                candidate
+                        )
+                        .orElseThrow()
+                        .isNew()
+        );
+    }
+
+    @Test
+    void shouldReplaceIncumbentWhenFeelerFails()
+            throws Exception {
+
+        PeerAddressManager manager =
+                deterministicManager();
+
+        PeerAddress[] collision =
+                findTriedCollision(
+                        manager
+                );
+
+        PeerAddress incumbent =
+                collision[0];
+
+        PeerAddress candidate =
+                collision[1];
+
+        Instant base =
+                Instant.ofEpochSecond(
+                        1_700_000_000L
+                );
+
+        manager.add(
+                incumbent,
+                base
+        );
+
+        manager.markSuccess(
+                incumbent,
+                base
+        );
+
+        Instant candidateSuccess =
+                base.plus(
+                        PeerAddressManager.TRIED_REPLACEMENT_WINDOW
+                ).plusSeconds(
+                        1
+                );
+
+        manager.add(
+                candidate,
+                candidateSuccess
+        );
+
+        manager.markSuccess(
+                candidate,
+                candidateSuccess
+        );
+
+        /*
+         * Simulate starting a feeler connection to incumbent.
+         */
+        Instant attempt =
+                candidateSuccess.plusSeconds(
+                        10
+                );
+
+        manager.markAttempt(
+                incumbent,
+                attempt
+        );
+
+        manager.resolveTriedCollisions(
+                attempt.plusSeconds(
+                        61
+                )
+        );
+
+        assertEquals(
+                0,
+                manager.triedCollisionCount()
+        );
+
+        assertTrue(
+                manager.find(
+                                candidate
+                        )
+                        .orElseThrow()
+                        .isTried()
+        );
+
+        assertTrue(
+                manager.find(
+                                incumbent
+                        )
+                        .orElseThrow()
+                        .isNew()
+        );
+    }
+
+    @Test
+    void shouldReplaceIncumbentWhenCollisionTestWindowExpires()
+            throws Exception {
+
+        PeerAddressManager manager =
+                deterministicManager();
+
+        PeerAddress[] collision =
+                findTriedCollision(
+                        manager
+                );
+
+        PeerAddress incumbent =
+                collision[0];
+
+        PeerAddress candidate =
+                collision[1];
+
+        Instant base =
+                Instant.ofEpochSecond(
+                        1_700_000_000L
+                );
+
+        manager.add(
+                incumbent,
+                base
+        );
+
+        manager.markSuccess(
+                incumbent,
+                base
+        );
+
+        Instant candidateSuccess =
+                base.plus(
+                        PeerAddressManager.TRIED_REPLACEMENT_WINDOW
+                ).plusSeconds(
+                        1
+                );
+
+        manager.add(
+                candidate,
+                candidateSuccess
+        );
+
+        manager.markSuccess(
+                candidate,
+                candidateSuccess
+        );
+
+        manager.resolveTriedCollisions(
+                candidateSuccess.plus(
+                        PeerAddressManager.TRIED_COLLISION_TEST_WINDOW
+                ).plusSeconds(
+                        1
+                )
+        );
+
+        assertEquals(
+                0,
+                manager.triedCollisionCount()
+        );
+
+        assertTrue(
+                manager.find(
+                                candidate
+                        )
+                        .orElseThrow()
+                        .isTried()
+        );
+
+        assertTrue(
+                manager.find(
+                                incumbent
+                        )
+                        .orElseThrow()
+                        .isNew()
+        );
+    }
+
+    private static PeerAddressManager deterministicManager() {
+
+        byte[] secretKey =
+                new byte[32];
+
+        for (int i = 0;
+             i < secretKey.length;
+             i++) {
+
+            secretKey[i] =
+                    (byte) (
+                            i + 1
+                    );
+        }
+
+        return new PeerAddressManager(
+                secretKey,
+                new Random(
+                        1L
+                )
+        );
+    }
+
+    private static PeerAddress[] findTriedCollision(
+            PeerAddressManager manager
+    ) throws Exception {
+
+        Map<Long, PeerAddress> positions =
+                new HashMap<>();
+
+        for (int i = 1;
+             i <= 65_535;
+             i++) {
+
+            int third =
+                    i >>> 8;
+
+            int fourth =
+                    i & 0xff;
+
+            PeerAddress address =
+                    new PeerAddress(
+                            InetAddress.getByName(
+                                    "198.51."
+                                            + third
+                                            + "."
+                                            + fourth
+                            ),
+                            8333,
+                            0L
+                    );
+
+            int bucket =
+                    manager.triedBucketForTesting(
+                            address
+                    );
+
+            int slot =
+                    manager.triedSlotForTesting(
+                            address
+                    );
+
+            long position =
+                    (
+                            (long) bucket
+                                    << 32
+                    )
+                            | (
+                            slot
+                                    & 0xffffffffL
+                    );
+
+            PeerAddress existing =
+                    positions.putIfAbsent(
+                            position,
+                            address
+                    );
+
+            if (existing != null
+                    && !existing.equals(
+                    address
+            )) {
+
+                return new PeerAddress[]{
+                        existing,
+                        address
+                };
+            }
+        }
+
+        throw new AssertionError(
+                "Unable to find deterministic TRIED collision"
+        );
+    }
+
     private static PeerAddressManager manager() {
 
         byte[] key =

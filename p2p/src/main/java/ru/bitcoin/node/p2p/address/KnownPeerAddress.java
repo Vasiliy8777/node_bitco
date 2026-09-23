@@ -162,6 +162,9 @@ public final class KnownPeerAddress {
         lastSuccess =
                 time;
 
+        lastAttempt =
+                time;
+
         attempts =
                 0;
     }

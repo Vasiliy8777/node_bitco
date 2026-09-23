@@ -3,8 +3,10 @@ package ru.bitcoin.node.p2p;
 import ru.bitcoin.node.p2p.address.OutboundPeerSelector;
 import ru.bitcoin.node.p2p.address.PeerAddress;
 import ru.bitcoin.node.p2p.address.PeerAddressManager;
+import ru.bitcoin.node.p2p.address.TriedCollision;
 
 import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
@@ -13,7 +15,7 @@ import java.util.function.Supplier;
 
 public final class OutboundPeerManager {
 
-    private final BitcoinClient bitcoinClient;
+    private final PeerConnector peerConnector;
     private final PeerManager peerManager;
     private final PeerAddressManager addressManager;
     private final OutboundPeerSelector selector;
@@ -36,17 +38,17 @@ public final class OutboundPeerManager {
     }
 
     OutboundPeerManager(
-            BitcoinClient bitcoinClient,
+            PeerConnector peerConnector,
             PeerManager peerManager,
             PeerAddressManager addressManager,
             OutboundPeerSelector selector,
             Supplier<Instant> clock
     ) {
 
-        this.bitcoinClient =
+        this.peerConnector =
                 Objects.requireNonNull(
-                        bitcoinClient,
-                        "bitcoinClient"
+                        peerConnector,
+                        "peerConnector"
                 );
 
         this.peerManager =
@@ -157,7 +159,7 @@ public final class OutboundPeerManager {
             try {
 
                 Peer peer =
-                        bitcoinClient.connect(
+                        peerConnector.connect(
                                 address.hostAddress(),
                                 address.port(),
                                 startHeight
@@ -227,6 +229,164 @@ public final class OutboundPeerManager {
                 );
             }
         }
+    }
+
+    /**
+     * Performs one test-before-evict attempt for a pending TRIED collision.
+     *
+     * <p>The feeler is intentionally short-lived:
+     * it is never registered in PeerManager and therefore never consumes
+     * a persistent outbound slot.
+     *
+     * @return true when a pending collision was processed; false when
+     *         there was no pending TRIED collision.
+     */
+    public boolean tryTriedCollisionFeeler(
+            int startHeight
+    ) throws IOException {
+
+        if (startHeight < 0) {
+            throw new IllegalArgumentException(
+                    "startHeight must not be negative"
+            );
+        }
+
+        /*
+         * Resolve collisions whose previous feeler result or timeout
+         * already gives AddrMan enough information to make a decision.
+         */
+        addressManager.resolveTriedCollisions(
+                now()
+        );
+
+        TriedCollision collision =
+                addressManager
+                        .selectTriedCollision()
+                        .orElse(
+                                null
+                        );
+
+        if (collision == null) {
+            return false;
+        }
+
+        PeerAddress incumbent =
+                collision.incumbent();
+
+        /*
+         * Bitcoin Core does not create another connection if the
+         * incumbent is already connected. The existing connection
+         * itself proves that the address is alive.
+         */
+        if (isAlreadyConnected(
+                incumbent
+        )) {
+
+            addressManager.markSuccess(
+                    incumbent,
+                    now()
+            );
+
+            addressManager.resolveTriedCollisions(
+                    now()
+            );
+
+            return true;
+        }
+
+        addressManager.markAttempt(
+                incumbent,
+                now()
+        );
+
+        Peer feeler = null;
+
+        try {
+
+            feeler =
+                    peerConnector.connect(
+                            incumbent.hostAddress(),
+                            incumbent.port(),
+                            startHeight
+                    );
+
+            if (!feeler.isReady()) {
+
+                throw new IOException(
+                        "Feeler connection did not complete handshake with "
+                                + incumbent.hostAddress()
+                                + ":"
+                                + incumbent.port()
+                );
+            }
+
+            /*
+             * A successful handshake proves that the incumbent is alive.
+             *
+             * markSuccess() updates both lastSuccess and lastAttempt,
+             * which causes resolveTriedCollisions() to preserve the
+             * incumbent.
+             */
+            addressManager.markSuccess(
+                    incumbent,
+                    now()
+            );
+
+            addressManager.resolveTriedCollisions(
+                    now()
+            );
+
+            return true;
+
+        } finally {
+
+            /*
+             * FEELER is deliberately not added to PeerManager.
+             * Close it immediately after the liveness check.
+             */
+            if (feeler != null) {
+
+                try {
+                    feeler.close();
+                } catch (IOException ignored) {
+                    // Best-effort feeler cleanup.
+                }
+            }
+        }
+    }
+
+    private boolean isAlreadyConnected(
+            PeerAddress address
+    ) {
+
+        for (Peer peer :
+                peerManager.readyPeers()) {
+
+            InetSocketAddress remote =
+                    peer.remoteAddress();
+
+            if (remote == null
+                    || remote.getAddress() == null) {
+
+                continue;
+            }
+
+            if (remote.getPort()
+                    != address.port()) {
+
+                continue;
+            }
+
+            if (remote.getAddress()
+                    .equals(
+                            address.address()
+                    )) {
+
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private Instant now() {

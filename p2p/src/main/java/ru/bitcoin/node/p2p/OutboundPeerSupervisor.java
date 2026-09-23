@@ -7,6 +7,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.IntSupplier;
 
@@ -25,9 +26,24 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
     private static final System.Logger log =
             System.getLogger(OutboundPeerSupervisor.class.getName());
 
-    private static final Duration DEFAULT_INITIAL_BACKOFF = Duration.ofSeconds(1);
-    private static final Duration DEFAULT_MAX_BACKOFF = Duration.ofSeconds(30);
-    private static final int DEFAULT_TARGET_OUTBOUND_PEERS = 1;
+    private static final Duration DEFAULT_FEELER_INTERVAL =
+            Duration.ofMinutes(
+                    2
+            );
+
+    private static final Duration DEFAULT_FEELER_JITTER =
+            Duration.ofSeconds(
+                    1
+            );
+
+    private static final Duration DEFAULT_INITIAL_BACKOFF =
+            Duration.ofSeconds(1);
+
+    private static final Duration DEFAULT_MAX_BACKOFF =
+            Duration.ofSeconds(30);
+
+    private static final int DEFAULT_TARGET_OUTBOUND_PEERS =
+            1;
 
     private final OutboundPeerManager outboundPeerManager;
     private final IntSupplier startHeightSupplier;
@@ -35,12 +51,34 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
     private final Duration initialBackoff;
     private final Duration maxBackoff;
 
-    private final Object monitor = new Object();
-    private final Object connectLock = new Object();
-    private final AtomicBoolean started = new AtomicBoolean();
-    private final List<Slot> slots = new ArrayList<>();
+    /*
+     * TRIED-collision feeler scheduling.
+     *
+     * Feeler connections are independent from the fixed set of
+     * long-lived outbound slots.
+     */
+    private final Duration feelerInterval;
+    private final Duration feelerJitter;
+
+    private final Object monitor =
+            new Object();
+
+    private final Object connectLock =
+            new Object();
+
+    private final AtomicBoolean started =
+            new AtomicBoolean();
+
+    private final List<Slot> slots =
+            new ArrayList<>();
 
     private volatile boolean stopping;
+
+    /*
+     * Dedicated worker for short-lived feeler connections.
+     * It is deliberately not represented by a normal outbound Slot.
+     */
+    private Thread feelerWorker;
 
     public OutboundPeerSupervisor(
             OutboundPeerManager outboundPeerManager,
@@ -91,20 +129,90 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
             Duration initialBackoff,
             Duration maxBackoff
     ) {
-        this.outboundPeerManager = Objects.requireNonNull(outboundPeerManager, "outboundPeerManager");
-        this.startHeightSupplier = Objects.requireNonNull(startHeightSupplier, "startHeightSupplier");
+        this(
+                outboundPeerManager,
+                startHeightSupplier,
+                targetOutboundPeers,
+                initialBackoff,
+                maxBackoff,
+                DEFAULT_FEELER_INTERVAL,
+                DEFAULT_FEELER_JITTER
+        );
+    }
+
+    OutboundPeerSupervisor(
+            OutboundPeerManager outboundPeerManager,
+            IntSupplier startHeightSupplier,
+            int targetOutboundPeers,
+            Duration initialBackoff,
+            Duration maxBackoff,
+            Duration feelerInterval,
+            Duration feelerJitter
+    ) {
+
+        this.outboundPeerManager =
+                Objects.requireNonNull(
+                        outboundPeerManager,
+                        "outboundPeerManager"
+                );
+
+        this.startHeightSupplier =
+                Objects.requireNonNull(
+                        startHeightSupplier,
+                        "startHeightSupplier"
+                );
 
         if (targetOutboundPeers <= 0) {
-            throw new IllegalArgumentException("targetOutboundPeers must be positive");
-        }
-        this.targetOutboundPeers = targetOutboundPeers;
 
-        this.initialBackoff = requirePositiveDuration(initialBackoff, "initialBackoff");
-        this.maxBackoff = requirePositiveDuration(maxBackoff, "maxBackoff");
-
-        if (this.initialBackoff.compareTo(this.maxBackoff) > 0) {
-            throw new IllegalArgumentException("initialBackoff must not exceed maxBackoff");
+            throw new IllegalArgumentException(
+                    "targetOutboundPeers must be positive"
+            );
         }
+
+        this.targetOutboundPeers =
+                targetOutboundPeers;
+
+        this.initialBackoff =
+                requirePositiveDuration(
+                        initialBackoff,
+                        "initialBackoff"
+                );
+
+        this.maxBackoff =
+                requirePositiveDuration(
+                        maxBackoff,
+                        "maxBackoff"
+                );
+
+        if (this.initialBackoff.compareTo(
+                this.maxBackoff
+        ) > 0) {
+
+            throw new IllegalArgumentException(
+                    "initialBackoff must not exceed maxBackoff"
+            );
+        }
+
+        this.feelerInterval =
+                requirePositiveDuration(
+                        feelerInterval,
+                        "feelerInterval"
+                );
+
+        Objects.requireNonNull(
+                feelerJitter,
+                "feelerJitter"
+        );
+
+        if (feelerJitter.isNegative()) {
+
+            throw new IllegalArgumentException(
+                    "feelerJitter must not be negative"
+            );
+        }
+
+        this.feelerJitter =
+                feelerJitter;
     }
 
     public void start(OutboundPeerConnection initialConnection) {
@@ -137,6 +245,21 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
                 worker.start();
             }
 
+            Thread worker =
+                    new Thread(
+                            this::runFeelerLoop,
+                            "outbound-peer-feeler"
+                    );
+
+            worker.setDaemon(
+                    true
+            );
+
+            feelerWorker =
+                    worker;
+
+            worker.start();
+
             monitor.notifyAll();
         }
 
@@ -146,6 +269,167 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
                 targetOutboundPeers,
                 initialConnection.address()
         );
+    }
+
+    private void runFeelerLoop() {
+
+        while (!stopping) {
+
+            if (!waitForFeelerInterval()) {
+                return;
+            }
+
+            if (stopping) {
+                return;
+            }
+
+            try {
+
+                int startHeight =
+                        startHeightSupplier.getAsInt();
+
+                if (startHeight < 0) {
+
+                    log.log(
+                            System.Logger.Level.WARNING,
+                            "Skipping feeler: startHeightSupplier returned negative height: {0}",
+                            startHeight
+                    );
+
+                    continue;
+                }
+
+                boolean processed;
+
+                /*
+                 * Serialize connection establishment with persistent
+                 * outbound slots. This prevents simultaneous socket
+                 * establishment from racing through AddrMan state.
+                 */
+                synchronized (connectLock) {
+
+                    if (stopping) {
+                        return;
+                    }
+
+                    processed =
+                            outboundPeerManager
+                                    .tryTriedCollisionFeeler(
+                                            startHeight
+                                    );
+                }
+
+                if (processed) {
+
+                    log.log(
+                            System.Logger.Level.DEBUG,
+                            "TRIED-collision feeler completed"
+                    );
+                }
+
+            } catch (IOException exception) {
+
+                if (!stopping) {
+
+                    log.log(
+                            System.Logger.Level.DEBUG,
+                            "TRIED-collision feeler failed: {0}",
+                            exception.toString()
+                    );
+                }
+
+            } catch (RuntimeException exception) {
+
+                if (!stopping) {
+
+                    log.log(
+                            System.Logger.Level.WARNING,
+                            "TRIED-collision feeler processing failed: {0}",
+                            exception.toString()
+                    );
+                }
+            }
+        }
+    }
+
+    private boolean waitForFeelerInterval() {
+
+        long intervalNanos =
+                feelerInterval.toNanos();
+
+        long jitterNanos =
+                feelerJitter.toNanos();
+
+        long extraNanos =
+                jitterNanos == 0L
+                        ? 0L
+                        : ThreadLocalRandom
+                        .current()
+                        .nextLong(
+                                jitterNanos + 1L
+                        );
+
+        long waitNanos;
+
+        try {
+
+            waitNanos =
+                    Math.addExact(
+                            intervalNanos,
+                            extraNanos
+                    );
+
+        } catch (ArithmeticException exception) {
+
+            waitNanos =
+                    Long.MAX_VALUE;
+        }
+
+        long deadline =
+                System.nanoTime()
+                        + waitNanos;
+
+        synchronized (monitor) {
+
+            while (!stopping
+                    && waitNanos > 0L) {
+
+                long millis =
+                        waitNanos
+                                / 1_000_000L;
+
+                int nanos =
+                        (int) (
+                                waitNanos
+                                        % 1_000_000L
+                        );
+
+                try {
+
+                    monitor.wait(
+                            millis,
+                            nanos
+                    );
+
+                } catch (InterruptedException exception) {
+
+                    if (stopping) {
+                        return false;
+                    }
+
+                    Thread.currentThread()
+                            .interrupt();
+
+                    return false;
+                }
+
+                waitNanos =
+                        deadline
+                                - System.nanoTime();
+            }
+
+            return !stopping;
+        }
     }
 
     private void runSlot(Slot slot) {
@@ -479,17 +763,36 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
         List<Thread> threadsToJoin;
 
         synchronized (monitor) {
+
             if (stopping) {
                 return;
             }
 
-            stopping = true;
+            stopping =
+                    true;
+
             monitor.notifyAll();
 
-            threadsToJoin = slots.stream()
-                    .map(slot -> slot.worker)
-                    .filter(Objects::nonNull)
-                    .toList();
+            threadsToJoin =
+                    new ArrayList<>();
+
+            for (Slot slot :
+                    slots) {
+
+                if (slot.worker != null) {
+
+                    threadsToJoin.add(
+                            slot.worker
+                    );
+                }
+            }
+
+            if (feelerWorker != null) {
+
+                threadsToJoin.add(
+                        feelerWorker
+                );
+            }
         }
 
         log.log(System.Logger.Level.INFO, "Stopping outbound peer supervisor");

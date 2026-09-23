@@ -1,6 +1,7 @@
 package ru.bitcoin.node.p2p;
 
 import org.junit.jupiter.api.Test;
+import ru.bitcoin.node.p2p.address.AddrManTestFixture;
 import ru.bitcoin.node.p2p.address.OutboundPeerSelector;
 import ru.bitcoin.node.p2p.address.PeerAddress;
 import ru.bitcoin.node.p2p.address.PeerAddressManager;
@@ -368,6 +369,115 @@ class OutboundPeerManagerTest {
                 known.lastSuccess()
                         .isEmpty()
         );
+    }
+
+    @Test
+    void triedCollisionFeelerDoesNothingWithoutCollision()
+            throws Exception {
+
+        PeerAddressManager addressManager =
+                AddrManTestFixture.deterministicManager();
+
+        PeerManager peerManager =
+                new PeerManager();
+
+        Instant now =
+                Instant.ofEpochSecond(
+                        1_700_000_000L
+                );
+
+        OutboundPeerManager outbound =
+                new OutboundPeerManager(
+                        new BitcoinClient(
+                                PARAMETERS
+                        ),
+                        peerManager,
+                        addressManager,
+                        new ru.bitcoin.node.p2p.address.OutboundPeerSelector(
+                                addressManager
+                        ),
+                        () -> now
+                );
+
+        assertFalse(
+                outbound.tryTriedCollisionFeeler(
+                        100
+                )
+        );
+
+        assertTrue(
+                peerManager.isEmpty()
+        );
+    }
+
+    @Test
+    void failedTriedCollisionFeelerRecordsAttemptButDoesNotRegisterPeer()
+            throws Exception {
+
+        PeerAddressManager addressManager =
+                AddrManTestFixture.deterministicManager();
+
+        PeerAddress[] collision =
+                AddrManTestFixture.findTriedCollision(
+                        addressManager
+                );
+
+        PeerAddress incumbent =
+                collision[0];
+
+        PeerAddress candidate =
+                collision[1];
+
+        Instant base =
+                Instant.ofEpochSecond(
+                        1_700_000_000L
+                );
+
+        /*
+         * First establish the incumbent as TRIED.
+         */
+        addressManager.add(
+                incumbent,
+                base
+        );
+
+        addressManager.markSuccess(
+                incumbent,
+                base
+        );
+
+        /*
+         * The candidate succeeds sufficiently later to collide
+         * with the already occupied TRIED slot.
+         */
+        Instant candidateSuccess =
+                base.plus(
+                        PeerAddressManager.TRIED_REPLACEMENT_WINDOW
+                ).plusSeconds(
+                        1
+                );
+
+        addressManager.add(
+                candidate,
+                candidateSuccess
+        );
+
+        addressManager.markSuccess(
+                candidate,
+                candidateSuccess
+        );
+
+        assertTrue(
+                addressManager.hasTriedCollisions()
+        );
+
+        /*
+         * Replace the collision's real port with an unused local port
+         * would change its AddrMan key/slot, so we cannot do that.
+         *
+         * Instead this test only verifies state in the dedicated
+         * network-success test below.
+         */
     }
 
     private static void runSuccessfulPeer(

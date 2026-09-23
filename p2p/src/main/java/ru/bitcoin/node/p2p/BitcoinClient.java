@@ -6,7 +6,8 @@ import ru.bitcoin.node.protocol.network.NetworkParameters;
 import java.io.IOException;
 import java.util.Objects;
 
-public final class BitcoinClient {
+public final class BitcoinClient
+        implements PeerConnector {
 
     private final NetworkParameters networkParameters;
     private final long localServices;
@@ -39,7 +40,7 @@ public final class BitcoinClient {
         this.relay =
                 relay;
     }
-
+    @Override
     public Peer connect(
             String host,
             int port,
