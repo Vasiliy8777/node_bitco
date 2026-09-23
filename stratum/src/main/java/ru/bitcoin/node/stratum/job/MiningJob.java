@@ -67,6 +67,10 @@ public final class MiningJob {
     }
 
     public Candidate candidate(byte[] extraNonce1, byte[] extraNonce2, long time, long nonce) {
+        return candidate(extraNonce1, extraNonce2, time, nonce, work.block().header().version());
+    }
+
+    public Candidate candidate(byte[] extraNonce1, byte[] extraNonce2, long time, long nonce, int version) {
         if (extraNonce1.length != ExtraNonceManager.EXTRANONCE1_SIZE || extraNonce2.length != ExtraNonceManager.EXTRANONCE2_SIZE)
             throw new IllegalArgumentException("Invalid extranonce size");
         byte[] script = Arrays.copyOf(scriptPrefix, scriptPrefix.length + EXTRA_SIZE);
@@ -79,7 +83,7 @@ public final class MiningJob {
         Hash256 root = coinbase.txId();
         for (var sibling : branch) root = combine(root, sibling);
         var originalHeader = work.block().header();
-        var header = new BlockHeader(originalHeader.version(), originalHeader.previousBlockHash(), root,
+        var header = new BlockHeader(version, originalHeader.previousBlockHash(), root,
                 new UInt32(time), originalHeader.bits(), new UInt32(nonce));
         return new Candidate(header, coinbase);
     }

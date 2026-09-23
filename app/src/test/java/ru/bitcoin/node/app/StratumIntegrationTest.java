@@ -32,7 +32,7 @@ class StratumIntegrationTest {
                 try (var server = new StratumServer(new InetSocketAddress("127.0.0.1", 0), backend, "miner", "secret",
                         new BigDecimal("0.0000000001"), 4); var client = new StratumWireMiner(server.port())) {
                     assertEquals(25, error(client.call("mining.submit", List.of())));
-                    assertEquals(Map.of("version-rolling", false), client.call("mining.configure", List.of(List.of("version-rolling"), Map.of())).get("result"));
+                    assertEquals(Map.of("unknown-extension", false), client.call("mining.configure", List.of(List.of("unknown-extension"), Map.of())).get("result"));
                     client.subscribe();
                     assertEquals(8, client.extraNonce2Size);
                     assertEquals(24, error(client.call("mining.submit", List.of())));
@@ -41,20 +41,32 @@ class StratumIntegrationTest {
                     var job = client.job();
                     assertEquals(true, job.get(8));
                     var ordinaryShare = client.solve(job, false);
+                    var unnegotiated = new ArrayList<Object>(ordinaryShare.params()); unnegotiated.add("00000000");
+                    assertEquals(20, error(client.call("mining.submit", unnegotiated)));
                     assertEquals(true, client.call("mining.submit", ordinaryShare.params()).get("result"));
                     assertEquals(22, error(client.call("mining.submit", ordinaryShare.params())));
                     var malformed = new ArrayList<Object>(ordinaryShare.params()); malformed.set(2, "00");
                     assertEquals(20, error(client.call("mining.submit", malformed)));
                     var foreignWorker = new ArrayList<Object>(ordinaryShare.params()); foreignWorker.set(0, "miner.other");
                     assertEquals(24, error(client.call("mining.submit", foreignWorker)));
-                    var solution = client.solve(job, true);
+                    assertEquals(Map.of("version-rolling", true, "version-rolling.mask", "00006000"),
+                            client.call("mining.configure", List.of(List.of("version-rolling"),
+                                    Map.of("version-rolling.mask", "00006000", "version-rolling.min-bit-count", 2))).get("result"));
+                    assertEquals(20, error(client.call("mining.submit", ordinaryShare.params())));
+                    var invalidBits = new ArrayList<Object>(ordinaryShare.params()); invalidBits.add("20000000");
+                    assertEquals(20, error(client.call("mining.submit", invalidBits)));
+                    var rolledShare = client.solve(job, false, "00002000", 0x6000);
+                    assertEquals(true, client.call("mining.submit", rolledShare.params()).get("result"));
+                    assertEquals(22, error(client.call("mining.submit", rolledShare.params())));
+                    var solution = client.solve(job, true, "00004000", 0x6000);
+                    assertEquals(0x20004000, solution.header().version());
                     assertEquals(true, client.call("mining.submit", solution.params()).get("result"));
                     assertEquals(solution.header().hash(), validation.activeTip().hash());
-                    assertEquals(21, error(client.call("mining.submit", ordinaryShare.params())));
+                    assertEquals(21, error(client.call("mining.submit", rolledShare.params())));
                     var nextJob = client.job();
                     assertNotEquals(job.getFirst(), nextJob.getFirst());
                     assertEquals(true, nextJob.get(8));
-                    assertEquals(2, server.statistics().acceptedShares());
+                    assertEquals(3, server.statistics().acceptedShares());
                     assertEquals(1, server.statistics().submittedBlocks());
                     try (var second = new StratumWireMiner(server.port())) {
                         second.subscribe();

@@ -63,10 +63,31 @@ jobs удаляются, а соединения с работающими ма�
 подписания challenge; для testnet запрещено изменение ntime внутри задания, чтобы
 не нарушить правила минимальной сложности.
 
-Сложность shares фиксирована конфигурацией. Vardiff и version rolling пока не реализованы;
-`mining.configure` явно возвращает `false` для запрашиваемых расширений,
-`mining.suggest_difficulty` возвращает `false`. Не все прошивки ASIC умеют работать без
-этих расширений; проверка с физическим оборудованием ещё нужна.
+Сложность shares фиксирована конфигурацией; vardiff пока не реализован.
+`mining.suggest_difficulty` возвращает `false`. Проверка с физическим ASIC ещё нужна.
+
+### Version rolling
+
+Поддержано согласование version rolling через `mining.configure` по
+[BIP310](https://github.com/bitcoin/bips/blob/master/bip-0310.mediawiki).
+Пример запроса перед `mining.subscribe`:
+
+```json
+{"id":1,"method":"mining.configure","params":[["version-rolling"],{"version-rolling.mask":"1fffe000","version-rolling.min-bit-count":2}]}
+```
+
+Сервер возвращает пересечение маски клиента с `1fffe000` — битами 13–28,
+описанными в [BIP320](https://github.com/bitcoin/bips/blob/master/bip-0320.mediawiki).
+Маску можно опустить (`ffffffff`); целое неотрицательное `min-bit-count` обязательно.
+При недостатке битов или неверных параметрах результат расширения содержит строку
+ошибки; соединение остаётся открытым. Неизвестные расширения возвращают `false`.
+
+После успешного согласования каждый `mining.submit` обязан содержать шестое поле
+`version_bits`: восемь hex-цифр, задающих только разрешённые биты. Версия вычисляется
+как `(job_version & ~mask) | version_bits`; остальные биты задания сохраняются.
+Без согласования остаётся прежний формат из пяти полей. Маска действует до конца
+соединения: повтор с той же итоговой маской допустим, изменение отклоняется и
+сохраняет прежние условия. Уведомления `mining.set_version_mask` не отправляются.
 
 ## Проверка shares и ограничения
 
@@ -92,14 +113,16 @@ extranonce и hex-полей, диапазон времени, SHA256d и target
 
 ```powershell
 .\mvnw.cmd -o test -q
-.\mvnw.cmd -o -pl app -am test '-Dtest=MiningJobTest,StratumIntegrationTest,BitcoinCoreMiningRoundTripTest' '-Dsurefire.failIfNoSpecifiedTests=false' '-Dbitcoin.core.binary=C:/Program Files/Bitcoin/daemon/bitcoind.exe'
+.\mvnw.cmd -o -pl app -am test '-Dtest=VersionRollingTest,MiningJobTest,StratumIntegrationTest,BitcoinCoreMiningRoundTripTest' '-Dsurefire.failIfNoSpecifiedTests=false' '-Dbitcoin.core.binary=C:/Program Files/Bitcoin/daemon/bitcoind.exe'
 ```
 
 `MiningJobTest` проверяет порядок байтов, coinbase, witness commitment, Merkle-ветки,
 target и историю jobs. `StratumIntegrationTest` использует настоящий TCP-клиент,
 самостоятельно собирающий заголовок из notify, и проверяет авторизацию, shares,
-повторы, смену tip и потерю готовности. `BitcoinCoreMiningRoundTripTest` дополнительно
-проверяет приём Bitcoin Core блока с транзакцией, добытого через Stratum.
+повторы, согласование версии, запрет лишних битов, смену tip и потерю готовности.
+`VersionRollingTest` проверяет границы масок и сохранение состояния при ошибках.
+`BitcoinCoreMiningRoundTripTest` дополнительно проверяет приём Bitcoin Core блока
+с транзакцией и изменённой через Stratum версией.
 
 Использованные первичные реализации и спецификация расширений:
 [Slush mining proxy](https://github.com/slush0/stratum-mining-proxy/blob/master/mining_libs/jobs.py),

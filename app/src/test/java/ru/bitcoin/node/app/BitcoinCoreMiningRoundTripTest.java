@@ -91,11 +91,15 @@ class BitcoinCoreMiningRoundTripTest {
                     try (var stratum = new ru.bitcoin.node.stratum.StratumServer(new java.net.InetSocketAddress("127.0.0.1", 0),
                             backend, "miner", "test-password", new java.math.BigDecimal("0.0000000001"), 4);
                          var client = new StratumWireMiner(stratum.port())) {
+                        assertEquals(Map.of("version-rolling", true, "version-rolling.mask", "1fffe000"),
+                                client.call("mining.configure", List.of(List.of("version-rolling"),
+                                        Map.of("version-rolling.mask", "ffffffff", "version-rolling.min-bit-count", 2))).get("result"));
                         client.subscribe();
                         assertEquals(true, client.call("mining.authorize", List.of("miner.test", "test-password")).get("result"));
                         var job = client.job();
                         assertFalse(((List<?>)job.get(4)).isEmpty(), "Stratum job must include the wallet transaction");
-                        var solution = client.solve(job, true);
+                        var solution = client.solve(job, true, "00006000", 0x1fffe000);
+                        assertEquals(0x20006000, solution.header().version());
                         var accepted = client.call("mining.submit", solution.params());
                         assertNull(accepted.get("error"));
                         assertEquals(true, accepted.get("result"));

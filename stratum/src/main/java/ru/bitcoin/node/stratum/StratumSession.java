@@ -3,6 +3,7 @@ package ru.bitcoin.node.stratum;
 import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.stratum.job.*;
 import ru.bitcoin.node.stratum.protocol.StratumException;
+import ru.bitcoin.node.stratum.protocol.VersionRolling;
 import tools.jackson.databind.json.JsonMapper;
 import java.io.*;
 import java.net.Socket;
@@ -22,6 +23,7 @@ public final class StratumSession implements AutoCloseable {
     private final AtomicBoolean closed = new AtomicBoolean();
     private final Set<Hash256> seenShares = new HashSet<>();
     private final Set<String> issuedJobs = new LinkedHashSet<>();
+    private final VersionRolling versionRolling = new VersionRolling();
     private boolean subscribed;
     private String worker;
     private MiningJob lastJob;
@@ -116,12 +118,15 @@ public final class StratumSession implements AutoCloseable {
     }
 
     private Object configure(List<?> params) {
-        if (params.size() != 2 || !(params.getFirst() instanceof List<?> extensions) || !(params.get(1) instanceof Map<?, ?>))
+        if (params.size() != 2 || !(params.getFirst() instanceof List<?> extensions) || !(params.get(1) instanceof Map<?, ?> parameters))
             throw new StratumException(20, "Invalid extension negotiation");
-        Map<String, Boolean> result = new LinkedHashMap<>();
+        if (extensions.stream().anyMatch(extension -> !(extension instanceof String name) || name.isEmpty()))
+            throw new StratumException(20, "Invalid extension name");
+        Map<String, Object> result = new LinkedHashMap<>();
         for (Object extension : extensions) {
-            if (!(extension instanceof String name)) throw new StratumException(20, "Invalid extension name");
-            result.put(name, false); // Explicitly decline version rolling and other unimplemented extensions.
+            String name = (String) extension;
+            if (name.equals("version-rolling")) result.putAll(versionRolling.configure(parameters));
+            else result.put(name, false);
         }
         return result;
     }
@@ -129,7 +134,8 @@ public final class StratumSession implements AutoCloseable {
     private boolean submit(List<?> params) {
         if (!subscribed) throw new StratumException(25, "Not subscribed");
         if (worker == null) throw new StratumException(24, "Unauthorized worker");
-        if (params.size() != 5) throw new StratumException(20, "Expected worker, job, extranonce2, ntime, nonce");
+        if (params.size() != (versionRolling.enabled() ? 6 : 5))
+            throw new StratumException(20, versionRolling.enabled() ? "Expected six submit parameters including version_bits" : "Expected five submit parameters");
         if (!worker.equals(string(params, 0))) throw new StratumException(24, "Unauthorized worker");
         String id = string(params, 1);
         if (!issuedJobs.contains(id)) throw new StratumException(21, "Job not found");
@@ -138,7 +144,9 @@ public final class StratumSession implements AutoCloseable {
         byte[] extraNonce2 = hex(string(params, 2), ExtraNonceManager.EXTRANONCE2_SIZE);
         long time = uint32(string(params, 3));
         long nonce = uint32(string(params, 4));
-        var candidate = job.candidate(extraNonceBytes, extraNonce2, time, nonce);
+        int version = job.work().block().header().version();
+        if (versionRolling.enabled()) version = versionRolling.version(version, string(params, 5));
+        var candidate = job.candidate(extraNonceBytes, extraNonce2, time, nonce, version);
         var hash = candidate.header().hash();
         if (seenShares.contains(hash)) throw new StratumException(22, "Duplicate share");
         boolean isBlock = server.validator().validate(job, candidate, server.backend().currentTimeSeconds());

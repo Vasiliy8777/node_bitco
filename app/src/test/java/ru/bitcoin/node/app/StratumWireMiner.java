@@ -58,6 +58,12 @@ final class StratumWireMiner implements AutoCloseable {
     record Solution(List<?> params, BlockHeader header) { }
 
     Solution solve(List<?> job, boolean block) {
+        return solve(job, block, null, 0);
+    }
+
+    Solution solve(List<?> job, boolean block, String versionBits, int versionMask) {
+        int version = (int)Long.parseUnsignedLong((String)job.get(5), 16);
+        if (versionBits != null) version = (version & ~versionMask) | Integer.parseUnsignedInt(versionBits, 16);
         String extraNonce2 = "00".repeat(extraNonce2Size);
         byte[] coinbase = HexFormat.of().parseHex(job.get(2) + extraNonce + extraNonce2 + job.get(3));
         byte[] root = Hash256Digest.hashBytes(coinbase);
@@ -72,10 +78,13 @@ final class StratumWireMiner implements AutoCloseable {
         var wire = java.nio.ByteBuffer.allocate(32).order(java.nio.ByteOrder.LITTLE_ENDIAN);
         while (words.hasRemaining()) wire.putInt(words.get());
         for (long nonce = 0; nonce < 100_000; nonce++) {
-            var header = new BlockHeader((int)Long.parseUnsignedLong((String)job.get(5),16), new Hash256(wire.array()), new Hash256(root),
+            var header = new BlockHeader(version, new Hash256(wire.array()), new Hash256(root),
                     new UInt32(Long.parseUnsignedLong((String)job.get(7),16)), new UInt32(Long.parseUnsignedLong((String)job.get(6),16)), new UInt32(nonce));
-            if (ProofOfWork.isValid(header, NetworkParametersRegistry.regtest()) == block)
-                return new Solution(List.of("miner.test", job.getFirst(), extraNonce2, job.get(7), String.format("%08x", nonce)), header);
+            if (ProofOfWork.isValid(header, NetworkParametersRegistry.regtest()) == block) {
+                var params = new ArrayList<Object>(List.of("miner.test", job.getFirst(), extraNonce2, job.get(7), String.format("%08x", nonce)));
+                if (versionBits != null) params.add(versionBits);
+                return new Solution(params, header);
+            }
         }
         throw new AssertionError("Could not find regtest solution");
     }
