@@ -217,6 +217,24 @@ public final class Peer implements AutoCloseable {
                 PeerState.CONNECTED;
     }
 
+    public void accept(
+            java.net.Socket socket
+    ) throws IOException {
+
+        if (state != PeerState.DISCONNECTED) {
+            throw new IllegalStateException(
+                    "Peer has already been started"
+            );
+        }
+
+        connection.accept(
+                socket
+        );
+
+        state =
+                PeerState.CONNECTED;
+    }
+
     public void handshake()
             throws IOException {
 

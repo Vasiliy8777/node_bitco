@@ -7,6 +7,7 @@ import ru.bitcoin.node.p2p.codec.BitcoinMessageStreamReader;
 import ru.bitcoin.node.p2p.message.*;
 import ru.bitcoin.node.protocol.block.Block;
 import ru.bitcoin.node.protocol.block.GenesisBlockFactory;
+import ru.bitcoin.node.protocol.network.NetworkParameters;
 import ru.bitcoin.node.protocol.network.NetworkParametersRegistry;
 
 import java.io.BufferedInputStream;
@@ -1554,6 +1555,40 @@ class PeerTest {
                 1,
                 notifications.get()
         );
+    }
+
+    @Test
+    void shouldAcceptInboundConnection()
+            throws Exception {
+
+        try (ServerSocket serverSocket =
+                     new ServerSocket(0);
+             Socket client =
+                     new Socket(
+                             "127.0.0.1",
+                             serverSocket.getLocalPort()
+                     );
+             Socket accepted =
+                     serverSocket.accept();
+             Peer peer =
+                     new Peer(
+                             new PeerConnection(
+                                     NetworkParametersRegistry.regtest()
+                             ),
+                             0L,
+                             0,
+                             true
+                     )) {
+
+            peer.accept(
+                    accepted
+            );
+
+            assertEquals(
+                    PeerState.CONNECTED,
+                    peer.state()
+            );
+        }
     }
 
     private static void sendVersion(

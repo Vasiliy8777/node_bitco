@@ -160,6 +160,87 @@ public final class PeerConnection implements AutoCloseable {
         }
     }
 
+    public void accept(
+            Socket acceptedSocket
+    ) throws IOException {
+
+        if (acceptedSocket == null) {
+            throw new IllegalArgumentException(
+                    "acceptedSocket must not be null"
+            );
+        }
+
+        if (!acceptedSocket.isConnected()
+                || acceptedSocket.isClosed()) {
+            throw new IllegalArgumentException(
+                    "acceptedSocket must be connected and open"
+            );
+        }
+
+        if (isConnected()) {
+            throw new IllegalStateException(
+                    "Peer connection is already open"
+            );
+        }
+
+        try {
+            acceptedSocket.setSoTimeout(
+                    readTimeoutMillis
+            );
+
+            acceptedSocket.setTcpNoDelay(
+                    true
+            );
+
+            InputStream newInput =
+                    new BufferedInputStream(
+                            acceptedSocket.getInputStream()
+                    );
+
+            OutputStream newOutput =
+                    new BufferedOutputStream(
+                            acceptedSocket.getOutputStream()
+                    );
+
+            BitcoinMessageEncoder newEncoder =
+                    new BitcoinMessageEncoder(
+                            networkParameters
+                    );
+
+            BitcoinMessageStreamReader newReader =
+                    new BitcoinMessageStreamReader(
+                            new BitcoinMessageDecoder(
+                                    networkParameters
+                            )
+                    );
+
+            socket =
+                    acceptedSocket;
+
+            input =
+                    newInput;
+
+            output =
+                    newOutput;
+
+            encoder =
+                    newEncoder;
+
+            reader =
+                    newReader;
+
+        } catch (IOException | RuntimeException exception) {
+
+            try {
+                acceptedSocket.close();
+            } catch (IOException ignored) {
+                // Preserve the original exception.
+            }
+
+            throw exception;
+        }
+    }
+
     public void send(
             BitcoinMessage message
     ) throws IOException {
