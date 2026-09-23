@@ -362,10 +362,22 @@ public final class PeerAddressManager {
     public synchronized Optional<PeerAddress> select(
             Set<PeerAddress> excludedAddresses
     ) {
+        return select(excludedAddresses, Set.of());
+    }
+
+    public synchronized Optional<PeerAddress> select(
+            Set<PeerAddress> excludedAddresses,
+            Set<PeerNetGroup> excludedNetGroups
+    ) {
 
         Objects.requireNonNull(
                 excludedAddresses,
                 "excludedAddresses"
+        );
+
+        Objects.requireNonNull(
+                excludedNetGroups,
+                "excludedNetGroups"
         );
 
         if (addresses.isEmpty()) {
@@ -375,13 +387,15 @@ public final class PeerAddressManager {
         List<KnownPeerAddress> newEntries =
                 eligible(
                         AddrManState.NEW,
-                        excludedAddresses
+                        excludedAddresses,
+                        excludedNetGroups
                 );
 
         List<KnownPeerAddress> triedEntries =
                 eligible(
                         AddrManState.TRIED,
-                        excludedAddresses
+                        excludedAddresses,
+                        excludedNetGroups
                 );
 
         if (newEntries.isEmpty()
@@ -533,7 +547,8 @@ public final class PeerAddressManager {
 
     private List<KnownPeerAddress> eligible(
             AddrManState state,
-            Set<PeerAddress> excludedAddresses
+            Set<PeerAddress> excludedAddresses,
+            Set<PeerNetGroup> excludedNetGroups
     ) {
 
         List<KnownPeerAddress> result =
@@ -549,6 +564,12 @@ public final class PeerAddressManager {
             if (excludedAddresses.contains(
                     known.peerAddress()
             )) {
+                continue;
+            }
+
+            PeerAddress peerAddress = known.peerAddress();
+            if (PeerNetGroup.isDiversifiable(peerAddress)
+                    && excludedNetGroups.contains(PeerNetGroup.of(peerAddress))) {
                 continue;
             }
 

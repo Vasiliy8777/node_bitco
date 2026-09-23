@@ -14,6 +14,7 @@ import ru.bitcoin.node.protocol.serialization.TransactionSerializer;
 import ru.bitcoin.node.protocol.transaction.*;
 import ru.bitcoin.node.storage.rocksdb.RocksDbDatabase;
 import ru.bitcoin.node.storage.utxo.*;
+import java.io.IOException;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.*;
@@ -303,6 +304,111 @@ class NodeRelayServiceTest {
                     incoming.get()
             );
         }
+    }
+
+
+    @Test
+    void acceptsGetDataAt1291000And50000InventoryEntries() throws Exception {
+        var parameters = NetworkParametersRegistry.regtest();
+        try (var db = new RocksDbDatabase(directory.resolve("large-getdata"));
+             var peers = new PeerManager()) {
+            var validation = new NodeValidationService(db, parameters, () -> 1_800_000_000L, new Mempool());
+            var sync = new NodeSyncInfrastructure(db, parameters, () -> 1_800_000_000L);
+            var peer = mock(Peer.class);
+            when(peer.isReady()).thenReturn(true);
+
+            var incoming = new AtomicReference<PeerMessageListener>();
+            doAnswer(invocation -> { incoming.set(invocation.getArgument(0)); return null; })
+                    .when(peer).addMessageListener(any());
+            var outbound = new LinkedBlockingQueue<BitcoinMessage>();
+            doAnswer(invocation -> { outbound.add(invocation.getArgument(0)); return null; })
+                    .when(peer).send(any());
+
+            peers.add(peer);
+            try (var relay = new NodeRelayService(validation, sync, peers)) {
+                for (int count : List.of(129, 1_000, 50_000)) {
+                    List<InventoryVector> inventory = unknownTransactions(count, count);
+                    incoming.get().onMessage(peer, BitcoinMessages.getData(new GetDataMessage(inventory)));
+
+                    BitcoinMessage response = take(outbound);
+                    assertEquals("notfound", response.command());
+                    assertEquals(inventory, BitcoinMessages.decodeNotFound(response).inventory());
+                    assertTrue(peer.isReady(), "Valid GETDATA size must not disconnect the peer");
+                }
+            }
+
+            verify(peer, never()).close();
+        }
+    }
+
+    @Test
+    void slowGetDataPeerDoesNotBlockAnotherPeer() throws Exception {
+        var parameters = NetworkParametersRegistry.regtest();
+        try (var db = new RocksDbDatabase(directory.resolve("slow-peer-isolation"));
+             var peers = new PeerManager()) {
+            var validation = new NodeValidationService(db, parameters, () -> 1_800_000_000L, new Mempool());
+            var sync = new NodeSyncInfrastructure(db, parameters, () -> 1_800_000_000L);
+
+            var slow = mock(Peer.class);
+            var fast = mock(Peer.class);
+            when(slow.isReady()).thenReturn(true);
+            when(fast.isReady()).thenReturn(true);
+
+            var slowIncoming = new AtomicReference<PeerMessageListener>();
+            var fastIncoming = new AtomicReference<PeerMessageListener>();
+            doAnswer(invocation -> { slowIncoming.set(invocation.getArgument(0)); return null; })
+                    .when(slow).addMessageListener(any());
+            doAnswer(invocation -> { fastIncoming.set(invocation.getArgument(0)); return null; })
+                    .when(fast).addMessageListener(any());
+
+            var slowSendEntered = new CountDownLatch(1);
+            var releaseSlowSend = new CountDownLatch(1);
+            doAnswer(invocation -> {
+                slowSendEntered.countDown();
+                if (!releaseSlowSend.await(5, TimeUnit.SECONDS)) {
+                    throw new IOException("test timed out waiting to release slow peer");
+                }
+                return null;
+            }).when(slow).send(any());
+
+            var fastOutbound = new LinkedBlockingQueue<BitcoinMessage>();
+            doAnswer(invocation -> { fastOutbound.add(invocation.getArgument(0)); return null; })
+                    .when(fast).send(any());
+
+            peers.add(slow);
+            peers.add(fast);
+            try (var relay = new NodeRelayService(validation, sync, peers)) {
+                var slowRequest = unknownTransactions(1_000, 10_000);
+                slowIncoming.get().onMessage(slow, BitcoinMessages.getData(new GetDataMessage(slowRequest)));
+                assertTrue(slowSendEntered.await(5, TimeUnit.SECONDS), "Slow peer never entered send()");
+
+                var fastRequest = unknownTransactions(1, 20_000);
+                fastIncoming.get().onMessage(fast, BitcoinMessages.getData(new GetDataMessage(fastRequest)));
+
+                BitcoinMessage fastResponse = fastOutbound.poll(2, TimeUnit.SECONDS);
+                assertNotNull(fastResponse, "Slow peer must not block GETDATA service for another peer");
+                assertEquals("notfound", fastResponse.command());
+                assertEquals(fastRequest, BitcoinMessages.decodeNotFound(fastResponse).inventory());
+
+                releaseSlowSend.countDown();
+            } finally {
+                releaseSlowSend.countDown();
+            }
+        }
+    }
+
+    private static List<InventoryVector> unknownTransactions(int count, int seed) {
+        List<InventoryVector> inventory = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            byte[] hash = new byte[32];
+            int value = seed + i;
+            hash[0] = (byte) value;
+            hash[1] = (byte) (value >>> 8);
+            hash[2] = (byte) (value >>> 16);
+            hash[3] = (byte) (value >>> 24);
+            inventory.add(new InventoryVector(InventoryVector.MSG_TX, new Hash256(hash)));
+        }
+        return List.copyOf(inventory);
     }
 
     private static BitcoinMessage take(BlockingQueue<BitcoinMessage> queue) throws InterruptedException {

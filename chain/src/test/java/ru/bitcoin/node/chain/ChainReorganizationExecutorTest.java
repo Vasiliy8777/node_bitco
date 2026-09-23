@@ -7,6 +7,7 @@ import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.common.types.UInt32;
 import ru.bitcoin.node.protocol.block.BlockHeader;
 import ru.bitcoin.node.protocol.network.NetworkParametersRegistry;
+import ru.bitcoin.node.storage.block.RocksDbBlockFailureStore;
 import ru.bitcoin.node.storage.block.RocksDbBlockIndexStore;
 import ru.bitcoin.node.storage.block.RocksDbBlockStore;
 import ru.bitcoin.node.storage.block.StoredBlockIndex;
@@ -118,6 +119,26 @@ class ChainReorganizationExecutorTest {
                             blockIndexStore
                     );
 
+            RocksDbBlockFailureStore failureStore =
+                    new RocksDbBlockFailureStore(
+                            database
+                    );
+
+            BlockFailureResolver failureResolver =
+                    new BlockFailureResolver(
+                            blockIndexLookup,
+                            failureStore
+                    );
+
+            BlockFailureManager failureManager =
+                    new BlockFailureManager(
+                            database,
+                            failureStore,
+                            blockIndexStore,
+                            chainStateStore,
+                            failureResolver
+                    );
+
             ChainReorganizationExecutor executor =
                     new ChainReorganizationExecutor(
                             blockStore,
@@ -125,7 +146,8 @@ class ChainReorganizationExecutorTest {
                             utxoStore,
                             transitionManager,
                             NetworkParametersRegistry.regtest(),
-                            blockIndexLookup
+                            blockIndexLookup,
+                            failureManager::markFailed
                     );
 
 
@@ -158,6 +180,20 @@ class ChainReorganizationExecutorTest {
                     chainStateStore
                             .loadActiveTipHash()
                             .orElseThrow()
+            );
+
+            /*
+             * Отсутствующий block body — infrastructure/storage
+             * failure, а НЕ доказательство consensus-invalid.
+             *
+             * InvalidBlockObserver не должен вызываться,
+             * поэтому permanent FAILED marker появиться не может.
+             */
+            assertFalse(
+                    failureStore.isFailed(
+                            newTip.hash()
+                    ),
+                    "Missing block body must not permanently mark the block as consensus-invalid"
             );
         }
     }

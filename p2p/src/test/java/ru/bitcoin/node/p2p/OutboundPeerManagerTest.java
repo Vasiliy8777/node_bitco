@@ -480,6 +480,301 @@ class OutboundPeerManagerTest {
          */
     }
 
+    @Test
+    void rejectsOutboundPeerBelowMinimumProtocolVersion()
+            throws Exception {
+
+        assertLongLivedOutboundEligibility(
+                VersionMessage.MIN_PEER_PROTOCOL_VERSION - 1,
+                VersionMessage.NODE_NETWORK | VersionMessage.NODE_WITNESS,
+                false
+        );
+    }
+
+    @Test
+    void rejectsOutboundPeerWithoutNodeWitness()
+            throws Exception {
+
+        assertLongLivedOutboundEligibility(
+                VersionMessage.CURRENT_PROTOCOL_VERSION,
+                VersionMessage.NODE_NETWORK,
+                false
+        );
+    }
+
+    @Test
+    void rejectsNodeNetworkLimitedPeerFromFullRelaySlot()
+            throws Exception {
+
+        assertLongLivedOutboundEligibility(
+                VersionMessage.CURRENT_PROTOCOL_VERSION,
+                VersionMessage.NODE_NETWORK_LIMITED | VersionMessage.NODE_WITNESS,
+                false
+        );
+    }
+
+    @Test
+    void acceptsNodeNetworkAndWitnessPeerForFullRelaySlot()
+            throws Exception {
+
+        assertLongLivedOutboundEligibility(
+                VersionMessage.CURRENT_PROTOCOL_VERSION,
+                VersionMessage.NODE_NETWORK | VersionMessage.NODE_WITNESS,
+                true
+        );
+    }
+
+    private static void assertLongLivedOutboundEligibility(
+            int protocolVersion,
+            long services,
+            boolean eligible
+    ) throws Exception {
+
+        try (ServerSocket serverSocket =
+                     new ServerSocket(0)) {
+
+            CompletableFuture<Void> server =
+                    CompletableFuture.runAsync(
+                            () -> runEligibilityPeer(
+                                    serverSocket,
+                                    protocolVersion,
+                                    services
+                            )
+                    );
+
+            PeerAddress address =
+                    new PeerAddress(
+                            InetAddress.getByName(
+                                    "127.0.0.1"
+                            ),
+                            serverSocket.getLocalPort(),
+                            0L
+                    );
+
+            PeerAddressManager addressManager =
+                    new PeerAddressManager();
+
+            addressManager.add(
+                    address,
+                    Instant.ofEpochSecond(
+                            1_700_000_000L
+                    )
+            );
+
+            PeerManager peerManager =
+                    new PeerManager();
+
+            OutboundPeerManager outbound =
+                    new OutboundPeerManager(
+                            new BitcoinClient(
+                                    PARAMETERS
+                            ),
+                            peerManager,
+                            addressManager,
+                            new DeterministicOutboundPeerSelector(
+                                    addressManager,
+                                    address
+                            ),
+                            () -> Instant.ofEpochSecond(
+                                    1_700_000_100L
+                            )
+                    );
+
+            try {
+
+                if (eligible) {
+
+                    Peer peer =
+                            outbound.connectOne(
+                                    100
+                            );
+
+                    assertTrue(
+                            peer.isReady()
+                    );
+
+                    assertEquals(
+                            1,
+                            peerManager.size()
+                    );
+
+                    assertSame(
+                            peer,
+                            peerManager.readyPeers()
+                                    .getFirst()
+                    );
+
+                    assertTrue(
+                            addressManager.find(
+                                            address
+                                    )
+                                    .orElseThrow()
+                                    .lastSuccess()
+                                    .isPresent()
+                    );
+
+                } else {
+                    assertThrows(
+                            IOException.class,
+                            () -> outbound.connectOne(
+                                    100
+                            )
+                    );
+
+                    assertTrue(
+                            peerManager.isEmpty()
+                    );
+
+                    assertTrue(
+                            addressManager.find(
+                                            address
+                                    )
+                                    .orElseThrow()
+                                    .lastSuccess()
+                                    .isEmpty()
+                    );
+                }
+
+            } finally {
+                peerManager.close();
+            }
+
+            server.get(
+                    5,
+                    TimeUnit.SECONDS
+            );
+        }
+    }
+
+    private static void runEligibilityPeer(
+            ServerSocket serverSocket,
+            int protocolVersion,
+            long services
+    ) {
+
+        try (Socket socket =
+                     serverSocket.accept()) {
+
+            socket.setSoTimeout(
+                    5_000
+            );
+
+            BufferedInputStream input =
+                    new BufferedInputStream(
+                            socket.getInputStream()
+                    );
+
+            BufferedOutputStream output =
+                    new BufferedOutputStream(
+                            socket.getOutputStream()
+                    );
+
+            BitcoinMessageStreamReader reader =
+                    new BitcoinMessageStreamReader(
+                            new BitcoinMessageDecoder(
+                                    PARAMETERS
+                            )
+                    );
+
+            BitcoinMessageEncoder encoder =
+                    new BitcoinMessageEncoder(
+                            PARAMETERS
+                    );
+
+            BitcoinMessage version =
+                    reader.read(
+                            input
+                    ).orElseThrow();
+
+            assertEquals(
+                    "version",
+                    version.command()
+            );
+
+            VersionMessage remoteVersion =
+                    new VersionMessage(
+                            protocolVersion,
+                            services,
+                            1_700_000_000L,
+                            NetworkAddress.unspecified(),
+                            NetworkAddress.unspecified(),
+                            0x223456789ABCDEFL,
+                            "/outbound-eligibility-test/",
+                            321,
+                            true
+                    );
+
+            output.write(
+                    encoder.encode(
+                            BitcoinMessages.version(
+                                    remoteVersion
+                            )
+                    )
+            );
+
+            output.flush();
+
+            if (protocolVersion >= 70016) {
+
+                assertEquals(
+                        "wtxidrelay",
+                        reader.read(input)
+                                .orElseThrow()
+                                .command()
+                );
+
+                assertEquals(
+                        "sendaddrv2",
+                        reader.read(input)
+                                .orElseThrow()
+                                .command()
+                );
+            }
+
+            assertEquals(
+                    "verack",
+                    reader.read(input)
+                            .orElseThrow()
+                            .command()
+            );
+
+            output.write(
+                    encoder.encode(
+                            BitcoinMessages.wtxidRelay()
+                    )
+            );
+
+            output.write(
+                    encoder.encode(
+                            BitcoinMessages.sendAddrV2()
+                    )
+            );
+
+            output.write(
+                    encoder.encode(
+                            BitcoinMessages.verack()
+                    )
+            );
+
+            output.flush();
+
+            /*
+             * Eligible peers are closed by PeerManager in test cleanup.
+             * Ineligible peers are closed immediately by OutboundPeerManager.
+             * In both cases the remote side must observe EOF.
+             */
+            assertEquals(
+                    -1,
+                    input.read()
+            );
+
+        } catch (Exception exception) {
+            throw new RuntimeException(
+                    exception
+            );
+        }
+    }
+
     private static void runSuccessfulPeer(
             ServerSocket serverSocket
     ) {

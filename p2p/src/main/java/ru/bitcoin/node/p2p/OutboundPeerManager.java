@@ -3,7 +3,9 @@ package ru.bitcoin.node.p2p;
 import ru.bitcoin.node.p2p.address.OutboundPeerSelector;
 import ru.bitcoin.node.p2p.address.PeerAddress;
 import ru.bitcoin.node.p2p.address.PeerAddressManager;
+import ru.bitcoin.node.p2p.address.PeerNetGroup;
 import ru.bitcoin.node.p2p.address.TriedCollision;
+import ru.bitcoin.node.p2p.message.VersionMessage;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -101,6 +103,14 @@ public final class OutboundPeerManager {
             int startHeight,
             List<PeerAddress> excludedAddresses
     ) throws IOException {
+        return connectOneWithAddress(startHeight, excludedAddresses, Set.of());
+    }
+
+    public OutboundPeerConnection connectOneWithAddress(
+            int startHeight,
+            List<PeerAddress> excludedAddresses,
+            Set<PeerNetGroup> excludedNetGroups
+    ) throws IOException {
 
         if (startHeight < 0) {
 
@@ -112,6 +122,10 @@ public final class OutboundPeerManager {
         Objects.requireNonNull(
                 excludedAddresses,
                 "excludedAddresses"
+        );
+        Objects.requireNonNull(
+                excludedNetGroups,
+                "excludedNetGroups"
         );
 
         Set<PeerAddress> attempted =
@@ -128,7 +142,8 @@ public final class OutboundPeerManager {
 
             PeerAddress address =
                     selector.select(
-                                    attempted
+                                    attempted,
+                                    excludedNetGroups
                             )
                             .orElse(
                                     null
@@ -166,27 +181,33 @@ public final class OutboundPeerManager {
                         );
 
                 if (!peer.isReady()) {
-
-                    try {
-
-                        peer.close();
-
-                    } catch (IOException closeException) {
-
-                        failure.addSuppressed(
-                                closeException
-                        );
-                    }
-
-                    failure.addSuppressed(
-                            new IOException(
-                                    "BitcoinClient returned non-ready peer "
-                                            + address.hostAddress()
-                                            + ":"
-                                            + address.port()
-                            )
+                    rejectPeer(
+                            peer,
+                            failure,
+                            "BitcoinClient returned non-ready peer "
+                                    + address.hostAddress()
+                                    + ":"
+                                    + address.port()
                     );
+                    continue;
+                }
 
+                String ineligibleReason =
+                        longLivedOutboundIneligibilityReason(
+                                peer.remoteVersion()
+                        );
+
+                if (ineligibleReason != null) {
+                    rejectPeer(
+                            peer,
+                            failure,
+                            "Ineligible long-lived outbound peer "
+                                    + address.hostAddress()
+                                    + ":"
+                                    + address.port()
+                                    + ": "
+                                    + ineligibleReason
+                    );
                     continue;
                 }
 
@@ -387,6 +408,60 @@ public final class OutboundPeerManager {
         }
 
         return false;
+    }
+
+    private static String longLivedOutboundIneligibilityReason(
+            VersionMessage version
+    ) {
+        if (version.version()
+                < VersionMessage.MIN_PEER_PROTOCOL_VERSION) {
+            return "protocol version "
+                    + version.version()
+                    + " is below minimum "
+                    + VersionMessage.MIN_PEER_PROTOCOL_VERSION;
+        }
+
+        long services =
+                version.services();
+
+        if ((services & VersionMessage.NODE_WITNESS) == 0) {
+            return "NODE_WITNESS is required";
+        }
+
+        /*
+         * This manager currently owns full-relay outbound slots.
+         * NODE_NETWORK_LIMITED is intentionally not treated as a substitute
+         * here: such peers cannot serve arbitrary historical blocks and need
+         * a separate post-IBD/limited-history connection policy.
+         */
+        if ((services & VersionMessage.NODE_NETWORK) == 0) {
+            return "NODE_NETWORK is required for a full-relay outbound slot";
+        }
+
+        return null;
+    }
+
+    private static void rejectPeer(
+            Peer peer,
+            IOException aggregateFailure,
+            String reason
+    ) {
+        IOException rejection =
+                new IOException(
+                        reason
+                );
+
+        try {
+            peer.close();
+        } catch (IOException closeException) {
+            rejection.addSuppressed(
+                    closeException
+            );
+        }
+
+        aggregateFailure.addSuppressed(
+                rejection
+        );
     }
 
     private Instant now() {

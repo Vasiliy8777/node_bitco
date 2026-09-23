@@ -1,12 +1,15 @@
 package ru.bitcoin.node.p2p;
 
 import ru.bitcoin.node.p2p.address.PeerAddress;
+import ru.bitcoin.node.p2p.address.PeerNetGroup;
 
 import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.LinkedHashSet;
+import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.IntSupplier;
@@ -555,19 +558,22 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
             }
 
             List<PeerAddress> excludedAddresses = occupiedAddresses(slot);
+            Set<PeerNetGroup> excludedNetGroups = occupiedNetGroups(slot);
 
             log.log(
                     System.Logger.Level.INFO,
-                    "Outbound reconnect attempt #{0} for slot {1}, startHeight={2}, excluded={3}",
+                    "Outbound reconnect attempt #{0} for slot {1}, startHeight={2}, excludedAddresses={3}, excludedNetGroups={4}",
                     attempt,
                     slot.index,
                     startHeight,
-                    excludedAddresses.size()
+                    excludedAddresses.size(),
+                    excludedNetGroups.size()
             );
 
             return outboundPeerManager.connectOneWithAddress(
                     startHeight,
-                    excludedAddresses
+                    excludedAddresses,
+                    excludedNetGroups
             );
         }
     }
@@ -585,6 +591,22 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
         }
     }
 
+    private Set<PeerNetGroup> occupiedNetGroups(Slot exceptSlot) {
+        synchronized (monitor) {
+            Set<PeerNetGroup> result = new LinkedHashSet<>();
+            for (Slot slot : slots) {
+                if (slot == exceptSlot || slot.connection == null) {
+                    continue;
+                }
+                PeerAddress address = slot.connection.address();
+                if (PeerNetGroup.isDiversifiable(address)) {
+                    result.add(PeerNetGroup.of(address));
+                }
+            }
+            return Set.copyOf(result);
+        }
+    }
+
     private boolean installConnection(Slot slot, OutboundPeerConnection newConnection) {
         Objects.requireNonNull(newConnection, "newConnection");
 
@@ -594,9 +616,20 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
             }
 
             for (Slot other : slots) {
-                if (other != slot
-                        && other.connection != null
-                        && other.connection.address().equals(newConnection.address())) {
+                if (other == slot || other.connection == null) {
+                    continue;
+                }
+
+                PeerAddress otherAddress = other.connection.address();
+                PeerAddress candidateAddress = newConnection.address();
+
+                if (otherAddress.equals(candidateAddress)) {
+                    return false;
+                }
+
+                if (PeerNetGroup.isDiversifiable(candidateAddress)
+                        && PeerNetGroup.isDiversifiable(otherAddress)
+                        && PeerNetGroup.of(otherAddress).equals(PeerNetGroup.of(candidateAddress))) {
                     return false;
                 }
             }

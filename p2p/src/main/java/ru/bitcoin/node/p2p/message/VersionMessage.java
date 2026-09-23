@@ -3,9 +3,11 @@ package ru.bitcoin.node.p2p.message;
 public final class VersionMessage {
 
     public static final int CURRENT_PROTOCOL_VERSION = 70017;
+    public static final int MIN_PEER_PROTOCOL_VERSION = 31800;
 
     public static final long NODE_NETWORK = 1L << 0;
     public static final long NODE_WITNESS = 1L << 3;
+    public static final long NODE_NETWORK_LIMITED = 1L << 10;
 
     public static final long DEFAULT_SERVICES =
             NODE_NETWORK | NODE_WITNESS;
