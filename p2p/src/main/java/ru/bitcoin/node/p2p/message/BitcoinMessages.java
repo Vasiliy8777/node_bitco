@@ -299,6 +299,36 @@ public final class BitcoinMessages {
         );
     }
 
+    public static BitcoinMessage addr(
+            AddrMessage addrMessage
+    ) {
+        if (addrMessage == null) {
+            throw new IllegalArgumentException(
+                    "addrMessage must not be null"
+            );
+        }
+
+        return new BitcoinMessage(
+                "addr",
+                AddrMessageCodec.encode(
+                        addrMessage
+                )
+        );
+    }
+
+    public static AddrMessage decodeAddr(
+            BitcoinMessage message
+    ) {
+        requireCommand(
+                message,
+                "addr"
+        );
+
+        return AddrMessageCodec.decode(
+                message.payload()
+        );
+    }
+
     private static void requireCommand(
             BitcoinMessage message,
             String expectedCommand
