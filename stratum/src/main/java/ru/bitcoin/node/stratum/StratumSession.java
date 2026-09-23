@@ -4,6 +4,8 @@ import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.stratum.job.*;
 import ru.bitcoin.node.stratum.protocol.StratumException;
 import ru.bitcoin.node.stratum.protocol.VersionRolling;
+import ru.bitcoin.node.stratum.share.ShareValidator;
+import ru.bitcoin.node.stratum.share.VarDiffController;
 import tools.jackson.databind.json.JsonMapper;
 import java.io.*;
 import java.net.Socket;
@@ -22,7 +24,12 @@ public final class StratumSession implements AutoCloseable {
     private final BlockingQueue<String> outgoing = new ArrayBlockingQueue<>(32);
     private final AtomicBoolean closed = new AtomicBoolean();
     private final Set<Hash256> seenShares = new HashSet<>();
-    private final Set<String> issuedJobs = new LinkedHashSet<>();
+    private record IssuedJob(String sourceId, ShareValidator validator, long difficultyEpoch) { }
+    private final Map<String, IssuedJob> issuedJobs = new LinkedHashMap<>();
+    private final VarDiffController varDiff;
+    private ShareValidator currentValidator;
+    private long difficultyEpoch;
+    private long jobSequence;
     private final VersionRolling versionRolling = new VersionRolling();
     private boolean subscribed;
     private String worker;
@@ -37,6 +44,8 @@ public final class StratumSession implements AutoCloseable {
         this.socket = socket;
         this.extraNonce = extraNonce;
         extraNonceBytes = HexFormat.of().parseHex(extraNonce);
+        varDiff = new VarDiffController(server.varDiff(), server.difficulty());
+        currentValidator = new ShareValidator(varDiff.difficulty());
     }
 
     void run(ExecutorService workers, ScheduledExecutorService watchdog) {
@@ -138,8 +147,9 @@ public final class StratumSession implements AutoCloseable {
             throw new StratumException(20, versionRolling.enabled() ? "Expected six submit parameters including version_bits" : "Expected five submit parameters");
         if (!worker.equals(string(params, 0))) throw new StratumException(24, "Unauthorized worker");
         String id = string(params, 1);
-        if (!issuedJobs.contains(id)) throw new StratumException(21, "Job not found");
-        var job = server.jobs().find(id).orElseThrow(() -> new StratumException(21, "Stale job"));
+        var issued = issuedJobs.get(id);
+        if (issued == null) throw new StratumException(21, "Job not found");
+        var job = server.jobs().find(issued.sourceId()).orElseThrow(() -> new StratumException(21, "Stale job"));
         if (!server.backend().isCurrent(job.work().block().header().previousBlockHash())) throw new StratumException(21, "Stale job");
         byte[] extraNonce2 = hex(string(params, 2), ExtraNonceManager.EXTRANONCE2_SIZE);
         long time = uint32(string(params, 3));
@@ -149,24 +159,34 @@ public final class StratumSession implements AutoCloseable {
         var candidate = job.candidate(extraNonceBytes, extraNonce2, time, nonce, version);
         var hash = candidate.header().hash();
         if (seenShares.contains(hash)) throw new StratumException(22, "Duplicate share");
-        boolean isBlock = server.validator().validate(job, candidate, server.backend().currentTimeSeconds());
+        boolean isBlock = issued.validator().validate(job, candidate, server.backend().currentTimeSeconds());
         if (seenShares.size() >= 8192) { close(); throw new StratumException(20, "Session share limit reached; reconnect"); }
         // Record only accepted shares. An unexpected storage error leaves the solution retryable.
         if (isBlock && !server.backend().submit(job.block(candidate))) throw new StratumException(21, "Block no longer extends the active tip");
         seenShares.add(hash);
         server.accepted(isBlock);
+        if (issued.difficultyEpoch() == difficultyEpoch) varDiff.accepted();
         return true;
     }
 
     synchronized void publish(MiningJob job) {
-        if (closed.get() || closingAfterFlush || !subscribed || worker == null || (lastJob != null && lastJob.id().equals(job.id()))) return;
+        if (closed.get() || closingAfterFlush || !subscribed || worker == null) return;
+        boolean changedDifficulty = varDiff.update(System.nanoTime());
+        if (!changedDifficulty && lastJob != null && lastJob.id().equals(job.id())) return;
         boolean clean = lastJob == null || !lastJob.work().block().header().previousBlockHash().equals(job.work().block().header().previousBlockHash());
-        if (lastJob == null) notification("mining.set_difficulty", List.of(server.difficulty()));
+        if (changedDifficulty) {
+            difficultyEpoch++;
+            currentValidator = new ShareValidator(varDiff.difficulty());
+        }
+        if (lastJob == null || changedDifficulty) notification("mining.set_difficulty", List.of(varDiff.difficulty()));
         if (clean) { issuedJobs.clear(); seenShares.clear(); }
-        issuedJobs.add(job.id());
-        while (issuedJobs.size() > 8) issuedJobs.remove(issuedJobs.iterator().next());
+        String wireId = job.id() + "-" + Long.toHexString(++jobSequence);
+        issuedJobs.put(wireId, new IssuedJob(job.id(), currentValidator, difficultyEpoch));
+        while (issuedJobs.size() > 8) issuedJobs.remove(issuedJobs.keySet().iterator().next());
         lastJob = job;
-        notification("mining.notify", job.notification(clean));
+        var parameters = new ArrayList<>(job.notification(clean));
+        parameters.set(0, wireId);
+        notification("mining.notify", parameters);
     }
 
     synchronized void invalidate() {

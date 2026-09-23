@@ -83,7 +83,8 @@ class StratumIntegrationTest {
         try (var context = new org.springframework.context.annotation.AnnotationConfigApplicationContext()) {
             context.getEnvironment().getPropertySources().addFirst(new org.springframework.core.env.MapPropertySource("stratum-test", Map.of(
                     "bitcoin.data-directory", directory.toString(), "bitcoin.network", "regtest", "bitcoin.stratum.enabled", "true",
-                    "bitcoin.stratum.port", "0", "bitcoin.stratum.password", "secret", "bitcoin.mining.payout-script", "51")));
+                    "bitcoin.stratum.port", "0", "bitcoin.stratum.password", "secret", "bitcoin.mining.payout-script", "51",
+                    "bitcoin.stratum.vardiff.enabled", "true")));
             context.register(ru.bitcoin.node.app.config.NetworkConfiguration.class, ru.bitcoin.node.app.config.NodeConfiguration.class,
                     ru.bitcoin.node.app.config.StratumConfiguration.class);
             context.refresh();
@@ -118,6 +119,54 @@ class StratumIntegrationTest {
                 server.close();
                 assertThrows(EOFException.class, replacement::job);
                 assertEquals(0, server.statistics().connections());
+            }
+        }
+    }
+
+    @Test void vardiffLowersDifficultyAndPreservesOlderTargets() throws Exception { verifyVarDiff(false); }
+
+    @Test void vardiffRaisesDifficultyAndPreservesOlderTargets() throws Exception { verifyVarDiff(true); }
+
+    private void verifyVarDiff(boolean rising) throws Exception {
+        var parameters = NetworkParametersRegistry.regtest();
+        try (var db = new RocksDbDatabase(directory); var peers = new PeerManager()) {
+            var validation = new NodeValidationService(db, parameters, () -> 1_800_000_000L, new Mempool());
+            var sync = new NodeSyncInfrastructure(db, parameters, () -> 1_800_000_000L);
+            try (var relay = new NodeRelayService(validation, sync, peers)) {
+                var backend = new StratumMiningBackend(validation, relay, parameters, () -> 1_800_000_000L,
+                        () -> true, new byte[]{0x51}, 4_000_000, new FeeRate(0));
+                var config = new ru.bitcoin.node.stratum.share.VarDiffConfig(true, new BigDecimal("2e-10"), BigDecimal.ONE,
+                        java.time.Duration.ofSeconds(1), java.time.Duration.ofSeconds(2));
+                try (var server = new StratumServer(new InetSocketAddress("127.0.0.1", 0), backend, "miner", "secret",
+                        new BigDecimal(rising ? "2e-10" : "8e-10"), 4, config); var client = new StratumWireMiner(server.port())) {
+                    assertEquals(true, ((Map<?, ?>) client.call("mining.configure", List.of(List.of("version-rolling"),
+                            Map.of("version-rolling.min-bit-count", 2))).get("result")).get("version-rolling"));
+                    client.subscribe();
+                    assertEquals(true, client.call("mining.authorize", List.of("miner.test", "secret")).get("result"));
+                    var oldJob = client.job();
+                    assertEquals(0, new BigDecimal(rising ? "2e-10" : "8e-10").compareTo(client.difficulty));
+                    var share = client.solve(oldJob, false, "00000000", 0x1fffe000);
+                    if (rising) {
+                        for (int i = 1; i <= 16; i++) {
+                            var sample = client.solve(oldJob, false, String.format("%08x", i << 13), 0x1fffe000);
+                            assertEquals(true, client.call("mining.submit", sample.params()).get("result"));
+                        }
+                    } else assertEquals(23, error(client.call("mining.submit", share.params())));
+                    var newJob = client.job();
+                    assertEquals(0, new BigDecimal(rising ? "8e-10" : "2e-10").compareTo(client.difficulty));
+                    assertNotEquals(oldJob.getFirst(), newJob.getFirst());
+                    assertEquals(false, newJob.get(8));
+                    assertEquals(oldJob.subList(1, 8), newJob.subList(1, 8));
+                    var newParams = new ArrayList<Object>(share.params()); newParams.set(1, newJob.getFirst());
+                    var harderParams = rising ? newParams : share.params();
+                    var easierParams = rising ? share.params() : newParams;
+                    assertEquals(23, error(client.call("mining.submit", harderParams)));
+                    assertEquals(true, client.call("mining.submit", easierParams).get("result"));
+                    assertEquals(22, error(client.call("mining.submit", harderParams)));
+                    var solution = client.solve(newJob, true, "00000000", 0x1fffe000);
+                    assertEquals(true, client.call("mining.submit", solution.params()).get("result"));
+                    assertEquals(solution.header().hash(), validation.activeTip().hash());
+                }
             }
         }
     }

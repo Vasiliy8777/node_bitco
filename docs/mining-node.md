@@ -126,7 +126,7 @@ Signet-майнинг отклоняется: подпись challenge не ре
 аварийное восстановление после отключения питания, длительные нагрузочные испытания
 и работа с реальным mining proxy/ASIC не подтверждены этими тестами.
 
-Остаются: проверка Stratum с реальным ASIC, vardiff, inbound P2P listener, compact-block relay,
+Остаются: проверка Stratum с реальным ASIC, inbound P2P listener, compact-block relay,
 полный адресный обмен и защита от eclipse/DoS, постоянный учёт невалидных веток,
 pruning/reindex, эксплуатационные метрики и оптимизация обходов цепочки/mempool.
 Сейчас обслуживание старого block locator требует прохода по предкам через RocksDB;

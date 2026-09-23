@@ -63,8 +63,42 @@ jobs удаляются, а соединения с работающими ма�
 подписания challenge; для testnet запрещено изменение ntime внутри задания, чтобы
 не нарушить правила минимальной сложности.
 
-Сложность shares фиксирована конфигурацией; vardiff пока не реализован.
+По умолчанию сложность shares фиксирована конфигурацией; vardiff включается отдельно.
 `mining.suggest_difficulty` возвращает `false`. Проверка с физическим ASIC ещё нужна.
+
+### Автоматическая сложность shares (vardiff)
+
+```yaml
+bitcoin:
+  stratum:
+    difficulty: 65536
+    vardiff:
+      enabled: true
+      minimum: 1
+      maximum: 1000000000000
+      target-seconds: 15
+      retarget-seconds: 60
+```
+
+Регулятор работает отдельно для каждого соединения. Начальная `difficulty` должна
+находиться между `minimum` и `maximum`. По умолчанию он стремится к одной принятой
+share за 15 секунд и пересматривает сложность раз в 60 секунд. Используется монотонное
+время; ожидание синхронизации до первого задания не входит в измерение.
+
+Расчёт: текущая сложность × число принятых shares × целевой интервал / время окна.
+Отклонение в пределах 25% не вызывает изменения; один шаг ограничен диапазоном
+от четверти до четырёх текущих сложностей и заданными границами. При отсутствии
+shares сложность снижается, пока соединение открыто. Значения округляются до
+12 десятичных знаков. Разрешены границы от `1e-12` до `1e18` и интервалы
+`1 <= target-seconds <= retarget-seconds <= 120`.
+
+Изменение отправляется как `mining.set_difficulty`, затем `mining.notify` с новым ID.
+При том же родителе `clean_jobs` остаётся `false`; каждая старая работа проверяется
+по сложности, с которой её выдали, в пределах общей истории восьми jobs/двух минут.
+Повтор одного заголовка под другим ID не становится новой share. Отклонённые shares
+и решения заданий предыдущего периода сложности не учитываются в новом измерении.
+Смена сложности shares не меняет сетевой `nbits` и правила приёма настоящего блока.
+Расширение `minimum-difficulty` пока не поддержано; нижняя граница задаётся сервером.
 
 ### Version rolling
 
@@ -113,7 +147,7 @@ extranonce и hex-полей, диапазон времени, SHA256d и target
 
 ```powershell
 .\mvnw.cmd -o test -q
-.\mvnw.cmd -o -pl app -am test '-Dtest=VersionRollingTest,MiningJobTest,StratumIntegrationTest,BitcoinCoreMiningRoundTripTest' '-Dsurefire.failIfNoSpecifiedTests=false' '-Dbitcoin.core.binary=C:/Program Files/Bitcoin/daemon/bitcoind.exe'
+.\mvnw.cmd -o -pl app -am test '-Dtest=VarDiffControllerTest,VersionRollingTest,MiningJobTest,StratumIntegrationTest,BitcoinCoreMiningRoundTripTest' '-Dsurefire.failIfNoSpecifiedTests=false' '-Dbitcoin.core.binary=C:/Program Files/Bitcoin/daemon/bitcoind.exe'
 ```
 
 `MiningJobTest` проверяет порядок байтов, coinbase, witness commitment, Merkle-ветки,
@@ -121,6 +155,9 @@ target и историю jobs. `StratumIntegrationTest` использует н�
 самостоятельно собирающий заголовок из notify, и проверяет авторизацию, shares,
 повторы, согласование версии, запрет лишних битов, смену tip и потерю готовности.
 `VersionRollingTest` проверяет границы масок и сохранение состояния при ошибках.
+`VarDiffControllerTest` проверяет рост, снижение, границы и стабильность сложности;
+TCP-тесты проверяют понижение при отсутствии shares, повышение при частых shares,
+сохранение target старых jobs и совместную работу с version rolling.
 `BitcoinCoreMiningRoundTripTest` дополнительно проверяет приём Bitcoin Core блока
 с транзакцией и изменённой через Stratum версией.
 

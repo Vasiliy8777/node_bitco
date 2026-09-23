@@ -4,7 +4,7 @@
 
 - [Синхронизация, конфигурация ноды и mining RPC](docs/mining-node.md).
 - [Подключение solo-майнеров через Stratum V1](docs/stratum.md): авторизация,
-  payout script, сложность shares и version rolling.
+  payout script, автоматическая сложность shares (vardiff) и version rolling.
 - [Реализованные проверки консенсуса и ограничения](docs/consensus-validation.md).
 
 RPC и Stratum включаются отдельно и по умолчанию выключены. Для Stratum нужны

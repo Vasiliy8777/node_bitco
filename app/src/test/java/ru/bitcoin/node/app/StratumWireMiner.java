@@ -21,6 +21,7 @@ final class StratumWireMiner implements AutoCloseable {
     private int nextId;
     String extraNonce;
     int extraNonce2Size;
+    java.math.BigDecimal difficulty;
 
     StratumWireMiner(int port) throws IOException {
         socket = new Socket("127.0.0.1", port);
@@ -51,6 +52,8 @@ final class StratumWireMiner implements AutoCloseable {
     List<?> job() throws IOException {
         while (true) {
             var message = notifications.isEmpty() ? read() : notifications.remove();
+            if ("mining.set_difficulty".equals(message.get("method")))
+                difficulty = new java.math.BigDecimal(((List<?>) message.get("params")).getFirst().toString());
             if ("mining.notify".equals(message.get("method"))) return (List<?>) message.get("params");
         }
     }

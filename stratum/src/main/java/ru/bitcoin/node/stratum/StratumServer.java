@@ -1,7 +1,8 @@
 package ru.bitcoin.node.stratum;
 
 import ru.bitcoin.node.stratum.job.*;
-import ru.bitcoin.node.stratum.share.ShareValidator;
+import ru.bitcoin.node.stratum.share.VarDiffConfig;
+import ru.bitcoin.node.stratum.share.VarDiffController;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.net.*;
@@ -19,7 +20,7 @@ public final class StratumServer implements AutoCloseable {
     private final String user;
     private final byte[] password;
     private final BigDecimal difficulty;
-    private final ShareValidator validator;
+    private final VarDiffConfig varDiff;
     private final MiningJobManager jobs = new MiningJobManager();
     private final ExtraNonceManager extraNonces = new ExtraNonceManager();
     private final Set<StratumSession> sessions = ConcurrentHashMap.newKeySet();
@@ -38,6 +39,11 @@ public final class StratumServer implements AutoCloseable {
 
     public StratumServer(InetSocketAddress address, MiningBackend backend, String user, String password,
                          BigDecimal difficulty, int maximumConnections) throws IOException {
+        this(address, backend, user, password, difficulty, maximumConnections, VarDiffConfig.disabled());
+    }
+
+    public StratumServer(InetSocketAddress address, MiningBackend backend, String user, String password,
+                         BigDecimal difficulty, int maximumConnections, VarDiffConfig varDiff) throws IOException {
         this.backend = java.util.Objects.requireNonNull(backend);
         if (user == null || user.isBlank() || user.length() > 64 || password == null || password.isBlank())
             throw new IllegalArgumentException("Stratum user and password are required");
@@ -45,7 +51,8 @@ public final class StratumServer implements AutoCloseable {
         this.user = user;
         this.password = password.getBytes(StandardCharsets.UTF_8);
         this.difficulty = difficulty;
-        validator = new ShareValidator(difficulty);
+        this.varDiff = java.util.Objects.requireNonNull(varDiff);
+        new VarDiffController(varDiff, difficulty); // Validate before binding a socket.
         slots = new Semaphore(maximumConnections);
         listener = new ServerSocket();
         try { listener.bind(address, maximumConnections); }
@@ -57,7 +64,7 @@ public final class StratumServer implements AutoCloseable {
     public int port() { return listener.getLocalPort(); }
     MiningBackend backend() { return backend; }
     MiningJobManager jobs() { return jobs; }
-    ShareValidator validator() { return validator; }
+    VarDiffConfig varDiff() { return varDiff; }
     BigDecimal difficulty() { return difficulty; }
     MiningJob current() { return current; }
 
