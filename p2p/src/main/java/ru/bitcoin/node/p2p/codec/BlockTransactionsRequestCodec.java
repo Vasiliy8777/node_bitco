@@ -26,9 +26,8 @@ public final class BlockTransactionsRequestCodec {
     public static BlockTransactionsRequest decode(byte[] b) {
         var r = new BitcoinReader(b);
         var h = new Hash256(r.readBytes(32));
-        long n = r.readCompactSize();
-        if (n > Integer.MAX_VALUE) throw new IllegalArgumentException("index count too large");
-        List<Integer> x = new ArrayList<>((int) n);
+        int n = Bip152CodecSupport.count(r, r.readCompactSize(), 1, "index count");
+        List<Integer> x = new ArrayList<>(n);
         long p = -1;
         for (int i = 0; i < n; i++) {
             long d = r.readCompactSize();

@@ -26,6 +26,52 @@ import static org.mockito.Mockito.*;
 class NodeRelayServiceTest {
     @TempDir Path directory;
 
+    @Test
+    void newBlockAnnouncementRunsBetweenHistoricalBlockResponses() throws Exception {
+        var validation = mock(NodeValidationService.class);
+        var sync = mock(NodeSyncInfrastructure.class);
+        Block historical = ru.bitcoin.node.protocol.block.GenesisBlockFactory.create(NetworkParametersRegistry.regtest());
+        when(validation.findBlock(historical.hash())).thenReturn(Optional.of(historical));
+        var peer = mock(Peer.class);
+        when(peer.isReady()).thenReturn(true);
+        var incoming = new AtomicReference<PeerMessageListener>();
+        doAnswer(call -> { incoming.set(call.getArgument(0)); return null; }).when(peer).addMessageListener(any());
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var first = new java.util.concurrent.atomic.AtomicBoolean(true);
+        var sent = new LinkedBlockingQueue<BitcoinMessage>();
+        doAnswer(call -> {
+            BitcoinMessage message = call.getArgument(0);
+            sent.add(message);
+            if (first.compareAndSet(true, false)) {
+                entered.countDown();
+                if (!release.await(5, TimeUnit.SECONDS)) throw new IOException("send barrier timeout");
+            }
+            return null;
+        }).when(peer).send(any());
+        try (var peers = new PeerManager()) {
+            peers.add(peer);
+            try (var relay = new NodeRelayService(validation, sync, peers)) {
+                var vector = new InventoryVector(InventoryVector.MSG_WITNESS_BLOCK, historical.hash());
+                incoming.get().onMessage(peer, BitcoinMessages.getData(new GetDataMessage(Collections.nCopies(300, vector))));
+                assertTrue(entered.await(5, TimeUnit.SECONDS));
+                var fresh = mock(Block.class);
+                when(fresh.hash()).thenReturn(Hash256.fromDisplayHex("12".repeat(32)));
+                relay.relayConnectedBlock(fresh, null);
+                release.countDown();
+                assertEquals("block", take(sent).command());
+                var announcement = take(sent);
+                assertEquals("inv", announcement.command());
+                assertEquals(fresh.hash(), BitcoinMessages.decodeInv(announcement).inventory().getFirst().hash());
+                for (int i = 1; i < 300; i++) assertEquals("block", take(sent).command());
+                verify(peer, never()).close();
+                verify(validation, never()).mempoolEntries();
+            } finally {
+                release.countDown();
+            }
+        }
+    }
+
     @Test void requestsMissingParentRetriesChildAndServesAdmittedTransaction() throws Exception {
         var parameters = NetworkParametersRegistry.regtest();
         byte[] script = HexFormat.of().parseHex("a914" + HexFormat.of().formatHex(Hash160.hash(new byte[]{0x51})) + "87");

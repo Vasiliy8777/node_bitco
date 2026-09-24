@@ -51,7 +51,16 @@ public final class HeaderSyncCoordinator {
                 );
     }
 
+    /** Collecting compatibility API; use the batch overload for full-history synchronization. */
     public List<BlockIndex> synchronize(Hash256 stopHash)
+            throws IOException {
+        List<BlockIndex> allProcessed = new ArrayList<>();
+        synchronize(stopHash, allProcessed::addAll);
+        return List.copyOf(allProcessed);
+    }
+
+    /** Streams validated batches. Memory stays bounded if the consumer does not retain batches. */
+    public long synchronize(Hash256 stopHash, java.util.function.Consumer<List<BlockIndex>> onBatch)
             throws IOException {
 
         Objects.requireNonNull(
@@ -59,8 +68,8 @@ public final class HeaderSyncCoordinator {
                 "stopHash"
         );
 
-        List<BlockIndex> allProcessed =
-                new ArrayList<>();
+        Objects.requireNonNull(onBatch, "onBatch");
+        long processedCount = 0;
 
         BlockIndex cursor =
                 headerChainState.bestHeaderTip();
@@ -82,9 +91,7 @@ public final class HeaderSyncCoordinator {
                     );
 
             if (headers.isEmpty()) {
-                return List.copyOf(
-                        allProcessed
-                );
+                return processedCount;
             }
 
             List<BlockIndex> processed =
@@ -114,9 +121,8 @@ public final class HeaderSyncCoordinator {
                 );
             }
 
-            allProcessed.addAll(
-                    processed
-            );
+            processedCount = Math.addExact(processedCount, processed.size());
+            onBatch.accept(List.copyOf(processed));
         }
     }
 }

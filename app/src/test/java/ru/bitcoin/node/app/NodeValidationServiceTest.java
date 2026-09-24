@@ -22,6 +22,29 @@ class NodeValidationServiceTest {
     private static final NetworkParameters PARAMS = NetworkParametersRegistry.regtest();
     private static final byte[] SCRIPT = HexFormat.of().parseHex("a914" + HexFormat.of().formatHex(Hash160.hash(new byte[]{0x51})) + "87");
 
+    @Test void cachedBlockAndHeaderQueriesFollowReorgAndHonorStopHash() {
+        try (var db = new RocksDbDatabase(directory)) {
+            var service = new NodeValidationService(db, PARAMS, () -> 1_800_000_000L, new Mempool());
+            var genesis = service.activeTip();
+            var main = block(genesis, 1, List.of());
+            service.processBlock(main);
+            assertTrue(service.findBlock(main.hash()).isPresent());
+            assertEquals(List.of(main.header()), service.headers(List.of(genesis.hash()), new Hash256(new byte[32])));
+            var side = block(genesis, 2, List.of());
+            service.processBlock(side);
+            assertTrue(service.findBlock(side.hash()).isEmpty());
+            var second = block(BlockIndexFactory.createChild(genesis, side.header()), 3, List.of());
+            service.processBlock(second);
+            assertTrue(service.findBlock(main.hash()).isEmpty());
+            assertTrue(service.findBlock(side.hash()).isPresent());
+            assertEquals(1, service.activeBlockDepth(side.hash()).orElseThrow());
+            assertTrue(service.activeBlockDepth(main.hash()).isEmpty());
+            assertEquals(List.of(side.header()), service.headers(List.of(main.hash(), genesis.hash()), side.hash()));
+            assertEquals(List.of(side.header(), second.header()), service.headers(List.of(genesis.hash()), new Hash256(new byte[32])));
+            assertEquals(Optional.of(second.hash()), service.bestActiveLocator(List.of(genesis.hash(), second.hash())));
+        }
+    }
+
     @Test void confirmationAndReorgAutomaticallyUpdateMempoolIncludingChildren() {
         try (var db = new RocksDbDatabase(directory)) {
             var service = new NodeValidationService(db, PARAMS, () -> 1_800_000_000L, new Mempool());

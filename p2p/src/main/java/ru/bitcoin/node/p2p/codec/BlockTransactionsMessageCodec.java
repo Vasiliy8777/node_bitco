@@ -24,9 +24,8 @@ public final class BlockTransactionsMessageCodec {
     public static BlockTransactionsMessage decode(byte[] b, long version) {
         var r = new BitcoinReader(b);
         var h = new Hash256(r.readBytes(32));
-        long n = r.readCompactSize();
-        if (n > Integer.MAX_VALUE) throw new IllegalArgumentException("transaction count too large");
-        List<Transaction> txs = new ArrayList<>((int) n);
+        int n = Bip152CodecSupport.count(r, r.readCompactSize(), 10, "transaction count");
+        List<Transaction> txs = new ArrayList<>(n);
         for (int i = 0; i < n; i++) txs.add(TransactionParser.parse(r));
         if (r.hasRemaining()) throw new IllegalArgumentException("Unexpected bytes after blocktxn");
         return new BlockTransactionsMessage(h, txs);

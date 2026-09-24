@@ -106,6 +106,10 @@ public final class CompactBlockReconstruction {
 
         Map<Long, Transaction> unique = new HashMap<>();
         Set<Long> collisions = new HashSet<>();
+        Set<Long> announcedIds = new HashSet<>();
+        for (long id : compact.shortIds()) {
+            if (!announcedIds.add(id)) collisions.add(id);
+        }
         for (Transaction tx : candidates) {
             long id = CompactBlockFactory.shortId(compact.header(), compact.nonce(), tx, version);
             if (unique.putIfAbsent(id, tx) != null) collisions.add(id);

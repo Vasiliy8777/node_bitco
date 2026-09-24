@@ -33,6 +33,7 @@ public final class NodeValidationService {
     private final RocksDbUtxoStore utxos;
     private BlockIndex poolTip;
     private long revision;
+    private final ActiveChainAncestors activeAncestors = new ActiveChainAncestors();
 
     public long revision() {
         synchronized (chain) {
@@ -63,10 +64,8 @@ public final class NodeValidationService {
         synchronized (chain) {
             var candidate = lookup.find(hash);
             if (candidate == null) return Optional.empty();
-            var cursor = chain.activeTip();
-            while (cursor.height() > candidate.height())
-                cursor = Objects.requireNonNull(lookup.find(cursor.previousBlockHash()), "Missing active ancestor");
-            return cursor.hash().equals(hash) ? blocks.find(hash) : Optional.empty();
+            var cursor = activeAncestors.at(chain.activeTip(), candidate.height(), lookup);
+            return cursor != null && cursor.hash().equals(hash) ? blocks.find(hash) : Optional.empty();
         }
     }
 
@@ -80,10 +79,7 @@ public final class NodeValidationService {
             if (candidate == null) return OptionalLong.empty();
             BlockIndex tip = chain.activeTip();
             if (candidate.height() > tip.height()) return OptionalLong.empty();
-            BlockIndex cursor = tip;
-            while (cursor.height() > candidate.height()) {
-                cursor = Objects.requireNonNull(lookup.find(cursor.previousBlockHash()), "Missing active ancestor");
-            }
+            BlockIndex cursor = activeAncestors.at(tip, candidate.height(), lookup);
             if (!cursor.hash().equals(hash)) return OptionalLong.empty();
             return OptionalLong.of(tip.height() - candidate.height());
         }
@@ -94,16 +90,14 @@ public final class NodeValidationService {
      */
     public List<ru.bitcoin.node.protocol.block.BlockHeader> headers(List<Hash256> locator, Hash256 stop) {
         synchronized (chain) {
-            Set<Hash256> wanted = new HashSet<>(locator);
-            var result = new ArrayDeque<ru.bitcoin.node.protocol.block.BlockHeader>();
-            var cursor = chain.activeTip();
-            while (cursor.height() > 0 && !wanted.contains(cursor.hash())) {
-                result.addFirst(cursor.header());
-                if (result.size() > 2000) result.removeLast();
-                cursor = Objects.requireNonNull(lookup.find(cursor.previousBlockHash()), "Missing active ancestor");
-            }
+            BlockIndex tip = chain.activeTip();
+            long start = bestActiveLocator(locator).map(lookup::find).map(BlockIndex::height).orElse(0L);
             var answer = new ArrayList<ru.bitcoin.node.protocol.block.BlockHeader>();
-            for (var header : result) {
+            long count = Math.min(2000, tip.height() - start);
+            // Warm the upper end once; successive heights then reuse nearby cached ancestors.
+            if (count > 0) activeAncestors.at(tip, start + count, lookup);
+            for (long offset = 1; offset <= count; offset++) {
+                var header = activeAncestors.at(tip, start + offset, lookup).header();
                 answer.add(header);
                 if (header.hash().equals(stop)) break;
             }
@@ -118,13 +112,16 @@ public final class NodeValidationService {
         Objects.requireNonNull(locator, "locator");
         synchronized (chain) {
             if (locator.isEmpty()) return Optional.empty();
-            Set<Hash256> wanted = new HashSet<>(locator);
-            BlockIndex cursor = chain.activeTip();
-            while (true) {
-                if (wanted.contains(cursor.hash())) return Optional.of(cursor.hash());
-                if (cursor.height() == 0) return Optional.empty();
-                cursor = Objects.requireNonNull(lookup.find(cursor.previousBlockHash()), "Missing active ancestor");
+            BlockIndex tip = chain.activeTip();
+            BlockIndex best = null;
+            for (Hash256 hash : locator) {
+                BlockIndex candidate = lookup.find(hash);
+                if (candidate == null || candidate.height() > tip.height()
+                        || (best != null && candidate.height() <= best.height())) continue;
+                BlockIndex active = activeAncestors.at(tip, candidate.height(), lookup);
+                if (active.hash().equals(hash)) best = candidate;
             }
+            return best == null ? Optional.empty() : Optional.of(best.hash());
         }
     }
 
@@ -147,12 +144,8 @@ public final class NodeValidationService {
             BlockIndex tip = lookup.find(tipHash);
             if (known == null || tip == null || known.height() > tip.height()) return Optional.empty();
 
-            BlockIndex activeAtTipHeight = chain.activeTip();
-            while (activeAtTipHeight.height() > tip.height()) {
-                activeAtTipHeight = Objects.requireNonNull(
-                        lookup.find(activeAtTipHeight.previousBlockHash()), "Missing active ancestor");
-            }
-            if (!activeAtTipHeight.hash().equals(tipHash)) return Optional.empty();
+            BlockIndex activeAtTipHeight = activeAncestors.at(chain.activeTip(), tip.height(), lookup);
+            if (activeAtTipHeight == null || !activeAtTipHeight.hash().equals(tipHash)) return Optional.empty();
 
             long distance = tip.height() - known.height();
             if (distance > maxHeaders) return Optional.empty();

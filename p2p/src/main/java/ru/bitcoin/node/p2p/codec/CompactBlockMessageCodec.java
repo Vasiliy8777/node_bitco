@@ -36,9 +36,9 @@ public final class CompactBlockMessageCodec {
         int ns = Bip152CodecSupport.count(r, r.readCompactSize(), 6, "short id count");
         List<Long> ids = new ArrayList<>(ns);
         for (int i = 0; i < ns; i++) ids.add(Bip152CodecSupport.readShortId(r));
-        long pc = r.readCompactSize();
-        if (pc > Integer.MAX_VALUE) throw new IllegalArgumentException("prefilled count too large");
-        List<PrefilledTransaction> ps = new ArrayList<>((int) pc);
+        // A prefilled entry needs at least one index byte and a ten-byte transaction envelope.
+        int pc = Bip152CodecSupport.count(r, r.readCompactSize(), 11, "prefilled count");
+        List<PrefilledTransaction> ps = new ArrayList<>(pc);
         long prev = -1;
         for (int i = 0; i < pc; i++) {
             long delta = r.readCompactSize();

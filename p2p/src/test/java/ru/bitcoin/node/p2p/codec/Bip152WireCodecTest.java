@@ -13,6 +13,55 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class Bip152WireCodecTest {
     @Test
+    void repeatedShortIdLeavesEveryAmbiguousPositionMissing() {
+        var candidate = tx(true);
+        long id = CompactBlockFactory.shortId(header(), 123L, candidate, 2);
+        var compact = new CompactBlockMessage(header(), 123L, List.of(id, id),
+                List.of(new PrefilledTransaction(0, tx(false))));
+        var partial = CompactBlockReconstruction.initialize(compact, List.of(candidate), 2);
+        assertFalse(partial.complete());
+        assertEquals(List.of(1, 2), partial.missingIndexes());
+        assertNull(partial.transactions().get(1));
+        assertNull(partial.transactions().get(2));
+    }
+
+    @Test
+    void rejectsUnbackedCollectionCountsBeforeAllocating() {
+        // These declarations fit int, but are not backed by payload bytes.
+        // ArrayList allocation from them would otherwise exhaust the test/node heap.
+        for (long count : new long[]{1, 100_000_000L, Integer.MAX_VALUE}) {
+            var request = new java.io.ByteArrayOutputStream();
+            request.writeBytes(new byte[32]);
+            request.writeBytes(ru.bitcoin.node.common.encoding.CompactSize.encode(count));
+            assertThrows(IllegalArgumentException.class,
+                    () -> BlockTransactionsRequestCodec.decode(request.toByteArray()));
+            assertThrows(IllegalArgumentException.class,
+                    () -> BlockTransactionsMessageCodec.decode(request.toByteArray(), 2));
+            var compact = new java.io.ByteArrayOutputStream();
+            compact.writeBytes(ru.bitcoin.node.protocol.serialization.BlockHeaderSerializer.serialize(header()));
+            compact.writeBytes(new byte[8]);
+            compact.write(0); // No short IDs.
+            compact.writeBytes(ru.bitcoin.node.common.encoding.CompactSize.encode(count));
+            assertThrows(IllegalArgumentException.class,
+                    () -> CompactBlockMessageCodec.decode(compact.toByteArray(), 2));
+        }
+    }
+
+    @Test
+    void blockTransactionsRoundTripBothSupportedVersions() {
+        for (long version : new long[]{1, 2}) {
+            var original = new BlockTransactionsMessage(header().hash(), List.of(tx(true), tx(false)));
+            var decoded = BlockTransactionsMessageCodec.decode(
+                    BlockTransactionsMessageCodec.encode(original, version), version);
+            assertEquals(original.blockHash(), decoded.blockHash());
+            assertEquals(original.transactions().stream().map(Transaction::txId).toList(),
+                    decoded.transactions().stream().map(Transaction::txId).toList());
+            if (version == 2) assertEquals(original.transactions().getFirst().wtxId(),
+                    decoded.transactions().getFirst().wtxId());
+        }
+    }
+
+    @Test
     void sipHashMatchesReferenceVector() {
         byte[] key = new byte[16];
         for (int i = 0; i < 16; i++) key[i] = (byte) i;

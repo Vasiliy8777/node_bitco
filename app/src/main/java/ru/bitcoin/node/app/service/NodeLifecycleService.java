@@ -339,7 +339,8 @@ public final class NodeLifecycleService
                 );
 
         coordinator.synchronize(
-                HEADER_SYNC_STOP_HASH
+                HEADER_SYNC_STOP_HASH,
+                batch -> { /* Headers are already persisted by HeaderSyncService. */ }
         );
     }
 
