@@ -21,7 +21,9 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
-/** Bounded unsolicited-message processing and relay. No disk work on peer reader threads. */
+/**
+ * Bounded unsolicited-message processing and relay. No disk work on peer reader threads.
+ */
 public final class NodeRelayService implements AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(NodeRelayService.class);
     private static final long MSG_WTX = 5;
@@ -50,16 +52,25 @@ public final class NodeRelayService implements AutoCloseable {
     private static final int MAX_RECENT_BLOCK_ANNOUNCEMENTS = 4096;
     // Bitcoin Core v31.1 MAX_BLOCKS_TO_ANNOUNCE.
     private static final int MAX_BLOCKS_TO_ANNOUNCE = 8;
+    // Bitcoin Core v31.1 BIP152 serving depths.
+    private static final int MAX_CMPCTBLOCK_DEPTH = 5;
+    private static final int MAX_BLOCKTXN_DEPTH = 10;
+    private static final long CMPCTBLOCKS_VERSION = 2;
     private final PeerMessageListener messages = this::enqueue;
     private final Consumer<Peer> connections = this::attach;
     private volatile boolean closed;
 
-    private record Orphan(Transaction transaction, long expires) { }
+    private record Orphan(Transaction transaction, long expires) {
+    }
 
-    /** Per-peer BIP130 block-announcement preference and last header sent. */
+    /**
+     * Per-peer BIP130 block-announcement preference and last header sent.
+     */
     private static final class BlockAnnouncementState {
         private volatile boolean prefersHeaders;
         private volatile Hash256 bestHeaderSent;
+        private volatile boolean providesCompactBlocks;
+        private volatile boolean requestsHighBandwidthCompactBlocks;
     }
 
     public NodeRelayService(NodeValidationService validation, NodeSyncInfrastructure sync, PeerManager peers) {
@@ -97,7 +108,8 @@ public final class NodeRelayService implements AutoCloseable {
     }
 
     private void enqueue(Peer peer, BitcoinMessage message) {
-        if (closed || !Set.of("inv", "tx", "getdata", "getheaders", "notfound", "sendheaders").contains(message.command())) return;
+        if (closed || !Set.of("inv", "tx", "getdata", "getheaders", "notfound", "sendheaders", "sendcmpct", "getblocktxn").contains(message.command()))
+            return;
         long bytes = message.payloadLength();
         if (queuedBytes.addAndGet(bytes) > MAX_QUEUED_INBOUND_BYTES) {
             queuedBytes.addAndGet(-bytes);
@@ -152,13 +164,26 @@ public final class NodeRelayService implements AutoCloseable {
                 BlockAnnouncementState state = blockAnnouncements.get(peer);
                 if (state != null) state.prefersHeaders = true;
             }
+            case "sendcmpct" -> {
+                SendCmpctMessage request = BitcoinMessages.decodeSendCmpct(message);
+                // Core v31.1 supports witness compact blocks only (version 2).
+                if (request.version() == CMPCTBLOCKS_VERSION) {
+                    BlockAnnouncementState state = blockAnnouncements.get(peer);
+                    if (state != null) {
+                        state.providesCompactBlocks = true;
+                        state.requestsHighBandwidthCompactBlocks = request.highBandwidth();
+                    }
+                }
+            }
+            case "getblocktxn" -> queueGetBlockTxn(peer, BitcoinMessages.decodeGetBlockTxn(message));
             case "notfound" -> {
                 for (var vector : BitcoinMessages.decodeNotFound(message).inventory()) {
                     transactionRequests.notFound(peer, vector.hash());
                 }
                 dispatchTransactionRequests();
             }
-            default -> { }
+            default -> {
+            }
         }
     }
 
@@ -211,7 +236,7 @@ public final class NodeRelayService implements AutoCloseable {
             boolean progress;
             do {
                 progress = false;
-                for (var iterator = orphans.values().iterator(); iterator.hasNext();) {
+                for (var iterator = orphans.values().iterator(); iterator.hasNext(); ) {
                     var orphan = iterator.next().transaction();
                     try {
                         validation.admit(orphan);
@@ -221,7 +246,8 @@ public final class NodeRelayService implements AutoCloseable {
                     } catch (MempoolAdmissionException exception) {
                         if (!exception.getMessage().startsWith("Missing UTXO:")) iterator.remove();
                     } catch (ru.bitcoin.node.consensus.transaction.TransactionValidationException
-                             | ru.bitcoin.node.script.ScriptExecutionException | ru.bitcoin.node.script.ScriptParseException exception) {
+                             | ru.bitcoin.node.script.ScriptExecutionException |
+                             ru.bitcoin.node.script.ScriptParseException exception) {
                         iterator.remove();
                     }
                 }
@@ -234,7 +260,8 @@ public final class NodeRelayService implements AutoCloseable {
                         .map(input -> new InventoryVector(InventoryVector.MSG_TX, input.previousOutput().transactionId())).distinct().toList()));
             }
         } catch (ru.bitcoin.node.consensus.transaction.TransactionValidationException
-                 | ru.bitcoin.node.script.ScriptExecutionException | ru.bitcoin.node.script.ScriptParseException exception) {
+                 | ru.bitcoin.node.script.ScriptExecutionException |
+                 ru.bitcoin.node.script.ScriptParseException exception) {
             log.debug("Rejected invalid transaction {}", transaction.txId());
         }
     }
@@ -252,7 +279,39 @@ public final class NodeRelayService implements AutoCloseable {
         }
     }
 
-    /** Runs only on this peer's outbound worker, so a slow socket cannot stall other peers. */
+    private void queueGetBlockTxn(Peer peer, BlockTransactionsRequest request) {
+        PeerOutbound sender = outbound.get(peer);
+        long retainedBytes = 256L + 8L * request.indexes().size();
+        if (sender == null || !sender.execute(() -> serveBlockTransactions(peer, request), retainedBytes)) {
+            disconnect(peer);
+        }
+    }
+
+    private void serveBlockTransactions(Peer peer, BlockTransactionsRequest request) throws IOException {
+        OptionalLong depth = validation.activeBlockDepth(request.blockHash());
+        Optional<Block> blockOptional = validation.findBlock(request.blockHash());
+        if (depth.isEmpty() || blockOptional.isEmpty()) return;
+        Block block = blockOptional.orElseThrow();
+
+        if (depth.getAsLong() > MAX_BLOCKTXN_DEPTH) {
+            sendDirect(peer, new BitcoinMessage("block", BlockSerializer.serialize(block)));
+            return;
+        }
+
+        List<Transaction> transactions = new ArrayList<>(request.indexes().size());
+        for (int index : request.indexes()) {
+            if (index < 0 || index >= block.transactions().size()) {
+                throw new IllegalArgumentException("getblocktxn transaction index out of bounds: " + index);
+            }
+            transactions.add(block.transactions().get(index));
+        }
+        sendDirect(peer, BitcoinMessages.blockTxn(
+                new BlockTransactionsMessage(request.blockHash(), transactions), CMPCTBLOCKS_VERSION));
+    }
+
+    /**
+     * Runs only on this peer's outbound worker, so a slow socket cannot stall other peers.
+     */
     private void serveData(Peer peer, GetDataMessage request) throws IOException {
         PeerConnectionRole role = peers.roleOf(peer);
         if (request.inventory().size() > GetDataMessage.MAX_INVENTORY_SIZE) {
@@ -271,7 +330,21 @@ public final class NodeRelayService implements AutoCloseable {
         for (var vector : request.inventory()) {
             if (!peer.isReady() || closed) return;
 
-            if (vector.type() == InventoryVector.MSG_BLOCK || vector.type() == InventoryVector.MSG_WITNESS_BLOCK) {
+            if (vector.type() == InventoryVector.MSG_CMPCT_BLOCK) {
+                var block = validation.findBlock(vector.hash());
+                OptionalLong depth = validation.activeBlockDepth(vector.hash());
+                if (block.isPresent() && depth.isPresent()) {
+                    if (depth.getAsLong() <= MAX_CMPCTBLOCK_DEPTH) {
+                        long nonce = ThreadLocalRandom.current().nextLong();
+                        sendDirect(peer, BitcoinMessages.compactBlock(
+                                CompactBlockFactory.create(block.orElseThrow(), nonce, CMPCTBLOCKS_VERSION),
+                                CMPCTBLOCKS_VERSION));
+                    } else {
+                        sendDirect(peer, new BitcoinMessage("block", BlockSerializer.serialize(block.orElseThrow())));
+                    }
+                    continue;
+                }
+            } else if (vector.type() == InventoryVector.MSG_BLOCK || vector.type() == InventoryVector.MSG_WITNESS_BLOCK) {
                 var block = validation.findBlock(vector.hash());
                 if (block.isPresent()) {
                     sendDirect(peer, new BitcoinMessage("block", vector.type() == InventoryVector.MSG_BLOCK
@@ -307,7 +380,9 @@ public final class NodeRelayService implements AutoCloseable {
         return result;
     }
 
-    /** Announces an active-tip block once, excluding the peer that supplied its body. */
+    /**
+     * Announces an active-tip block once, excluding the peer that supplied its body.
+     */
     public void relayConnectedBlock(Block block, Peer source) {
         Objects.requireNonNull(block, "block");
         synchronized (announcedBlocks) {
@@ -322,6 +397,12 @@ public final class NodeRelayService implements AutoCloseable {
             if (peer == source) continue;
 
             BlockAnnouncementState state = blockAnnouncements.get(peer);
+            if (state != null && state.requestsHighBandwidthCompactBlocks) {
+                long nonce = ThreadLocalRandom.current().nextLong();
+                send(peer, BitcoinMessages.compactBlock(
+                        CompactBlockFactory.create(block, nonce, CMPCTBLOCKS_VERSION), CMPCTBLOCKS_VERSION));
+                continue;
+            }
             if (state != null && state.prefersHeaders && state.bestHeaderSent != null) {
                 Optional<List<ru.bitcoin.node.protocol.block.BlockHeader>> path =
                         validation.activeHeadersAfter(state.bestHeaderSent, block.hash(), MAX_BLOCKS_TO_ANNOUNCE);
@@ -362,7 +443,9 @@ public final class NodeRelayService implements AutoCloseable {
         for (Peer peer : peers.readyPeers()) if (peer != source) send(peer, message);
     }
 
-    /** Queue ordinary outbound traffic on the same per-peer serial worker as GETDATA responses. */
+    /**
+     * Queue ordinary outbound traffic on the same per-peer serial worker as GETDATA responses.
+     */
     private void send(Peer peer, BitcoinMessage message) {
         if (closed) return;
         PeerOutbound sender = outbound.get(peer);
@@ -371,7 +454,9 @@ public final class NodeRelayService implements AutoCloseable {
         }
     }
 
-    /** Must only be called by the peer's PeerOutbound worker. */
+    /**
+     * Must only be called by the peer's PeerOutbound worker.
+     */
     private void sendDirect(Peer peer, BitcoinMessage message) throws IOException {
         if (closed) return;
         var timeout = sendTimeouts.schedule(() -> disconnect(peer), 10, TimeUnit.SECONDS);
@@ -422,7 +507,9 @@ public final class NodeRelayService implements AutoCloseable {
         void run() throws IOException;
     }
 
-    /** One bounded serial send/work queue per peer. */
+    /**
+     * One bounded serial send/work queue per peer.
+     */
     private final class PeerOutbound {
         private final ThreadPoolExecutor executor;
         private final Peer peer;

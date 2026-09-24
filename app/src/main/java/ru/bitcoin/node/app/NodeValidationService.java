@@ -14,9 +14,11 @@ import ru.bitcoin.node.storage.chain.RocksDbChainStateStore;
 import ru.bitcoin.node.storage.rocksdb.RocksDbDatabase;
 import ru.bitcoin.node.storage.undo.RocksDbUndoStore;
 import ru.bitcoin.node.storage.utxo.RocksDbUtxoStore;
+
 import java.util.*;
 
-/** Application entry point for block and transaction admission. The caller owns
+/**
+ * Application entry point for block and transaction admission. The caller owns
  * the database lifetime and must not mutate these stores through another processor.
  */
 public final class NodeValidationService {
@@ -32,9 +34,16 @@ public final class NodeValidationService {
     private BlockIndex poolTip;
     private long revision;
 
-    public long revision() { synchronized (chain) { synchronizePool(); return revision; } }
+    public long revision() {
+        synchronized (chain) {
+            synchronizePool();
+            return revision;
+        }
+    }
 
-    public record MiningSnapshot(Block block, List<MempoolEntry> entries, long height, long medianTimePast, long revision) { }
+    public record MiningSnapshot(Block block, List<MempoolEntry> entries, long height, long medianTimePast,
+                                 long revision) {
+    }
 
     public MiningSnapshot miningSnapshot(byte[] payout, byte[] extraNonce, long weight, FeeRate feeRate) {
         synchronized (chain) {
@@ -61,7 +70,28 @@ public final class NodeValidationService {
         }
     }
 
-    /** Only returns active-chain headers, in forward order, bounded to the wire limit. */
+    /**
+     * Returns active-chain depth: tip=0, parent=1; empty for unknown/side-chain blocks.
+     */
+    public OptionalLong activeBlockDepth(Hash256 hash) {
+        Objects.requireNonNull(hash, "hash");
+        synchronized (chain) {
+            BlockIndex candidate = lookup.find(hash);
+            if (candidate == null) return OptionalLong.empty();
+            BlockIndex tip = chain.activeTip();
+            if (candidate.height() > tip.height()) return OptionalLong.empty();
+            BlockIndex cursor = tip;
+            while (cursor.height() > candidate.height()) {
+                cursor = Objects.requireNonNull(lookup.find(cursor.previousBlockHash()), "Missing active ancestor");
+            }
+            if (!cursor.hash().equals(hash)) return OptionalLong.empty();
+            return OptionalLong.of(tip.height() - candidate.height());
+        }
+    }
+
+    /**
+     * Only returns active-chain headers, in forward order, bounded to the wire limit.
+     */
     public List<ru.bitcoin.node.protocol.block.BlockHeader> headers(List<Hash256> locator, Hash256 stop) {
         synchronized (chain) {
             Set<Hash256> wanted = new HashSet<>(locator);
@@ -81,7 +111,9 @@ public final class NodeValidationService {
         }
     }
 
-    /** Returns the best active-chain block referenced by a peer locator, or empty when none matches. */
+    /**
+     * Returns the best active-chain block referenced by a peer locator, or empty when none matches.
+     */
     public Optional<Hash256> bestActiveLocator(List<Hash256> locator) {
         Objects.requireNonNull(locator, "locator");
         synchronized (chain) {
@@ -193,7 +225,9 @@ public final class NodeValidationService {
                 );
         coins = point -> utxos.find(point).map(coin -> new UtxoEntry(coin.amount(), coin.scriptPubKey(), coin.height(), coin.coinbase()));
         poolTip = chain.activeTip();
-        synchronized (chain) { mempool.revalidate(context(), coins, Set.of()); }
+        synchronized (chain) {
+            mempool.revalidate(context(), coins, Set.of());
+        }
     }
 
     public BlockProcessingResult processBlock(Block block) {
@@ -206,6 +240,7 @@ public final class NodeValidationService {
             return result;
         }
     }
+
     public MempoolEntry admit(Transaction transaction) {
         synchronized (chain) {
             synchronizePool();
@@ -216,9 +251,15 @@ public final class NodeValidationService {
             return entry;
         }
     }
+
     public List<MempoolEntry> mempoolEntries() {
-        synchronized (chain) { synchronizePool(); mempool.expire(); return mempool.entries(); }
+        synchronized (chain) {
+            synchronizePool();
+            mempool.expire();
+            return mempool.entries();
+        }
     }
+
     public List<MempoolEntry> admitPackage(List<Transaction> transactions) {
         synchronized (chain) {
             synchronizePool();
@@ -229,21 +270,29 @@ public final class NodeValidationService {
             return entries;
         }
     }
-    public BlockIndex activeTip() { synchronized (chain) { return chain.activeTip(); } }
 
-    /** Fresh template from one coherent chain/mempool snapshot. Does not search PoW. */
+    public BlockIndex activeTip() {
+        synchronized (chain) {
+            return chain.activeTip();
+        }
+    }
+
+    /**
+     * Fresh template from one coherent chain/mempool snapshot. Does not search PoW.
+     */
     public Block createMiningTemplate(byte[] payout, byte[] extraNonce, long maximumWeight, FeeRate minimumRate) {
         synchronized (chain) {
             synchronizePool();
             mempool.expire();
             var parent = chain.activeTip();
             long now = time.currentTimeSeconds();
-            long timestamp = Math.max(now, Math.addExact(MedianTimePast.calculate(parent,lookup),1));
-            if (timestamp > Math.addExact(now,7200)) throw new IllegalStateException("Chain time too far ahead of local time");
+            long timestamp = Math.max(now, Math.addExact(MedianTimePast.calculate(parent, lookup), 1));
+            if (timestamp > Math.addExact(now, 7200))
+                throw new IllegalStateException("Chain time too far ahead of local time");
             var blockTime = new ru.bitcoin.node.common.types.UInt32(timestamp);
-            var bits = ChainHeaderValidator.nextBits(parent,lookup,parameters,blockTime);
-            return ru.bitcoin.node.mining.BlockTemplateBuilder.fromMempool(parent,lookup,utxos,parameters,
-                    0x20000000,blockTime,bits,payout,extraNonce,mempool.entries(),maximumWeight,minimumRate);
+            var bits = ChainHeaderValidator.nextBits(parent, lookup, parameters, blockTime);
+            return ru.bitcoin.node.mining.BlockTemplateBuilder.fromMempool(parent, lookup, utxos, parameters,
+                    0x20000000, blockTime, bits, payout, extraNonce, mempool.entries(), maximumWeight, minimumRate);
         }
     }
 
@@ -253,6 +302,7 @@ public final class NodeValidationService {
         return new MempoolValidationContext(Math.addExact(tip.height(), 1), MedianTimePast.calculate(tip, lookup),
                 resolver::resolvePreviousMedianTimePast);
     }
+
     private void synchronizePool() {
         BlockIndex tip = chain.activeTip();
         if (tip.hash().equals(poolTip.hash())) return;
@@ -270,6 +320,7 @@ public final class NodeValidationService {
         revision++;
         chain.notifyAll();
     }
+
     private Block requireBlock(BlockIndex index) {
         return blocks.find(index.hash()).orElseThrow(() -> new IllegalStateException("Missing chain-update block: " + index.hash()));
     }
