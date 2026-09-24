@@ -37,6 +37,11 @@ public final class RocksDbBlockFailureStore
     }
 
     @Override
+    public long revision() {
+        return database.namespaceVersion(FAILED_BLOCK_PREFIX);
+    }
+
+    @Override
     public boolean isFailed(
             Hash256 hash
     ) {

@@ -20,6 +20,7 @@ public final class RocksDbDatabase
 
     private final Options options;
     private final RocksDB database;
+    private final long[] namespaceVersions = new long[256];
 
     private boolean closed;
 
@@ -58,7 +59,7 @@ public final class RocksDbDatabase
         }
     }
 
-    public void put(
+    public synchronized void put(
             byte[] key,
             byte[] value
     ) {
@@ -81,6 +82,7 @@ public final class RocksDbDatabase
                     key,
                     value
             );
+            if (key.length > 0) namespaceVersions[Byte.toUnsignedInt(key[0])]++;
         } catch (RocksDBException e) {
             throw new IllegalStateException(
                     "Failed to write RocksDB value",
@@ -112,7 +114,7 @@ public final class RocksDbDatabase
         }
     }
 
-    public void delete(
+    public synchronized void delete(
             byte[] key
     ) {
         ensureOpen();
@@ -127,6 +129,7 @@ public final class RocksDbDatabase
             database.delete(
                     key
             );
+            if (key.length > 0) namespaceVersions[Byte.toUnsignedInt(key[0])]++;
         } catch (RocksDBException e) {
             throw new IllegalStateException(
                     "Failed to delete RocksDB value",
@@ -142,7 +145,7 @@ public final class RocksDbDatabase
      * When this method returns successfully, RocksDB has requested
      * that the write be synchronously flushed to durable storage.
      */
-    public void write(
+    public synchronized void write(
             RocksDbWriteBatch batch
     ) {
         ensureOpen();
@@ -161,6 +164,10 @@ public final class RocksDbDatabase
                     writeOptions,
                     batch.nativeBatch()
             );
+            var prefixes = batch.changedPrefixes();
+            for (int prefix = prefixes.nextSetBit(0); prefix >= 0; prefix = prefixes.nextSetBit(prefix + 1)) {
+                namespaceVersions[prefix]++;
+            }
 
         } catch (RocksDBException e) {
 
@@ -169,6 +176,12 @@ public final class RocksDbDatabase
                     e
             );
         }
+    }
+
+    /** Process-local generation, published only after successful writes. */
+    public synchronized long namespaceVersion(byte prefix) {
+        ensureOpen();
+        return namespaceVersions[Byte.toUnsignedInt(prefix)];
     }
 
     /** Checks logical contents, including every store sharing this database. */

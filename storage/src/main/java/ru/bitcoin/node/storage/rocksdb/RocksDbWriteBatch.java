@@ -7,6 +7,7 @@ public final class RocksDbWriteBatch
         implements AutoCloseable {
 
     private final WriteBatch batch;
+    private final java.util.BitSet changedPrefixes = new java.util.BitSet(256);
 
     private boolean closed;
 
@@ -37,6 +38,7 @@ public final class RocksDbWriteBatch
                     key,
                     value
             );
+            if (key.length > 0) changedPrefixes.set(Byte.toUnsignedInt(key[0]));
         } catch (RocksDBException e) {
             throw new IllegalStateException(
                     "Failed to add put operation to RocksDB batch",
@@ -60,6 +62,7 @@ public final class RocksDbWriteBatch
             batch.delete(
                     key
             );
+            if (key.length > 0) changedPrefixes.set(Byte.toUnsignedInt(key[0]));
         } catch (RocksDBException e) {
             throw new IllegalStateException(
                     "Failed to add delete operation to RocksDB batch",
@@ -71,6 +74,11 @@ public final class RocksDbWriteBatch
     WriteBatch nativeBatch() {
         ensureOpen();
         return batch;
+    }
+
+    java.util.BitSet changedPrefixes() {
+        ensureOpen();
+        return (java.util.BitSet) changedPrefixes.clone();
     }
 
     private void ensureOpen() {
