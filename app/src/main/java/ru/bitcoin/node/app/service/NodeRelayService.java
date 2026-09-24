@@ -39,6 +39,8 @@ public final class NodeRelayService implements AutoCloseable {
     private final Set<Peer> attached = ConcurrentHashMap.newKeySet();
     private final Map<Peer, PeerOutbound> outbound = new ConcurrentHashMap<>();
     private final Map<Peer, BlockAnnouncementState> blockAnnouncements = new ConcurrentHashMap<>();
+    private final Map<Peer, LinkedHashMap<Hash256, PendingCompactBlock>> pendingCompactBlocks = new ConcurrentHashMap<>();
+    private final Deque<Peer> highBandwidthCompactPeers = new ArrayDeque<>();
     private final AtomicLong queuedBytes = new AtomicLong();
     private final ScheduledExecutorService sendTimeouts = Executors.newSingleThreadScheduledExecutor(
             Thread.ofPlatform().daemon().name("bitcoin-relay-send-timeout").factory());
@@ -56,11 +58,18 @@ public final class NodeRelayService implements AutoCloseable {
     private static final int MAX_CMPCTBLOCK_DEPTH = 5;
     private static final int MAX_BLOCKTXN_DEPTH = 10;
     private static final long CMPCTBLOCKS_VERSION = 2;
+    // BIP152/Core keeps at most three peers in high-bandwidth announcement mode.
+    private static final int MAX_HIGH_BANDWIDTH_COMPACT_PEERS = 3;
+    private static final int MAX_PENDING_COMPACT_BLOCKS_PER_PEER = 16;
+    private static final long COMPACT_BLOCK_TIMEOUT_NANOS = Duration.ofSeconds(30).toNanos();
     private final PeerMessageListener messages = this::enqueue;
     private final Consumer<Peer> connections = this::attach;
     private volatile boolean closed;
 
     private record Orphan(Transaction transaction, long expires) {
+    }
+
+    private record PendingCompactBlock(CompactBlockReconstruction.Partial partial, long expires) {
     }
 
     /**
@@ -85,7 +94,10 @@ public final class NodeRelayService implements AutoCloseable {
         if (closed) return;
         try {
             worker.execute(() -> {
-                if (!closed) dispatchTransactionRequests();
+                if (!closed) {
+                    dispatchTransactionRequests();
+                    expireCompactBlocks();
+                }
             });
         } catch (RejectedExecutionException ignored) {
             // Service is closing or inbound work is temporarily saturated.
@@ -96,19 +108,23 @@ public final class NodeRelayService implements AutoCloseable {
         if (!closed && attached.add(peer)) {
             outbound.computeIfAbsent(peer, PeerOutbound::new);
             blockAnnouncements.computeIfAbsent(peer, ignored -> new BlockAnnouncementState());
+            pendingCompactBlocks.computeIfAbsent(peer, ignored -> new LinkedHashMap<>());
             peer.addMessageListener(messages);
+
             peer.addCloseListener((source, cause) -> {
                 source.removeMessageListener(messages);
                 attached.remove(source);
                 PeerOutbound sender = outbound.remove(source);
                 blockAnnouncements.remove(source);
+                pendingCompactBlocks.remove(source);
+                removeHighBandwidthCompactPeer(source);
                 if (sender != null) sender.shutdownNow();
             });
         }
     }
 
     private void enqueue(Peer peer, BitcoinMessage message) {
-        if (closed || !Set.of("inv", "tx", "getdata", "getheaders", "notfound", "sendheaders", "sendcmpct", "getblocktxn").contains(message.command()))
+        if (closed || !Set.of("inv", "tx", "getdata", "getheaders", "notfound", "sendheaders", "sendcmpct", "cmpctblock", "getblocktxn", "blocktxn").contains(message.command()))
             return;
         long bytes = message.payloadLength();
         if (queuedBytes.addAndGet(bytes) > MAX_QUEUED_INBOUND_BYTES) {
@@ -134,6 +150,7 @@ public final class NodeRelayService implements AutoCloseable {
     }
 
     private void handle(Peer peer, BitcoinMessage message) throws IOException {
+        expireCompactBlocks();
         PeerConnectionRole role = peers.roleOf(peer);
         switch (message.command()) {
             case "inv" -> {
@@ -175,7 +192,11 @@ public final class NodeRelayService implements AutoCloseable {
                     }
                 }
             }
+            case "cmpctblock" ->
+                    receiveCompactBlock(peer, BitcoinMessages.decodeCompactBlock(message, CMPCTBLOCKS_VERSION));
             case "getblocktxn" -> queueGetBlockTxn(peer, BitcoinMessages.decodeGetBlockTxn(message));
+            case "blocktxn" ->
+                    receiveBlockTransactions(peer, BitcoinMessages.decodeBlockTxn(message, CMPCTBLOCKS_VERSION));
             case "notfound" -> {
                 for (var vector : BitcoinMessages.decodeNotFound(message).inventory()) {
                     transactionRequests.notFound(peer, vector.hash());
@@ -184,6 +205,117 @@ public final class NodeRelayService implements AutoCloseable {
             }
             default -> {
             }
+        }
+    }
+
+    private void promoteHighBandwidthCompactPeer(Peer peer) {
+        BlockAnnouncementState state = blockAnnouncements.get(peer);
+        if (state == null || !state.providesCompactBlocks || closed) return;
+
+        Peer demoted = null;
+        synchronized (highBandwidthCompactPeers) {
+            if (highBandwidthCompactPeers.remove(peer)) {
+                highBandwidthCompactPeers.addLast(peer);
+                return;
+            }
+            if (highBandwidthCompactPeers.size() >= MAX_HIGH_BANDWIDTH_COMPACT_PEERS) {
+                demoted = highBandwidthCompactPeers.removeFirst();
+            }
+            highBandwidthCompactPeers.addLast(peer);
+        }
+        if (demoted != null && demoted.isReady()) {
+            send(demoted, BitcoinMessages.sendCmpct(new SendCmpctMessage(false, CMPCTBLOCKS_VERSION)));
+        }
+        send(peer, BitcoinMessages.sendCmpct(new SendCmpctMessage(true, CMPCTBLOCKS_VERSION)));
+    }
+
+    private void removeHighBandwidthCompactPeer(Peer peer) {
+        synchronized (highBandwidthCompactPeers) {
+            highBandwidthCompactPeers.remove(peer);
+        }
+    }
+
+    private void receiveCompactBlock(Peer peer, CompactBlockMessage compact) {
+        Hash256 hash = compact.header().hash();
+        if (validation.findBlock(hash).isPresent()) return;
+
+        // A compact block carries a real block header. Feed it through the existing header
+        // validation/index pipeline before accepting any reconstructed body.
+        sync.headerSyncService().process(new HeadersMessage(List.of(compact.header())));
+
+        List<Transaction> candidates = validation.mempoolEntries().stream()
+                .map(entry -> entry.transaction()).toList();
+        CompactBlockReconstruction.Partial partial =
+                CompactBlockReconstruction.initialize(compact, candidates, CMPCTBLOCKS_VERSION);
+        if (partial.complete()) {
+            processReconstructedBlock(peer, partial.toBlock());
+            return;
+        }
+
+        LinkedHashMap<Hash256, PendingCompactBlock> byHash = pendingCompactBlocks.get(peer);
+        if (byHash == null) return;
+        synchronized (byHash) {
+            byHash.put(hash, new PendingCompactBlock(partial,
+                    System.nanoTime() + COMPACT_BLOCK_TIMEOUT_NANOS));
+            while (byHash.size() > MAX_PENDING_COMPACT_BLOCKS_PER_PEER) {
+                Iterator<Hash256> iterator = byHash.keySet().iterator();
+                iterator.next();
+                iterator.remove();
+            }
+        }
+        send(peer, BitcoinMessages.getBlockTxn(new BlockTransactionsRequest(hash, partial.missingIndexes())));
+    }
+
+    private void receiveBlockTransactions(Peer peer, BlockTransactionsMessage response) {
+        LinkedHashMap<Hash256, PendingCompactBlock> byHash = pendingCompactBlocks.get(peer);
+        if (byHash == null) return;
+        PendingCompactBlock pending;
+        synchronized (byHash) {
+            pending = byHash.remove(response.blockHash());
+        }
+        if (pending == null) return;
+        if (pending.expires() < System.nanoTime()) {
+            requestFullBlock(peer, response.blockHash());
+            return;
+        }
+        try {
+            processReconstructedBlock(peer, pending.partial().fill(response.transactions()));
+        } catch (IllegalArgumentException | IllegalStateException exception) {
+            // Reconstruction failure is not enough to blame the peer: mempool contents may have
+            // changed or short IDs may have collided. Fall back to an ordinary witness block.
+            requestFullBlock(peer, response.blockHash());
+        }
+    }
+
+    private void processReconstructedBlock(Peer source, Block block) {
+        BlockProcessingResult result = validation.processBlock(block);
+        if (result == BlockProcessingResult.CONNECTED) {
+            promoteHighBandwidthCompactPeer(source);
+            relayConnectedBlock(block, source);
+        }
+    }
+
+    private void requestFullBlock(Peer peer, Hash256 hash) {
+        send(peer, BitcoinMessages.getData(new GetDataMessage(List.of(
+                new InventoryVector(InventoryVector.MSG_WITNESS_BLOCK, hash)))));
+    }
+
+    private void expireCompactBlocks() {
+        long now = System.nanoTime();
+        for (var entry : pendingCompactBlocks.entrySet()) {
+            LinkedHashMap<Hash256, PendingCompactBlock> byHash = entry.getValue();
+            List<Hash256> expired = new ArrayList<>();
+            synchronized (byHash) {
+                Iterator<Map.Entry<Hash256, PendingCompactBlock>> iterator = byHash.entrySet().iterator();
+                while (iterator.hasNext()) {
+                    var pending = iterator.next();
+                    if (pending.getValue().expires() <= now) {
+                        expired.add(pending.getKey());
+                        iterator.remove();
+                    }
+                }
+            }
+            for (Hash256 hash : expired) requestFullBlock(entry.getKey(), hash);
         }
     }
 
@@ -499,6 +631,10 @@ public final class NodeRelayService implements AutoCloseable {
         attached.clear();
         outbound.clear();
         blockAnnouncements.clear();
+        pendingCompactBlocks.clear();
+        synchronized (highBandwidthCompactPeers) {
+            highBandwidthCompactPeers.clear();
+        }
         sendTimeouts.shutdownNow();
     }
 

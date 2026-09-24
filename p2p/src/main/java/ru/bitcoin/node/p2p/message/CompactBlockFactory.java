@@ -16,24 +16,35 @@ public final class CompactBlockFactory {
         Objects.requireNonNull(block, "block");
         if (block.transactions().isEmpty()) throw new IllegalArgumentException("block has no transactions");
         if (version != 1 && version != 2) throw new IllegalArgumentException("version");
-        byte[] keyMaterial = keyMaterial(block, nonce);
+        byte[] keyMaterial = keyMaterial(block.header(), nonce);
         long k0 = read64(keyMaterial, 0), k1 = read64(keyMaterial, 8);
         List<Long> ids = new ArrayList<>();
         for (int i = 1; i < block.transactions().size(); i++) {
             Transaction tx = block.transactions().get(i);
-            byte[] hash = (version == 2 ? tx.wtxId() : tx.txId()).bytes();
-            ids.add(SipHash24.hash(k0, k1, hash) & CompactBlockMessage.SHORT_ID_MASK);
+            ids.add(shortId(k0, k1, tx, version));
         }
         return new CompactBlockMessage(block.header(), nonce, ids, List.of(new PrefilledTransaction(0, block.transactions().getFirst())));
     }
 
-    public static byte[] keyMaterial(Block b, long nonce) {
+    public static byte[] keyMaterial(ru.bitcoin.node.protocol.block.BlockHeader header, long nonce) {
+        Objects.requireNonNull(header, "header");
         var o = new ByteArrayOutputStream();
-        o.writeBytes(BlockHeaderSerializer.serialize(b.header()));
+        o.writeBytes(BlockHeaderSerializer.serialize(header));
         byte[] n = new byte[8];
         for (int i = 0; i < 8; i++) n[i] = (byte) (nonce >>> (8 * i));
         o.writeBytes(n);
         return Sha256.hash(o.toByteArray());
+    }
+
+    public static long shortId(ru.bitcoin.node.protocol.block.BlockHeader header, long nonce, Transaction transaction, long version) {
+        byte[] keyMaterial = keyMaterial(header, nonce);
+        return shortId(read64(keyMaterial, 0), read64(keyMaterial, 8), transaction, version);
+    }
+
+    private static long shortId(long k0, long k1, Transaction transaction, long version) {
+        if (version != 1 && version != 2) throw new IllegalArgumentException("version");
+        byte[] hash = (version == 2 ? transaction.wtxId() : transaction.txId()).bytes();
+        return SipHash24.hash(k0, k1, hash) & CompactBlockMessage.SHORT_ID_MASK;
     }
 
     private static long read64(byte[] b, int o) {

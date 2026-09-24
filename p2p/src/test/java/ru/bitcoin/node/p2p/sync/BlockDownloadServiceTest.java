@@ -309,6 +309,15 @@ class BlockDownloadServiceTest {
                 sendAddrV2.command()
         );
 
+        BitcoinMessage sendCmpct =
+                reader.read(input)
+                        .orElseThrow();
+
+        assertEquals(
+                "sendcmpct",
+                sendCmpct.command()
+        );
+
         BitcoinMessage verack =
                 reader.read(
                         input

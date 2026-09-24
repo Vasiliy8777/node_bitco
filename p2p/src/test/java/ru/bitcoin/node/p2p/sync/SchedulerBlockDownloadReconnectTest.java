@@ -465,6 +465,16 @@ class SchedulerBlockDownloadReconnectTest {
         );
 
         assertEquals(
+                "sendcmpct",
+                io.reader()
+                        .read(
+                                io.input()
+                        )
+                        .orElseThrow()
+                        .command()
+        );
+
+        assertEquals(
                 "verack",
                 io.reader()
                         .read(

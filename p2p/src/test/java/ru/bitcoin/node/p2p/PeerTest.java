@@ -175,8 +175,18 @@ class PeerTest {
                                                     .orElseThrow();
 
                                     assertEquals(
-                                            "verack",
+                                            "sendcmpct",
                                             next.command()
+                                    );
+
+                                    BitcoinMessage verack =
+                                            io.reader()
+                                                    .read(io.input())
+                                                    .orElseThrow();
+
+                                    assertEquals(
+                                            "verack",
+                                            verack.command()
                                     );
 
                                     io.output().write(
@@ -487,6 +497,16 @@ class PeerTest {
                     sendAddrV2.command()
             );
 
+            BitcoinMessage sendCmpct =
+                    io.reader()
+                            .read(io.input())
+                            .orElseThrow();
+
+            assertEquals(
+                    "sendcmpct",
+                    sendCmpct.command()
+            );
+
             assertEquals(
                     0,
                     sendAddrV2.payloadLength()
@@ -668,6 +688,14 @@ class PeerTest {
                                     );
 
                                     assertEquals(
+                                            "sendcmpct",
+                                            io.reader()
+                                                    .read(io.input())
+                                                    .orElseThrow()
+                                                    .command()
+                                    );
+
+                                    assertEquals(
                                             "verack",
                                             io.reader()
                                                     .read(io.input())
@@ -842,6 +870,14 @@ class PeerTest {
 
                                     assertEquals(
                                             "sendaddrv2",
+                                            io.reader()
+                                                    .read(io.input())
+                                                    .orElseThrow()
+                                                    .command()
+                                    );
+
+                                    assertEquals(
+                                            "sendcmpct",
                                             io.reader()
                                                     .read(io.input())
                                                     .orElseThrow()
@@ -1230,6 +1266,14 @@ class PeerTest {
 
                                     assertEquals(
                                             "sendaddrv2",
+                                            io.reader()
+                                                    .read(io.input())
+                                                    .orElseThrow()
+                                                    .command()
+                                    );
+
+                                    assertEquals(
+                                            "sendcmpct",
                                             io.reader()
                                                     .read(io.input())
                                                     .orElseThrow()

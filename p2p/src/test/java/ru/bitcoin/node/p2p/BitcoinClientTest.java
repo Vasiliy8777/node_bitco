@@ -134,6 +134,8 @@ class BitcoinClientTest {
 
                     assertEquals("wtxidrelay", io.reader().read(io.input()).orElseThrow().command());
                     assertEquals("sendaddrv2", io.reader().read(io.input()).orElseThrow().command());
+
+                    assertEquals("sendcmpct", io.reader().read(io.input()).orElseThrow().command());
                     assertEquals("verack", io.reader().read(io.input()).orElseThrow().command());
                     io.output().write(io.encoder().encode(BitcoinMessages.wtxidRelay()));
                     io.output().write(io.encoder().encode(BitcoinMessages.sendAddrV2()));
@@ -246,6 +248,16 @@ class BitcoinClientTest {
             assertEquals(
                     "sendaddrv2",
                     sendAddrV2.command()
+            );
+
+            BitcoinMessage sendCmpct =
+                    io.reader()
+                            .read(io.input())
+                            .orElseThrow();
+
+            assertEquals(
+                    "sendcmpct",
+                    sendCmpct.command()
             );
 
             BitcoinMessage verack =

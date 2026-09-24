@@ -22,6 +22,7 @@ public final class Peer implements AutoCloseable {
     public void removeMessageListener(PeerMessageListener listener) {
         messageListeners.remove(listener);
     }
+
     private final List<PeerCloseListener> closeListeners =
             new CopyOnWriteArrayList<>();
     private final List<PeerInventoryListener> inventoryListeners =
@@ -34,6 +35,8 @@ public final class Peer implements AutoCloseable {
     private final PeerMessageReader messageReader;
     private static final int WTXID_RELAY_VERSION =
             70016;
+    private static final int SHORT_IDS_BLOCKS_VERSION = 70014;
+    private static final long CMPCTBLOCKS_VERSION = 2L;
     private boolean remoteWtxidRelay;
 
     private boolean remoteWantsAddrV2;
@@ -507,6 +510,31 @@ public final class Peer implements AutoCloseable {
             localSendAddrV2Sent =
                     true;
         }
+
+        if (commonVersion >= SHORT_IDS_BLOCKS_VERSION) {
+
+            /*
+             * BIP152:
+             *
+             * Advertise support for compact block version 2.
+             *
+             * announce=false means low-bandwidth mode:
+             * the peer must not automatically announce every new
+             * block to us with CMPCTBLOCK.
+             *
+             * High-bandwidth mode is enabled later by
+             * NodeRelayService only after a valid compact-block
+             * reconstruction from that peer.
+             */
+            connection.send(
+                    BitcoinMessages.sendCmpct(
+                            new SendCmpctMessage(
+                                    false,
+                                    CMPCTBLOCKS_VERSION
+                            )
+                    )
+            );
+        }
     }
 
     private void handleVerack(
@@ -605,20 +633,17 @@ public final class Peer implements AutoCloseable {
 
         switch (message.command()) {
 
-            case "ping" ->
-                    handlePing(
-                            message
-                    );
+            case "ping" -> handlePing(
+                    message
+            );
 
-            case "pong" ->
-                    handlePong(
-                            message
-                    );
+            case "pong" -> handlePong(
+                    message
+            );
 
-            case "inv" ->
-                    handleInv(
-                            message
-                    );
+            case "inv" -> handleInv(
+                    message
+            );
 
             default -> {
                 /*

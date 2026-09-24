@@ -5986,6 +5986,13 @@ class BlockSyncCoordinatorTest {
         );
 
         assertEquals(
+                "sendcmpct",
+                reader.read(input)
+                        .orElseThrow()
+                        .command()
+        );
+
+        assertEquals(
                 "verack",
                 reader.read(input)
                         .orElseThrow()
@@ -6185,6 +6192,13 @@ class BlockSyncCoordinatorTest {
 
         assertEquals(
                 "sendaddrv2",
+                reader.read(input)
+                        .orElseThrow()
+                        .command()
+        );
+
+        assertEquals(
+                "sendcmpct",
                 reader.read(input)
                         .orElseThrow()
                         .command()

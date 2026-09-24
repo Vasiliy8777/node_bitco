@@ -52,6 +52,35 @@ class Bip152WireCodecTest {
     }
 
     @Test
+    void compactBlockReconstructionUsesMempoolAndRequestsOnlyMissingIndexes() {
+        var coinbase = tx(false);
+        var known = tx(true);
+        var missing = new Transaction(2,
+                List.of(new TxIn(new OutPoint(Hash256.fromDisplayHex("04".repeat(32)), new UInt32(2)),
+                        new byte[]{0x51}, TxIn.FINAL_SEQUENCE, new Witness(List.of(new byte[]{9})))),
+                List.of(new TxOut(2000, new byte[]{0x51})), new UInt32(0));
+        var block = new Block(header(), List.of(coinbase, known, missing));
+        var compact = CompactBlockFactory.create(block, 1234L, 2);
+
+        var partial = CompactBlockReconstruction.initialize(compact, List.of(known), 2);
+        assertFalse(partial.complete());
+        assertEquals(List.of(2), partial.missingIndexes());
+        assertEquals(block, partial.fill(List.of(missing)));
+    }
+
+    @Test
+    void compactBlockReconstructionCompletesWhenAllShortIdsAreKnown() {
+        var coinbase = tx(false);
+        var known = tx(true);
+        var block = new Block(header(), List.of(coinbase, known));
+        var compact = CompactBlockFactory.create(block, 5678L, 2);
+
+        var partial = CompactBlockReconstruction.initialize(compact, List.of(known), 2);
+        assertTrue(partial.complete());
+        assertEquals(block, partial.toBlock());
+    }
+
+    @Test
     void blockTransactionsVersion2RoundTrips() {
         var m = new BlockTransactionsMessage(Hash256.fromDisplayHex("22".repeat(32)), List.of(tx(true), tx(false)));
         var d = BlockTransactionsMessageCodec.decode(BlockTransactionsMessageCodec.encode(m, 2), 2);

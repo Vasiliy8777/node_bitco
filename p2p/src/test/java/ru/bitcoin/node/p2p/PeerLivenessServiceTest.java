@@ -143,6 +143,8 @@ class PeerLivenessServiceTest {
 
         assertEquals("wtxidrelay", io.reader().read(io.input()).orElseThrow().command());
         assertEquals("sendaddrv2", io.reader().read(io.input()).orElseThrow().command());
+
+        assertEquals("sendcmpct", io.reader().read(io.input()).orElseThrow().command());
         assertEquals("verack", io.reader().read(io.input()).orElseThrow().command());
 
         io.output().write(io.encoder().encode(BitcoinMessages.wtxidRelay()));

@@ -626,6 +626,8 @@ class OutboundPeerSupervisorTest {
 
             assertEquals("wtxidrelay", reader.read(input).orElseThrow().command());
             assertEquals("sendaddrv2", reader.read(input).orElseThrow().command());
+
+            assertEquals("sendcmpct", reader.read(input).orElseThrow().command());
             assertEquals("verack", reader.read(input).orElseThrow().command());
             output.write(encoder.encode(BitcoinMessages.wtxidRelay()));
             output.write(encoder.encode(BitcoinMessages.sendAddrV2()));
@@ -693,6 +695,8 @@ class OutboundPeerSupervisorTest {
 
             assertEquals("wtxidrelay", reader.read(input).orElseThrow().command());
             assertEquals("sendaddrv2", reader.read(input).orElseThrow().command());
+
+            assertEquals("sendcmpct", reader.read(input).orElseThrow().command());
             assertEquals("verack", reader.read(input).orElseThrow().command());
 
             output.write(encoder.encode(BitcoinMessages.wtxidRelay()));
@@ -868,6 +872,13 @@ class OutboundPeerSupervisorTest {
 
         assertEquals(
                 "sendaddrv2",
+                reader.read(input)
+                        .orElseThrow()
+                        .command()
+        );
+
+        assertEquals(
+                "sendcmpct",
                 reader.read(input)
                         .orElseThrow()
                         .command()

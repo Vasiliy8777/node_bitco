@@ -133,8 +133,8 @@ class OutboundPeerManagerTest {
              * Add the replacement address immediately after observing
              * that first attempt.
              */
-            CompletableFuture<Void> addSuccessfulAddress =
-                    CompletableFuture.runAsync(
+            CompletableFuture<ru.bitcoin.node.p2p.address.KnownPeerAddress> failedAttempt =
+                    CompletableFuture.supplyAsync(
                             () -> {
 
                                 long deadline =
@@ -163,7 +163,7 @@ class OutboundPeerManagerTest {
                                                 )
                                         );
 
-                                        return;
+                                        return known.get();
                                     }
 
                                     Thread.onSpinWait();
@@ -182,10 +182,11 @@ class OutboundPeerManagerTest {
                                 100
                         );
 
-                addSuccessfulAddress.get(
-                        5,
-                        TimeUnit.SECONDS
-                );
+                var failedKnown =
+                        failedAttempt.get(
+                                5,
+                                TimeUnit.SECONDS
+                        );
 
                 assertTrue(
                         peer.isReady()
@@ -201,11 +202,6 @@ class OutboundPeerManagerTest {
                         peerManager.readyPeers()
                                 .get(0)
                 );
-
-                var failedKnown =
-                        addressManager.find(
-                                failedAddress
-                        ).orElseThrow();
 
                 assertEquals(
                         1,
@@ -729,6 +725,13 @@ class OutboundPeerManagerTest {
                                 .orElseThrow()
                                 .command()
                 );
+
+                assertEquals(
+                        "sendcmpct",
+                        reader.read(input)
+                                .orElseThrow()
+                                .command()
+                );
             }
 
             assertEquals(
@@ -860,6 +863,13 @@ class OutboundPeerManagerTest {
 
             assertEquals(
                     "sendaddrv2",
+                    reader.read(input)
+                            .orElseThrow()
+                            .command()
+            );
+
+            assertEquals(
+                    "sendcmpct",
                     reader.read(input)
                             .orElseThrow()
                             .command()

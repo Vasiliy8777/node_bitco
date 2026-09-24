@@ -4,6 +4,8 @@ public final class VersionMessage {
 
     public static final int CURRENT_PROTOCOL_VERSION = 70017;
     public static final int MIN_PEER_PROTOCOL_VERSION = 31800;
+    /** BIP152 compact block relay was introduced for protocol version 70014. */
+    public static final int SHORT_IDS_BLOCKS_VERSION = 70014;
 
     public static final long NODE_NETWORK = 1L << 0;
     public static final long NODE_WITNESS = 1L << 3;

@@ -188,6 +188,16 @@ class PeerIdleConnectionTest {
                     sendAddrV2.command()
             );
 
+            BitcoinMessage sendCmpct =
+                    io.reader()
+                            .read(io.input())
+                            .orElseThrow();
+
+            assertEquals(
+                    "sendcmpct",
+                    sendCmpct.command()
+            );
+
             BitcoinMessage verack =
                     io.reader()
                             .read(

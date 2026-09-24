@@ -695,6 +695,13 @@ class NodeLifecycleServiceTest {
         );
 
         assertEquals(
+                "sendcmpct",
+                reader.read(input)
+                        .orElseThrow()
+                        .command()
+        );
+
+        assertEquals(
                 "verack",
                 reader.read(input)
                         .orElseThrow()
