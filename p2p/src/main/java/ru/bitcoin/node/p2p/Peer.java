@@ -713,6 +713,13 @@ public final class Peer implements AutoCloseable {
         }
     }
 
+    boolean isPingDue(long nowNanos, long intervalNanos) {
+        synchronized (pingLock) {
+            return isReady() && pingNonceSent == 0L
+                    && (lastPingNanos == 0L || nowNanos - lastPingNanos >= intervalNanos);
+        }
+    }
+
     boolean sendPingIfDue(
             long nowNanos,
             long intervalNanos,
@@ -723,19 +730,16 @@ public final class Peer implements AutoCloseable {
         }
 
         synchronized (pingLock) {
-            if (!isReady() || pingNonceSent != 0L) {
-                return false;
-            }
-            if (lastPingNanos != 0L && nowNanos - lastPingNanos < intervalNanos) {
-                return false;
-            }
+            if (!isPingDue(nowNanos, intervalNanos)) return false;
 
-            connection.send(BitcoinMessages.ping(new PingMessage(nonce)));
+            // Publish before writing: a fast pong may arrive before send returns.
+            // Never hold pingLock across socket I/O; timeout checks must remain available.
             pingNonceSent = nonce;
             pingStartNanos = nowNanos;
             lastPingNanos = nowNanos;
-            return true;
         }
+        connection.send(BitcoinMessages.ping(new PingMessage(nonce)));
+        return true;
     }
 
     boolean pingTimedOut(long nowNanos, long timeoutNanos) {

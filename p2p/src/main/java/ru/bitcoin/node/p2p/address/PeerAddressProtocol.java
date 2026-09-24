@@ -37,14 +37,23 @@ public final class PeerAddressProtocol
 
     private final PeerAddressManager addressManager;
     private final PeerManager peerManager;
+    private final java.util.function.LongSupplier nanoTime;
+    // Weak keys avoid retaining disconnected Peer instances; values never reference the peer.
+    private final java.util.Map<Peer, AddressRelayBudget> budgets = new java.util.WeakHashMap<>();
 
     public PeerAddressProtocol(PeerAddressManager addressManager) {
         this(addressManager, null);
     }
 
     public PeerAddressProtocol(PeerAddressManager addressManager, PeerManager peerManager) {
+        this(addressManager, peerManager, System::nanoTime);
+    }
+
+    PeerAddressProtocol(PeerAddressManager addressManager, PeerManager peerManager,
+                        java.util.function.LongSupplier nanoTime) {
         this.addressManager = Objects.requireNonNull(addressManager, "addressManager");
         this.peerManager = peerManager;
+        this.nanoTime = Objects.requireNonNull(nanoTime, "nanoTime");
     }
 
     @Override
@@ -69,6 +78,8 @@ public final class PeerAddressProtocol
         }
 
         try {
+            if ((message.command().equals("addr") || message.command().equals("addrv2"))
+                    && !budget(peer).allowMessage(nanoTime.getAsLong())) return;
 
             switch (message.command()) {
 
@@ -99,7 +110,7 @@ public final class PeerAddressProtocol
 
             throw exception;
 
-        } catch (IllegalArgumentException exception) {
+        } catch (IllegalArgumentException | IndexOutOfBoundsException exception) {
 
             throw new PeerAddressProtocolException(
                     "Invalid "
@@ -117,7 +128,8 @@ public final class PeerAddressProtocol
 
         handleAddr(
                 sourceOf(peer),
-                message
+                message,
+                budget(peer)
         );
     }
 
@@ -128,13 +140,15 @@ public final class PeerAddressProtocol
 
         handleAddrV2(
                 sourceOf(peer),
-                message
+                message,
+                budget(peer)
         );
     }
 
     private void handleAddr(
             PeerAddressSource source,
-            BitcoinMessage message
+            BitcoinMessage message,
+            AddressRelayBudget budget
     ) {
 
         AddrMessage addrMessage =
@@ -145,8 +159,10 @@ public final class PeerAddressProtocol
         Instant receivedAt =
                 Instant.now();
 
+        int remaining = budget.takeAddresses(addrMessage.size(), nanoTime.getAsLong());
         for (AddrEntry entry :
                 addrMessage.addresses()) {
+            if (remaining-- == 0) break;
 
             PeerAddress peerAddress =
                     toPeerAddress(
@@ -166,7 +182,8 @@ public final class PeerAddressProtocol
 
     private void handleAddrV2(
             PeerAddressSource source,
-            BitcoinMessage message
+            BitcoinMessage message,
+            AddressRelayBudget budget
     ) {
 
         AddrV2Message addrV2Message =
@@ -177,8 +194,10 @@ public final class PeerAddressProtocol
         Instant receivedAt =
                 Instant.now();
 
+        int remaining = budget.takeAddresses(addrV2Message.addresses().size(), nanoTime.getAsLong());
         for (AddrV2Entry entry :
                 addrV2Message.addresses()) {
+            if (remaining-- == 0) break;
 
             PeerAddress peerAddress =
                     toPeerAddress(
@@ -193,6 +212,12 @@ public final class PeerAddressProtocol
                         receivedAt
                 );
             }
+        }
+    }
+
+    private AddressRelayBudget budget(Peer peer) {
+        synchronized (budgets) {
+            return budgets.computeIfAbsent(peer, ignored -> new AddressRelayBudget(nanoTime.getAsLong()));
         }
     }
 

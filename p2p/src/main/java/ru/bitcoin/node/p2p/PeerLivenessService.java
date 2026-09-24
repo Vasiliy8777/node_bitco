@@ -5,6 +5,9 @@ import java.security.SecureRandom;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.Random;
+import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Periodic BIP31 ping/pong liveness probing for managed READY peers.
@@ -19,6 +22,10 @@ public final class PeerLivenessService implements AutoCloseable {
     public static final Duration DEFAULT_PING_INTERVAL = Duration.ofMinutes(2);
     public static final Duration DEFAULT_PING_TIMEOUT = Duration.ofMinutes(20);
     public static final Duration DEFAULT_CHECK_INTERVAL = Duration.ofSeconds(1);
+    static final int MAX_PENDING_WRITES = 256;
+    private static final long WRITE_TIMEOUT_NANOS = Duration.ofSeconds(10).toNanos();
+
+    private final ConcurrentHashMap<Peer, PingWrite> pendingWrites = new ConcurrentHashMap<>();
 
     private final PeerManager peerManager;
     private final long pingIntervalNanos;
@@ -83,7 +90,14 @@ public final class PeerLivenessService implements AutoCloseable {
     }
 
     void checkPeers() {
+        if (stopping) return;
         long now = System.nanoTime();
+
+        pendingWrites.forEach((peer, write) -> {
+            if (now - write.started > Math.min(WRITE_TIMEOUT_NANOS, pingTimeoutNanos)) {
+                write.fail(peer, "Peer ping write timeout");
+            }
+        });
 
         for (Peer peer : peerManager.readyPeers()) {
             if (peer.pingTimedOut(now, pingTimeoutNanos)) {
@@ -91,10 +105,48 @@ public final class PeerLivenessService implements AutoCloseable {
                 continue;
             }
 
+            schedulePing(peer, now);
+        }
+    }
+
+    private synchronized void schedulePing(Peer peer, long now) {
+        if (stopping || pendingWrites.containsKey(peer)
+                || pendingWrites.size() >= MAX_PENDING_WRITES
+                || !peer.isPingDue(now, pingIntervalNanos)) return;
+        PingWrite write = new PingWrite(now);
+        long nonce = nextNonce();
+        pendingWrites.put(peer, write);
+        // Platform threads avoid pinning the Java 21 virtual-thread carrier in sendLock.
+        // There is no queued work, and each peer can occupy only one bounded slot.
+        Thread sender = new Thread(() -> {
             try {
-                peer.sendPingIfDue(now, pingIntervalNanos, nextNonce());
-            } catch (IOException failure) {
-                peer.handleReaderFailure(failure);
+                if (!stopping && !write.failed.get()) {
+                    peer.sendPingIfDue(System.nanoTime(), pingIntervalNanos, nonce);
+                }
+            } catch (IOException | IllegalStateException failure) {
+                peer.handleReaderFailure(new IOException("Peer ping write failed", failure));
+            } finally {
+                pendingWrites.remove(peer, write);
+            }
+        }, "bitcoin-peer-ping-write");
+        sender.setDaemon(true);
+        try {
+            sender.start();
+        } catch (RuntimeException | Error failure) {
+            pendingWrites.remove(peer, write);
+            throw failure;
+        }
+    }
+
+    private static final class PingWrite {
+        private final long started;
+        private final AtomicBoolean failed = new AtomicBoolean();
+
+        private PingWrite(long started) { this.started = started; }
+
+        private void fail(Peer peer, String reason) {
+            if (failed.compareAndSet(false, true)) {
+                peer.handleReaderFailure(new IOException(reason));
             }
         }
     }
@@ -108,10 +160,14 @@ public final class PeerLivenessService implements AutoCloseable {
     }
 
     @Override
-    public synchronized void close() {
-        if (stopping) return;
-        stopping = true;
-        Thread current = worker;
-        if (current != null) current.interrupt();
+    public void close() {
+        List<java.util.Map.Entry<Peer, PingWrite>> writes;
+        synchronized (this) {
+            if (stopping) return;
+            stopping = true;
+            if (worker != null) worker.interrupt();
+            writes = List.copyOf(pendingWrites.entrySet());
+        }
+        writes.forEach(entry -> entry.getValue().fail(entry.getKey(), "Peer liveness stopped during ping write"));
     }
 }
