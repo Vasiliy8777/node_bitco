@@ -27,6 +27,9 @@ public final class NodeRelayService implements AutoCloseable {
     private static final long MSG_WTX = 5;
     private static final long MAX_QUEUED_INBOUND_BYTES = 16_000_000L;
     private static final int MAX_OUTBOUND_TASKS_PER_PEER = 64;
+    private static final long MAX_OUTBOUND_BYTES_PER_PEER = 16_000_000L;
+    private static final long MAX_OUTBOUND_BYTES = 64_000_000L;
+    private final AtomicLong outboundBytes = new AtomicLong();
 
     private final NodeValidationService validation;
     private final NodeSyncInfrastructure sync;
@@ -214,7 +217,9 @@ public final class NodeRelayService implements AutoCloseable {
      */
     private void queueGetData(Peer peer, GetDataMessage request) {
         PeerOutbound sender = outbound.get(peer);
-        if (sender == null || !sender.execute(() -> serveData(peer, request))) {
+        // Charge decoded vectors/hash arrays/list references as well as the task itself.
+        long retainedBytes = 256L + 128L * request.inventory().size();
+        if (sender == null || !sender.execute(() -> serveData(peer, request), retainedBytes)) {
             disconnect(peer);
         }
     }
@@ -312,7 +317,7 @@ public final class NodeRelayService implements AutoCloseable {
     private void send(Peer peer, BitcoinMessage message) {
         if (closed) return;
         PeerOutbound sender = outbound.get(peer);
-        if (sender == null || !sender.execute(() -> sendDirect(peer, message))) {
+        if (sender == null || !sender.execute(() -> sendDirect(peer, message), 128L + message.payloadLength())) {
             disconnect(peer);
         }
     }
@@ -370,8 +375,11 @@ public final class NodeRelayService implements AutoCloseable {
     /** One bounded serial send/work queue per peer. */
     private final class PeerOutbound {
         private final ThreadPoolExecutor executor;
+        private final Peer peer;
+        private final AtomicLong retainedBytes = new AtomicLong();
 
         private PeerOutbound(Peer peer) {
+            this.peer = peer;
             executor = new ThreadPoolExecutor(
                     1,
                     1,
@@ -381,39 +389,64 @@ public final class NodeRelayService implements AutoCloseable {
                     Thread.ofPlatform().daemon().name("bitcoin-relay-peer-", 0).factory());
         }
 
-        private boolean execute(IoTask task) {
+        private synchronized boolean execute(IoTask task, long bytes) {
             if (closed || executor.isShutdown()) return false;
+            if (bytes > MAX_OUTBOUND_BYTES_PER_PEER - retainedBytes.get()) return false;
+            while (true) {
+                long total = outboundBytes.get();
+                if (bytes > MAX_OUTBOUND_BYTES - total) return false;
+                if (outboundBytes.compareAndSet(total, total + bytes)) break;
+            }
+            retainedBytes.addAndGet(bytes);
+            var reserved = new ReservedTask(task, bytes);
             try {
-                executor.execute(() -> {
-                    if (closed) return;
-                    try {
-                        task.run();
-                    } catch (IOException | IllegalStateException exception) {
-                        disconnectPeer(exception);
-                    } catch (RuntimeException exception) {
-                        log.error("Unable to serve outbound peer work", exception);
-                        disconnectPeer(exception);
-                    }
-                });
+                executor.execute(reserved);
                 return true;
             } catch (RejectedExecutionException exception) {
+                reserved.release();
                 return false;
+            }
+        }
+
+        private final class ReservedTask implements Runnable {
+            private final IoTask task;
+            private final long bytes;
+            private final java.util.concurrent.atomic.AtomicBoolean released = new java.util.concurrent.atomic.AtomicBoolean();
+
+            private ReservedTask(IoTask task, long bytes) {
+                this.task = task;
+                this.bytes = bytes;
+            }
+
+            @Override
+            public void run() {
+                try {
+                    if (!closed && peer.isReady()) task.run();
+                } catch (IOException | IllegalStateException exception) {
+                    disconnectPeer(exception);
+                } catch (RuntimeException exception) {
+                    log.error("Unable to serve outbound peer work", exception);
+                    disconnectPeer(exception);
+                } finally {
+                    release();
+                }
+            }
+
+            private void release() {
+                if (released.compareAndSet(false, true)) {
+                    retainedBytes.addAndGet(-bytes);
+                    outboundBytes.addAndGet(-bytes);
+                }
             }
         }
 
         private void disconnectPeer(Exception cause) {
             log.debug("Outbound relay failed", cause);
-            // The close listener removes and shuts down this PeerOutbound.
-            for (var entry : outbound.entrySet()) {
-                if (entry.getValue() == this) {
-                    disconnect(entry.getKey());
-                    return;
-                }
-            }
+            disconnect(peer);
         }
 
-        private void shutdownNow() {
-            executor.shutdownNow();
+        private synchronized void shutdownNow() {
+            for (Runnable abandoned : executor.shutdownNow()) ((ReservedTask) abandoned).release();
         }
     }
 }
