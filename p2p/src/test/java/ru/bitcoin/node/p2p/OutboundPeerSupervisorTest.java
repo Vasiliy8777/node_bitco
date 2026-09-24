@@ -517,6 +517,130 @@ class OutboundPeerSupervisorTest {
         }
     }
 
+
+    @Test
+    void shouldMaintainSeparateFullRelayAndBlockRelayOnlySlots()
+            throws Exception {
+
+        try (ServerSocket first = new ServerSocket(0);
+             ServerSocket second = new ServerSocket(0);
+             ServerSocket third = new ServerSocket(0)) {
+
+            CompletableFuture<ObservedConnection> firstAccepted =
+                    CompletableFuture.supplyAsync(() -> acceptAndObserveRole(first));
+            CompletableFuture<ObservedConnection> secondAccepted =
+                    CompletableFuture.supplyAsync(() -> acceptAndObserveRole(second));
+            CompletableFuture<ObservedConnection> thirdAccepted =
+                    CompletableFuture.supplyAsync(() -> acceptAndObserveRole(third));
+
+            PeerAddressManager addressManager = new PeerAddressManager();
+            Instant now = Instant.now();
+            for (ServerSocket server : List.of(first, second, third)) {
+                addressManager.add(new PeerAddress(
+                        InetAddress.getByName("127.0.0.1"),
+                        server.getLocalPort(),
+                        0L
+                ), now);
+            }
+
+            PeerManager peerManager = new PeerManager();
+            OutboundPeerManager outboundPeerManager = new OutboundPeerManager(
+                    new BitcoinClient(PARAMETERS),
+                    peerManager,
+                    addressManager
+            );
+
+            OutboundPeerConnection initial = outboundPeerManager.connectOneWithAddress(
+                    100,
+                    List.of()
+            );
+
+            OutboundPeerSupervisor supervisor = new OutboundPeerSupervisor(
+                    outboundPeerManager,
+                    () -> 101,
+                    1,
+                    2
+            );
+
+            ObservedConnection a = null;
+            ObservedConnection b = null;
+            ObservedConnection c = null;
+            try {
+                supervisor.start(initial);
+                waitUntil(() -> supervisor.activeConnectionCount() == 3, Duration.ofSeconds(5));
+
+                assertEquals(1, supervisor.targetOutboundPeers());
+                assertEquals(2, supervisor.targetBlockRelayPeers());
+                assertEquals(3, supervisor.connections().size());
+                assertEquals(1L, supervisor.connections().stream()
+                        .filter(connection -> connection.role() == PeerConnectionRole.FULL_RELAY)
+                        .count());
+                assertEquals(2L, supervisor.connections().stream()
+                        .filter(connection -> connection.role() == PeerConnectionRole.BLOCK_RELAY_ONLY)
+                        .count());
+
+                a = firstAccepted.get(5, TimeUnit.SECONDS);
+                b = secondAccepted.get(5, TimeUnit.SECONDS);
+                c = thirdAccepted.get(5, TimeUnit.SECONDS);
+
+                long relayTrue = List.of(a, b, c).stream()
+                        .filter(ObservedConnection::relay)
+                        .count();
+                assertEquals(1L, relayTrue,
+                        "Only FULL_RELAY must advertise transaction relay in VERSION");
+            } finally {
+                supervisor.close();
+                peerManager.close();
+                if (a != null) a.socket().close();
+                if (b != null) b.socket().close();
+                if (c != null) c.socket().close();
+            }
+        }
+    }
+
+
+    private static ObservedConnection acceptAndObserveRole(ServerSocket serverSocket) {
+        try {
+            Socket socket = serverSocket.accept();
+            socket.setSoTimeout(5_000);
+            BufferedInputStream input = new BufferedInputStream(socket.getInputStream());
+            BufferedOutputStream output = new BufferedOutputStream(socket.getOutputStream());
+            BitcoinMessageStreamReader reader = new BitcoinMessageStreamReader(new BitcoinMessageDecoder(PARAMETERS));
+            BitcoinMessageEncoder encoder = new BitcoinMessageEncoder(PARAMETERS);
+
+            VersionMessage localVersion = BitcoinMessages.decodeVersion(reader.read(input).orElseThrow());
+
+            VersionMessage remoteVersion = new VersionMessage(
+                    VersionMessage.CURRENT_PROTOCOL_VERSION,
+                    VersionMessage.DEFAULT_SERVICES,
+                    1_700_000_000L,
+                    NetworkAddress.unspecified(),
+                    NetworkAddress.unspecified(),
+                    0x123456789ABCDEFL,
+                    "/outbound-role-test/",
+                    321,
+                    true
+            );
+            output.write(encoder.encode(BitcoinMessages.version(remoteVersion)));
+            output.flush();
+
+            assertEquals("wtxidrelay", reader.read(input).orElseThrow().command());
+            assertEquals("sendaddrv2", reader.read(input).orElseThrow().command());
+            assertEquals("verack", reader.read(input).orElseThrow().command());
+            output.write(encoder.encode(BitcoinMessages.wtxidRelay()));
+            output.write(encoder.encode(BitcoinMessages.sendAddrV2()));
+            output.write(encoder.encode(BitcoinMessages.verack()));
+            output.flush();
+
+            return new ObservedConnection(socket, localVersion.relay());
+        } catch (Exception exception) {
+            throw new RuntimeException(exception);
+        }
+    }
+
+    private record ObservedConnection(Socket socket, boolean relay) {
+    }
+
     private static Socket acceptAndHandshakeOnce(
             ServerSocket serverSocket
     ) {

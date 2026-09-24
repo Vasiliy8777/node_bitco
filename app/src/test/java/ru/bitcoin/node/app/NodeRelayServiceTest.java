@@ -397,6 +397,157 @@ class NodeRelayServiceTest {
         }
     }
 
+    @Test
+    void blockRelayOnlyPeerRejectsTransactionRelayButStillServesHeaders()
+            throws Exception {
+
+        var parameters = NetworkParametersRegistry.regtest();
+        try (var db = new RocksDbDatabase(directory.resolve("block-relay-only-role"));
+             var peers = new PeerManager()) {
+
+            var validation = new NodeValidationService(
+                    db,
+                    parameters,
+                    () -> 1_800_000_000L,
+                    new Mempool()
+            );
+            var sync = new NodeSyncInfrastructure(
+                    db,
+                    parameters,
+                    () -> 1_800_000_000L
+            );
+
+            var peer = mock(Peer.class);
+            when(peer.isReady()).thenReturn(true);
+
+            var incoming = new AtomicReference<PeerMessageListener>();
+            doAnswer(invocation -> {
+                incoming.set(invocation.getArgument(0));
+                return null;
+            }).when(peer).addMessageListener(any());
+
+            var outbound = new LinkedBlockingQueue<BitcoinMessage>();
+            doAnswer(invocation -> {
+                outbound.add(invocation.getArgument(0));
+                return null;
+            }).when(peer).send(any());
+
+            peers.add(peer, PeerConnectionRole.BLOCK_RELAY_ONLY);
+
+            try (var relay = new NodeRelayService(validation, sync, peers)) {
+                Hash256 unknownTx = Hash256.fromDisplayHex("42".repeat(32));
+                incoming.get().onMessage(
+                        peer,
+                        BitcoinMessages.inv(new InvMessage(List.of(
+                                new InventoryVector(InventoryVector.MSG_TX, unknownTx)
+                        )))
+                );
+
+                Hash256 genesis = parameters.genesisBlockHash();
+                incoming.get().onMessage(
+                        peer,
+                        BitcoinMessages.getHeaders(new GetHeadersMessage(
+                                VersionMessage.CURRENT_PROTOCOL_VERSION,
+                                List.of(genesis),
+                                new Hash256(new byte[32])
+                        ))
+                );
+
+                BitcoinMessage response = take(outbound);
+                assertEquals("headers", response.command(),
+                        "BLOCK_RELAY_ONLY peer must retain block/header relay");
+                assertTrue(outbound.isEmpty(),
+                        "BLOCK_RELAY_ONLY peer must not trigger transaction GETDATA");
+            }
+
+            verify(peer).removeMessageListener(incoming.get());
+        }
+    }
+
+
+    @Test
+    void largeInventoryIsRetainedBeyondFirst128AndGlobalWindowRefills() throws Exception {
+        var parameters = NetworkParametersRegistry.regtest();
+        try (var db = new RocksDbDatabase(directory.resolve("tx-request-window"));
+             var peers = new PeerManager()) {
+            var validation = new NodeValidationService(db, parameters, () -> 1_800_000_000L, new Mempool());
+            var sync = new NodeSyncInfrastructure(db, parameters, () -> 1_800_000_000L);
+            var peer = mock(Peer.class);
+            when(peer.isReady()).thenReturn(true);
+            var incoming = new AtomicReference<PeerMessageListener>();
+            doAnswer(invocation -> { incoming.set(invocation.getArgument(0)); return null; })
+                    .when(peer).addMessageListener(any());
+            var outbound = new LinkedBlockingQueue<BitcoinMessage>();
+            doAnswer(invocation -> { outbound.add(invocation.getArgument(0)); return null; })
+                    .when(peer).send(any());
+            peers.add(peer);
+
+            try (var relay = new NodeRelayService(validation, sync, peers)) {
+                var inventory = unknownTransactions(1_500, 30_000);
+                incoming.get().onMessage(peer, BitcoinMessages.inv(new InvMessage(inventory)));
+
+                List<InventoryVector> requested = new ArrayList<>();
+                while (requested.size() < 1_024) {
+                    BitcoinMessage message = take(outbound);
+                    assertEquals("getdata", message.command());
+                    var batch = BitcoinMessages.decodeGetData(message).inventory();
+                    assertTrue(batch.size() <= 128);
+                    requested.addAll(batch);
+                }
+                assertEquals(1_024, requested.size());
+                assertEquals(inventory.subList(0, 1_024).stream().map(InventoryVector::hash).toList(),
+                        requested.stream().map(InventoryVector::hash).toList());
+
+                incoming.get().onMessage(peer, BitcoinMessages.notFound(
+                        new NotFoundMessage(List.of(requested.getFirst()))));
+                BitcoinMessage refill = take(outbound);
+                assertEquals("getdata", refill.command());
+                assertEquals(inventory.get(1_024).hash(),
+                        BitcoinMessages.decodeGetData(refill).inventory().getFirst().hash());
+            }
+        }
+    }
+
+    @Test
+    void notFoundRetriesTransactionFromAlternativeAnnouncingPeer() throws Exception {
+        var parameters = NetworkParametersRegistry.regtest();
+        try (var db = new RocksDbDatabase(directory.resolve("tx-request-failover"));
+             var peers = new PeerManager()) {
+            var validation = new NodeValidationService(db, parameters, () -> 1_800_000_000L, new Mempool());
+            var sync = new NodeSyncInfrastructure(db, parameters, () -> 1_800_000_000L);
+            var first = mock(Peer.class);
+            var second = mock(Peer.class);
+            when(first.isReady()).thenReturn(true);
+            when(second.isReady()).thenReturn(true);
+            var firstIncoming = new AtomicReference<PeerMessageListener>();
+            var secondIncoming = new AtomicReference<PeerMessageListener>();
+            doAnswer(invocation -> { firstIncoming.set(invocation.getArgument(0)); return null; })
+                    .when(first).addMessageListener(any());
+            doAnswer(invocation -> { secondIncoming.set(invocation.getArgument(0)); return null; })
+                    .when(second).addMessageListener(any());
+            var firstOutbound = new LinkedBlockingQueue<BitcoinMessage>();
+            var secondOutbound = new LinkedBlockingQueue<BitcoinMessage>();
+            doAnswer(invocation -> { firstOutbound.add(invocation.getArgument(0)); return null; }).when(first).send(any());
+            doAnswer(invocation -> { secondOutbound.add(invocation.getArgument(0)); return null; }).when(second).send(any());
+            peers.add(first);
+            peers.add(second);
+
+            try (var relay = new NodeRelayService(validation, sync, peers)) {
+                var vector = unknownTransactions(1, 40_000).getFirst();
+                firstIncoming.get().onMessage(first, BitcoinMessages.inv(new InvMessage(List.of(vector))));
+                assertEquals(vector.hash(), BitcoinMessages.decodeGetData(take(firstOutbound)).inventory().getFirst().hash());
+
+                secondIncoming.get().onMessage(second, BitcoinMessages.inv(new InvMessage(List.of(vector))));
+                assertNull(secondOutbound.poll(250, TimeUnit.MILLISECONDS),
+                        "A transaction must not be requested from two peers concurrently");
+
+                firstIncoming.get().onMessage(first, BitcoinMessages.notFound(new NotFoundMessage(List.of(vector))));
+                assertEquals(vector.hash(), BitcoinMessages.decodeGetData(take(secondOutbound)).inventory().getFirst().hash());
+            }
+        }
+    }
+
+
     private static List<InventoryVector> unknownTransactions(int count, int seed) {
         List<InventoryVector> inventory = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {

@@ -105,6 +105,60 @@ class BitcoinClientTest {
         }
     }
 
+
+    @Test
+    void shouldDisableTransactionRelayForBlockRelayOnlyConnection()
+            throws Exception {
+
+        try (ServerSocket serverSocket = new ServerSocket(0)) {
+            CompletableFuture<Boolean> advertisedRelay = CompletableFuture.supplyAsync(() -> {
+                try (Socket socket = serverSocket.accept()) {
+                    socket.setSoTimeout(5_000);
+                    PeerIo io = peerIo(socket);
+                    BitcoinMessage version = io.reader().read(io.input()).orElseThrow();
+                    VersionMessage localVersion = BitcoinMessages.decodeVersion(version);
+
+                    VersionMessage remoteVersion = new VersionMessage(
+                            VersionMessage.CURRENT_PROTOCOL_VERSION,
+                            VersionMessage.DEFAULT_SERVICES,
+                            1_700_000_000L,
+                            NetworkAddress.unspecified(),
+                            NetworkAddress.unspecified(),
+                            REMOTE_NONCE,
+                            "/bitcoin-client-role-test/",
+                            321,
+                            true
+                    );
+                    io.output().write(io.encoder().encode(BitcoinMessages.version(remoteVersion)));
+                    io.output().flush();
+
+                    assertEquals("wtxidrelay", io.reader().read(io.input()).orElseThrow().command());
+                    assertEquals("sendaddrv2", io.reader().read(io.input()).orElseThrow().command());
+                    assertEquals("verack", io.reader().read(io.input()).orElseThrow().command());
+                    io.output().write(io.encoder().encode(BitcoinMessages.wtxidRelay()));
+                    io.output().write(io.encoder().encode(BitcoinMessages.sendAddrV2()));
+                    io.output().write(io.encoder().encode(BitcoinMessages.verack()));
+                    io.output().flush();
+                    return localVersion.relay();
+                } catch (Exception exception) {
+                    throw new RuntimeException(exception);
+                }
+            });
+
+            BitcoinClient client = new BitcoinClient(PARAMETERS);
+            try (Peer peer = client.connectManaged(
+                    "127.0.0.1",
+                    serverSocket.getLocalPort(),
+                    100,
+                    PeerConnectionRole.BLOCK_RELAY_ONLY
+            )) {
+                assertTrue(peer.isReady());
+            }
+
+            assertFalse(advertisedRelay.get(5, TimeUnit.SECONDS));
+        }
+    }
+
     private static void runSuccessfulPeer(
             ServerSocket serverSocket
     ) {

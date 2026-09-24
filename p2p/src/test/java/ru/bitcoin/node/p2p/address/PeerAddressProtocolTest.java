@@ -3,6 +3,8 @@ package ru.bitcoin.node.p2p.address;
 import org.junit.jupiter.api.Test;
 import ru.bitcoin.node.p2p.Peer;
 import ru.bitcoin.node.p2p.PeerConnection;
+import ru.bitcoin.node.p2p.PeerConnectionRole;
+import ru.bitcoin.node.p2p.PeerManager;
 import ru.bitcoin.node.p2p.message.*;
 import ru.bitcoin.node.protocol.network.NetworkParametersRegistry;
 
@@ -535,4 +537,44 @@ class PeerAddressProtocolTest {
             }
         }
     }
+    @Test
+    void blockRelayOnlyPeerMustNotParticipateInAddressRelay()
+            throws Exception {
+
+        PeerAddressManager addressManager = new PeerAddressManager();
+
+        try (PeerManager peerManager = new PeerManager();
+             ServerSocket serverSocket = new ServerSocket(
+                     0,
+                     1,
+                     InetAddress.getByName("127.0.0.1")
+             );
+             PeerConnection connection = new PeerConnection(NetworkParametersRegistry.regtest());
+             Peer peer = new Peer(connection, 1L, 0, true)) {
+
+            peer.connect("127.0.0.1", serverSocket.getLocalPort());
+
+            try (Socket accepted = serverSocket.accept()) {
+                peerManager.add(peer, PeerConnectionRole.BLOCK_RELAY_ONLY);
+                PeerAddressProtocol protocol = new PeerAddressProtocol(addressManager, peerManager);
+
+                AddrEntry entry = AddrEntry.fromIp(
+                        1_700_000_000L,
+                        9L,
+                        InetAddress.getByName("192.0.2.99"),
+                        8333
+                );
+
+                protocol.onMessage(
+                        peer,
+                        BitcoinMessages.addr(new AddrMessage(List.of(entry)))
+                );
+
+                assertTrue(addressManager.isEmpty(),
+                        "BLOCK_RELAY_ONLY peer must not feed AddrMan");
+            }
+        }
+    }
+
+
 }

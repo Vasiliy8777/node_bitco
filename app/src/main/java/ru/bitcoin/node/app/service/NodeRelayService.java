@@ -36,15 +36,16 @@ public final class NodeRelayService implements AutoCloseable {
     private final AtomicLong queuedBytes = new AtomicLong();
     private final ScheduledExecutorService sendTimeouts = Executors.newSingleThreadScheduledExecutor(
             Thread.ofPlatform().daemon().name("bitcoin-relay-send-timeout").factory());
+    private final ScheduledExecutorService requestTimer = Executors.newSingleThreadScheduledExecutor(
+            Thread.ofPlatform().daemon().name("bitcoin-tx-request-timer").factory());
     private final ThreadPoolExecutor worker = new ThreadPoolExecutor(1, 1, 0, TimeUnit.SECONDS,
             new ArrayBlockingQueue<>(128), Thread.ofPlatform().daemon().name("bitcoin-relay").factory());
-    private final Map<Hash256, Request> requested = new HashMap<>();
+    private final TransactionRequestScheduler transactionRequests = new TransactionRequestScheduler();
     private final Map<Hash256, Orphan> orphans = new LinkedHashMap<>();
     private final PeerMessageListener messages = this::enqueue;
     private final Consumer<Peer> connections = this::attach;
     private volatile boolean closed;
 
-    private record Request(Peer peer, long expires, boolean witnessId) { }
     private record Orphan(Transaction transaction, long expires) { }
 
     public NodeRelayService(NodeValidationService validation, NodeSyncInfrastructure sync, PeerManager peers) {
@@ -52,6 +53,18 @@ public final class NodeRelayService implements AutoCloseable {
         this.sync = Objects.requireNonNull(sync, "sync");
         this.peers = Objects.requireNonNull(peers, "peers");
         peers.addPeerListener(connections);
+        requestTimer.scheduleWithFixedDelay(this::enqueueRequestTick, 1, 1, TimeUnit.SECONDS);
+    }
+
+    private void enqueueRequestTick() {
+        if (closed) return;
+        try {
+            worker.execute(() -> {
+                if (!closed) dispatchTransactionRequests();
+            });
+        } catch (RejectedExecutionException ignored) {
+            // Service is closing or inbound work is temporarily saturated.
+        }
     }
 
     private void attach(Peer peer) {
@@ -108,40 +121,56 @@ public final class NodeRelayService implements AutoCloseable {
             }
             case "notfound" -> {
                 for (var vector : BitcoinMessages.decodeNotFound(message).inventory()) {
-                    var request = requested.get(vector.hash());
-                    if (request != null && request.peer() == peer) requested.remove(vector.hash());
+                    transactionRequests.notFound(peer, vector.hash());
                 }
+                dispatchTransactionRequests();
             }
             default -> { }
         }
     }
 
-    private void requestTransactions(Peer peer, InvMessage inventory) throws IOException {
-        long now = System.nanoTime();
-        requested.values().removeIf(request -> request.expires() < now || !request.peer().isReady());
+    private void requestTransactions(Peer peer, InvMessage inventory) {
         Set<Hash256> known = new HashSet<>();
         for (var entry : validation.mempoolEntries()) {
             known.add(entry.transaction().txId());
             known.add(entry.transaction().wtxId());
         }
-        List<InventoryVector> needed = new ArrayList<>();
+
         for (var vector : inventory.inventory()) {
             if (vector.type() != InventoryVector.MSG_TX && vector.type() != MSG_WTX) continue;
-            if (known.contains(vector.hash()) || requested.containsKey(vector.hash())) continue;
-            if (requested.size() >= 1024 || needed.size() >= 128) break;
-            requested.put(vector.hash(), new Request(peer, now + Duration.ofSeconds(30).toNanos(), vector.type() == MSG_WTX));
-            needed.add(new InventoryVector(vector.type() == MSG_WTX ? MSG_WTX : InventoryVector.MSG_WITNESS_TX, vector.hash()));
+            if (known.contains(vector.hash())) continue;
+            transactionRequests.announced(peer, vector);
         }
-        if (!needed.isEmpty()) send(peer, BitcoinMessages.getData(new GetDataMessage(needed)));
+        dispatchTransactionRequests();
+    }
+
+    private void dispatchTransactionRequests() {
+        List<TransactionRequestScheduler.Scheduled> scheduled = transactionRequests.schedule(
+                System.nanoTime(),
+                candidate -> candidate.isReady()
+                        && attached.contains(candidate)
+                        && peers.roleOf(candidate).relaysTransactions());
+        if (scheduled.isEmpty()) return;
+
+        LinkedHashMap<Peer, List<InventoryVector>> byPeer = new LinkedHashMap<>();
+        for (var request : scheduled) {
+            byPeer.computeIfAbsent(request.peer(), ignored -> new ArrayList<>()).add(request.vector());
+        }
+
+        for (var entry : byPeer.entrySet()) {
+            List<InventoryVector> vectors = entry.getValue();
+            for (int offset = 0; offset < vectors.size(); offset += TransactionRequestScheduler.MAX_GETDATA_BATCH) {
+                int end = Math.min(offset + TransactionRequestScheduler.MAX_GETDATA_BATCH, vectors.size());
+                send(entry.getKey(), BitcoinMessages.getData(
+                        new GetDataMessage(List.copyOf(vectors.subList(offset, end)))));
+            }
+        }
     }
 
     private void receiveTransaction(Peer peer, Transaction transaction) throws IOException {
         orphans.values().removeIf(orphan -> orphan.expires() < System.nanoTime());
-        var byId = requested.get(transaction.txId());
-        var byWitness = requested.get(transaction.wtxId());
-        if ((byId == null || byId.peer() != peer) && (byWitness == null || byWitness.peer() != peer)) return;
-        requested.remove(transaction.txId());
-        requested.remove(transaction.wtxId());
+        if (!transactionRequests.isExpected(peer, transaction.txId(), transaction.wtxId())) return;
+        transactionRequests.forget(transaction.txId(), transaction.wtxId());
         try {
             validation.admit(transaction);
             announceTransaction(transaction, peer);
@@ -295,6 +324,7 @@ public final class NodeRelayService implements AutoCloseable {
         peers.removePeerListener(connections);
         attached.forEach(peer -> peer.removeMessageListener(messages));
 
+        requestTimer.shutdownNow();
         worker.shutdownNow();
         try {
             if (!worker.awaitTermination(5, TimeUnit.SECONDS)) {
