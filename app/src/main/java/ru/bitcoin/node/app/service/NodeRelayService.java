@@ -138,10 +138,11 @@ public final class NodeRelayService implements AutoCloseable {
             known.add(entry.transaction().wtxId());
         }
 
+        long now = System.nanoTime();
         for (var vector : inventory.inventory()) {
             if (vector.type() != InventoryVector.MSG_TX && vector.type() != MSG_WTX) continue;
             if (known.contains(vector.hash())) continue;
-            transactionRequests.announced(peer, vector);
+            transactionRequests.announced(peer, vector, now);
         }
         dispatchTransactionRequests();
     }

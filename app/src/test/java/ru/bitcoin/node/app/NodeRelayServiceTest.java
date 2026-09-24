@@ -467,7 +467,7 @@ class NodeRelayServiceTest {
 
 
     @Test
-    void largeInventoryIsRetainedBeyondFirst128AndGlobalWindowRefills() throws Exception {
+    void largeInventoryIsRetainedBeyondFirst128AndPeerWindowRefills() throws Exception {
         var parameters = NetworkParametersRegistry.regtest();
         try (var db = new RocksDbDatabase(directory.resolve("tx-request-window"));
              var peers = new PeerManager()) {
@@ -488,22 +488,22 @@ class NodeRelayServiceTest {
                 incoming.get().onMessage(peer, BitcoinMessages.inv(new InvMessage(inventory)));
 
                 List<InventoryVector> requested = new ArrayList<>();
-                while (requested.size() < 1_024) {
+                while (requested.size() < 128) {
                     BitcoinMessage message = take(outbound);
                     assertEquals("getdata", message.command());
                     var batch = BitcoinMessages.decodeGetData(message).inventory();
                     assertTrue(batch.size() <= 128);
                     requested.addAll(batch);
                 }
-                assertEquals(1_024, requested.size());
-                assertEquals(inventory.subList(0, 1_024).stream().map(InventoryVector::hash).toList(),
+                assertEquals(128, requested.size());
+                assertEquals(inventory.subList(0, 128).stream().map(InventoryVector::hash).toList(),
                         requested.stream().map(InventoryVector::hash).toList());
 
                 incoming.get().onMessage(peer, BitcoinMessages.notFound(
                         new NotFoundMessage(List.of(requested.getFirst()))));
                 BitcoinMessage refill = take(outbound);
                 assertEquals("getdata", refill.command());
-                assertEquals(inventory.get(1_024).hash(),
+                assertEquals(inventory.get(128).hash(),
                         BitcoinMessages.decodeGetData(refill).inventory().getFirst().hash());
             }
         }
