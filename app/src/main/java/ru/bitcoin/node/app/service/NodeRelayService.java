@@ -36,6 +36,7 @@ public final class NodeRelayService implements AutoCloseable {
     private final PeerManager peers;
     private final Set<Peer> attached = ConcurrentHashMap.newKeySet();
     private final Map<Peer, PeerOutbound> outbound = new ConcurrentHashMap<>();
+    private final Map<Peer, BlockAnnouncementState> blockAnnouncements = new ConcurrentHashMap<>();
     private final AtomicLong queuedBytes = new AtomicLong();
     private final ScheduledExecutorService sendTimeouts = Executors.newSingleThreadScheduledExecutor(
             Thread.ofPlatform().daemon().name("bitcoin-relay-send-timeout").factory());
@@ -47,11 +48,19 @@ public final class NodeRelayService implements AutoCloseable {
     private final Map<Hash256, Orphan> orphans = new LinkedHashMap<>();
     private final LinkedHashMap<Hash256, Boolean> announcedBlocks = new LinkedHashMap<>();
     private static final int MAX_RECENT_BLOCK_ANNOUNCEMENTS = 4096;
+    // Bitcoin Core v31.1 MAX_BLOCKS_TO_ANNOUNCE.
+    private static final int MAX_BLOCKS_TO_ANNOUNCE = 8;
     private final PeerMessageListener messages = this::enqueue;
     private final Consumer<Peer> connections = this::attach;
     private volatile boolean closed;
 
     private record Orphan(Transaction transaction, long expires) { }
+
+    /** Per-peer BIP130 block-announcement preference and last header sent. */
+    private static final class BlockAnnouncementState {
+        private volatile boolean prefersHeaders;
+        private volatile Hash256 bestHeaderSent;
+    }
 
     public NodeRelayService(NodeValidationService validation, NodeSyncInfrastructure sync, PeerManager peers) {
         this.validation = Objects.requireNonNull(validation, "validation");
@@ -75,18 +84,20 @@ public final class NodeRelayService implements AutoCloseable {
     private void attach(Peer peer) {
         if (!closed && attached.add(peer)) {
             outbound.computeIfAbsent(peer, PeerOutbound::new);
+            blockAnnouncements.computeIfAbsent(peer, ignored -> new BlockAnnouncementState());
             peer.addMessageListener(messages);
             peer.addCloseListener((source, cause) -> {
                 source.removeMessageListener(messages);
                 attached.remove(source);
                 PeerOutbound sender = outbound.remove(source);
+                blockAnnouncements.remove(source);
                 if (sender != null) sender.shutdownNow();
             });
         }
     }
 
     private void enqueue(Peer peer, BitcoinMessage message) {
-        if (closed || !Set.of("inv", "tx", "getdata", "getheaders", "notfound").contains(message.command())) return;
+        if (closed || !Set.of("inv", "tx", "getdata", "getheaders", "notfound", "sendheaders").contains(message.command())) return;
         long bytes = message.payloadLength();
         if (queuedBytes.addAndGet(bytes) > MAX_QUEUED_INBOUND_BYTES) {
             queuedBytes.addAndGet(-bytes);
@@ -122,7 +133,24 @@ public final class NodeRelayService implements AutoCloseable {
             case "getdata" -> queueGetData(peer, BitcoinMessages.decodeGetData(message));
             case "getheaders" -> {
                 var request = GetHeadersMessageCodec.decode(message.payload());
-                send(peer, BitcoinMessages.headers(new HeadersMessage(validation.headers(request.locatorHashes(), request.stopHash()))));
+                var headers = validation.headers(request.locatorHashes(), request.stopHash());
+                send(peer, BitcoinMessages.headers(new HeadersMessage(headers)));
+                BlockAnnouncementState state = blockAnnouncements.get(peer);
+                if (state != null) {
+                    if (!headers.isEmpty()) {
+                        state.bestHeaderSent = headers.getLast().hash();
+                    } else {
+                        validation.bestActiveLocator(request.locatorHashes())
+                                .ifPresent(hash -> state.bestHeaderSent = hash);
+                    }
+                }
+            }
+            case "sendheaders" -> {
+                if (message.payloadLength() != 0) {
+                    throw new IllegalArgumentException("sendheaders message must have empty payload");
+                }
+                BlockAnnouncementState state = blockAnnouncements.get(peer);
+                if (state != null) state.prefersHeaders = true;
             }
             case "notfound" -> {
                 for (var vector : BitcoinMessages.decodeNotFound(message).inventory()) {
@@ -290,8 +318,29 @@ public final class NodeRelayService implements AutoCloseable {
                 iterator.remove();
             }
         }
-        broadcast(BitcoinMessages.inv(new InvMessage(List.of(
-                new InventoryVector(InventoryVector.MSG_BLOCK, block.hash())))), source);
+        for (Peer peer : peers.readyPeers()) {
+            if (peer == source) continue;
+
+            BlockAnnouncementState state = blockAnnouncements.get(peer);
+            if (state != null && state.prefersHeaders && state.bestHeaderSent != null) {
+                Optional<List<ru.bitcoin.node.protocol.block.BlockHeader>> path =
+                        validation.activeHeadersAfter(state.bestHeaderSent, block.hash(), MAX_BLOCKS_TO_ANNOUNCE);
+                if (path.isPresent()) {
+                    List<ru.bitcoin.node.protocol.block.BlockHeader> headers = path.orElseThrow();
+                    if (!headers.isEmpty()) {
+                        send(peer, BitcoinMessages.headers(new HeadersMessage(headers)));
+                        state.bestHeaderSent = block.hash();
+                    }
+                    continue;
+                }
+            }
+
+            // BIP130 fallback: if the peer did not request headers, we do not know a connecting
+            // header for it, or the gap is larger than Core's announcement window, announce only
+            // the current tip by INV and let normal headers synchronization recover the path.
+            send(peer, BitcoinMessages.inv(new InvMessage(List.of(
+                    new InventoryVector(InventoryVector.MSG_BLOCK, block.hash())))));
+        }
     }
 
     public Hash256 submitTransaction(Transaction transaction) {
@@ -364,6 +413,7 @@ public final class NodeRelayService implements AutoCloseable {
         outbound.values().forEach(PeerOutbound::shutdownNow);
         attached.clear();
         outbound.clear();
+        blockAnnouncements.clear();
         sendTimeouts.shutdownNow();
     }
 

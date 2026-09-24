@@ -81,6 +81,61 @@ public final class NodeValidationService {
         }
     }
 
+    /** Returns the best active-chain block referenced by a peer locator, or empty when none matches. */
+    public Optional<Hash256> bestActiveLocator(List<Hash256> locator) {
+        Objects.requireNonNull(locator, "locator");
+        synchronized (chain) {
+            if (locator.isEmpty()) return Optional.empty();
+            Set<Hash256> wanted = new HashSet<>(locator);
+            BlockIndex cursor = chain.activeTip();
+            while (true) {
+                if (wanted.contains(cursor.hash())) return Optional.of(cursor.hash());
+                if (cursor.height() == 0) return Optional.empty();
+                cursor = Objects.requireNonNull(lookup.find(cursor.previousBlockHash()), "Missing active ancestor");
+            }
+        }
+    }
+
+    /**
+     * Returns headers strictly after {@code knownHash} through {@code tipHash} when both are on the
+     * active chain and the path is contiguous and no longer than {@code maxHeaders}. An empty
+     * Optional means a headers announcement cannot safely connect and the caller should fall back
+     * to INV. An empty list means the peer already knows {@code tipHash}.
+     */
+    public Optional<List<ru.bitcoin.node.protocol.block.BlockHeader>> activeHeadersAfter(
+            Hash256 knownHash,
+            Hash256 tipHash,
+            int maxHeaders
+    ) {
+        Objects.requireNonNull(knownHash, "knownHash");
+        Objects.requireNonNull(tipHash, "tipHash");
+        if (maxHeaders <= 0) throw new IllegalArgumentException("maxHeaders must be positive");
+        synchronized (chain) {
+            BlockIndex known = lookup.find(knownHash);
+            BlockIndex tip = lookup.find(tipHash);
+            if (known == null || tip == null || known.height() > tip.height()) return Optional.empty();
+
+            BlockIndex activeAtTipHeight = chain.activeTip();
+            while (activeAtTipHeight.height() > tip.height()) {
+                activeAtTipHeight = Objects.requireNonNull(
+                        lookup.find(activeAtTipHeight.previousBlockHash()), "Missing active ancestor");
+            }
+            if (!activeAtTipHeight.hash().equals(tipHash)) return Optional.empty();
+
+            long distance = tip.height() - known.height();
+            if (distance > maxHeaders) return Optional.empty();
+
+            ArrayDeque<ru.bitcoin.node.protocol.block.BlockHeader> result = new ArrayDeque<>();
+            BlockIndex cursor = tip;
+            while (cursor.height() > known.height()) {
+                result.addFirst(cursor.header());
+                cursor = Objects.requireNonNull(lookup.find(cursor.previousBlockHash()), "Missing active ancestor");
+            }
+            if (!cursor.hash().equals(knownHash)) return Optional.empty();
+            return Optional.of(List.copyOf(result));
+        }
+    }
+
     public NodeValidationService(RocksDbDatabase database, NetworkParameters parameters,
                                  AdjustedTime time, Mempool mempool) {
         this.mempool = Objects.requireNonNull(mempool);

@@ -63,6 +63,14 @@ public final class BitcoinMessages {
                 new byte[0]
         );
     }
+
+    /** BIP130 preference signal: announce new blocks with HEADERS when possible. */
+    public static BitcoinMessage sendHeaders() {
+        return new BitcoinMessage(
+                "sendheaders",
+                new byte[0]
+        );
+    }
     public static BitcoinMessage getHeaders(
             GetHeadersMessage getHeadersMessage
     ) {
