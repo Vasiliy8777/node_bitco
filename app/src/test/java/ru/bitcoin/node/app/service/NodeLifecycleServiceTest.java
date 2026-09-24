@@ -2488,9 +2488,27 @@ class NodeLifecycleServiceTest {
                 return;
             }
 
+            BitcoinMessage wire = message.get();
+
+            if ("ping".equals(wire.command())) {
+                PingMessage ping = BitcoinMessages.decodePing(wire);
+
+                output.write(
+                        encoder.encode(
+                                BitcoinMessages.pong(
+                                        new PongMessage(
+                                                ping.nonce()
+                                        )
+                                )
+                        )
+                );
+                output.flush();
+                continue;
+            }
+
             assertEquals(
                     "getheaders",
-                    message.get().command()
+                    wire.command()
             );
 
             output.write(

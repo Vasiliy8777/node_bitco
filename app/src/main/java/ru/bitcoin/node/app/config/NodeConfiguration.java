@@ -155,6 +155,13 @@ public class NodeConfiguration {
         return new PeerManager();
     }
 
+    @Bean(initMethod = "start", destroyMethod = "close")
+    public PeerLivenessService peerLivenessService(
+            PeerManager peerManager
+    ) {
+        return new PeerLivenessService(peerManager);
+    }
+
     @Bean
     public BitcoinClient bitcoinClient(
             NetworkParameters parameters

@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.security.SecureRandom;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -62,6 +63,13 @@ public final class Peer implements AutoCloseable {
     private VersionMessage remoteVersion;
 
     private boolean remoteVerackReceived;
+
+    private final Object pingLock = new Object();
+    private long pingNonceSent;
+    private long pingStartNanos;
+    private long lastPingNanos;
+    private long lastPingRoundTripNanos = -1L;
+    private long minPingRoundTripNanos = -1L;
 
     public Peer(
             PeerConnection connection,
@@ -602,6 +610,11 @@ public final class Peer implements AutoCloseable {
                             message
                     );
 
+            case "pong" ->
+                    handlePong(
+                            message
+                    );
+
             case "inv" ->
                     handleInv(
                             message
@@ -641,6 +654,91 @@ public final class Peer implements AutoCloseable {
                  * an otherwise valid peer.
                  */
             }
+        }
+    }
+
+    private void handlePong(
+            BitcoinMessage message
+    ) throws IOException {
+
+        final PongMessage pong;
+
+        try {
+            pong = BitcoinMessages.decodePong(message);
+        } catch (IllegalArgumentException exception) {
+            throw new IOException("Invalid pong message", exception);
+        }
+
+        long now = System.nanoTime();
+
+        synchronized (pingLock) {
+            if (pingNonceSent == 0L || pong.nonce() != pingNonceSent) {
+                return;
+            }
+
+            long roundTrip = now - pingStartNanos;
+            if (roundTrip >= 0L) {
+                lastPingRoundTripNanos = roundTrip;
+                if (minPingRoundTripNanos < 0L || roundTrip < minPingRoundTripNanos) {
+                    minPingRoundTripNanos = roundTrip;
+                }
+            }
+
+            pingNonceSent = 0L;
+        }
+    }
+
+    boolean sendPingIfDue(
+            long nowNanos,
+            long intervalNanos,
+            long nonce
+    ) throws IOException {
+        if (nonce == 0L) {
+            throw new IllegalArgumentException("ping nonce must not be zero");
+        }
+
+        synchronized (pingLock) {
+            if (!isReady() || pingNonceSent != 0L) {
+                return false;
+            }
+            if (lastPingNanos != 0L && nowNanos - lastPingNanos < intervalNanos) {
+                return false;
+            }
+
+            connection.send(BitcoinMessages.ping(new PingMessage(nonce)));
+            pingNonceSent = nonce;
+            pingStartNanos = nowNanos;
+            lastPingNanos = nowNanos;
+            return true;
+        }
+    }
+
+    boolean pingTimedOut(long nowNanos, long timeoutNanos) {
+        synchronized (pingLock) {
+            return pingNonceSent != 0L
+                    && nowNanos - pingStartNanos > timeoutNanos;
+        }
+    }
+
+    public Optional<Duration> lastPingRoundTrip() {
+        synchronized (pingLock) {
+            return lastPingRoundTripNanos < 0L
+                    ? Optional.empty()
+                    : Optional.of(Duration.ofNanos(lastPingRoundTripNanos));
+        }
+    }
+
+    public Optional<Duration> minPingRoundTrip() {
+        synchronized (pingLock) {
+            return minPingRoundTripNanos < 0L
+                    ? Optional.empty()
+                    : Optional.of(Duration.ofNanos(minPingRoundTripNanos));
+        }
+    }
+
+    public boolean hasOutstandingPing() {
+        synchronized (pingLock) {
+            return pingNonceSent != 0L;
         }
     }
 
