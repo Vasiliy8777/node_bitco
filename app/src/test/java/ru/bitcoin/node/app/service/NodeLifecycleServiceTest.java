@@ -2469,13 +2469,39 @@ class NodeLifecycleServiceTest {
         }
     }
 
-    private static void answerLiveHeaderPolls(BitcoinMessageStreamReader reader, BitcoinMessageEncoder encoder,
-                                              BufferedInputStream input, BufferedOutputStream output) throws IOException {
+    private static void answerLiveHeaderPolls(
+            BitcoinMessageStreamReader reader,
+            BitcoinMessageEncoder encoder,
+            BufferedInputStream input,
+            BufferedOutputStream output
+    ) throws IOException {
         while (true) {
-            var message = reader.read(input);
-            if (message.isEmpty()) return;
-            assertEquals("getheaders", message.get().command());
-            output.write(encoder.encode(BitcoinMessages.headers(new HeadersMessage(List.of()))));
+            final java.util.Optional<BitcoinMessage> message;
+
+            try {
+                message = reader.read(input);
+            } catch (java.net.SocketTimeoutException timeout) {
+                return;
+            }
+
+            if (message.isEmpty()) {
+                return;
+            }
+
+            assertEquals(
+                    "getheaders",
+                    message.get().command()
+            );
+
+            output.write(
+                    encoder.encode(
+                            BitcoinMessages.headers(
+                                    new HeadersMessage(
+                                            List.of()
+                                    )
+                            )
+                    )
+            );
             output.flush();
         }
     }

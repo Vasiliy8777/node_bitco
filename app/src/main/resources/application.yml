@@ -9,4 +9,5 @@ bitcoin:
     port: 18455
     max-inbound-peers: 32
     target-outbound-peers: 3
+    target-block-relay-peers: 2
     peers: 127.0.0.1:18444,127.0.0.1:18454,127.0.0.1:18464

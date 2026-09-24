@@ -15,4 +15,8 @@ public interface PeerConnector {
     default Peer connectManaged(String host, int port, int startHeight) throws IOException {
         return connect(host, port, startHeight);
     }
+
+    default Peer connectManaged(String host, int port, int startHeight, PeerConnectionRole role) throws IOException {
+        return connectManaged(host, port, startHeight);
+    }
 }

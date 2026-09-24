@@ -51,6 +51,7 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
     private final OutboundPeerManager outboundPeerManager;
     private final IntSupplier startHeightSupplier;
     private final int targetOutboundPeers;
+    private final int targetBlockRelayPeers;
     private final Duration initialBackoff;
     private final Duration maxBackoff;
 
@@ -152,6 +153,29 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
             Duration feelerInterval,
             Duration feelerJitter
     ) {
+        this(outboundPeerManager, startHeightSupplier, targetOutboundPeers, 0, initialBackoff, maxBackoff, feelerInterval, feelerJitter);
+    }
+
+    public OutboundPeerSupervisor(
+            OutboundPeerManager outboundPeerManager,
+            IntSupplier startHeightSupplier,
+            int targetOutboundPeers,
+            int targetBlockRelayPeers
+    ) {
+        this(outboundPeerManager, startHeightSupplier, targetOutboundPeers, targetBlockRelayPeers,
+                DEFAULT_INITIAL_BACKOFF, DEFAULT_MAX_BACKOFF, DEFAULT_FEELER_INTERVAL, DEFAULT_FEELER_JITTER);
+    }
+
+    OutboundPeerSupervisor(
+            OutboundPeerManager outboundPeerManager,
+            IntSupplier startHeightSupplier,
+            int targetOutboundPeers,
+            int targetBlockRelayPeers,
+            Duration initialBackoff,
+            Duration maxBackoff,
+            Duration feelerInterval,
+            Duration feelerJitter
+    ) {
 
         this.outboundPeerManager =
                 Objects.requireNonNull(
@@ -174,6 +198,10 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
 
         this.targetOutboundPeers =
                 targetOutboundPeers;
+        if (targetBlockRelayPeers < 0) {
+            throw new IllegalArgumentException("targetBlockRelayPeers must not be negative");
+        }
+        this.targetBlockRelayPeers = targetBlockRelayPeers;
 
         this.initialBackoff =
                 requirePositiveDuration(
@@ -231,7 +259,10 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
             }
 
             for (int index = 0; index < targetOutboundPeers; index++) {
-                slots.add(new Slot(index));
+                slots.add(new Slot(index, PeerConnectionRole.FULL_RELAY));
+            }
+            for (int index = 0; index < targetBlockRelayPeers; index++) {
+                slots.add(new Slot(targetOutboundPeers + index, PeerConnectionRole.BLOCK_RELAY_ONLY));
             }
 
             Slot initialSlot = slots.get(0);
@@ -573,7 +604,8 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
             return outboundPeerManager.connectOneWithAddress(
                     startHeight,
                     excludedAddresses,
-                    excludedNetGroups
+                    excludedNetGroups,
+                    slot.role
             );
         }
     }
@@ -612,6 +644,9 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
 
         synchronized (monitor) {
             if (stopping || slot.connection != null) {
+                return false;
+            }
+            if (newConnection.role() != slot.role) {
                 return false;
             }
 
@@ -783,6 +818,10 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
         return targetOutboundPeers;
     }
 
+    public int targetBlockRelayPeers() {
+        return targetBlockRelayPeers;
+    }
+
     public boolean isStarted() {
         return started.get();
     }
@@ -882,11 +921,13 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
 
     private static final class Slot {
         private final int index;
+        private final PeerConnectionRole role;
         private OutboundPeerConnection connection;
         private Thread worker;
 
-        private Slot(int index) {
+        private Slot(int index, PeerConnectionRole role) {
             this.index = index;
+            this.role = Objects.requireNonNull(role, "role");
         }
     }
 }

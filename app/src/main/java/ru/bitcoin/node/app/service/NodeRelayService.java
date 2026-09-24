@@ -93,9 +93,14 @@ public final class NodeRelayService implements AutoCloseable {
     }
 
     private void handle(Peer peer, BitcoinMessage message) throws IOException {
+        PeerConnectionRole role = peers.roleOf(peer);
         switch (message.command()) {
-            case "inv" -> requestTransactions(peer, BitcoinMessages.decodeInv(message));
-            case "tx" -> receiveTransaction(peer, TransactionParser.parse(message.payload()));
+            case "inv" -> {
+                if (role.relaysTransactions()) requestTransactions(peer, BitcoinMessages.decodeInv(message));
+            }
+            case "tx" -> {
+                if (role.relaysTransactions()) receiveTransaction(peer, TransactionParser.parse(message.payload()));
+            }
             case "getdata" -> queueGetData(peer, BitcoinMessages.decodeGetData(message));
             case "getheaders" -> {
                 var request = GetHeadersMessageCodec.decode(message.payload());
@@ -184,6 +189,7 @@ public final class NodeRelayService implements AutoCloseable {
 
     /** Runs only on this peer's outbound worker, so a slow socket cannot stall other peers. */
     private void serveData(Peer peer, GetDataMessage request) throws IOException {
+        PeerConnectionRole role = peers.roleOf(peer);
         if (request.inventory().size() > GetDataMessage.MAX_INVENTORY_SIZE) {
             throw new IllegalArgumentException("getdata exceeds protocol inventory limit");
         }
@@ -207,9 +213,9 @@ public final class NodeRelayService implements AutoCloseable {
                             ? BlockSerializer.serializeLegacy(block.get()) : BlockSerializer.serialize(block.get())));
                     continue;
                 }
-            } else if (vector.type() == InventoryVector.MSG_TX
+            } else if (role.relaysTransactions() && (vector.type() == InventoryVector.MSG_TX
                     || vector.type() == InventoryVector.MSG_WITNESS_TX
-                    || vector.type() == MSG_WTX) {
+                    || vector.type() == MSG_WTX)) {
                 Transaction transaction = vector.type() == MSG_WTX
                         ? byWtxId.get(vector.hash())
                         : byTxId.get(vector.hash());
@@ -244,7 +250,7 @@ public final class NodeRelayService implements AutoCloseable {
 
     private void announceTransaction(Transaction transaction, Peer source) {
         for (Peer peer : peers.readyPeers()) {
-            if (peer == source || !peer.remoteVersion().relay()) continue;
+            if (peer == source || !peers.roleOf(peer).relaysTransactions() || !peer.remoteVersion().relay()) continue;
             send(peer, BitcoinMessages.inv(new InvMessage(List.of(new InventoryVector(
                     peer.remoteWtxidRelay() ? MSG_WTX : InventoryVector.MSG_TX,
                     peer.remoteWtxidRelay() ? transaction.wtxId() : transaction.txId())))));

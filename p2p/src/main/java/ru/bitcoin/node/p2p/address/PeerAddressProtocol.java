@@ -2,6 +2,8 @@ package ru.bitcoin.node.p2p.address;
 
 import ru.bitcoin.node.p2p.Peer;
 import ru.bitcoin.node.p2p.PeerMessageListener;
+import ru.bitcoin.node.p2p.PeerManager;
+import ru.bitcoin.node.p2p.PeerConnectionRole;
 import ru.bitcoin.node.p2p.message.*;
 
 import java.io.IOException;
@@ -34,16 +36,15 @@ public final class PeerAddressProtocol
             1_000;
 
     private final PeerAddressManager addressManager;
+    private final PeerManager peerManager;
 
-    public PeerAddressProtocol(
-            PeerAddressManager addressManager
-    ) {
+    public PeerAddressProtocol(PeerAddressManager addressManager) {
+        this(addressManager, null);
+    }
 
-        this.addressManager =
-                Objects.requireNonNull(
-                        addressManager,
-                        "addressManager"
-                );
+    public PeerAddressProtocol(PeerAddressManager addressManager, PeerManager peerManager) {
+        this.addressManager = Objects.requireNonNull(addressManager, "addressManager");
+        this.peerManager = peerManager;
     }
 
     @Override
@@ -61,6 +62,11 @@ public final class PeerAddressProtocol
                 message,
                 "message"
         );
+
+        if (peerManager != null
+                && peerManager.hasRole(peer, PeerConnectionRole.BLOCK_RELAY_ONLY)) {
+            return;
+        }
 
         try {
 

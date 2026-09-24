@@ -111,6 +111,19 @@ public final class OutboundPeerManager {
             List<PeerAddress> excludedAddresses,
             Set<PeerNetGroup> excludedNetGroups
     ) throws IOException {
+        return connectOneWithAddress(startHeight, excludedAddresses, excludedNetGroups, PeerConnectionRole.FULL_RELAY);
+    }
+
+    public OutboundPeerConnection connectOneWithAddress(
+            int startHeight,
+            List<PeerAddress> excludedAddresses,
+            Set<PeerNetGroup> excludedNetGroups,
+            PeerConnectionRole role
+    ) throws IOException {
+        Objects.requireNonNull(role, "role");
+        if (!role.persistentOutbound()) {
+            throw new IllegalArgumentException("role must be a persistent outbound role");
+        }
 
         if (startHeight < 0) {
 
@@ -177,7 +190,8 @@ public final class OutboundPeerManager {
                         peerConnector.connectManaged(
                                 address.hostAddress(),
                                 address.port(),
-                                startHeight
+                                startHeight,
+                                role
                         );
 
                 if (!peer.isReady()) {
@@ -219,7 +233,8 @@ public final class OutboundPeerManager {
                 try {
 
                     peerManager.add(
-                            peer
+                            peer,
+                            role
                     );
 
                 } catch (RuntimeException exception) {
@@ -240,7 +255,8 @@ public final class OutboundPeerManager {
 
                 return new OutboundPeerConnection(
                         peer,
-                        address
+                        address,
+                        role
                 );
 
             } catch (IOException exception) {

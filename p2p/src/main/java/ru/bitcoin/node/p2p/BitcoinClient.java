@@ -51,10 +51,21 @@ public final class BitcoinClient
     }
 
     @Override public Peer connectManaged(String host, int port, int startHeight) throws IOException {
-        return connect(host, port, startHeight, false);
+        return connect(host, port, startHeight, false, relay);
+    }
+
+    @Override
+    public Peer connectManaged(String host, int port, int startHeight, PeerConnectionRole role) throws IOException {
+        Objects.requireNonNull(role, "role");
+        boolean connectionRelay = role == PeerConnectionRole.BLOCK_RELAY_ONLY ? false : relay;
+        return connect(host, port, startHeight, false, connectionRelay);
     }
 
     private Peer connect(String host, int port, int startHeight, boolean startReader) throws IOException {
+        return connect(host, port, startHeight, startReader, relay);
+    }
+
+    private Peer connect(String host, int port, int startHeight, boolean startReader, boolean connectionRelay) throws IOException {
 
         if (host == null || host.isBlank()) {
             throw new IllegalArgumentException(
@@ -81,7 +92,7 @@ public final class BitcoinClient
                         ),
                         localServices,
                         startHeight,
-                        relay
+                        connectionRelay
                 );
 
         try {

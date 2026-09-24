@@ -3,6 +3,8 @@ package ru.bitcoin.node.p2p;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.IdentityHashMap;
 import java.util.Objects;
 
 public final class PeerManager
@@ -11,6 +13,7 @@ public final class PeerManager
     private final List<Peer> peers =
             new ArrayList<>();
     private final List<java.util.function.Consumer<Peer>> listeners = new ArrayList<>();
+    private final Map<Peer, PeerConnectionRole> roles = new IdentityHashMap<>();
 
     /** Callbacks only attach nonblocking observers; called under the manager lock. */
     public synchronized void addPeerListener(java.util.function.Consumer<Peer> listener) {
@@ -25,11 +28,16 @@ public final class PeerManager
     public synchronized void add(
             Peer peer
     ) {
+        add(peer, peer.isInboundConnection() ? PeerConnectionRole.INBOUND : PeerConnectionRole.FULL_RELAY);
+    }
+
+    public synchronized void add(Peer peer, PeerConnectionRole role) {
 
         Objects.requireNonNull(
                 peer,
                 "peer"
         );
+        Objects.requireNonNull(role, "role");
 
         if (peers.contains(peer)) {
             return;
@@ -61,6 +69,7 @@ public final class PeerManager
         peers.add(
                 peer
         );
+        roles.put(peer, role);
 
         peer.addCloseListener(
                 this::onPeerClosed
@@ -81,6 +90,7 @@ public final class PeerManager
             peers.remove(
                     peer
             );
+            roles.remove(peer);
         }
     }
 
@@ -96,6 +106,7 @@ public final class PeerManager
         peers.remove(
                 peer
         );
+        roles.remove(peer);
     }
 
     public synchronized List<Peer> peers() {
@@ -103,6 +114,17 @@ public final class PeerManager
         return List.copyOf(
                 peers
         );
+    }
+
+    public synchronized PeerConnectionRole roleOf(Peer peer) {
+        Objects.requireNonNull(peer, "peer");
+        PeerConnectionRole role = roles.get(peer);
+        if (role == null) throw new IllegalArgumentException("Peer is not managed");
+        return role;
+    }
+
+    public synchronized boolean hasRole(Peer peer, PeerConnectionRole role) {
+        return roles.get(peer) == role;
     }
 
     public synchronized List<Peer> readyPeers() {
@@ -134,6 +156,7 @@ public final class PeerManager
                     );
 
             peers.clear();
+            roles.clear();
         }
 
         IOException failure =

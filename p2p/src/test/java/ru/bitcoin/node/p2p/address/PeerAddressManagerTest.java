@@ -320,9 +320,7 @@ class PeerAddressManagerTest {
                 new PeerAddressManager();
 
         Instant time =
-                Instant.ofEpochSecond(
-                        1_700_000_000L
-                );
+                Instant.now();
 
         manager.add(
                 peer(
@@ -356,9 +354,7 @@ class PeerAddressManagerTest {
                 new PeerAddressManager();
 
         Instant time =
-                Instant.ofEpochSecond(
-                        1_700_000_000L
-                );
+                Instant.now();
 
         manager.addAll(
                 List.of(

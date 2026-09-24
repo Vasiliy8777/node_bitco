@@ -204,6 +204,19 @@ class PeerManagerTest {
         }
     }
 
+
+    @Test
+    void shouldTrackExplicitConnectionRole()
+            throws Exception {
+        try (PeerManager manager = new PeerManager()) {
+            Peer peer = newPeer();
+            manager.add(peer, PeerConnectionRole.BLOCK_RELAY_ONLY);
+            assertEquals(PeerConnectionRole.BLOCK_RELAY_ONLY, manager.roleOf(peer));
+            assertTrue(manager.hasRole(peer, PeerConnectionRole.BLOCK_RELAY_ONLY));
+            assertFalse(manager.hasRole(peer, PeerConnectionRole.FULL_RELAY));
+        }
+    }
+
     private static Peer newPeer() {
 
         PeerConnection connection =

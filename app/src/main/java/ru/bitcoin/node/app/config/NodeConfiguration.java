@@ -35,7 +35,7 @@ import java.util.List;
 public class NodeConfiguration {
     @Bean(destroyMethod = "close")
     public ru.bitcoin.node.app.service.NodeRelayService nodeRelayService(NodeValidationService validation,
-            NodeSyncInfrastructure infrastructure, PeerManager peers) {
+                                                                         NodeSyncInfrastructure infrastructure, PeerManager peers) {
         return new ru.bitcoin.node.app.service.NodeRelayService(validation, infrastructure, peers);
     }
 
@@ -122,7 +122,9 @@ public class NodeConfiguration {
             OutboundPeerManager outboundPeerManager,
             NodeValidationService validationService,
             @Value("${bitcoin.p2p.target-outbound-peers:1}")
-            int targetOutboundPeers
+            int targetOutboundPeers,
+            @Value("${bitcoin.p2p.target-block-relay-peers:2}")
+            int targetBlockRelayPeers
     ) {
 
         return new OutboundPeerSupervisor(
@@ -132,7 +134,8 @@ public class NodeConfiguration {
                                 .activeTip()
                                 .height()
                 ),
-                targetOutboundPeers
+                targetOutboundPeers,
+                targetBlockRelayPeers
         );
     }
 
@@ -318,7 +321,8 @@ public class NodeConfiguration {
 
         PeerAddressProtocol protocol =
                 new PeerAddressProtocol(
-                        peerAddressManager
+                        peerAddressManager,
+                        peerManager
                 );
 
         peerManager.addPeerListener(
