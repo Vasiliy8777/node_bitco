@@ -10,6 +10,7 @@ import ru.bitcoin.node.mempool.Mempool;
 import ru.bitcoin.node.p2p.*;
 import ru.bitcoin.node.p2p.message.*;
 import ru.bitcoin.node.protocol.network.NetworkParametersRegistry;
+import ru.bitcoin.node.protocol.block.Block;
 import ru.bitcoin.node.protocol.serialization.TransactionSerializer;
 import ru.bitcoin.node.protocol.transaction.*;
 import ru.bitcoin.node.storage.rocksdb.RocksDbDatabase;
@@ -567,8 +568,46 @@ class NodeRelayServiceTest {
         assertNotNull(message, "Expected network message");
         return message;
     }
+    @Test
+    void relaysConnectedBlockOnceAndExcludesSourcePeer() throws Exception {
+        var parameters = NetworkParametersRegistry.regtest();
+        try (var db = new RocksDbDatabase(directory.resolve("connected-block-relay"));
+             var peers = new PeerManager()) {
+            var validation = new NodeValidationService(db, parameters, () -> 1_800_000_000L, new Mempool());
+            var sync = new NodeSyncInfrastructure(db, parameters, () -> 1_800_000_000L);
+            var source = mock(Peer.class);
+            var destination = mock(Peer.class);
+            when(source.isReady()).thenReturn(true);
+            when(destination.isReady()).thenReturn(true);
+            peers.add(source);
+            peers.add(destination);
+
+            try (var relay = new NodeRelayService(validation, sync, peers)) {
+                Block block = mock(Block.class);
+                Hash256 hash = Hash256.fromDisplayHex("42".repeat(32));
+                when(block.hash()).thenReturn(hash);
+
+                relay.relayConnectedBlock(block, source);
+                relay.relayConnectedBlock(block, source);
+
+                verify(source, never()).send(any());
+                verify(destination, timeout(2_000).times(1)).send(argThat(message -> {
+                    if (!"inv".equals(message.command())) return false;
+                    var inventory = BitcoinMessages.decodeInv(message).inventory();
+                    return inventory.size() == 1
+                            && inventory.getFirst().type() == InventoryVector.MSG_BLOCK
+                            && inventory.getFirst().hash().equals(hash);
+                }));
+            }
+        }
+    }
+
     private static Transaction spend(OutPoint point, long value, byte[] script) {
-        return new Transaction(2, List.of(new TxIn(point, new byte[]{1,0x51}, TxIn.FINAL_SEQUENCE)),
-                List.of(new TxOut(value, script)), new UInt32(0));
+        return new Transaction(
+                2,
+                List.of(new TxIn(point, new byte[]{1, 0x51}, TxIn.FINAL_SEQUENCE)),
+                List.of(new TxOut(value, script)),
+                new UInt32(0)
+        );
     }
 }

@@ -2,14 +2,20 @@ package ru.bitcoin.node.p2p.sync;
 
 import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.protocol.block.Block;
+import ru.bitcoin.node.p2p.Peer;
 
 import java.util.Objects;
 
 public record CompletedBlockDownload(
         int index,
         Hash256 requestedHash,
-        Block block
+        Block block,
+        Peer sourcePeer
 ) {
+
+    public CompletedBlockDownload(int index, Hash256 requestedHash, Block block) {
+        this(index, requestedHash, block, null);
+    }
 
     public CompletedBlockDownload {
 

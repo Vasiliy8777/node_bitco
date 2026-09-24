@@ -40,6 +40,7 @@ public final class BlockSyncCoordinator {
     private final HeaderChainState headerChainState;
     private final BlockIndexLookup lookup;
     private final BlockStore blockStore;
+    private final ConnectedBlockListener connectedBlockListener;
 
     private final BlockDownloadWindowStallDetector stallDetector;
     private final BlockDownloadStallTracker stallTracker;
@@ -58,7 +59,8 @@ public final class BlockSyncCoordinator {
                 headerChainState,
                 lookup,
                 blockStore,
-                DEFAULT_DOWNLOAD_WINDOW
+                DEFAULT_DOWNLOAD_WINDOW,
+                ConnectedBlockListener.NOOP
         );
     }
 
@@ -77,7 +79,55 @@ public final class BlockSyncCoordinator {
                 lookup,
                 blockStore,
                 downloadWindow,
+                ConnectedBlockListener.NOOP,
                 new BlockDownloadStallTracker()
+        );
+    }
+
+    public BlockSyncCoordinator(
+            BlockDownloadScheduler blockDownloadScheduler,
+            NodeValidationService validationService,
+            HeaderChainState headerChainState,
+            BlockIndexLookup lookup,
+            BlockStore blockStore,
+            int downloadWindow,
+            ConnectedBlockListener connectedBlockListener
+    ) {
+        this(
+                blockDownloadScheduler,
+                validationService,
+                headerChainState,
+                lookup,
+                blockStore,
+                downloadWindow,
+                connectedBlockListener,
+                new BlockDownloadStallTracker()
+        );
+    }
+
+    BlockSyncCoordinator(
+            BlockDownloadScheduler blockDownloadScheduler,
+            NodeValidationService validationService,
+            HeaderChainState headerChainState,
+            BlockIndexLookup lookup,
+            BlockStore blockStore,
+            int downloadWindow,
+            ConnectedBlockListener connectedBlockListener,
+            BlockDownloadStallTracker stallTracker
+    ) {
+        this(
+                blockDownloadScheduler,
+                validationService,
+                headerChainState,
+                lookup,
+                blockStore,
+                downloadWindow,
+                connectedBlockListener,
+                stallTracker,
+                new BlockDownloadStallTimeoutEvaluator(
+                        stallTracker,
+                        new BlockDownloadStallTimeoutPolicy()
+                )
         );
     }
 
@@ -97,6 +147,7 @@ public final class BlockSyncCoordinator {
                 lookup,
                 blockStore,
                 downloadWindow,
+                ConnectedBlockListener.NOOP,
                 stallTracker,
                 new BlockDownloadStallTimeoutEvaluator(
                         stallTracker,
@@ -112,6 +163,21 @@ public final class BlockSyncCoordinator {
             BlockIndexLookup lookup,
             BlockStore blockStore,
             int downloadWindow,
+            BlockDownloadStallTracker stallTracker,
+            BlockDownloadStallTimeoutEvaluator stallTimeoutEvaluator
+    ) {
+        this(blockDownloadScheduler, validationService, headerChainState, lookup, blockStore,
+                downloadWindow, ConnectedBlockListener.NOOP, stallTracker, stallTimeoutEvaluator);
+    }
+
+    BlockSyncCoordinator(
+            BlockDownloadScheduler blockDownloadScheduler,
+            NodeValidationService validationService,
+            HeaderChainState headerChainState,
+            BlockIndexLookup lookup,
+            BlockStore blockStore,
+            int downloadWindow,
+            ConnectedBlockListener connectedBlockListener,
             BlockDownloadStallTracker stallTracker,
             BlockDownloadStallTimeoutEvaluator stallTimeoutEvaluator
     ) {
@@ -149,6 +215,12 @@ public final class BlockSyncCoordinator {
                 Objects.requireNonNull(
                         blockStore,
                         "blockStore"
+                );
+
+        this.connectedBlockListener =
+                Objects.requireNonNull(
+                        connectedBlockListener,
+                        "connectedBlockListener"
                 );
 
         this.downloadWindow =
@@ -230,7 +302,7 @@ public final class BlockSyncCoordinator {
          * Consensus processing still consumes this map strictly
          * in blocksToDownload order.
          */
-        Map<Hash256, Block> availableBlocks =
+        Map<Hash256, AvailableBlock> availableBlocks =
                 new HashMap<>();
 
         /*
@@ -291,10 +363,10 @@ public final class BlockSyncCoordinator {
 
                     if (localBlock != null) {
 
-                        Block previous =
+                        AvailableBlock previous =
                                 availableBlocks.put(
                                         index.hash(),
-                                        localBlock
+                                        new AvailableBlock(localBlock, null)
                                 );
 
                         if (previous != null) {
@@ -342,14 +414,16 @@ public final class BlockSyncCoordinator {
                                     nextToProcess
                             );
 
-                    Block block =
+                    AvailableBlock available =
                             availableBlocks.remove(
                                     index.hash()
                             );
 
-                    if (block == null) {
+                    if (available == null) {
                         break;
                     }
+
+                    Block block = available.block();
 
                     if (!block.hash().equals(
                             index.hash()
@@ -380,6 +454,10 @@ public final class BlockSyncCoordinator {
                                         + " at height "
                                         + index.height()
                         );
+                    }
+
+                    if (result == BlockProcessingResult.CONNECTED) {
+                        connectedBlockListener.onConnected(block, available.sourcePeer());
                     }
 
                     nextToProcess =
@@ -545,10 +623,10 @@ public final class BlockSyncCoordinator {
                     );
                 }
 
-                Block previous =
+                AvailableBlock previous =
                         availableBlocks.put(
                                 completedHash,
-                                completedBlock
+                                new AvailableBlock(completedBlock, completed.sourcePeer())
                         );
 
                 if (previous != null) {
@@ -672,6 +750,12 @@ public final class BlockSyncCoordinator {
             if (activeSession == session) {
                 activeSession = null;
             }
+        }
+    }
+
+    private record AvailableBlock(Block block, Peer sourcePeer) {
+        private AvailableBlock {
+            Objects.requireNonNull(block, "block");
         }
     }
 

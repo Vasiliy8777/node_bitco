@@ -517,7 +517,8 @@ public final class SchedulerBlockDownloadSession
                     new CompletedBlockDownload(
                             state.index,
                             state.blockHash,
-                            block
+                            block,
+                            peer
                     )
             );
         }

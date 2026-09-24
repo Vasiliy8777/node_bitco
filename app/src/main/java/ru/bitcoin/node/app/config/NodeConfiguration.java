@@ -221,14 +221,17 @@ public class NodeConfiguration {
     public BlockSyncCoordinator blockSyncCoordinator(
             BlockDownloadScheduler blockDownloadScheduler,
             NodeValidationService validationService,
-            NodeSyncInfrastructure syncInfrastructure
+            NodeSyncInfrastructure syncInfrastructure,
+            ru.bitcoin.node.app.service.NodeRelayService nodeRelayService
     ) {
         return new BlockSyncCoordinator(
                 blockDownloadScheduler,
                 validationService,
                 syncInfrastructure.headerChainState(),
                 syncInfrastructure.blockIndexLookup(),
-                syncInfrastructure.blockStore()
+                syncInfrastructure.blockStore(),
+                1024,
+                nodeRelayService::relayConnectedBlock
         );
     }
 

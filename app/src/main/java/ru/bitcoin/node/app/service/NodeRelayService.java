@@ -42,6 +42,8 @@ public final class NodeRelayService implements AutoCloseable {
             new ArrayBlockingQueue<>(128), Thread.ofPlatform().daemon().name("bitcoin-relay").factory());
     private final TransactionRequestScheduler transactionRequests = new TransactionRequestScheduler();
     private final Map<Hash256, Orphan> orphans = new LinkedHashMap<>();
+    private final LinkedHashMap<Hash256, Boolean> announcedBlocks = new LinkedHashMap<>();
+    private static final int MAX_RECENT_BLOCK_ANNOUNCEMENTS = 4096;
     private final PeerMessageListener messages = this::enqueue;
     private final Consumer<Peer> connections = this::attach;
     private volatile boolean closed;
@@ -266,9 +268,24 @@ public final class NodeRelayService implements AutoCloseable {
         var result = validation.processBlock(block);
         if (result == BlockProcessingResult.CONNECTED) {
             sync.headerSyncService().process(new HeadersMessage(List.of(block.header())));
-            broadcast(BitcoinMessages.inv(new InvMessage(List.of(new InventoryVector(InventoryVector.MSG_BLOCK, block.hash())))), null);
+            relayConnectedBlock(block, null);
         }
         return result;
+    }
+
+    /** Announces an active-tip block once, excluding the peer that supplied its body. */
+    public void relayConnectedBlock(Block block, Peer source) {
+        Objects.requireNonNull(block, "block");
+        synchronized (announcedBlocks) {
+            if (announcedBlocks.putIfAbsent(block.hash(), Boolean.TRUE) != null) return;
+            while (announcedBlocks.size() > MAX_RECENT_BLOCK_ANNOUNCEMENTS) {
+                Iterator<Hash256> iterator = announcedBlocks.keySet().iterator();
+                iterator.next();
+                iterator.remove();
+            }
+        }
+        broadcast(BitcoinMessages.inv(new InvMessage(List.of(
+                new InventoryVector(InventoryVector.MSG_BLOCK, block.hash())))), source);
     }
 
     public Hash256 submitTransaction(Transaction transaction) {
