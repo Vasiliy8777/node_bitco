@@ -389,6 +389,42 @@ public final class BitcoinMessages {
         }
     }
 
+    public static BitcoinMessage sendCmpct(SendCmpctMessage value) {
+        return new BitcoinMessage("sendcmpct", SendCmpctMessageCodec.encode(value));
+    }
+
+    public static SendCmpctMessage decodeSendCmpct(BitcoinMessage message) {
+        requireCommand(message, "sendcmpct");
+        return SendCmpctMessageCodec.decode(message.payload());
+    }
+
+    public static BitcoinMessage compactBlock(CompactBlockMessage value, long version) {
+        return new BitcoinMessage("cmpctblock", CompactBlockMessageCodec.encode(value, version));
+    }
+
+    public static CompactBlockMessage decodeCompactBlock(BitcoinMessage message, long version) {
+        requireCommand(message, "cmpctblock");
+        return CompactBlockMessageCodec.decode(message.payload(), version);
+    }
+
+    public static BitcoinMessage getBlockTxn(BlockTransactionsRequest value) {
+        return new BitcoinMessage("getblocktxn", BlockTransactionsRequestCodec.encode(value));
+    }
+
+    public static BlockTransactionsRequest decodeGetBlockTxn(BitcoinMessage message) {
+        requireCommand(message, "getblocktxn");
+        return BlockTransactionsRequestCodec.decode(message.payload());
+    }
+
+    public static BitcoinMessage blockTxn(BlockTransactionsMessage value, long version) {
+        return new BitcoinMessage("blocktxn", BlockTransactionsMessageCodec.encode(value, version));
+    }
+
+    public static BlockTransactionsMessage decodeBlockTxn(BitcoinMessage message, long version) {
+        requireCommand(message, "blocktxn");
+        return BlockTransactionsMessageCodec.decode(message.payload(), version);
+    }
+
     private static void requireCommand(
             BitcoinMessage message,
             String expectedCommand
