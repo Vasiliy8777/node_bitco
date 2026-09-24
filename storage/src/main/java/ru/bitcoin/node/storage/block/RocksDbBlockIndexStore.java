@@ -11,6 +11,8 @@ public final class RocksDbBlockIndexStore
         implements BlockIndexStore {
     private static final int HASH_SIZE = 32;
     private static final byte BLOCK_INDEX_PREFIX = 0x01;
+    private static final byte WORK_INDEX_PREFIX = 0x08;
+    private static final byte[] WORK_INDEX_VERSION_KEY = {0x09};
 
     private final RocksDbDatabase database;
 
@@ -36,12 +38,10 @@ public final class RocksDbBlockIndexStore
             );
         }
 
-        database.put(
-                key(blockIndex.hash()),
-                StoredBlockIndexSerializer.serialize(
-                        blockIndex
-                )
-        );
+        try (var batch = new RocksDbWriteBatch()) {
+            save(batch, blockIndex);
+            database.write(batch);
+        }
     }
 
     @Override
@@ -95,6 +95,75 @@ public final class RocksDbBlockIndexStore
                 .toList();
     }
 
+    public void forEach(java.util.function.Consumer<StoredBlockIndex> visitor) {
+        java.util.Objects.requireNonNull(visitor, "visitor");
+        database.forEachValueByPrefix(BLOCK_INDEX_PREFIX,
+                value -> visitor.accept(StoredBlockIndexSerializer.deserialize(value)));
+    }
+
+    /** Highest chainwork, then height, then display hash; stops at the first eligible entry. */
+    public Optional<StoredBlockIndex> findBest(java.util.function.Predicate<StoredBlockIndex> eligible) {
+        java.util.Objects.requireNonNull(eligible, "eligible");
+        ensureWorkIndex();
+        StoredBlockIndex[] result = new StoredBlockIndex[1];
+        database.visitPrefixDescending(WORK_INDEX_PREFIX, (key, value) -> {
+            StoredBlockIndex current = find(new Hash256(value)).orElse(null);
+            // A batch may replace/delete the same primary record several times.
+            // Old secondary entries must never resurrect a deleted or superseded candidate.
+            if (current != null && java.util.Arrays.equals(key, workKey(current)) && eligible.test(current)) {
+                result[0] = current;
+                return false;
+            }
+            return true;
+        });
+        return Optional.ofNullable(result[0]);
+    }
+
+    private void ensureWorkIndex() {
+        synchronized (database) {
+            byte[] version = database.get(WORK_INDEX_VERSION_KEY);
+            if (version != null) {
+                if (!java.util.Arrays.equals(version, new byte[]{1})) {
+                    throw new IllegalStateException("Unsupported block work index version");
+                }
+                return;
+            }
+            // Bounded, restartable migration. A missing marker causes replay after interruption.
+            // The database monitor excludes commits while taking and indexing the primary view.
+            class Migration implements AutoCloseable {
+                RocksDbWriteBatch batch = new RocksDbWriteBatch();
+                int count;
+                void add(StoredBlockIndex index) {
+                    batch.put(workKey(index), index.hash().bytes());
+                    if (++count == 1024) {
+                        database.write(batch);
+                        batch.close();
+                        batch = new RocksDbWriteBatch();
+                        count = 0;
+                    }
+                }
+                public void close() { batch.close(); }
+            }
+            try (var migration = new Migration()) {
+                forEach(migration::add);
+                migration.batch.put(WORK_INDEX_VERSION_KEY, new byte[]{1});
+                database.write(migration.batch);
+            }
+        }
+    }
+
+    private static byte[] workKey(StoredBlockIndex index) {
+        byte[] key = new byte[1 + 32 + 8 + 32];
+        key[0] = WORK_INDEX_PREFIX;
+        byte[] work = index.chainWork().toByteArray();
+        int length = Math.min(32, work.length);
+        System.arraycopy(work, work.length - length, key, 33 - length, length);
+        java.nio.ByteBuffer.wrap(key, 33, 8).putLong(index.height());
+        byte[] hash = index.hash().bytes();
+        for (int i = 0; i < 32; i++) key[41 + i] = hash[31 - i];
+        return key;
+    }
+
     @Override
     public void delete(
             Hash256 hash
@@ -105,9 +174,10 @@ public final class RocksDbBlockIndexStore
             );
         }
 
-        database.delete(
-                key(hash)
-        );
+        try (var batch = new RocksDbWriteBatch()) {
+            delete(batch, hash);
+            database.write(batch);
+        }
     }
 
     private static byte[] key(
@@ -157,6 +227,8 @@ public final class RocksDbBlockIndexStore
             );
         }
 
+        find(blockIndex.hash()).ifPresent(previous -> batch.delete(workKey(previous)));
+        batch.put(workKey(blockIndex), blockIndex.hash().bytes());
         batch.put(
                 key(blockIndex.hash()),
                 StoredBlockIndexSerializer.serialize(
@@ -181,6 +253,7 @@ public final class RocksDbBlockIndexStore
             );
         }
 
+        find(hash).ifPresent(previous -> batch.delete(workKey(previous)));
         batch.delete(
                 key(hash)
         );

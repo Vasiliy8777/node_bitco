@@ -215,6 +215,48 @@ public final class RocksDbDatabase
         }
     }
 
+    /** Visits one namespace without retaining its contents in Java memory. */
+    public void forEachValueByPrefix(byte prefix, java.util.function.Consumer<byte[]> visitor) {
+        ensureOpen();
+        java.util.Objects.requireNonNull(visitor, "visitor");
+        try (var iterator = database.newIterator()) {
+            iterator.seek(new byte[]{prefix});
+            while (iterator.isValid()) {
+                byte[] key = iterator.key();
+                if (key.length == 0 || key[0] != prefix) break;
+                visitor.accept(iterator.value());
+                iterator.next();
+            }
+            iterator.status();
+        } catch (RocksDBException e) {
+            throw new IllegalStateException("Failed to visit RocksDB namespace", e);
+        }
+    }
+
+    /** Visits keys in reverse byte order until the visitor returns false. */
+    public void visitPrefixDescending(byte prefix, java.util.function.BiPredicate<byte[], byte[]> visitor) {
+        ensureOpen();
+        java.util.Objects.requireNonNull(visitor, "visitor");
+        try (var iterator = database.newIterator()) {
+            if (Byte.toUnsignedInt(prefix) == 255) {
+                iterator.seekToLast();
+            } else {
+                iterator.seekForPrev(new byte[]{(byte) (Byte.toUnsignedInt(prefix) + 1)});
+                if (iterator.isValid() && java.util.Arrays.equals(iterator.key(),
+                        new byte[]{(byte) (Byte.toUnsignedInt(prefix) + 1)})) iterator.prev();
+            }
+            while (iterator.isValid()) {
+                byte[] key = iterator.key();
+                if (key.length == 0 || key[0] != prefix) break;
+                if (!visitor.test(key, iterator.value())) break;
+                iterator.prev();
+            }
+            iterator.status();
+        } catch (RocksDBException e) {
+            throw new IllegalStateException("Failed to visit RocksDB namespace in descending order", e);
+        }
+    }
+
     /** Counts one key namespace without loading its values. Caller must exclude concurrent writes. */
     public long countPrefix(byte prefix) {
         ensureOpen();

@@ -19,6 +19,32 @@ class RocksDbBlockIndexStoreTest {
     Path tempDirectory;
 
     @Test
+    void streamsOnlyBlockIndexesAndCanRestartAfterVisitorFailure() {
+        try (var database = new RocksDbDatabase(tempDirectory)) {
+            var store = new RocksDbBlockIndexStore(database);
+            var expected = new java.util.HashSet<StoredBlockIndex>();
+            var genesis = storedGenesis();
+            for (int i = 0; i < 2000; i++) {
+                var original = genesis.header();
+                var header = new BlockHeader(original.version(), genesis.hash(), original.merkleRoot(),
+                        original.timestamp(), original.bits(), new UInt32(i));
+                var index = new StoredBlockIndex(header.hash(), header, i,
+                        genesis.hash(), BigInteger.valueOf(i + 1));
+                store.save(index);
+                expected.add(index);
+            }
+            database.put(new byte[]{0}, new byte[]{1});
+            database.put(new byte[]{2}, new byte[]{1});
+            RuntimeException failure = new RuntimeException("visitor failed");
+            assertSame(failure, assertThrows(RuntimeException.class,
+                    () -> store.forEach(index -> { throw failure; })));
+            var seen = new java.util.HashSet<StoredBlockIndex>();
+            store.forEach(index -> assertTrue(seen.add(index)));
+            assertEquals(expected, seen);
+        }
+    }
+
+    @Test
     void shouldSaveAndFindBlockIndex() {
 
         Path databasePath =

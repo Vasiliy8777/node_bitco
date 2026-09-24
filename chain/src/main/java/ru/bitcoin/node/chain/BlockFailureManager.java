@@ -7,7 +7,6 @@ import ru.bitcoin.node.storage.chain.RocksDbChainStateStore;
 import ru.bitcoin.node.storage.rocksdb.RocksDbDatabase;
 import ru.bitcoin.node.storage.rocksdb.RocksDbWriteBatch;
 
-import java.util.Comparator;
 import java.util.Objects;
 
 public final class BlockFailureManager {
@@ -44,13 +43,9 @@ public final class BlockFailureManager {
             throw new IllegalStateException("Genesis block cannot be marked failed");
         }
 
-        BlockIndex bestEligible = blockIndexStore.findAll().stream()
+        BlockIndex bestEligible = blockIndexStore
+                .findBest(stored -> !failureResolver.isFailed(BlockIndexStorageMapper.fromStored(stored), hash))
                 .map(BlockIndexStorageMapper::fromStored)
-                .filter(index -> !failureResolver.isFailed(index, hash))
-                .max(Comparator
-                        .comparing(BlockIndex::chainWork)
-                        .thenComparingLong(BlockIndex::height)
-                        .thenComparing(index -> index.hash().toDisplayHex()))
                 .orElseThrow(() -> new IllegalStateException(
                         "No eligible block index remains after invalidating " + hash.toDisplayHex()));
 
