@@ -508,9 +508,10 @@ class NodeLifecycleServiceTest {
             );
 
             BitcoinMessage firstGetHeaders =
-                    reader.read(
+                    readProtocolMessage(
+                            reader,
                             input
-                    ).orElseThrow();
+                    );
 
             assertEquals(
                     "getheaders",
@@ -542,9 +543,10 @@ class NodeLifecycleServiceTest {
             output.flush();
 
             BitcoinMessage secondGetHeaders =
-                    reader.read(
+                    readProtocolMessage(
+                            reader,
                             input
-                    ).orElseThrow();
+                    );
 
             assertEquals(
                     "getheaders",
@@ -575,9 +577,10 @@ class NodeLifecycleServiceTest {
             output.flush();
 
             BitcoinMessage getDataWire =
-                    reader.read(
+                    readProtocolMessage(
+                            reader,
                             input
-                    ).orElseThrow();
+                    );
 
             assertEquals(
                     "getdata",
@@ -1813,9 +1816,10 @@ class NodeLifecycleServiceTest {
                  * First GETHEADERS.
                  */
                 BitcoinMessage firstGetHeaders =
-                        reader.read(
+                        readProtocolMessage(
+                                reader,
                                 input
-                        ).orElseThrow();
+                        );
 
                 assertEquals(
                         "getheaders",
@@ -1853,9 +1857,10 @@ class NodeLifecycleServiceTest {
                  * Header synchronizer asks again from block1.
                  */
                 BitcoinMessage secondGetHeaders =
-                        reader.read(
+                        readProtocolMessage(
+                                reader,
                                 input
-                        ).orElseThrow();
+                        );
 
                 assertEquals(
                         "getheaders",
@@ -1892,9 +1897,10 @@ class NodeLifecycleServiceTest {
                  * Block IBD starts.
                  */
                 BitcoinMessage getDataWire =
-                        reader.read(
+                        readProtocolMessage(
+                                reader,
                                 input
-                        ).orElseThrow();
+                        );
 
                 assertEquals(
                         "getdata",
@@ -1992,9 +1998,10 @@ class NodeLifecycleServiceTest {
                  * unfinished block body to this new Peer instance.
                  */
                 BitcoinMessage getDataWire =
-                        reader.read(
+                        readProtocolMessage(
+                                reader,
                                 input
-                        ).orElseThrow();
+                        );
 
                 assertEquals(
                         "getdata",
@@ -2109,9 +2116,10 @@ class NodeLifecycleServiceTest {
             );
 
             BitcoinMessage firstGetHeaders =
-                    reader.read(
+                    readProtocolMessage(
+                            reader,
                             input
-                    ).orElseThrow();
+                    );
 
             assertEquals(
                     "getheaders",
@@ -2133,9 +2141,10 @@ class NodeLifecycleServiceTest {
             output.flush();
 
             BitcoinMessage secondGetHeaders =
-                    reader.read(
+                    readProtocolMessage(
+                            reader,
                             input
-                    ).orElseThrow();
+                    );
 
             assertEquals(
                     "getheaders",
@@ -2167,9 +2176,10 @@ class NodeLifecycleServiceTest {
             output.flush();
 
             BitcoinMessage getDataWire =
-                    reader.read(
+                    readProtocolMessage(
+                            reader,
                             input
-                    ).orElseThrow();
+                    );
 
             assertEquals(
                     "getdata",
@@ -2204,9 +2214,9 @@ class NodeLifecycleServiceTest {
                     null
             );
 
-            assertEquals(
-                    -1,
-                    input.read()
+            awaitPeerDisconnect(
+                    reader,
+                    input
             );
 
         } catch (Exception exception) {
@@ -2264,9 +2274,10 @@ class NodeLifecycleServiceTest {
             );
 
             BitcoinMessage getHeaders =
-                    reader.read(
+                    readProtocolMessage(
+                            reader,
                             input
-                    ).orElseThrow();
+                    );
 
             assertEquals(
                     "getheaders",
@@ -2277,9 +2288,9 @@ class NodeLifecycleServiceTest {
                     null
             );
 
-            assertEquals(
-                    -1,
-                    input.read()
+            awaitPeerDisconnect(
+                    reader,
+                    input
             );
 
         } catch (Exception exception) {
@@ -2337,9 +2348,10 @@ class NodeLifecycleServiceTest {
             );
 
             BitcoinMessage getHeadersWire =
-                    reader.read(
+                    readProtocolMessage(
+                            reader,
                             input
-                    ).orElseThrow();
+                    );
 
             assertEquals(
                     "getheaders",
@@ -2428,9 +2440,10 @@ class NodeLifecycleServiceTest {
             );
 
             BitcoinMessage getHeadersWire =
-                    reader.read(
+                    readProtocolMessage(
+                            reader,
                             input
-                    ).orElseThrow();
+                    );
 
             assertEquals(
                     "getheaders",
@@ -2476,6 +2489,64 @@ class NodeLifecycleServiceTest {
         }
     }
 
+    /**
+     * Reads the next application-level message from the test peer.
+     *
+     * FULL_RELAY outbound peers may send a one-shot GETADDR after the
+     * handshake. GETADDR is orthogonal to header/block synchronization, so
+     * lifecycle test peers intentionally consume it instead of treating it
+     * as the next synchronization message.
+     */
+    private static BitcoinMessage readProtocolMessage(
+            BitcoinMessageStreamReader reader,
+            BufferedInputStream input
+    ) throws IOException {
+
+        while (true) {
+            BitcoinMessage message =
+                    reader.read(
+                            input
+                    ).orElseThrow();
+
+            if ("getaddr".equals(
+                    message.command()
+            )) {
+                continue;
+            }
+
+            return message;
+        }
+    }
+
+    /**
+     * Waits until the node closes the connection.
+     *
+     * FULL_RELAY peers may have a one-shot GETADDR already queued when the
+     * lifecycle is being stopped. Seeing that complete protocol message before
+     * EOF does not mean shutdown failed, so consume it and continue waiting for
+     * the actual socket close.
+     */
+    private static void awaitPeerDisconnect(
+            BitcoinMessageStreamReader reader,
+            BufferedInputStream input
+    ) throws IOException {
+
+        while (true) {
+            java.util.Optional<BitcoinMessage> message =
+                    reader.read(input);
+
+            if (message.isEmpty()) {
+                return;
+            }
+
+            assertEquals(
+                    "getaddr",
+                    message.get().command(),
+                    "Unexpected protocol message while waiting for peer disconnect"
+            );
+        }
+    }
+
     private static void answerLiveHeaderPolls(
             BitcoinMessageStreamReader reader,
             BitcoinMessageEncoder encoder,
@@ -2496,6 +2567,10 @@ class NodeLifecycleServiceTest {
             }
 
             BitcoinMessage wire = message.get();
+
+            if ("getaddr".equals(wire.command())) {
+                continue;
+            }
 
             if ("ping".equals(wire.command())) {
                 PingMessage ping = BitcoinMessages.decodePing(wire);
@@ -2561,6 +2636,9 @@ class NodeLifecycleServiceTest {
                         var wire = reader.read(input);
                         if (wire.isEmpty()) return;
                         var message = wire.get();
+                        if (message.command().equals("getaddr")) {
+                            continue;
+                        }
                         if (message.command().equals("getheaders")) {
                             var request = GetHeadersMessageCodec.decode(message.payload());
                             var current = branch.get();

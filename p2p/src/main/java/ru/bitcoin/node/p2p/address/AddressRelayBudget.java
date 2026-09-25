@@ -46,6 +46,15 @@ final class AddressRelayBudget {
         return granted;
     }
 
+    /**
+     * Bitcoin Core grants an additional MAX_ADDR_TO_SEND processing tokens
+     * immediately after sending GETADDR. This allowance intentionally may
+     * raise the bucket above the normal soft cap.
+     */
+    synchronized void grantGetAddrResponseAllowance() {
+        addresses += MAX_ADDR_PROCESSING_TOKEN_BUCKET;
+    }
+
     synchronized double available(
             long now
     ) {

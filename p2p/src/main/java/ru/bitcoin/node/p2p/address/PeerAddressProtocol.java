@@ -56,6 +56,58 @@ public final class PeerAddressProtocol
         this.nanoTime = Objects.requireNonNull(nanoTime, "nanoTime");
     }
 
+    /**
+     * Called after a READY peer has been admitted to PeerManager.
+     *
+     * Bitcoin Core performs a one-time GETADDR fetch from ordinary outbound
+     * address-relay peers, but not from inbound or block-relay-only peers.
+     */
+    public void onPeerManaged(
+            Peer peer
+    ) {
+
+        Objects.requireNonNull(
+                peer,
+                "peer"
+        );
+
+        if (peerManager == null
+                || peer.isInboundConnection()
+                || !peerManager.hasRole(
+                peer,
+                PeerConnectionRole.FULL_RELAY
+        )) {
+            return;
+        }
+
+        if (!peer.markGetAddrSent()) {
+            return;
+        }
+
+        AddressRelayBudget budget =
+                budget(peer);
+
+        /*
+         * The response to our GETADDR is explicitly allowed an additional
+         * MAX_ADDR_TO_SEND records, bypassing the normal soft bucket cap.
+         * PeerManager invokes this callback before starting the managed reader,
+         * so the allowance is installed before an ADDR/ADDRV2 response can be
+         * dispatched to this protocol.
+         */
+        budget.grantGetAddrResponseAllowance();
+
+        try {
+            peer.sendAsync(
+                    BitcoinMessages.getAddr()
+            );
+        } catch (IOException exception) {
+            throw new PeerAddressProtocolException(
+                    "Failed to send getaddr request",
+                    exception
+            );
+        }
+    }
+
     @Override
     public void onMessage(
             Peer peer,

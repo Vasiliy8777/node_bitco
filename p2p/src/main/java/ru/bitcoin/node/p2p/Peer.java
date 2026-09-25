@@ -45,6 +45,8 @@ public final class Peer implements AutoCloseable {
 
     private boolean getAddrReceived;
 
+    private boolean getAddrSent;
+
     private boolean localWtxidRelaySent;
 
     private boolean localSendAddrV2Sent;
@@ -937,6 +939,25 @@ public final class Peer implements AutoCloseable {
 
     public synchronized boolean getAddrReceived() {
         return getAddrReceived;
+    }
+
+    /**
+     * Marks the one-time outbound GETADDR request for this connection.
+     *
+     * @return true only when this call marks the request for the first time.
+     */
+    public synchronized boolean markGetAddrSent() {
+
+        if (getAddrSent) {
+            return false;
+        }
+
+        getAddrSent = true;
+        return true;
+    }
+
+    public synchronized boolean getAddrSent() {
+        return getAddrSent;
     }
 
     public boolean remoteWantsAddrV2() {

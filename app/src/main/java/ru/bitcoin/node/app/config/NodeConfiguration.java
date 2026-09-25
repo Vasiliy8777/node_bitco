@@ -345,10 +345,14 @@ public class NodeConfiguration {
                 );
 
         peerManager.addPeerListener(
-                peer ->
-                        peer.addMessageListener(
-                                protocol
-                        )
+                peer -> {
+                    peer.addMessageListener(
+                            protocol
+                    );
+                    protocol.onPeerManaged(
+                            peer
+                    );
+                }
         );
 
         return protocol;
