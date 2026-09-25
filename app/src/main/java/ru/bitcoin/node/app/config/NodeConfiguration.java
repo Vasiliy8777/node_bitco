@@ -70,6 +70,8 @@ public class NodeConfiguration {
             RocksDbDatabase database,
             NetworkParameters parameters,
             AdjustedTime adjustedTime,
+            @Value("${bitcoin.reindex:false}")
+            boolean fullReindex,
             @Value("${bitcoin.reindex-chainstate:false}")
             boolean reindexChainstate,
             @Value("${bitcoin.prune:0}")
@@ -77,23 +79,25 @@ public class NodeConfiguration {
     ) {
         long pruneTargetBytes = pruneTargetBytes(pruneMiB);
         var pruneState = new ru.bitcoin.node.storage.chain.RocksDbPruneStateStore(database);
-        if (reindexChainstate && pruneState.hasPruned()) {
+        if (fullReindex && reindexChainstate) {
+            throw new IllegalArgumentException(
+                    "bitcoin.reindex and bitcoin.reindex-chainstate cannot both be enabled");
+        }
+        if ((fullReindex || reindexChainstate) && pruneState.hasPruned()) {
             throw new IllegalStateException(
-                    "bitcoin.reindex-chainstate cannot rebuild a pruned chainstate; old raw block data is no longer available");
+                    "reindex cannot rebuild from locally pruned historical block data");
         }
 
-        var reindexer =
-                new ru.bitcoin.node.chain.ChainstateReindexer(
-                        database,
-                        parameters,
-                        adjustedTime
-                );
+        var fullReindexer = new ru.bitcoin.node.chain.FullReindexer(
+                database, parameters, adjustedTime);
+        var reindexer = new ru.bitcoin.node.chain.ChainstateReindexer(
+                database, parameters, adjustedTime);
 
-        /*
-         * Explicit operator request starts a rebuild. A durable marker also
-         * resumes a rebuild automatically after process/power interruption.
-         */
-        if (reindexChainstate || reindexer.isInProgress()) {
+        /* A full-reindex marker has priority because its reset removes the block index
+         * that reindex-chainstate requires. Both rebuilds are restart-safe. */
+        if (fullReindex || fullReindexer.isInProgress()) {
+            fullReindexer.rebuild();
+        } else if (reindexChainstate || reindexer.isInProgress()) {
             reindexer.rebuild();
         }
 

@@ -237,6 +237,16 @@ public final class RocksDbBlockIndexStore
         );
     }
 
+    /** Clears primary and secondary block-index namespaces atomically with the caller's batch. */
+    public void clear(RocksDbWriteBatch batch) {
+        if (batch == null) {
+            throw new IllegalArgumentException("batch must not be null");
+        }
+        batch.deletePrefix(BLOCK_INDEX_PREFIX);
+        batch.deletePrefix(WORK_INDEX_PREFIX);
+        batch.delete(WORK_INDEX_VERSION_KEY);
+    }
+
     public void delete(
             RocksDbWriteBatch batch,
             Hash256 hash

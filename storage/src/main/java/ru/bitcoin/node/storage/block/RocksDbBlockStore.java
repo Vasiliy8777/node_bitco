@@ -104,6 +104,19 @@ public final class RocksDbBlockStore
         );
     }
 
+    /** Visits persisted block headers without retaining full transaction bodies in Java memory. */
+    public void forEachHeader(java.util.function.Consumer<ru.bitcoin.node.protocol.block.BlockHeader> visitor) {
+        java.util.Objects.requireNonNull(visitor, "visitor");
+        database.forEachValueByPrefix(BLOCK_PREFIX, value -> {
+            if (value.length < ru.bitcoin.node.protocol.block.BlockHeader.SERIALIZED_SIZE) {
+                throw new IllegalStateException("Stored block is shorter than an 80-byte header");
+            }
+            byte[] headerBytes = java.util.Arrays.copyOf(
+                    value, ru.bitcoin.node.protocol.block.BlockHeader.SERIALIZED_SIZE);
+            visitor.accept(ru.bitcoin.node.protocol.serialization.BlockHeaderParser.parse(headerBytes));
+        });
+    }
+
     public long serializedSize(Hash256 blockHash) {
         if (blockHash == null) throw new IllegalArgumentException("blockHash must not be null");
         byte[] value = database.get(key(blockHash));
