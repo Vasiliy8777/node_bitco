@@ -106,6 +106,11 @@ public final class BlockProcessor {
                 ru.bitcoin.node.consensus.block.WitnessCommitmentValidator.validate(
                         block, known.height() >= parameters.segwitHeight());
                 ru.bitcoin.node.consensus.block.SignetBlockValidator.validate(block, parameters);
+                // A pruned active-chain block can be received again. Preserve the validated
+                // body instead of discarding it merely because its BlockIndex is already known.
+                if (!storage.hasBody(known.hash())) {
+                    storage.save(block, known);
+                }
                 return BlockProcessingResult.ALREADY_IN_ACTIVE_CHAIN;
             }
 

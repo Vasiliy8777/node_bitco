@@ -42,6 +42,11 @@ public final class KnownBlockStorage {
         this.blockIndexStore = blockIndexStore;
     }
 
+    public boolean hasBody(ru.bitcoin.node.common.types.Hash256 hash) {
+        if (hash == null) throw new IllegalArgumentException("hash must not be null");
+        return blockStore.find(hash).isPresent();
+    }
+
     public void save(
             Block block,
             BlockIndex blockIndex

@@ -127,9 +127,20 @@ public final class NodeRpcServer implements AutoCloseable {
             }
             case "getblockchaininfo" -> {
                 var tip = validation.activeTip();
-                yield Map.of("blocks", tip.height(), "headers", sync.headerChainState().bestHeaderTip().height(),
-                        "bestblockhash", tip.hash().toDisplayHex(), "chainwork", String.format("%064x", tip.chainWork()),
-                        "initialblockdownload", !ready.getAsBoolean());
+                var prune = validation.pruneInfo();
+                var info = new LinkedHashMap<String, Object>();
+                info.put("blocks", tip.height());
+                info.put("headers", sync.headerChainState().bestHeaderTip().height());
+                info.put("bestblockhash", tip.hash().toDisplayHex());
+                info.put("chainwork", String.format("%064x", tip.chainWork()));
+                info.put("initialblockdownload", !ready.getAsBoolean());
+                info.put("pruned", prune.enabled());
+                if (prune.enabled()) {
+                    info.put("pruneheight", prune.pruneHeight());
+                    info.put("automatic_pruning", true);
+                    info.put("prune_target_size", prune.targetBytes());
+                }
+                yield info;
             }
             case "getmininginfo" -> Map.of("blocks", validation.activeTip().height(), "pooledtx", validation.mempoolEntries().size(),
                     "miningready", ready.getAsBoolean());

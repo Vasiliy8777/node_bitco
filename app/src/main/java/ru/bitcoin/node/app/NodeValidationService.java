@@ -11,6 +11,7 @@ import ru.bitcoin.node.protocol.network.NetworkParameters;
 import ru.bitcoin.node.protocol.transaction.Transaction;
 import ru.bitcoin.node.storage.block.*;
 import ru.bitcoin.node.storage.chain.RocksDbChainStateStore;
+import ru.bitcoin.node.storage.chain.RocksDbPruneStateStore;
 import ru.bitcoin.node.storage.rocksdb.RocksDbDatabase;
 import ru.bitcoin.node.storage.undo.RocksDbUndoStore;
 import ru.bitcoin.node.storage.utxo.RocksDbUtxoStore;
@@ -32,6 +33,8 @@ public final class NodeValidationService {
     private final AdjustedTime time;
     private final RocksDbUtxoStore utxos;
     private final BlockPruner blockPruner;
+    private final RocksDbPruneStateStore pruneState;
+    private final long pruneTargetBytes;
     private BlockIndex poolTip;
     private long revision;
     private final ActiveChainAncestors activeAncestors = new ActiveChainAncestors();
@@ -60,6 +63,41 @@ public final class NodeValidationService {
             if (revision == previous) chain.wait(timeoutMillis);
         }
     }
+
+
+    /** Snapshot of local pruning state for RPC/P2P policy. */
+    public PruneInfo pruneInfo() {
+        synchronized (chain) {
+            boolean hasPruned = pruneState.hasPruned();
+            long pruneHeight = hasPruned ? lowestAvailableActiveHeight() : 0L;
+            return new PruneInfo(blockPruner.enabled(), hasPruned, pruneHeight, pruneTargetBytes);
+        }
+    }
+
+    /** True only when the hash is an active-chain block whose raw body was removed by pruning. */
+    public boolean isPrunedActiveBlock(Hash256 hash) {
+        Objects.requireNonNull(hash, "hash");
+        synchronized (chain) {
+            if (!pruneState.hasPruned()) return false;
+            BlockIndex candidate = lookup.find(hash);
+            if (candidate == null || candidate.height() > chain.activeTip().height()) return false;
+            BlockIndex active = activeAncestors.at(chain.activeTip(), candidate.height(), lookup);
+            return active != null && active.hash().equals(hash) && blocks.find(hash).isEmpty();
+        }
+    }
+
+    private long lowestAvailableActiveHeight() {
+        BlockIndex tip = chain.activeTip();
+        long highestPruned = pruneState.highestPrunedHeight().orElse(-1L);
+        long upper = Math.min(highestPruned + 1L, tip.height());
+        for (long height = upper; height >= 0; height--) {
+            BlockIndex index = activeAncestors.at(tip, height, lookup);
+            if (index != null && blocks.find(index.hash()).isEmpty()) return height + 1L;
+        }
+        return 0L;
+    }
+
+    public record PruneInfo(boolean enabled, boolean hasPruned, long pruneHeight, long targetBytes) {}
 
     public Optional<Block> findBlock(Hash256 hash) {
         synchronized (chain) {
@@ -171,6 +209,8 @@ public final class NodeValidationService {
                                  AdjustedTime time, Mempool mempool, long pruneTargetBytes) {
         this.mempool = Objects.requireNonNull(mempool);
         this.blockPruner = new BlockPruner(database, pruneTargetBytes);
+        this.pruneState = new RocksDbPruneStateStore(database);
+        this.pruneTargetBytes = pruneTargetBytes;
         this.parameters = Objects.requireNonNull(parameters);
         this.time = Objects.requireNonNull(time);
         utxos = new RocksDbUtxoStore(database);

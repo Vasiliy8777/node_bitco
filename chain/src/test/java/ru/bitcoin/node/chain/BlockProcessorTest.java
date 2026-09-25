@@ -64,6 +64,19 @@ class BlockProcessorTest {
     }
 
     @Test
+    void receivingKnownActiveBlockRestoresPrunedBody() {
+        try (Fixture f = new Fixture(directory)) {
+            Block block = child(f.genesis, 1, REWARD);
+            assertEquals(CONNECTED, f.processor.process(block));
+            f.blocks.delete(block.hash());
+            assertTrue(f.blocks.find(block.hash()).isEmpty());
+            assertEquals(ALREADY_IN_ACTIVE_CHAIN, f.processor.process(block));
+            assertTrue(f.blocks.find(block.hash()).isPresent());
+            f.assertTip(block.hash());
+        }
+    }
+
+    @Test
     void initializerRejectsMissingAncestorOfConnectedTip() {
         try (Fixture f = new Fixture(directory)) {
             Block block = child(f.genesis, 1, REWARD);

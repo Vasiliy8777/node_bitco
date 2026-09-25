@@ -24,13 +24,16 @@ import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 class MiningRpcTest {
-    @TempDir Path directory;
+    @TempDir
+    Path directory;
     private static final JsonMapper JSON = JsonMapper.builder().build();
 
-    @Test void authenticatesGatesMiningAndAcceptsBlockAssembledFromRpcTemplate() throws Exception {
+    @Test
+    void authenticatesGatesMiningAndAcceptsBlockAssembledFromRpcTemplate() throws Exception {
         var parameters = NetworkParametersRegistry.regtest();
         try (var db = new RocksDbDatabase(directory); var peers = new PeerManager()) {
             var validation = new NodeValidationService(db, parameters, () -> 1_800_000_000L, new Mempool());
@@ -43,14 +46,17 @@ class MiningRpcTest {
                     URI uri = URI.create("http://127.0.0.1:" + rpc.port());
                     String body = JSON.writeValueAsString(Map.of("id", 1, "method", "getblocktemplate", "params", List.of(Map.of("rules", List.of("segwit")))));
                     assertEquals(401, client.send(HttpRequest.newBuilder(uri).POST(HttpRequest.BodyPublishers.ofString(body)).build(), HttpResponse.BodyHandlers.ofString()).statusCode());
-                    assertEquals(-10, ((Number)((Map<?, ?>)call(client, uri, "getblocktemplate", List.of(Map.of("rules", List.of("segwit")))).get("error")).get("code")).intValue());
+                    assertEquals(-10, ((Number) ((Map<?, ?>) call(client, uri, "getblocktemplate", List.of(Map.of("rules", List.of("segwit")))).get("error")).get("code")).intValue());
+                    var chainInfo = (Map<?, ?>) call(client, uri, "getblockchaininfo", List.of()).get("result");
+                    assertEquals(false, chainInfo.get("pruned"));
+                    assertFalse(chainInfo.containsKey("pruneheight"));
                     ready.set(true);
                     var response = call(client, uri, "getblocktemplate", List.of(Map.of("rules", List.of("segwit"))));
                     assertNull(response.get("error"));
                     var template = (Map<?, ?>) response.get("result");
                     Block mined = mineTemplate(template);
                     var next = client.sendAsync(request(uri, "getblocktemplate", List.of(Map.of("rules", List.of("segwit"),
-                                    "longpollid", template.get("longpollid")))), HttpResponse.BodyHandlers.ofString());
+                            "longpollid", template.get("longpollid")))), HttpResponse.BodyHandlers.ofString());
                     var submitted = call(client, uri, "submitblock", List.of(HexFormat.of().formatHex(BlockSerializer.serialize(mined))));
                     assertNull(submitted.get("error"));
                     assertNull(submitted.get("result"));
@@ -61,7 +67,7 @@ class MiningRpcTest {
                     assertEquals(mined.hash(), sync.headerChainState().bestHeaderTip().hash());
                     assertEquals("duplicate", call(client, uri, "submitblock", List.of(HexFormat.of().formatHex(BlockSerializer.serialize(mined)))).get("result"));
                     assertNotNull(call(client, uri, "submitblock", List.of("zz")).get("error"));
-                    assertEquals(-32601, ((Number)((Map<?, ?>)call(client, uri, "unknown", List.of()).get("error")).get("code")).intValue());
+                    assertEquals(-32601, ((Number) ((Map<?, ?>) call(client, uri, "unknown", List.of()).get("error")).get("code")).intValue());
                 }
             }
         }
@@ -71,18 +77,20 @@ class MiningRpcTest {
         var parameters = NetworkParametersRegistry.regtest();
         var selected = new ArrayList<Transaction>();
         for (var value : (List<?>) template.get("transactions")) {
-            selected.add(TransactionParser.parse(HexFormat.of().parseHex((String)((Map<?, ?>)value).get("data"))));
+            selected.add(TransactionParser.parse(HexFormat.of().parseHex((String) ((Map<?, ?>) value).get("data"))));
         }
-        long height = ((Number)template.get("height")).longValue();
-        long reward = ((Number)template.get("coinbasevalue")).longValue();
+        long height = ((Number) template.get("height")).longValue();
+        long reward = ((Number) template.get("coinbasevalue")).longValue();
         long fees = reward - ru.bitcoin.node.consensus.money.BlockSubsidy.calculate(height, parameters);
         var coinbase = CoinbaseBuilder.build(height, parameters, fees, new byte[]{0x51}, new byte[8], selected);
-        var transactions = new ArrayList<Transaction>(); transactions.add(coinbase); transactions.addAll(selected);
-        var candidate = new Block(new BlockHeader(((Number)template.get("version")).intValue(),
-                ru.bitcoin.node.common.types.Hash256.fromDisplayHex((String)template.get("previousblockhash")),
+        var transactions = new ArrayList<Transaction>();
+        transactions.add(coinbase);
+        transactions.addAll(selected);
+        var candidate = new Block(new BlockHeader(((Number) template.get("version")).intValue(),
+                ru.bitcoin.node.common.types.Hash256.fromDisplayHex((String) template.get("previousblockhash")),
                 MerkleTree.calculateRoot(transactions.stream().map(Transaction::txId).toList()),
-                new UInt32(((Number)template.get("curtime")).longValue()),
-                new UInt32(Long.parseUnsignedLong((String)template.get("bits"), 16)), new UInt32(0)), transactions);
+                new UInt32(((Number) template.get("curtime")).longValue()),
+                new UInt32(Long.parseUnsignedLong((String) template.get("bits"), 16)), new UInt32(0)), transactions);
         return NonceMiner.search(candidate, parameters, 0, 100_000, () -> false).orElseThrow();
     }
 
