@@ -257,6 +257,25 @@ public final class RocksDbDatabase
         }
     }
 
+    /** Returns the serialized value bytes currently stored in one namespace. */
+    public long valueBytesByPrefix(byte prefix) {
+        ensureOpen();
+        long bytes = 0L;
+        try (var iterator = database.newIterator()) {
+            iterator.seek(new byte[]{prefix});
+            while (iterator.isValid()) {
+                byte[] key = iterator.key();
+                if (key.length == 0 || key[0] != prefix) break;
+                bytes = Math.addExact(bytes, iterator.value().length);
+                iterator.next();
+            }
+            iterator.status();
+            return bytes;
+        } catch (RocksDBException e) {
+            throw new IllegalStateException("Failed to measure RocksDB namespace", e);
+        }
+    }
+
     /** Counts one key namespace without loading its values. Caller must exclude concurrent writes. */
     public long countPrefix(byte prefix) {
         ensureOpen();

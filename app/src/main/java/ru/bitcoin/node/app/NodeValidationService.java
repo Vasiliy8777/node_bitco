@@ -31,6 +31,7 @@ public final class NodeValidationService {
     private final NetworkParameters parameters;
     private final AdjustedTime time;
     private final RocksDbUtxoStore utxos;
+    private final BlockPruner blockPruner;
     private BlockIndex poolTip;
     private long revision;
     private final ActiveChainAncestors activeAncestors = new ActiveChainAncestors();
@@ -163,7 +164,13 @@ public final class NodeValidationService {
 
     public NodeValidationService(RocksDbDatabase database, NetworkParameters parameters,
                                  AdjustedTime time, Mempool mempool) {
+        this(database, parameters, time, mempool, 0L);
+    }
+
+    public NodeValidationService(RocksDbDatabase database, NetworkParameters parameters,
+                                 AdjustedTime time, Mempool mempool, long pruneTargetBytes) {
         this.mempool = Objects.requireNonNull(mempool);
+        this.blockPruner = new BlockPruner(database, pruneTargetBytes);
         this.parameters = Objects.requireNonNull(parameters);
         this.time = Objects.requireNonNull(time);
         utxos = new RocksDbUtxoStore(database);
@@ -220,6 +227,7 @@ public final class NodeValidationService {
         poolTip = chain.activeTip();
         synchronized (chain) {
             mempool.revalidate(context(), coins, Set.of());
+            blockPruner.prune(chain.activeTip());
         }
     }
 
@@ -230,6 +238,9 @@ public final class NodeValidationService {
             // Chain storage has committed. On a history/storage failure poolTip stays old,
             // and every later API call retries synchronization before exposing the pool.
             synchronizePool();
+            if (result == BlockProcessingResult.CONNECTED) {
+                blockPruner.prune(chain.activeTip());
+            }
             return result;
         }
     }

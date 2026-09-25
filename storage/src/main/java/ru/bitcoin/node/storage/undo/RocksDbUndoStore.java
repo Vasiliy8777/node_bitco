@@ -78,6 +78,12 @@ public final class RocksDbUndoStore
         );
     }
 
+    public long serializedSize(Hash256 blockHash) {
+        if (blockHash == null) throw new IllegalArgumentException("blockHash must not be null");
+        byte[] value = database.get(key(blockHash));
+        return value == null ? 0L : value.length;
+    }
+
     @Override
     public void delete(
             Hash256 blockHash

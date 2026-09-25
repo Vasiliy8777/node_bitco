@@ -71,8 +71,17 @@ public class NodeConfiguration {
             NetworkParameters parameters,
             AdjustedTime adjustedTime,
             @Value("${bitcoin.reindex-chainstate:false}")
-            boolean reindexChainstate
+            boolean reindexChainstate,
+            @Value("${bitcoin.prune:0}")
+            long pruneMiB
     ) {
+        long pruneTargetBytes = pruneTargetBytes(pruneMiB);
+        var pruneState = new ru.bitcoin.node.storage.chain.RocksDbPruneStateStore(database);
+        if (reindexChainstate && pruneState.hasPruned()) {
+            throw new IllegalStateException(
+                    "bitcoin.reindex-chainstate cannot rebuild a pruned chainstate; old raw block data is no longer available");
+        }
+
         var reindexer =
                 new ru.bitcoin.node.chain.ChainstateReindexer(
                         database,
@@ -98,7 +107,8 @@ public class NodeConfiguration {
                 database,
                 parameters,
                 adjustedTime,
-                new Mempool()
+                new Mempool(),
+                pruneTargetBytes
         );
     }
 
@@ -197,11 +207,14 @@ public class NodeConfiguration {
 
     @Bean
     public BitcoinClient bitcoinClient(
-            NetworkParameters parameters
+            NetworkParameters parameters,
+            @Value("${bitcoin.prune:0}") long pruneMiB
     ) {
-        return new BitcoinClient(
-                parameters
-        );
+        long services = pruneMiB > 0
+                ? ru.bitcoin.node.p2p.message.VersionMessage.NODE_WITNESS
+                | ru.bitcoin.node.p2p.message.VersionMessage.NODE_NETWORK_LIMITED
+                : ru.bitcoin.node.p2p.message.VersionMessage.DEFAULT_SERVICES;
+        return new BitcoinClient(parameters, services, true);
     }
 
     @Bean
@@ -390,4 +403,12 @@ public class NodeConfiguration {
 
         return protocol;
     }
+    static long pruneTargetBytes(long pruneMiB) {
+        if (pruneMiB < 0) throw new IllegalArgumentException("bitcoin.prune must not be negative");
+        if (pruneMiB > 0 && pruneMiB < 550) {
+            throw new IllegalArgumentException("bitcoin.prune must be 0 or at least 550 MiB");
+        }
+        return Math.multiplyExact(pruneMiB, 1024L * 1024L);
+    }
+
 }
