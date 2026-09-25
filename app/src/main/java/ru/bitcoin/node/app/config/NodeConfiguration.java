@@ -88,6 +88,12 @@ public class NodeConfiguration {
             reindexer.rebuild();
         }
 
+        new ru.bitcoin.node.chain.ChainstateConsistencyChecker(
+                database,
+                parameters,
+                ru.bitcoin.node.chain.ChainstateConsistencyChecker.DEFAULT_REORG_SAFETY_DEPTH
+        ).verify();
+
         return new NodeValidationService(
                 database,
                 parameters,
