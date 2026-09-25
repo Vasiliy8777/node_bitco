@@ -344,7 +344,7 @@ public final class BlockSyncCoordinator {
                                 )
                         );
 
-                List<Hash256> missingToSubmit =
+                List<BlockDownloadRequest> missingToSubmit =
                         new ArrayList<>();
 
                 while (nextToExpose
@@ -380,7 +380,10 @@ public final class BlockSyncCoordinator {
                     } else {
 
                         missingToSubmit.add(
-                                index.hash()
+                                new BlockDownloadRequest(
+                                        index.hash(),
+                                        index.height()
+                                )
                         );
                     }
 
@@ -392,7 +395,7 @@ public final class BlockSyncCoordinator {
 
                 if (!missingToSubmit.isEmpty()) {
 
-                    session.submit(
+                    session.submitRequests(
                             missingToSubmit
                     );
                 }

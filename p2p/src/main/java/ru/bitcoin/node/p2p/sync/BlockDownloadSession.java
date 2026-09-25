@@ -15,6 +15,21 @@ public interface BlockDownloadSession
             List<Hash256> blockHashes
     ) throws IOException;
 
+    /**
+     * Submit requests with validated block heights. Implementations that do not
+     * need height-aware peer selection may fall back to the legacy hash-only
+     * submission path.
+     */
+    default void submitRequests(
+            List<BlockDownloadRequest> requests
+    ) throws IOException {
+        submit(
+                requests.stream()
+                        .map(BlockDownloadRequest::blockHash)
+                        .toList()
+        );
+    }
+
     CompletedBlockDownload awaitCompleted()
             throws IOException;
 

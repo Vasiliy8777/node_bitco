@@ -231,12 +231,14 @@ public class NodeConfiguration {
     public OutboundPeerManager outboundPeerManager(
             BitcoinClient bitcoinClient,
             PeerManager peerManager,
-            PeerAddressManager peerAddressManager
+            PeerAddressManager peerAddressManager,
+            NodeValidationService validationService
     ) {
         return new OutboundPeerManager(
                 bitcoinClient,
                 peerManager,
-                peerAddressManager
+                peerAddressManager,
+                validationService::isInitialBlockDownload
         );
     }
 

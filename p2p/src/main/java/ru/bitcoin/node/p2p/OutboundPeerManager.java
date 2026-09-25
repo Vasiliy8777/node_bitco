@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Supplier;
+import java.util.function.BooleanSupplier;
 
 public final class OutboundPeerManager {
 
@@ -23,6 +24,7 @@ public final class OutboundPeerManager {
     private final OutboundPeerSelector selector;
     private final Supplier<Instant> clock;
     private final PeerDiscouragementManager discouragementManager;
+    private final BooleanSupplier initialBlockDownload;
 
     public OutboundPeerManager(
             BitcoinClient bitcoinClient,
@@ -37,7 +39,25 @@ public final class OutboundPeerManager {
                         addressManager
                 ),
                 Instant::now,
-                peerManager.discouragementManager()
+                peerManager.discouragementManager(),
+                () -> false
+        );
+    }
+
+    public OutboundPeerManager(
+            BitcoinClient bitcoinClient,
+            PeerManager peerManager,
+            PeerAddressManager addressManager,
+            BooleanSupplier initialBlockDownload
+    ) {
+        this(
+                bitcoinClient,
+                peerManager,
+                addressManager,
+                new OutboundPeerSelector(addressManager),
+                Instant::now,
+                peerManager.discouragementManager(),
+                initialBlockDownload
         );
     }
 
@@ -48,7 +68,8 @@ public final class OutboundPeerManager {
             OutboundPeerSelector selector,
             Supplier<Instant> clock
     ) {
-        this(peerConnector, peerManager, addressManager, selector, clock, peerManager.discouragementManager());
+        this(peerConnector, peerManager, addressManager, selector, clock,
+                peerManager.discouragementManager(), () -> false);
     }
 
     OutboundPeerManager(
@@ -58,6 +79,19 @@ public final class OutboundPeerManager {
             OutboundPeerSelector selector,
             Supplier<Instant> clock,
             PeerDiscouragementManager discouragementManager
+    ) {
+        this(peerConnector, peerManager, addressManager, selector, clock,
+                discouragementManager, () -> false);
+    }
+
+    OutboundPeerManager(
+            PeerConnector peerConnector,
+            PeerManager peerManager,
+            PeerAddressManager addressManager,
+            OutboundPeerSelector selector,
+            Supplier<Instant> clock,
+            PeerDiscouragementManager discouragementManager,
+            BooleanSupplier initialBlockDownload
     ) {
 
         this.peerConnector =
@@ -92,6 +126,8 @@ public final class OutboundPeerManager {
 
         this.discouragementManager = Objects.requireNonNull(
                 discouragementManager, "discouragementManager");
+        this.initialBlockDownload = Objects.requireNonNull(
+                initialBlockDownload, "initialBlockDownload");
     }
 
     public Peer connectOne(
@@ -230,7 +266,8 @@ public final class OutboundPeerManager {
                 String ineligibleReason =
                         longLivedOutboundIneligibilityReason(
                                 peer.remoteVersion(),
-                                startHeight
+                                startHeight,
+                                initialBlockDownload.getAsBoolean()
                         );
 
                 if (ineligibleReason != null) {
@@ -450,7 +487,8 @@ public final class OutboundPeerManager {
 
     private static String longLivedOutboundIneligibilityReason(
             VersionMessage version,
-            int localActiveHeight
+            int localActiveHeight,
+            boolean initialBlockDownload
     ) {
         if (version.version()
                 < VersionMessage.MIN_PEER_PROTOCOL_VERSION) {
@@ -473,6 +511,10 @@ public final class OutboundPeerManager {
 
         if (!LimitedHistoryPeerPolicy.hasLimitedHistory(services)) {
             return "NODE_NETWORK or NODE_NETWORK_LIMITED is required for a persistent outbound slot";
+        }
+
+        if (initialBlockDownload) {
+            return "NODE_NETWORK_LIMITED peer is not sufficient during initial block download";
         }
 
         if (!LimitedHistoryPeerPolicy.canServeCurrentSyncPosition(

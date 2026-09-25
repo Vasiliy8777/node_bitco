@@ -51,6 +51,34 @@ class LimitedHistoryPeerPolicyTest {
     }
 
     @Test
+    void limitedPeerServesExactlyItsAdvertisedRecentHistoryWindow() {
+        VersionMessage version = version(
+                VersionMessage.NODE_NETWORK_LIMITED | VersionMessage.NODE_WITNESS,
+                1_000
+        );
+
+        assertTrue(LimitedHistoryPeerPolicy.canServeBlockHeight(version, 1_000));
+        assertTrue(LimitedHistoryPeerPolicy.canServeBlockHeight(version, 713));
+        assertFalse(LimitedHistoryPeerPolicy.canServeBlockHeight(version, 712));
+    }
+
+    @Test
+    void fullHistoryPeerCanServeArbitrarilyOldBlockHeight() {
+        VersionMessage version = version(
+                VersionMessage.NODE_NETWORK | VersionMessage.NODE_WITNESS,
+                1_000_000
+        );
+
+        assertTrue(LimitedHistoryPeerPolicy.canServeBlockHeight(version, 1));
+    }
+
+    @Test
+    void peerWithoutNetworkHistoryServiceCannotServeBlockHeight() {
+        VersionMessage version = version(VersionMessage.NODE_WITNESS, 1_000);
+        assertFalse(LimitedHistoryPeerPolicy.canServeBlockHeight(version, 1_000));
+    }
+
+    @Test
     void constantsMatchBip159CorePolicy() {
         assertEquals(288, LimitedHistoryPeerPolicy.MIN_BLOCKS_TO_SERVE);
         assertEquals(144, LimitedHistoryPeerPolicy.ALLOW_CONNECTION_BLOCKS);

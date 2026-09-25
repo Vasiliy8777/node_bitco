@@ -29,6 +29,39 @@ public final class LimitedHistoryPeerPolicy {
         return (services & VersionMessage.NODE_NETWORK_LIMITED) != 0;
     }
 
+
+    /**
+     * Returns whether the peer's advertised services make it eligible for a
+     * request at the supplied validated block height.
+     *
+     * <p>A NODE_NETWORK peer is treated as full-history. A peer that advertises
+     * NODE_NETWORK_LIMITED without NODE_NETWORK is only used for the most recent
+     * 288 blocks relative to the height it announced in VERSION.
+     */
+    public static boolean canServeBlockHeight(
+            VersionMessage remoteVersion,
+            long blockHeight
+    ) {
+        Objects.requireNonNull(remoteVersion, "remoteVersion");
+        if (blockHeight < 0) {
+            throw new IllegalArgumentException("blockHeight must not be negative");
+        }
+
+        long services = remoteVersion.services();
+        if (hasFullHistory(services)) {
+            return true;
+        }
+        if (!hasLimitedHistory(services)) {
+            return false;
+        }
+
+        long oldestAdvertisedHeight = Math.max(
+                0L,
+                (long) remoteVersion.startHeight() - MIN_BLOCKS_TO_SERVE + 1L
+        );
+        return blockHeight >= oldestAdvertisedHeight;
+    }
+
     public static boolean canServeCurrentSyncPosition(
             VersionMessage remoteVersion,
             int localActiveHeight

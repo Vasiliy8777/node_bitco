@@ -103,36 +103,49 @@ public final class SchedulerBlockDownloadSession
     public synchronized void submit(
             List<Hash256> blockHashes
     ) throws IOException {
+        Objects.requireNonNull(blockHashes, "blockHashes");
+        submitInternal(
+                blockHashes.stream()
+                        .map(hash -> new PendingRequest(hash, null))
+                        .toList()
+        );
+    }
+
+    @Override
+    public synchronized void submitRequests(
+            List<BlockDownloadRequest> requests
+    ) throws IOException {
+        Objects.requireNonNull(requests, "requests");
+        submitInternal(
+                requests.stream()
+                        .map(request -> new PendingRequest(
+                                request.blockHash(),
+                                Long.valueOf(request.height())
+                        ))
+                        .toList()
+        );
+    }
+
+    private void submitInternal(
+            List<PendingRequest> requests
+    ) throws IOException {
 
         ensureOpen();
 
-        Objects.requireNonNull(
-                blockHashes,
-                "blockHashes"
-        );
+        Set<Hash256> batchHashes = new HashSet<>();
 
-        Set<Hash256> batchHashes =
-                new HashSet<>();
+        for (PendingRequest request : requests) {
+            Objects.requireNonNull(request, "requests must not contain null");
+            Hash256 blockHash = request.blockHash();
 
-        for (Hash256 blockHash : blockHashes) {
-
-            Objects.requireNonNull(
-                    blockHash,
-                    "blockHashes must not contain null"
-            );
-
-            if (!batchHashes.add(
-                    blockHash
-            )) {
+            if (!batchHashes.add(blockHash)) {
                 throw new IllegalArgumentException(
                         "Duplicate block hash in submitted batch: "
                                 + blockHash.toDisplayHex()
                 );
             }
 
-            if (submittedHashes.contains(
-                    blockHash
-            )) {
+            if (submittedHashes.contains(blockHash)) {
                 throw new IllegalArgumentException(
                         "Block hash was already submitted to this session: "
                                 + blockHash.toDisplayHex()
@@ -140,66 +153,39 @@ public final class SchedulerBlockDownloadSession
             }
         }
 
-        if (blockHashes.isEmpty()) {
+        if (requests.isEmpty()) {
             return;
         }
 
-        List<Peer> peers =
-                peerManager.readyPeers();
+        List<Peer> peers = peerManager.readyPeers();
 
-        /*
-         * Validate all integer arithmetic before changing
-         * session state.
-         */
         int prospectiveNextIndex =
-                Math.addExact(
-                        nextIndex,
-                        blockHashes.size()
-                );
+                Math.addExact(nextIndex, requests.size());
 
         int prospectivePendingCount =
-                Math.addExact(
-                        pendingCount,
-                        blockHashes.size()
-                );
+                Math.addExact(pendingCount, requests.size());
 
-        int index =
-                nextIndex;
+        int index = nextIndex;
 
-        for (Hash256 blockHash : blockHashes) {
-
+        for (PendingRequest request : requests) {
             states.add(
                     new DownloadState(
                             index,
-                            blockHash
+                            request.blockHash(),
+                            request.height()
                     )
             );
 
-            submittedHashes.add(
-                    blockHash
-            );
-
-            index =
-                    Math.incrementExact(
-                            index
-                    );
+            submittedHashes.add(request.blockHash());
+            index = Math.incrementExact(index);
         }
 
-        nextIndex =
-                prospectiveNextIndex;
-
-        pendingCount =
-                prospectivePendingCount;
+        nextIndex = prospectiveNextIndex;
+        pendingCount = prospectivePendingCount;
 
         if (!peers.isEmpty()) {
-
-            ensureExecutor(
-                    peers.size()
-            );
-
-            assignAvailable(
-                    peers
-            );
+            ensureExecutor(peers.size());
+            assignAvailable(peers);
         }
     }
 
@@ -1009,10 +995,31 @@ public final class SchedulerBlockDownloadSession
                 continue;
             }
 
+            if (!peerCanServe(
+                    peer,
+                    state
+            )) {
+                continue;
+            }
+
             return state;
         }
 
         return null;
+    }
+
+    private static boolean peerCanServe(
+            Peer peer,
+            DownloadState state
+    ) {
+        if (state.height == null) {
+            return true;
+        }
+
+        return ru.bitcoin.node.p2p.LimitedHistoryPeerPolicy.canServeBlockHeight(
+                peer.remoteVersion(),
+                state.height
+        );
     }
 
     private DownloadState firstIncomplete() {
@@ -1088,10 +1095,23 @@ public final class SchedulerBlockDownloadSession
         }
     }
 
+    private record PendingRequest(
+            Hash256 blockHash,
+            Long height
+    ) {
+        private PendingRequest {
+            Objects.requireNonNull(blockHash, "blockHash");
+            if (height != null && height < 0) {
+                throw new IllegalArgumentException("height must not be negative");
+            }
+        }
+    }
+
     private static final class DownloadState {
 
         private final int index;
         private final Hash256 blockHash;
+        private final Long height;
 
         private final Set<Peer> attemptedPeers =
                 Collections.newSetFromMap(
@@ -1106,7 +1126,8 @@ public final class SchedulerBlockDownloadSession
 
         private DownloadState(
                 int index,
-                Hash256 blockHash
+                Hash256 blockHash,
+                Long height
         ) {
 
             if (index < 0) {
@@ -1123,6 +1144,11 @@ public final class SchedulerBlockDownloadSession
                             blockHash,
                             "blockHash"
                     );
+
+            if (height != null && height < 0) {
+                throw new IllegalArgumentException("height must not be negative");
+            }
+            this.height = height;
         }
     }
 
