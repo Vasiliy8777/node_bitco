@@ -60,7 +60,8 @@ public final class BlockConnectChangesBuilder {
                         previousMedianTimePast,
                         overlay,
                         networkParameters,
-                        medianTimePastResolver
+                        medianTimePastResolver,
+                        true
                 );
 
         return new BlockConnectChanges(
@@ -77,6 +78,20 @@ public final class BlockConnectChangesBuilder {
             UtxoOverlay overlay,
             NetworkParameters networkParameters,
             AncestorMedianTimePastResolver medianTimePastResolver
+    ) {
+        return apply(block, blockHeight, lockTimeCutoff, previousMedianTimePast, overlay,
+                networkParameters, medianTimePastResolver, true);
+    }
+
+    public static BlockUndoData apply(
+            Block block,
+            long blockHeight,
+            long lockTimeCutoff,
+            long previousMedianTimePast,
+            UtxoOverlay overlay,
+            NetworkParameters networkParameters,
+            AncestorMedianTimePastResolver medianTimePastResolver,
+            boolean verifyScripts
     ) {
         if (block == null) {
             throw new IllegalArgumentException(
@@ -193,10 +208,10 @@ public final class BlockConnectChangesBuilder {
                     transactionIndex == 0;
 
             TransactionFinality.validate(
-                        transaction,
-                        blockHeight,
-                        lockTimeCutoff
-                );
+                    transaction,
+                    blockHeight,
+                    lockTimeCutoff
+            );
 
             sigOpsCost = Math.addExact(sigOpsCost,
                     TransactionSigOpCost.calculate(transaction, utxoView, scriptVerifyFlags));
@@ -246,11 +261,13 @@ public final class BlockConnectChangesBuilder {
                  * Поэтому каждый input теперь должен доказать
                  * право потратить соответствующий UTXO.
                  */
-                InputScriptValidator.validateAll(
-                        transaction,
-                        utxoView,
-                        scriptVerifyFlags
-                );
+                if (verifyScripts) {
+                    InputScriptValidator.validateAll(
+                            transaction,
+                            utxoView,
+                            scriptVerifyFlags
+                    );
+                }
 
                 try {
                     totalFees =

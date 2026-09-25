@@ -202,11 +202,16 @@ public final class NodeValidationService {
 
     public NodeValidationService(RocksDbDatabase database, NetworkParameters parameters,
                                  AdjustedTime time, Mempool mempool) {
-        this(database, parameters, time, mempool, 0L);
+        this(database, parameters, time, mempool, 0L, parameters.defaultAssumeValid());
     }
 
     public NodeValidationService(RocksDbDatabase database, NetworkParameters parameters,
                                  AdjustedTime time, Mempool mempool, long pruneTargetBytes) {
+        this(database, parameters, time, mempool, pruneTargetBytes, parameters.defaultAssumeValid());
+    }
+
+    public NodeValidationService(RocksDbDatabase database, NetworkParameters parameters,
+                                 AdjustedTime time, Mempool mempool, long pruneTargetBytes, Hash256 assumedValidBlock) {
         this.mempool = Objects.requireNonNull(mempool);
         this.blockPruner = new BlockPruner(database, pruneTargetBytes);
         this.pruneState = new RocksDbPruneStateStore(database);
@@ -246,7 +251,13 @@ public final class NodeValidationService {
                 new ChainTransitionManager(chain, storage),
                 parameters,
                 lookup,
-                failureManager::markFailed
+                failureManager::markFailed,
+                new AssumeValidPolicy(
+                        lookup,
+                        () -> tips.loadBestHeaderTipHash().map(lookup::find).orElse(null),
+                        parameters,
+                        Objects.requireNonNull(assumedValidBlock, "assumedValidBlock")
+                )
         );
         processor =
                 new BlockProcessor(

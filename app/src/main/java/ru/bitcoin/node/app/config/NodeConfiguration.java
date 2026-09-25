@@ -75,7 +75,9 @@ public class NodeConfiguration {
             @Value("${bitcoin.reindex-chainstate:false}")
             boolean reindexChainstate,
             @Value("${bitcoin.prune:0}")
-            long pruneMiB
+            long pruneMiB,
+            @Value("${bitcoin.assume-valid:}")
+            String assumeValid
     ) {
         long pruneTargetBytes = pruneTargetBytes(pruneMiB);
         var pruneState = new ru.bitcoin.node.storage.chain.RocksDbPruneStateStore(database);
@@ -112,7 +114,8 @@ public class NodeConfiguration {
                 parameters,
                 adjustedTime,
                 new Mempool(),
-                pruneTargetBytes
+                pruneTargetBytes,
+                assumeValidHash(assumeValid, parameters)
         );
     }
 
@@ -408,6 +411,18 @@ public class NodeConfiguration {
 
         return protocol;
     }
+    static ru.bitcoin.node.common.types.Hash256 assumeValidHash(
+            String configured, NetworkParameters parameters) {
+        java.util.Objects.requireNonNull(parameters, "parameters");
+        if (configured == null || configured.isBlank()) return parameters.defaultAssumeValid();
+        String value = configured.trim();
+        if (value.equals("0")) return new ru.bitcoin.node.common.types.Hash256(new byte[32]);
+        if (!value.matches("(?i)[0-9a-f]{64}")) {
+            throw new IllegalArgumentException("bitcoin.assume-valid must be 0 or a 64-character block hash");
+        }
+        return ru.bitcoin.node.common.types.Hash256.fromDisplayHex(value);
+    }
+
     static long pruneTargetBytes(long pruneMiB) {
         if (pruneMiB < 0) throw new IllegalArgumentException("bitcoin.prune must not be negative");
         if (pruneMiB > 0 && pruneMiB < 550) {

@@ -4,6 +4,7 @@ import ru.bitcoin.node.chain.AncestorMedianTimePastResolver;
 import ru.bitcoin.node.chain.BlockIndex;
 import ru.bitcoin.node.chain.BlockIndexLookup;
 import ru.bitcoin.node.chain.InvalidBlockObserver;
+import ru.bitcoin.node.chain.AssumeValidPolicy;
 import ru.bitcoin.node.consensus.block.BlockValidationException;
 import ru.bitcoin.node.consensus.transaction.TransactionValidationException;
 import ru.bitcoin.node.script.ScriptExecutionException;
@@ -34,7 +35,8 @@ public final class BlockReorganizationChangesBuilder {
                 utxoStore,
                 networkParameters,
                 blockIndexLookup,
-                InvalidBlockObserver.noop()
+                InvalidBlockObserver.noop(),
+                AssumeValidPolicy.verifyAll(blockIndexLookup, networkParameters)
         );
     }
 
@@ -45,6 +47,19 @@ public final class BlockReorganizationChangesBuilder {
             NetworkParameters networkParameters,
             BlockIndexLookup blockIndexLookup,
             InvalidBlockObserver invalidBlockObserver
+    ) {
+        return build(disconnectBlocks, connectBlocks, utxoStore, networkParameters, blockIndexLookup,
+                invalidBlockObserver, AssumeValidPolicy.verifyAll(blockIndexLookup, networkParameters));
+    }
+
+    public static BlockReorganizationChanges build(
+            List<BlockToDisconnect> disconnectBlocks,
+            List<BlockToConnect> connectBlocks,
+            UtxoStore utxoStore,
+            NetworkParameters networkParameters,
+            BlockIndexLookup blockIndexLookup,
+            InvalidBlockObserver invalidBlockObserver,
+            AssumeValidPolicy assumeValidPolicy
     ) {
         if (disconnectBlocks == null) {
             throw new IllegalArgumentException(
@@ -72,6 +87,10 @@ public final class BlockReorganizationChangesBuilder {
             throw new IllegalArgumentException(
                     "invalidBlockObserver must not be null"
             );
+        }
+
+        if (assumeValidPolicy == null) {
+            throw new IllegalArgumentException("assumeValidPolicy must not be null");
         }
 
         if (utxoStore == null) {
@@ -180,7 +199,8 @@ public final class BlockReorganizationChangesBuilder {
                                 blockToConnect.previousMedianTimePast(),
                                 overlay,
                                 networkParameters,
-                                medianTimePastResolver
+                                medianTimePastResolver,
+                                assumeValidPolicy.shouldVerifyScripts(candidateIndex)
                         );
             } catch (BlockValidationException
                      | TransactionValidationException

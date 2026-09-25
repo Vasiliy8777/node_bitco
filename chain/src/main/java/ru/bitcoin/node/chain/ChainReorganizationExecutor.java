@@ -24,6 +24,7 @@ public final class ChainReorganizationExecutor {
     private final ChainTransitionManager transitionManager;
     private final NetworkParameters networkParameters;
     private final InvalidBlockObserver invalidBlockObserver;
+    private final AssumeValidPolicy assumeValidPolicy;
 
     public ChainReorganizationExecutor(
             BlockStore blockStore,
@@ -40,7 +41,8 @@ public final class ChainReorganizationExecutor {
                 transitionManager,
                 networkParameters,
                 blockIndexLookup,
-                InvalidBlockObserver.noop()
+                InvalidBlockObserver.noop(),
+                AssumeValidPolicy.verifyAll(blockIndexLookup, networkParameters)
         );
     }
 
@@ -52,6 +54,20 @@ public final class ChainReorganizationExecutor {
             NetworkParameters networkParameters,
             BlockIndexLookup blockIndexLookup,
             InvalidBlockObserver invalidBlockObserver
+    ) {
+        this(blockStore, undoStore, utxoStore, transitionManager, networkParameters, blockIndexLookup,
+                invalidBlockObserver, AssumeValidPolicy.verifyAll(blockIndexLookup, networkParameters));
+    }
+
+    public ChainReorganizationExecutor(
+            BlockStore blockStore,
+            UndoStore undoStore,
+            UtxoStore utxoStore,
+            ChainTransitionManager transitionManager,
+            NetworkParameters networkParameters,
+            BlockIndexLookup blockIndexLookup,
+            InvalidBlockObserver invalidBlockObserver,
+            AssumeValidPolicy assumeValidPolicy
     ) {
         if (blockStore == null) {
             throw new IllegalArgumentException(
@@ -96,6 +112,7 @@ public final class ChainReorganizationExecutor {
                         invalidBlockObserver,
                         "invalidBlockObserver"
                 );
+        this.assumeValidPolicy = java.util.Objects.requireNonNull(assumeValidPolicy, "assumeValidPolicy");
     }
 
     public void execute(
@@ -141,7 +158,8 @@ public final class ChainReorganizationExecutor {
                         utxoStore,
                         networkParameters,
                         blockIndexLookup,
-                        invalidBlockObserver
+                        invalidBlockObserver,
+                        assumeValidPolicy
                 );
 
         /*
