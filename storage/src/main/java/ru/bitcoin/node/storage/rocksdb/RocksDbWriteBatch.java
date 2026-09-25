@@ -71,6 +71,34 @@ public final class RocksDbWriteBatch
         }
     }
 
+    /**
+     * Deletes one complete one-byte key namespace as part of this batch.
+     *
+     * The operation is represented by a RocksDB range tombstone and therefore
+     * remains atomic with the other operations in the same WriteBatch.
+     */
+    public void deletePrefix(byte prefix) {
+        ensureOpen();
+        int unsignedPrefix = Byte.toUnsignedInt(prefix);
+        if (unsignedPrefix == 255) {
+            throw new IllegalArgumentException(
+                    "0xFF namespace cannot be range-deleted safely"
+            );
+        }
+        try {
+            batch.deleteRange(
+                    new byte[]{prefix},
+                    new byte[]{(byte) (unsignedPrefix + 1)}
+            );
+            changedPrefixes.set(unsignedPrefix);
+        } catch (RocksDBException e) {
+            throw new IllegalStateException(
+                    "Failed to add namespace delete to RocksDB batch",
+                    e
+            );
+        }
+    }
+
     WriteBatch nativeBatch() {
         ensureOpen();
         return batch;

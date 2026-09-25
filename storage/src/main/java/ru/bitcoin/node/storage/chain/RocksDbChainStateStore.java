@@ -171,4 +171,12 @@ public final class RocksDbChainStateStore
                 hash.bytes()
         );
     }
+    /** Clears active/best-tip metadata in the caller's atomic batch. */
+    public void clear(RocksDbWriteBatch batch) {
+        if (batch == null) {
+            throw new IllegalArgumentException("batch must not be null");
+        }
+        batch.deletePrefix((byte) 0x02);
+    }
+
 }

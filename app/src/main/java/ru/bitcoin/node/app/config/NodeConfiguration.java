@@ -69,8 +69,25 @@ public class NodeConfiguration {
     public NodeValidationService nodeValidationService(
             RocksDbDatabase database,
             NetworkParameters parameters,
-            AdjustedTime adjustedTime
+            AdjustedTime adjustedTime,
+            @Value("${bitcoin.reindex-chainstate:false}")
+            boolean reindexChainstate
     ) {
+        var reindexer =
+                new ru.bitcoin.node.chain.ChainstateReindexer(
+                        database,
+                        parameters,
+                        adjustedTime
+                );
+
+        /*
+         * Explicit operator request starts a rebuild. A durable marker also
+         * resumes a rebuild automatically after process/power interruption.
+         */
+        if (reindexChainstate || reindexer.isInProgress()) {
+            reindexer.rebuild();
+        }
+
         return new NodeValidationService(
                 database,
                 parameters,
@@ -83,7 +100,8 @@ public class NodeConfiguration {
     public NodeSyncInfrastructure nodeSyncInfrastructure(
             RocksDbDatabase database,
             NetworkParameters parameters,
-            AdjustedTime adjustedTime
+            AdjustedTime adjustedTime,
+            NodeValidationService validationService
     ) {
         return new NodeSyncInfrastructure(
                 database,

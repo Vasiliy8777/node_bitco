@@ -207,4 +207,12 @@ public final class RocksDbUtxoStore
                 key(outPoint)
         );
     }
+    /** Removes the complete persistent namespace in the caller's atomic batch. */
+    public void clear(RocksDbWriteBatch batch) {
+        if (batch == null) {
+            throw new IllegalArgumentException("batch must not be null");
+        }
+        batch.deletePrefix(UTXO_PREFIX);
+    }
+
 }

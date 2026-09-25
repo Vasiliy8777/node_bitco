@@ -294,4 +294,31 @@ class RocksDbWriteBatchTest {
                         )
         );
     }
+    @Test
+    void shouldDeleteOnlyRequestedNamespaceAtomically() {
+        Path databasePath = tempDirectory.resolve("namespace-delete");
+        try (RocksDbDatabase database = new RocksDbDatabase(databasePath)) {
+            database.put(new byte[]{0x03, 0x01}, new byte[]{0x11});
+            database.put(new byte[]{0x03, 0x02}, new byte[]{0x22});
+            database.put(new byte[]{0x04, 0x01}, new byte[]{0x33});
+
+            try (RocksDbWriteBatch batch = new RocksDbWriteBatch()) {
+                batch.deletePrefix((byte) 0x03);
+                assertArrayEquals(new byte[]{0x11}, database.get(new byte[]{0x03, 0x01}));
+                database.write(batch);
+            }
+
+            assertNull(database.get(new byte[]{0x03, 0x01}));
+            assertNull(database.get(new byte[]{0x03, 0x02}));
+            assertArrayEquals(new byte[]{0x33}, database.get(new byte[]{0x04, 0x01}));
+        }
+    }
+
+    @Test
+    void shouldRejectUnsafeFfNamespaceRangeDelete() {
+        try (RocksDbWriteBatch batch = new RocksDbWriteBatch()) {
+            assertThrows(IllegalArgumentException.class, () -> batch.deletePrefix((byte) 0xFF));
+        }
+    }
+
 }

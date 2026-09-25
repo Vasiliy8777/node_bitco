@@ -175,4 +175,12 @@ public final class RocksDbUndoStore
                 key(blockHash)
         );
     }
+    /** Removes the complete persistent namespace in the caller's atomic batch. */
+    public void clear(RocksDbWriteBatch batch) {
+        if (batch == null) {
+            throw new IllegalArgumentException("batch must not be null");
+        }
+        batch.deletePrefix(UNDO_PREFIX);
+    }
+
 }
