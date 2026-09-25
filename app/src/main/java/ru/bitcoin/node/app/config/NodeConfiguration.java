@@ -34,9 +34,18 @@ import java.util.List;
 @ConditionalOnProperty(name = "bitcoin.data-directory")
 public class NodeConfiguration {
     @Bean(destroyMethod = "close")
-    public ru.bitcoin.node.app.service.NodeRelayService nodeRelayService(NodeValidationService validation,
-                                                                         NodeSyncInfrastructure infrastructure, PeerManager peers) {
-        return new ru.bitcoin.node.app.service.NodeRelayService(validation, infrastructure, peers);
+    public ru.bitcoin.node.app.service.NodeRelayService nodeRelayService(
+            NodeValidationService validation,
+            NodeSyncInfrastructure infrastructure,
+            PeerManager peers,
+            BlockDownloadScheduler blockDownloadScheduler
+    ) {
+        return new ru.bitcoin.node.app.service.NodeRelayService(
+                validation,
+                infrastructure,
+                peers,
+                blockDownloadScheduler
+        );
     }
 
     @Bean(destroyMethod = "close")

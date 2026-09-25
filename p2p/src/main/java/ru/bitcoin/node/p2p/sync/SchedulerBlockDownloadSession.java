@@ -50,11 +50,22 @@ public final class SchedulerBlockDownloadSession
     private int nextPeerIndex;
 
     private boolean closed;
+    private final java.util.function.Consumer<SchedulerBlockDownloadSession> closeListener;
+    private final Deque<CompletedBlockDownload> externalCompletions = new ArrayDeque<>();
 
     public SchedulerBlockDownloadSession(
             PeerManager peerManager,
             BlockDownloadService blockDownloadService,
             BlockDownloadTimeoutPolicy timeoutPolicy
+    ) {
+        this(peerManager, blockDownloadService, timeoutPolicy, ignored -> { });
+    }
+
+    SchedulerBlockDownloadSession(
+            PeerManager peerManager,
+            BlockDownloadService blockDownloadService,
+            BlockDownloadTimeoutPolicy timeoutPolicy,
+            java.util.function.Consumer<SchedulerBlockDownloadSession> closeListener
     ) {
 
         this.peerManager =
@@ -79,6 +90,12 @@ public final class SchedulerBlockDownloadSession
                 new BlockDownloadTimeoutEvaluator(
                         inFlightTracker,
                         timeoutPolicy
+                );
+
+        this.closeListener =
+                Objects.requireNonNull(
+                        closeListener,
+                        "closeListener"
                 );
     }
 
@@ -226,6 +243,14 @@ public final class SchedulerBlockDownloadSession
         synchronized (this) {
 
             ensureOpen();
+
+            CompletedBlockDownload external =
+                    externalCompletions.pollFirst();
+
+            if (external != null) {
+                pendingCount = Math.decrementExact(pendingCount);
+                return Optional.of(external);
+            }
 
             if (pendingCount == 0) {
                 throw new IllegalStateException(
@@ -513,12 +538,19 @@ public final class SchedulerBlockDownloadSession
                 );
             }
 
+            Peer sourcePeer =
+                    state.externalSourcePeer != null
+                            ? state.externalSourcePeer
+                            : peer;
+
+            state.externalSourcePeer = null;
+
             return Optional.of(
                     new CompletedBlockDownload(
                             state.index,
                             state.blockHash,
                             block,
-                            peer
+                            sourcePeer
                     )
             );
         }
@@ -635,6 +667,67 @@ public final class SchedulerBlockDownloadSession
         if (executorToClose != null) {
             executorToClose.shutdownNow();
         }
+
+        closeListener.accept(
+                this
+        );
+    }
+
+    /**
+     * Satisfies a submitted block from an alternative transport path.
+     * If an ordinary GETDATA request is already in flight, its dispatcher
+     * future is completed so the existing worker and in-flight accounting
+     * finish normally. If it has not yet been assigned, completion is queued
+     * directly without consuming an in-flight slot.
+     */
+    synchronized boolean acceptExternalBlock(
+            Peer sourcePeer,
+            Block block
+    ) {
+        Objects.requireNonNull(sourcePeer, "sourcePeer");
+        Objects.requireNonNull(block, "block");
+
+        if (closed) {
+            return false;
+        }
+
+        DownloadState state = null;
+        for (DownloadState candidate : states) {
+            if (!candidate.completed && candidate.blockHash.equals(block.hash())) {
+                state = candidate;
+                break;
+            }
+        }
+
+        if (state == null) {
+            return false;
+        }
+
+        if (state.inFlight) {
+            Peer assignedPeer = inFlightTracker.peerForBlock(state.blockHash);
+            if (assignedPeer == null) {
+                throw new IllegalStateException("In-flight state has no owning peer");
+            }
+
+            state.externalSourcePeer = sourcePeer;
+            if (!assignedPeer.messageDispatcher().completePendingBlock(block)) {
+                state.externalSourcePeer = null;
+                return false;
+            }
+            return true;
+        }
+
+        state.completed = true;
+        externalCompletions.addLast(
+                new CompletedBlockDownload(
+                        state.index,
+                        state.blockHash,
+                        block,
+                        sourcePeer
+                )
+        );
+        notifyAll();
+        return true;
     }
 
     private void ensureExecutor(
@@ -882,6 +975,7 @@ public final class SchedulerBlockDownloadSession
 
         private boolean inFlight;
         private boolean completed;
+        private Peer externalSourcePeer;
 
         private DownloadState(
                 int index,

@@ -1834,4 +1834,47 @@ class BlockDownloadSchedulerTest {
             BufferedOutputStream output
     ) {
     }
+
+    @Test
+    void compactBlockCanCompletePendingDownloadBeforePeerAssignment()
+            throws Exception {
+
+        Block block = blocks(1).getFirst();
+
+        try (PeerManager peerManager = new PeerManager();
+             PeerConnection sourceConnection = new PeerConnection(
+                     NetworkParametersRegistry.mainnet(),
+                     5_000,
+                     5_000
+             );
+             Peer sourcePeer = new Peer(
+                     sourceConnection,
+                     VersionMessage.DEFAULT_SERVICES,
+                     0,
+                     true
+             )) {
+
+            BlockDownloadScheduler scheduler = new BlockDownloadScheduler(
+                    peerManager,
+                    new BlockDownloadService(peerManager),
+                    new BlockDownloadTimeoutPolicy(Duration.ofMinutes(10))
+            );
+
+            try (BlockDownloadSession session = scheduler.openSession()) {
+                session.submit(List.of(block.hash()));
+
+                assertEquals(1, session.pendingCount());
+                assertTrue(scheduler.acceptBlock(sourcePeer, block));
+
+                CompletedBlockDownload completed = session.awaitCompleted();
+
+                assertEquals(block.hash(), completed.requestedHash());
+                assertEquals(block, completed.block());
+                assertSame(sourcePeer, completed.sourcePeer());
+                assertEquals(0, session.pendingCount());
+                assertFalse(scheduler.acceptBlock(sourcePeer, block));
+            }
+        }
+    }
+
 }

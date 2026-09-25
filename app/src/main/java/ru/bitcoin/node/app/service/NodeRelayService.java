@@ -10,6 +10,7 @@ import ru.bitcoin.node.mempool.MempoolAdmissionException;
 import ru.bitcoin.node.p2p.*;
 import ru.bitcoin.node.p2p.codec.GetHeadersMessageCodec;
 import ru.bitcoin.node.p2p.message.*;
+import ru.bitcoin.node.p2p.sync.BlockDownloadScheduler;
 import ru.bitcoin.node.protocol.block.Block;
 import ru.bitcoin.node.protocol.serialization.*;
 import ru.bitcoin.node.protocol.transaction.Transaction;
@@ -36,6 +37,7 @@ public final class NodeRelayService implements AutoCloseable {
     private final NodeValidationService validation;
     private final NodeSyncInfrastructure sync;
     private final PeerManager peers;
+    private final BlockDownloadScheduler blockDownloadScheduler;
     private final Set<Peer> attached = ConcurrentHashMap.newKeySet();
     private final Map<Peer, PeerOutbound> outbound = new ConcurrentHashMap<>();
     private final Map<Peer, BlockAnnouncementState> blockAnnouncements = new ConcurrentHashMap<>();
@@ -84,9 +86,19 @@ public final class NodeRelayService implements AutoCloseable {
     }
 
     public NodeRelayService(NodeValidationService validation, NodeSyncInfrastructure sync, PeerManager peers) {
+        this(validation, sync, peers, null);
+    }
+
+    public NodeRelayService(
+            NodeValidationService validation,
+            NodeSyncInfrastructure sync,
+            PeerManager peers,
+            BlockDownloadScheduler blockDownloadScheduler
+    ) {
         this.validation = Objects.requireNonNull(validation, "validation");
         this.sync = Objects.requireNonNull(sync, "sync");
         this.peers = Objects.requireNonNull(peers, "peers");
+        this.blockDownloadScheduler = blockDownloadScheduler;
         peers.addPeerListener(connections);
         requestTimer.scheduleWithFixedDelay(this::enqueueRequestTick, 1, 1, TimeUnit.SECONDS);
     }
@@ -297,6 +309,17 @@ public final class NodeRelayService implements AutoCloseable {
     }
 
     private void processReconstructedBlock(Peer source, Block block) {
+        /*
+         * A compact block may be the body currently awaited by the bulk block
+         * scheduler. Let that existing lifecycle consume it first so the same
+         * hash is not validated/downloaded through two independent paths.
+         */
+        if (blockDownloadScheduler != null
+                && blockDownloadScheduler.acceptBlock(source, block)) {
+            promoteHighBandwidthCompactPeer(source);
+            return;
+        }
+
         BlockProcessingResult result;
         try {
             result = validation.processBlock(block);
@@ -340,6 +363,11 @@ public final class NodeRelayService implements AutoCloseable {
         var header = BlockHeaderParser.parse(new BitcoinReader(message.payload()));
         if (!takeCompactFallback(peer, header.hash())) return;
         Block block = BlockParser.parse(message.payload());
+        if (blockDownloadScheduler != null
+                && blockDownloadScheduler.acceptBlock(peer, block)) {
+            promoteHighBandwidthCompactPeer(peer);
+            return;
+        }
         // Full data uses ordinary consensus validation, without another reconstruction retry.
         if (validation.processBlock(block) == BlockProcessingResult.CONNECTED) {
             promoteHighBandwidthCompactPeer(peer);

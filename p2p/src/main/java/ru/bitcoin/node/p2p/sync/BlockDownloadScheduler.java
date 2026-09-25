@@ -9,6 +9,8 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 public final class BlockDownloadScheduler {
 
@@ -26,6 +28,14 @@ public final class BlockDownloadScheduler {
     private final BlockDownloadService blockDownloadService;
 
     private final BlockDownloadTimeoutPolicy timeoutPolicy;
+
+    /*
+     * Active sessions are registered so alternative block transports
+     * (currently BIP152) can satisfy the same logical download instead of
+     * creating a second, independent block-download lifecycle.
+     */
+    private final Set<SchedulerBlockDownloadSession> activeSessions =
+            ConcurrentHashMap.newKeySet();
 
     public BlockDownloadScheduler(
             PeerManager peerManager,
@@ -54,10 +64,47 @@ public final class BlockDownloadScheduler {
 
     public BlockDownloadSession openSession() {
 
-        return new SchedulerBlockDownloadSession(
-                peerManager,
-                blockDownloadService,
-                timeoutPolicy
+        SchedulerBlockDownloadSession session =
+                new SchedulerBlockDownloadSession(
+                        peerManager,
+                        blockDownloadService,
+                        timeoutPolicy,
+                        this::sessionClosed
+                );
+
+        activeSessions.add(
+                session
+        );
+
+        return session;
+    }
+
+    /**
+     * Offers a block obtained outside the ordinary GETDATA/BLOCK path to the
+     * currently active download sessions. Returns true when a pending
+     * scheduled download accepted the block.
+     */
+    public boolean acceptBlock(
+            ru.bitcoin.node.p2p.Peer sourcePeer,
+            Block block
+    ) {
+        Objects.requireNonNull(sourcePeer, "sourcePeer");
+        Objects.requireNonNull(block, "block");
+
+        for (SchedulerBlockDownloadSession session : activeSessions) {
+            if (session.acceptExternalBlock(sourcePeer, block)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void sessionClosed(
+            SchedulerBlockDownloadSession session
+    ) {
+        activeSessions.remove(
+                session
         );
     }
 

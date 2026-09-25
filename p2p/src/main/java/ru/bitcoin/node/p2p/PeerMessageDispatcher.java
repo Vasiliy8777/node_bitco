@@ -28,6 +28,15 @@ public final class PeerMessageDispatcher {
     private final Map<Hash256, CompletableFuture<Block>>
             pendingBlocks =
             new HashMap<>();
+
+    /*
+     * A scheduler-owned alternative transport may finish after the scheduler
+     * marks a block in-flight but just before BlockSynchronizer registers its
+     * dispatcher future. Keep that narrowly-scoped early completion so the
+     * subsequent registration consumes it without sending a duplicate request.
+     */
+    private final Map<Hash256, Block> precompletedBlocks =
+            new HashMap<>();
     private CompletableFuture<HeadersMessage>
             pendingHeaders;
 
@@ -92,6 +101,46 @@ public final class PeerMessageDispatcher {
         }
     }
 
+    /**
+     * Completes an already registered block request from an alternative
+     * transport path (for example BIP152 compact-block reconstruction).
+     *
+     * The request remains owned by the original downloader; this method only
+     * supplies the authoritative block body to its pending future.
+     */
+    public boolean completePendingBlock(
+            Block block
+    ) {
+        Objects.requireNonNull(
+                block,
+                "block"
+        );
+
+        CompletableFuture<Block> future;
+
+        synchronized (this) {
+            future = pendingBlocks.remove(
+                    block.hash()
+            );
+        }
+
+        if (future == null) {
+            synchronized (this) {
+                precompletedBlocks.putIfAbsent(
+                        block.hash(),
+                        block
+                );
+            }
+            return true;
+        }
+
+        future.complete(
+                block
+        );
+
+        return true;
+    }
+
     public synchronized CompletableFuture<Block>
     registerBlock(
             Hash256 blockHash
@@ -113,6 +162,18 @@ public final class PeerMessageDispatcher {
 
         CompletableFuture<Block> future =
                 new CompletableFuture<>();
+
+        Block precompleted =
+                precompletedBlocks.remove(
+                        blockHash
+                );
+
+        if (precompleted != null) {
+            future.complete(
+                    precompleted
+            );
+            return future;
+        }
 
         pendingBlocks.put(
                 blockHash,
@@ -314,6 +375,7 @@ public final class PeerMessageDispatcher {
                     );
 
             pendingBlocks.clear();
+            precompletedBlocks.clear();
         }
 
         for (CompletableFuture<Block> future :

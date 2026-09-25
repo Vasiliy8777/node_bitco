@@ -47,6 +47,18 @@ public final class BlockSynchronizer {
 
         try {
 
+            /*
+             * An alternative transport (BIP152) may have completed this
+             * scheduler-owned request immediately before registration. In that
+             * case the dispatcher returns an already-completed future and no
+             * duplicate full-block GETDATA is necessary.
+             */
+            if (future.isDone()) {
+                return completedBlock(
+                        future
+                );
+            }
+
             GetDataMessage request =
                     new GetDataMessage(
                             List.of(
