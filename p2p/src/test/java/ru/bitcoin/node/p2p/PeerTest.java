@@ -1395,10 +1395,15 @@ class PeerTest {
                                 5
                         );
 
-                while (peer.state()
-                        != PeerState.CLOSED
-                        && System.nanoTime()
-                        < deadline) {
+                while (System.nanoTime() < deadline) {
+
+                    if (peer.state() == PeerState.CLOSED
+                            && blockFuture.isDone()
+                            && headersFuture.isDone()
+                            && !connection.isConnected()) {
+
+                        break;
+                    }
 
                     Thread.sleep(
                             10

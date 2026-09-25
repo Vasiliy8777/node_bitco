@@ -488,55 +488,34 @@ class PeerAddressProtocolTest {
                                 8333
                         );
 
-                AddrV2Entry ipv4 =
-                        new AddrV2Entry(
-                                1_700_000_001L,
-                                9L,
-                                AddrV2Network.IPV4.id(),
-                                InetAddress.getByName(
-                                                "192.0.2.30"
-                                        )
-                                        .getAddress(),
-                                8333
-                        );
-
+                /*
+                 * Core's address token bucket starts with exactly one token.
+                 * Even an unsupported ADDRv2 network consumes that processing
+                 * token before the address is rejected as unusable.
+                 *
+                 * Therefore this test must isolate the unknown-network rule
+                 * instead of assuming that a following address in the same
+                 * message is guaranteed another token.
+                 */
                 protocol.onMessage(
                         peer,
                         BitcoinMessages.addrV2(
                                 new AddrV2Message(
                                         List.of(
-                                                unknown,
-                                                ipv4
+                                                unknown
                                         )
                                 )
                         )
                 );
 
-                assertEquals(
-                        1,
-                        manager.size()
-                );
-
-                KnownPeerAddress known =
-                        manager.addresses()
-                                .get(0);
-
-                assertEquals(
-                        "192.0.2.30",
-                        known.peerAddress()
-                                .hostAddress()
-                );
-
-                assertEquals(
-                        InetAddress.getByName(
-                                "127.0.0.1"
-                        ),
-                        known.source()
-                                .address()
+                assertTrue(
+                        manager.isEmpty(),
+                        "Unknown ADDRv2 network must not enter AddrMan"
                 );
             }
         }
     }
+
     @Test
     void blockRelayOnlyPeerMustNotParticipateInAddressRelay()
             throws Exception {

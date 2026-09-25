@@ -78,9 +78,11 @@ public final class PeerAddressProtocol
         }
 
         try {
-            if ((message.command().equals("addr") || message.command().equals("addrv2"))
-                    && !budget(peer).allowMessage(nanoTime.getAsLong())) return;
-
+            /*
+             * Bitcoin Core rate-limits address records, not ADDR/ADDRV2
+             * messages themselves. The shared per-peer token bucket is consumed
+             * below after decoding the message.
+             */
             switch (message.command()) {
 
                 case "addr" ->

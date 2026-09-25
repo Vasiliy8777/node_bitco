@@ -840,12 +840,15 @@ public final class PeerAddressManager {
 
             if (incumbent != null) {
 
+                /*
+                 * Losing the last NEW bucket reference does not mean that
+                 * the endpoint itself becomes unknown.
+                 *
+                 * Keep it in the known-address index. A later observation may
+                 * give it another NEW-table reference through
+                 * maybeAddNewReference().
+                 */
                 incumbent.decrementNewBucketReferences();
-
-                removeIfUnreferenced(
-                        existing,
-                        incumbent
-                );
             }
         }
 
@@ -878,20 +881,6 @@ public final class PeerAddressManager {
 
         if (known != null) {
             known.resetNewBucketReferences();
-        }
-    }
-
-    private void removeIfUnreferenced(
-            PeerAddressKey key,
-            KnownPeerAddress known
-    ) {
-
-        if (known.isNew()
-                && known.newBucketReferences() == 0) {
-
-            addresses.remove(
-                    key
-            );
         }
     }
 
