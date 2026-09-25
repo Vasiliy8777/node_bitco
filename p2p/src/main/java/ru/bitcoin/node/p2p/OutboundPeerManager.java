@@ -22,6 +22,7 @@ public final class OutboundPeerManager {
     private final PeerAddressManager addressManager;
     private final OutboundPeerSelector selector;
     private final Supplier<Instant> clock;
+    private final PeerDiscouragementManager discouragementManager;
 
     public OutboundPeerManager(
             BitcoinClient bitcoinClient,
@@ -35,7 +36,8 @@ public final class OutboundPeerManager {
                 new OutboundPeerSelector(
                         addressManager
                 ),
-                Instant::now
+                Instant::now,
+                peerManager.discouragementManager()
         );
     }
 
@@ -45,6 +47,17 @@ public final class OutboundPeerManager {
             PeerAddressManager addressManager,
             OutboundPeerSelector selector,
             Supplier<Instant> clock
+    ) {
+        this(peerConnector, peerManager, addressManager, selector, clock, peerManager.discouragementManager());
+    }
+
+    OutboundPeerManager(
+            PeerConnector peerConnector,
+            PeerManager peerManager,
+            PeerAddressManager addressManager,
+            OutboundPeerSelector selector,
+            Supplier<Instant> clock,
+            PeerDiscouragementManager discouragementManager
     ) {
 
         this.peerConnector =
@@ -76,6 +89,9 @@ public final class OutboundPeerManager {
                         clock,
                         "clock"
                 );
+
+        this.discouragementManager = Objects.requireNonNull(
+                discouragementManager, "discouragementManager");
     }
 
     public Peer connectOne(
@@ -178,6 +194,11 @@ public final class OutboundPeerManager {
             attempted.add(
                     address
             );
+
+            if (address.isDirectSocketAddress()
+                    && discouragementManager.isDiscouraged(address.address())) {
+                continue;
+            }
 
             addressManager.markAttempt(
                     address,

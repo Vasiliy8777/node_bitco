@@ -972,6 +972,17 @@ public final class Peer implements AutoCloseable {
         return localSendAddrV2Sent;
     }
 
+    /**
+     * Disconnects this peer while preserving a machine-detectable protocol
+     * violation cause for connection-management policy.
+     */
+    public void disconnectForProtocolViolation(String message, Throwable cause) {
+        PeerProtocolException protocolFailure = cause instanceof PeerProtocolException p
+                ? p
+                : new PeerProtocolException(message, cause);
+        handleReaderFailure(new IOException(message, protocolFailure));
+    }
+
     void handleReaderFailure(
             IOException failure
     ) {

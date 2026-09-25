@@ -26,6 +26,7 @@ public final class BitcoinServer
 
     private final NetworkParameters networkParameters;
     private final PeerManager peerManager;
+    private final PeerDiscouragementManager discouragementManager;
 
     private final long localServices;
     private final boolean relay;
@@ -55,7 +56,8 @@ public final class BitcoinServer
                 peerManager,
                 VersionMessage.DEFAULT_SERVICES,
                 true,
-                DEFAULT_MAX_INBOUND_CONNECTIONS
+                DEFAULT_MAX_INBOUND_CONNECTIONS,
+                peerManager.discouragementManager()
         );
     }
 
@@ -65,6 +67,18 @@ public final class BitcoinServer
             long localServices,
             boolean relay,
             int maxInboundConnections
+    ) {
+        this(networkParameters, peerManager, localServices, relay, maxInboundConnections,
+                peerManager.discouragementManager());
+    }
+
+    public BitcoinServer(
+            NetworkParameters networkParameters,
+            PeerManager peerManager,
+            long localServices,
+            boolean relay,
+            int maxInboundConnections,
+            PeerDiscouragementManager discouragementManager
     ) {
 
         this.networkParameters =
@@ -78,6 +92,9 @@ public final class BitcoinServer
                         peerManager,
                         "peerManager"
                 );
+
+        this.discouragementManager = Objects.requireNonNull(
+                discouragementManager, "discouragementManager");
 
         if (maxInboundConnections <= 0) {
             throw new IllegalArgumentException(
@@ -209,6 +226,13 @@ public final class BitcoinServer
 
                 socket =
                         currentServerSocket.accept();
+
+                if (socket.getInetAddress() != null
+                        && discouragementManager.isDiscouraged(socket.getInetAddress())) {
+                    closeQuietly(socket);
+                    socket = null;
+                    continue;
+                }
 
                 if (!reserveInboundSlot()) {
 

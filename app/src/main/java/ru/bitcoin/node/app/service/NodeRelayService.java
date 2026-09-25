@@ -185,7 +185,8 @@ public final class NodeRelayService implements AutoCloseable {
                     if (!closed && peer.isReady()) handle(peer, message);
                 } catch (IOException | IllegalArgumentException exception) {
                     log.debug("Rejected peer message {}", message.command(), exception);
-                    disconnect(peer);
+                    peer.disconnectForProtocolViolation(
+                            "Rejected " + message.command() + " message", exception);
                 } catch (RuntimeException exception) {
                     log.error("Unable to process peer message {}", message.command(), exception);
                 } finally {

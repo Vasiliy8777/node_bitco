@@ -14,6 +14,15 @@ public final class PeerManager
             new ArrayList<>();
     private final List<java.util.function.Consumer<Peer>> listeners = new ArrayList<>();
     private final Map<Peer, PeerConnectionRole> roles = new IdentityHashMap<>();
+    private final PeerDiscouragementManager discouragementManager;
+
+    public PeerManager() {
+        this(new PeerDiscouragementManager());
+    }
+
+    public PeerManager(PeerDiscouragementManager discouragementManager) {
+        this.discouragementManager = Objects.requireNonNull(discouragementManager, "discouragementManager");
+    }
 
     /** Callbacks only attach nonblocking observers; called under the manager lock. */
     public synchronized void addPeerListener(java.util.function.Consumer<Peer> listener) {
@@ -85,13 +94,28 @@ public final class PeerManager
             IOException cause
     ) {
 
-        synchronized (this) {
+        if (isProtocolViolation(cause)) {
+            java.net.InetSocketAddress remote = peer.remoteAddress();
+            if (remote != null && remote.getAddress() != null) {
+                discouragementManager.discourage(remote.getAddress());
+            }
+        }
 
-            peers.remove(
-                    peer
-            );
+        synchronized (this) {
+            peers.remove(peer);
             roles.remove(peer);
         }
+    }
+
+    private static boolean isProtocolViolation(Throwable failure) {
+        for (Throwable cursor = failure; cursor != null; cursor = cursor.getCause()) {
+            if (cursor instanceof PeerProtocolException) return true;
+        }
+        return false;
+    }
+
+    public PeerDiscouragementManager discouragementManager() {
+        return discouragementManager;
     }
 
     public synchronized void remove(
