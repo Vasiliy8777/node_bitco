@@ -106,8 +106,16 @@ class NodeRelayServiceTest {
                 assertEquals(parent.txId(), BitcoinMessages.decodeGetData(take(requests)).inventory().getFirst().hash());
                 assertTrue(validation.mempoolEntries().isEmpty());
                 incoming.get().onMessage(source, new BitcoinMessage("tx", TransactionSerializer.serialize(parent)));
-                assertEquals(parent.wtxId(), BitcoinMessages.decodeInv(take(announcements)).inventory().getFirst().hash());
-                assertEquals(child.wtxId(), BitcoinMessages.decodeInv(take(announcements)).inventory().getFirst().hash());
+                BitcoinMessage relayed = take(announcements);
+                assertEquals("inv", relayed.command());
+                List<InventoryVector> relayedInventory =
+                        BitcoinMessages.decodeInv(relayed).inventory();
+                assertEquals(
+                        List.of(parent.wtxId(), child.wtxId()),
+                        relayedInventory.stream()
+                                .map(InventoryVector::hash)
+                                .toList()
+                );
                 assertEquals(2, validation.mempoolEntries().size());
                 /*
                  * The source peer originally announced the child's wtxid to us,
@@ -635,7 +643,7 @@ class NodeRelayServiceTest {
     }
 
     private static BitcoinMessage take(BlockingQueue<BitcoinMessage> queue) throws InterruptedException {
-        var message = queue.poll(5, TimeUnit.SECONDS);
+        var message = queue.poll(15, TimeUnit.SECONDS);
         assertNotNull(message, "Expected network message");
         return message;
     }

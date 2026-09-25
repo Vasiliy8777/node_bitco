@@ -34,6 +34,17 @@ public final class NodeRelayService implements AutoCloseable {
     private static final int MAX_OUTBOUND_TASKS_PER_PEER = 64;
     private static final long MAX_OUTBOUND_BYTES_PER_PEER = 16_000_000L;
     private static final long MAX_OUTBOUND_BYTES = 64_000_000L;
+
+    // Bitcoin Core v31.1 transaction-inventory trickle constants.
+    static final long INBOUND_INVENTORY_BROADCAST_INTERVAL_NANOS =
+            Duration.ofSeconds(5).toNanos();
+    static final long OUTBOUND_INVENTORY_BROADCAST_INTERVAL_NANOS =
+            Duration.ofSeconds(2).toNanos();
+    static final int INVENTORY_BROADCAST_PER_SECOND = 14;
+    static final int INVENTORY_BROADCAST_TARGET =
+            INVENTORY_BROADCAST_PER_SECOND * 5;
+    static final int INVENTORY_BROADCAST_MAX = 1_000;
+
     private final AtomicLong outboundBytes = new AtomicLong();
 
     private final NodeValidationService validation;
@@ -113,6 +124,7 @@ public final class NodeRelayService implements AutoCloseable {
             worker.execute(() -> {
                 if (!closed) {
                     dispatchTransactionRequests();
+                    flushTransactionInventory();
                     expireCompactBlocks();
                 }
             });
@@ -750,7 +762,10 @@ public final class NodeRelayService implements AutoCloseable {
             }
         }
 
-        long feeRate = entry == null ? 0L : entry.feeRate().satoshisPerKiloByte();
+        long feeRate =
+                entry == null
+                        ? 0L
+                        : entry.feeRate().satoshisPerKiloByte();
 
         for (Peer peer : peers.readyPeers()) {
             if (peer == source
@@ -770,33 +785,155 @@ public final class NodeRelayService implements AutoCloseable {
                             : transaction.txId();
 
             /*
-             * BIP133 filters announcements, not transaction validity. A peer may
-             * still explicitly request a transaction through GETDATA.
+             * Queue rather than immediately send. Core keeps transaction
+             * inventory pending per peer and releases it only on the peer's
+             * randomized inventory trickle schedule.
              */
             if (feeRate < relayState.feeFilterSatPerKvB()
                     || relayState.knows(announcedHash)) {
                 continue;
             }
 
-            relayState.markKnown(transaction.txId());
-            relayState.markKnown(transaction.wtxId());
+            relayState.queue(
+                    transaction.txId(),
+                    transaction.wtxId(),
+                    feeRate
+            );
+        }
+    }
+
+    private void flushTransactionInventory() {
+        long now = System.nanoTime();
+
+        for (Peer peer : peers.readyPeers()) {
+            if (!peers.roleOf(peer).relaysTransactions()
+                    || !peer.remoteVersion().relay()) {
+                continue;
+            }
+
+            TxRelayState state = txRelayStates.get(peer);
+            if (state == null || state.pendingCount() == 0) {
+                continue;
+            }
+
+            long next = state.nextInventorySendNanos();
+            if (next == 0L) {
+                state.nextInventorySendNanos(
+                        saturatedAdd(
+                                now,
+                                nextInventoryDelayNanos(peer)
+                        )
+                );
+                continue;
+            }
+
+            if (now < next) {
+                continue;
+            }
+
+            state.nextInventorySendNanos(
+                    saturatedAdd(
+                            now,
+                            nextInventoryDelayNanos(peer)
+                    )
+            );
+
+            int backlog = state.pendingCount();
+
+            /*
+             * Bitcoin Core v31.1:
+             * target = 14 * 5 = 70;
+             * add 5 for each 1000 queued items;
+             * hard-cap a single trickle transmission at 1000 tx inventory.
+             */
+            int broadcastMaximum =
+                    Math.min(
+                            INVENTORY_BROADCAST_MAX,
+                            INVENTORY_BROADCAST_TARGET
+                                    + (backlog / 1_000) * 5
+                    );
+
+            List<TxRelayState.PendingAnnouncement> selected =
+                    state.takeForRelay(
+                            peer.remoteWtxidRelay(),
+                            broadcastMaximum
+                    );
+
+            if (selected.isEmpty()) {
+                continue;
+            }
+
+            List<InventoryVector> inventory =
+                    new ArrayList<>(selected.size());
+
+            for (TxRelayState.PendingAnnouncement announcement : selected) {
+                Hash256 hash =
+                        peer.remoteWtxidRelay()
+                                ? announcement.wtxId()
+                                : announcement.txId();
+
+                inventory.add(
+                        new InventoryVector(
+                                peer.remoteWtxidRelay()
+                                        ? MSG_WTX
+                                        : InventoryVector.MSG_TX,
+                                hash
+                        )
+                );
+
+                /*
+                 * Known inventory is updated when the announcement is actually
+                 * selected for transmission, not merely when it is queued.
+                 */
+                state.markKnown(announcement.txId());
+                state.markKnown(announcement.wtxId());
+            }
 
             send(
                     peer,
                     BitcoinMessages.inv(
                             new InvMessage(
-                                    List.of(
-                                            new InventoryVector(
-                                                    peer.remoteWtxidRelay()
-                                                            ? MSG_WTX
-                                                            : InventoryVector.MSG_TX,
-                                                    announcedHash
-                                            )
-                                    )
+                                    List.copyOf(inventory)
                             )
                     )
             );
         }
+    }
+
+    private static long nextInventoryDelayNanos(Peer peer) {
+        long mean =
+                peer.isInboundConnection()
+                        ? INBOUND_INVENTORY_BROADCAST_INTERVAL_NANOS
+                        : OUTBOUND_INVENTORY_BROADCAST_INTERVAL_NANOS;
+
+        /*
+         * Core uses exponentially distributed delays. Clamp u away from zero
+         * so the logarithm remains finite.
+         */
+        double u =
+                Math.max(
+                        ThreadLocalRandom.current().nextDouble(),
+                        1.0e-12
+                );
+
+        double delay =
+                -Math.log(u) * mean;
+
+        if (delay >= Long.MAX_VALUE) {
+            return Long.MAX_VALUE;
+        }
+
+        return Math.max(
+                1L,
+                (long) delay
+        );
+    }
+
+    private static long saturatedAdd(long left, long right) {
+        if (right > 0 && left > Long.MAX_VALUE - right) {
+            return Long.MAX_VALUE;
+        }
+        return left + right;
     }
 
     private void broadcast(BitcoinMessage message, Peer source) {
@@ -859,6 +996,7 @@ public final class NodeRelayService implements AutoCloseable {
         attached.clear();
         outbound.clear();
         blockAnnouncements.clear();
+        txRelayStates.clear();
         pendingCompactBlocks.clear();
         synchronized (compactFallbacks) { compactFallbacks.clear(); }
         synchronized (highBandwidthCompactPeers) {
