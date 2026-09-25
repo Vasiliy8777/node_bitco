@@ -109,8 +109,33 @@ class NodeRelayServiceTest {
                 assertEquals(parent.wtxId(), BitcoinMessages.decodeInv(take(announcements)).inventory().getFirst().hash());
                 assertEquals(child.wtxId(), BitcoinMessages.decodeInv(take(announcements)).inventory().getFirst().hash());
                 assertEquals(2, validation.mempoolEntries().size());
-                assertEquals(child.wtxId(), BitcoinMessages.decodeInv(take(requests)).inventory().getFirst().hash());
-                incoming.get().onMessage(source, BitcoinMessages.getData(new GetDataMessage(List.of(new InventoryVector(5, child.wtxId())))));
+                /*
+                 * The source peer originally announced the child's wtxid to us,
+                 * so the per-peer known-inventory state must suppress announcing
+                 * the same transaction back to that peer.
+                 */
+                assertNull(
+                        requests.poll(250, TimeUnit.MILLISECONDS),
+                        "Transaction already announced by the source peer must not be announced back"
+                );
+
+                /*
+                 * BIP133 / known-inventory suppression affects announcements only.
+                 * An explicit GETDATA from the source must still be served.
+                 */
+                incoming.get().onMessage(
+                        source,
+                        BitcoinMessages.getData(
+                                new GetDataMessage(
+                                        List.of(
+                                                new InventoryVector(
+                                                        5,
+                                                        child.wtxId()
+                                                )
+                                        )
+                                )
+                        )
+                );
                 var served = take(requests);
                 assertEquals("tx", served.command());
                 assertArrayEquals(TransactionSerializer.serialize(child), served.payload());

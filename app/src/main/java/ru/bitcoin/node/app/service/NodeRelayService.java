@@ -7,6 +7,8 @@ import ru.bitcoin.node.app.sync.NodeSyncInfrastructure;
 import ru.bitcoin.node.chain.BlockProcessingResult;
 import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.mempool.MempoolAdmissionException;
+import ru.bitcoin.node.mempool.MempoolEntry;
+import ru.bitcoin.node.consensus.money.Money;
 import ru.bitcoin.node.p2p.*;
 import ru.bitcoin.node.p2p.codec.GetHeadersMessageCodec;
 import ru.bitcoin.node.p2p.message.*;
@@ -41,6 +43,7 @@ public final class NodeRelayService implements AutoCloseable {
     private final Set<Peer> attached = ConcurrentHashMap.newKeySet();
     private final Map<Peer, PeerOutbound> outbound = new ConcurrentHashMap<>();
     private final Map<Peer, BlockAnnouncementState> blockAnnouncements = new ConcurrentHashMap<>();
+    private final Map<Peer, TxRelayState> txRelayStates = new ConcurrentHashMap<>();
     private final PendingCompactBlocks pendingCompactBlocks = new PendingCompactBlocks();
     // Guarded by the map monitor. These are relay-owned fallbacks only; a hash already
     // owned by BlockDownloadScheduler must stay in the scheduler's single download lifecycle.
@@ -122,6 +125,7 @@ public final class NodeRelayService implements AutoCloseable {
         if (!closed && attached.add(peer)) {
             outbound.computeIfAbsent(peer, PeerOutbound::new);
             blockAnnouncements.computeIfAbsent(peer, ignored -> new BlockAnnouncementState());
+            txRelayStates.computeIfAbsent(peer, ignored -> new TxRelayState());
             pendingCompactBlocks.register(peer);
             peer.addMessageListener(messages);
 
@@ -130,6 +134,7 @@ public final class NodeRelayService implements AutoCloseable {
                 attached.remove(source);
                 PeerOutbound sender = outbound.remove(source);
                 blockAnnouncements.remove(source);
+                txRelayStates.remove(source);
                 pendingCompactBlocks.removePeer(source);
                 synchronized (compactFallbacks) { compactFallbacks.remove(source); }
                 removeHighBandwidthCompactPeer(source);
@@ -144,7 +149,7 @@ public final class NodeRelayService implements AutoCloseable {
                 if (!compactFallbacks.containsKey(peer)) return;
             }
         }
-        if (closed || !Set.of("inv", "tx", "getdata", "getheaders", "notfound", "sendheaders", "sendcmpct", "cmpctblock", "getblocktxn", "blocktxn", "block").contains(message.command()))
+        if (closed || !Set.of("inv", "tx", "getdata", "getheaders", "notfound", "sendheaders", "sendcmpct", "feefilter", "cmpctblock", "getblocktxn", "blocktxn", "block").contains(message.command()))
             return;
         long bytes = message.payloadLength();
         if (queuedBytes.addAndGet(bytes) > MAX_QUEUED_INBOUND_BYTES) {
@@ -174,7 +179,20 @@ public final class NodeRelayService implements AutoCloseable {
         PeerConnectionRole role = peers.roleOf(peer);
         switch (message.command()) {
             case "inv" -> {
-                if (role.relaysTransactions()) requestTransactions(peer, BitcoinMessages.decodeInv(message));
+                if (role.relaysTransactions()) {
+                    InvMessage inventory = BitcoinMessages.decodeInv(message);
+                    TxRelayState relayState = txRelayStates.get(peer);
+                    if (relayState != null) {
+                        for (InventoryVector vector : inventory.inventory()) {
+                            if (vector.type() == InventoryVector.MSG_TX
+                                    || vector.type() == InventoryVector.MSG_WITNESS_TX
+                                    || vector.type() == MSG_WTX) {
+                                relayState.markKnown(vector.hash());
+                            }
+                        }
+                    }
+                    requestTransactions(peer, inventory);
+                }
             }
             case "tx" -> {
                 if (role.relaysTransactions()) receiveTransaction(peer, TransactionParser.parse(message.payload()));
@@ -191,6 +209,20 @@ public final class NodeRelayService implements AutoCloseable {
                     } else {
                         validation.bestActiveLocator(request.locatorHashes())
                                 .ifPresent(hash -> state.bestHeaderSent = hash);
+                    }
+                }
+            }
+            case "feefilter" -> {
+                long feeFilter = BitcoinMessages.decodeFeeFilter(message);
+
+                /*
+                 * Bitcoin Core ignores values outside MoneyRange rather than
+                 * treating them as a protocol violation.
+                 */
+                if (Money.isValidAmount(feeFilter)) {
+                    TxRelayState relayState = txRelayStates.get(peer);
+                    if (relayState != null) {
+                        relayState.feeFilterSatPerKvB(feeFilter);
                     }
                 }
             }
@@ -710,11 +742,60 @@ public final class NodeRelayService implements AutoCloseable {
     }
 
     private void announceTransaction(Transaction transaction, Peer source) {
+        MempoolEntry entry = null;
+        for (MempoolEntry candidate : validation.mempoolEntries()) {
+            if (candidate.transaction().txId().equals(transaction.txId())) {
+                entry = candidate;
+                break;
+            }
+        }
+
+        long feeRate = entry == null ? 0L : entry.feeRate().satoshisPerKiloByte();
+
         for (Peer peer : peers.readyPeers()) {
-            if (peer == source || !peers.roleOf(peer).relaysTransactions() || !peer.remoteVersion().relay()) continue;
-            send(peer, BitcoinMessages.inv(new InvMessage(List.of(new InventoryVector(
-                    peer.remoteWtxidRelay() ? MSG_WTX : InventoryVector.MSG_TX,
-                    peer.remoteWtxidRelay() ? transaction.wtxId() : transaction.txId())))));
+            if (peer == source
+                    || !peers.roleOf(peer).relaysTransactions()
+                    || !peer.remoteVersion().relay()) {
+                continue;
+            }
+
+            TxRelayState relayState = txRelayStates.get(peer);
+            if (relayState == null) {
+                continue;
+            }
+
+            Hash256 announcedHash =
+                    peer.remoteWtxidRelay()
+                            ? transaction.wtxId()
+                            : transaction.txId();
+
+            /*
+             * BIP133 filters announcements, not transaction validity. A peer may
+             * still explicitly request a transaction through GETDATA.
+             */
+            if (feeRate < relayState.feeFilterSatPerKvB()
+                    || relayState.knows(announcedHash)) {
+                continue;
+            }
+
+            relayState.markKnown(transaction.txId());
+            relayState.markKnown(transaction.wtxId());
+
+            send(
+                    peer,
+                    BitcoinMessages.inv(
+                            new InvMessage(
+                                    List.of(
+                                            new InventoryVector(
+                                                    peer.remoteWtxidRelay()
+                                                            ? MSG_WTX
+                                                            : InventoryVector.MSG_TX,
+                                                    announcedHash
+                                            )
+                                    )
+                            )
+                    )
+            );
         }
     }
 

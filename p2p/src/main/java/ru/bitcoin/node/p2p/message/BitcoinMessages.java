@@ -389,6 +389,18 @@ public final class BitcoinMessages {
         }
     }
 
+    public static BitcoinMessage feeFilter(long satoshisPerKiloByte) {
+        return new BitcoinMessage(
+                "feefilter",
+                FeeFilterMessageCodec.encode(satoshisPerKiloByte)
+        );
+    }
+
+    public static long decodeFeeFilter(BitcoinMessage message) {
+        requireCommand(message, "feefilter");
+        return FeeFilterMessageCodec.decode(message.payload());
+    }
+
     public static BitcoinMessage sendCmpct(SendCmpctMessage value) {
         return new BitcoinMessage("sendcmpct", SendCmpctMessageCodec.encode(value));
     }
