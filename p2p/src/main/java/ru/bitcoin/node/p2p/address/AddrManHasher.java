@@ -7,184 +7,46 @@ import java.util.Arrays;
 import java.util.Objects;
 
 final class AddrManHasher {
+    private AddrManHasher() {}
 
-    private AddrManHasher() {
-    }
-
-    static long hash64(
-            byte[] secretKey,
-            byte[]... parts
-    ) {
-
-        Objects.requireNonNull(
-                secretKey,
-                "secretKey"
-        );
-
+    static long hash64(byte[] secretKey, byte[]... parts) {
+        Objects.requireNonNull(secretKey, "secretKey");
         try {
-
-            MessageDigest digest =
-                    MessageDigest.getInstance(
-                            "SHA-256"
-                    );
-
-            digest.update(
-                    secretKey
-            );
-
-            for (byte[] part : parts) {
-
-                digest.update(
-                        Objects.requireNonNull(
-                                part,
-                                "part"
-                        )
-                );
-            }
-
-            byte[] first =
-                    digest.digest();
-
-            byte[] second =
-                    digest.digest(
-                            first
-                    );
-
-            return ByteBuffer
-                    .wrap(
-                            Arrays.copyOf(
-                                    second,
-                                    Long.BYTES
-                            )
-                    )
-                    .getLong();
-
-        } catch (NoSuchAlgorithmException exception) {
-
-            throw new IllegalStateException(
-                    "SHA-256 unavailable",
-                    exception
-            );
-        }
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            digest.update(secretKey);
+            for (byte[] part : parts) digest.update(Objects.requireNonNull(part, "part"));
+            byte[] first = digest.digest();
+            byte[] second = digest.digest(first);
+            return ByteBuffer.wrap(Arrays.copyOf(second, Long.BYTES)).getLong();
+        } catch (NoSuchAlgorithmException e) { throw new IllegalStateException("SHA-256 unavailable", e); }
     }
 
-    static byte[] endpointBytes(
-            PeerAddress address
-    ) {
-
-        Objects.requireNonNull(
-                address,
-                "address"
-        );
-
-        byte[] ip =
-                address.address()
-                        .getAddress();
-
-        ByteBuffer buffer =
-                ByteBuffer.allocate(
-                        1
-                                + ip.length
-                                + Integer.BYTES
-                );
-
-        buffer.put(
-                (byte) ip.length
-        );
-
-        buffer.put(
-                ip
-        );
-
-        buffer.putInt(
-                address.port()
-        );
-
-        return buffer.array();
+    static byte[] endpointBytes(PeerAddress address) {
+        byte[] raw = address.rawAddress();
+        ByteBuffer b = ByteBuffer.allocate(2 + raw.length + Integer.BYTES);
+        b.put((byte) address.network().bip155Id()).put((byte) raw.length).put(raw).putInt(address.port());
+        return b.array();
     }
 
-    static byte[] groupBytes(
-            PeerAddress address
-    ) {
-
-        Objects.requireNonNull(
-                address,
-                "address"
-        );
-
-        return groupBytes(
-                address.address()
-        );
+    static byte[] groupBytes(PeerAddress address) {
+        return groupBytes(address.network(), address.rawAddress());
     }
 
-    static byte[] groupBytes(
-            PeerAddressSource source
-    ) {
-
-        Objects.requireNonNull(
-                source,
-                "source"
-        );
-
-        return groupBytes(
-                source.address()
-        );
+    static byte[] groupBytes(PeerAddressSource source) {
+        return groupBytes(source.network(), source.rawAddress());
     }
 
-    private static byte[] groupBytes(
-            java.net.InetAddress address
-    ) {
-
-        byte[] raw =
-                address.getAddress();
-
-        /*
-         * Current project is still IP-only.
-         *
-         * IPv4 group: /16.
-         * IPv6 group: /32.
-         *
-         * Later the network-address abstraction will replace
-         * this with Core-compatible NetGroup behavior for all
-         * supported networks.
-         */
-        if (raw.length == 4) {
-
-            return new byte[]{
-                    4,
-                    raw[0],
-                    raw[1]
-            };
-        }
-
-        if (raw.length == 16) {
-
-            return new byte[]{
-                    6,
-                    raw[0],
-                    raw[1],
-                    raw[2],
-                    raw[3]
-            };
-        }
-
-        throw new IllegalArgumentException(
-                "Unsupported IP address length: "
-                        + raw.length
-        );
+    private static byte[] groupBytes(PeerAddressNetwork network, byte[] raw) {
+        int prefix = switch (network) {
+            case IPV4 -> 2;
+            case IPV6, CJDNS -> 4;
+            case TORV3, I2P -> 4;
+        };
+        byte[] out = new byte[2 + prefix];
+        out[0] = (byte) network.bip155Id(); out[1] = (byte) prefix;
+        System.arraycopy(raw, 0, out, 2, prefix);
+        return out;
     }
 
-    static byte[] intBytes(
-            int value
-    ) {
-
-        return ByteBuffer
-                .allocate(
-                        Integer.BYTES
-                )
-                .putInt(
-                        value
-                )
-                .array();
-    }
+    static byte[] intBytes(int value) { return ByteBuffer.allocate(Integer.BYTES).putInt(value).array(); }
 }

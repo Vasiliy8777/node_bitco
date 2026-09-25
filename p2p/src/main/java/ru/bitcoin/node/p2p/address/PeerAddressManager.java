@@ -568,6 +568,9 @@ public final class PeerAddressManager {
             }
 
             PeerAddress peerAddress = known.peerAddress();
+            if (!peerAddress.isDirectSocketAddress()) {
+                continue;
+            }
             if (PeerNetGroup.isDiversifiable(peerAddress)
                     && excludedNetGroups.contains(PeerNetGroup.of(peerAddress))) {
                 continue;

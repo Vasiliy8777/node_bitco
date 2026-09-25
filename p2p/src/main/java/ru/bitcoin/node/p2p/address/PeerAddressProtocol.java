@@ -21,13 +21,8 @@ import java.util.Objects;
  * addrv2
  * getaddr
  *
- * The current PeerAddress model represents IP endpoints,
- * therefore only IPv4 and IPv6 are admitted into
- * PeerAddressManager here.
- *
- * Non-IP BIP155 address families remain represented by the
- * wire layer and will be integrated when AddrMan is upgraded
- * to the full multi-network address model.
+ * ADDRv2 addresses are retained in AddrMan for every currently supported
+ * BIP155 family except obsolete Tor v2. Legacy ADDR remains IP-only.
  */
 public final class PeerAddressProtocol
         implements PeerMessageListener {
@@ -379,11 +374,13 @@ public final class PeerAddressProtocol
             PeerAddress address =
                     known.peerAddress();
 
+            if (!address.isLegacyAddrCompatible()) {
+                continue;
+            }
+
             entries.add(
                     AddrEntry.fromIp(
-                            timestamp(
-                                    known
-                            ),
+                            timestamp(known),
                             address.services(),
                             address.address(),
                             address.port()
@@ -421,25 +418,10 @@ public final class PeerAddressProtocol
                     known.peerAddress();
 
             byte[] raw =
-                    address.address()
-                            .getAddress();
+                    address.rawAddress();
 
-            final int networkId;
-
-            if (raw.length == 4) {
-
-                networkId =
-                        AddrV2Network.IPV4.id();
-
-            } else if (raw.length == 16) {
-
-                networkId =
-                        AddrV2Network.IPV6.id();
-
-            } else {
-
-                continue;
-            }
+            int networkId =
+                    address.network().bip155Id();
 
             entries.add(
                     new AddrV2Entry(
@@ -500,7 +482,7 @@ public final class PeerAddressProtocol
         }
     }
 
-    private static PeerAddress toPeerAddress(
+    static PeerAddress toPeerAddress(
             AddrV2Entry entry
     ) {
 
@@ -508,44 +490,19 @@ public final class PeerAddressProtocol
             return null;
         }
 
-        AddrV2Network network =
-                entry.network()
-                        .orElse(
-                                null
-                        );
-
-        if (network != AddrV2Network.IPV4
-                && network != AddrV2Network.IPV6) {
-
-            /*
-             * Current PeerAddress is InetAddress-based.
-             *
-             * Tor v3, I2P and CJDNS require the future
-             * multi-network AddrMan model.
-             */
-            return null;
-        }
-
-        if (entry.port() == 0) {
+        AddrV2Network network = entry.network().orElse(null);
+        if (network == null || entry.port() == 0) {
             return null;
         }
 
         try {
-
-            InetAddress address =
-                    InetAddress.getByAddress(
-                            entry.address()
-                    );
-
             return new PeerAddress(
-                    address,
+                    PeerAddressNetwork.from(network),
+                    entry.address(),
                     entry.port(),
                     entry.services()
             );
-
-        } catch (UnknownHostException
-                 | IllegalArgumentException exception) {
-
+        } catch (IllegalArgumentException exception) {
             return null;
         }
     }
