@@ -50,6 +50,7 @@ class MiningRpcTest {
                     var chainInfo = (Map<?, ?>) call(client, uri, "getblockchaininfo", List.of()).get("result");
                     assertEquals(false, chainInfo.get("pruned"));
                     assertFalse(chainInfo.containsKey("pruneheight"));
+                    assertEquals(true, chainInfo.get("initialblockdownload"));
                     ready.set(true);
                     var response = call(client, uri, "getblocktemplate", List.of(Map.of("rules", List.of("segwit"))));
                     assertNull(response.get("error"));
@@ -65,6 +66,7 @@ class MiningRpcTest {
                     assertEquals(false, updated.get("submitold"));
                     assertEquals(mined.hash(), validation.activeTip().hash());
                     assertEquals(mined.hash(), sync.headerChainState().bestHeaderTip().hash());
+                    assertFalse(validation.isInitialBlockDownload());
                     assertEquals("duplicate", call(client, uri, "submitblock", List.of(HexFormat.of().formatHex(BlockSerializer.serialize(mined)))).get("result"));
                     assertNotNull(call(client, uri, "submitblock", List.of("zz")).get("error"));
                     assertEquals(-32601, ((Number) ((Map<?, ?>) call(client, uri, "unknown", List.of()).get("error")).get("code")).intValue());

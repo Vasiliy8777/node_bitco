@@ -133,7 +133,7 @@ public final class NodeRpcServer implements AutoCloseable {
                 info.put("headers", sync.headerChainState().bestHeaderTip().height());
                 info.put("bestblockhash", tip.hash().toDisplayHex());
                 info.put("chainwork", String.format("%064x", tip.chainWork()));
-                info.put("initialblockdownload", !ready.getAsBoolean());
+                info.put("initialblockdownload", validation.isInitialBlockDownload());
                 info.put("pruned", prune.enabled());
                 if (prune.enabled()) {
                     info.put("pruneheight", prune.pruneHeight());

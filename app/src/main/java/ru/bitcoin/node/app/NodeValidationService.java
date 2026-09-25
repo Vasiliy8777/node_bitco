@@ -41,6 +41,7 @@ public final class NodeValidationService {
     private BlockIndex poolTip;
     private long revision;
     private final ActiveChainAncestors activeAncestors = new ActiveChainAncestors();
+    private final InitialBlockDownloadState initialBlockDownload;
 
     public long revision() {
         synchronized (chain) {
@@ -254,6 +255,7 @@ public final class NodeValidationService {
                         failureResolver
                 );
         chain = new ChainInitializer(database, parameters).initialize();
+        initialBlockDownload = new InitialBlockDownloadState(parameters, time::currentTimeSeconds);
         var storage = new RocksDbChainTransitionStorage(database, utxos, undos, indexes, tips);
         var executor = new ChainReorganizationExecutor(
                 blocks,
@@ -292,6 +294,7 @@ public final class NodeValidationService {
             mempool.revalidate(context(), coins, Set.of());
             if (persistMempool) mempoolStore.replace(mempoolTransactions());
             blockPruner.prune(chain.activeTip());
+            initialBlockDownload.update(chain.activeTip());
         }
     }
 
@@ -304,6 +307,7 @@ public final class NodeValidationService {
             synchronizePool();
             if (result == BlockProcessingResult.CONNECTED) {
                 blockPruner.prune(chain.activeTip());
+                initialBlockDownload.update(chain.activeTip());
             }
             return result;
         }
@@ -364,6 +368,14 @@ public final class NodeValidationService {
             } finally {
                 if (persistMempool) mempoolStore.apply(transactions(before), mempoolTransactions());
             }
+        }
+    }
+
+    /** Bitcoin Core-style latched Initial Block Download state. */
+    public boolean isInitialBlockDownload() {
+        synchronized (chain) {
+            initialBlockDownload.update(chain.activeTip());
+            return initialBlockDownload.isInitialBlockDownload();
         }
     }
 
