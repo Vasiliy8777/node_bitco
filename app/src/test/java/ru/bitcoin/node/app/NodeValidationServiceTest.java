@@ -73,6 +73,27 @@ class NodeValidationServiceTest {
     }
 
     @Test
+    void restoresPersistedMempoolInDependencyOrderAfterRestart() {
+        OutPoint fund = new OutPoint(Hash256.fromDisplayHex("22".repeat(32)), new UInt32(0));
+        Transaction parent;
+        Transaction child;
+        try (var db = new RocksDbDatabase(directory)) {
+            var service = new NodeValidationService(db, PARAMS, () -> 1_800_000_000L, new Mempool());
+            new RocksDbUtxoStore(db).save(fund, new StoredUtxo(100_000, SCRIPT, 0, false));
+            parent = spend(fund, 90_000);
+            child = spend(new OutPoint(parent.txId(), new UInt32(0)), 80_000);
+            service.admit(parent);
+            service.admit(child);
+            assertEquals(2, service.mempoolEntries().size());
+        }
+        try (var db = new RocksDbDatabase(directory)) {
+            var restored = new NodeValidationService(db, PARAMS, () -> 1_800_000_000L, new Mempool());
+            assertEquals(List.of(parent.txId(), child.txId()),
+                    restored.mempoolEntries().stream().map(e -> e.transaction().txId()).toList());
+        }
+    }
+
+    @Test
     void exposesPruneModeSeparatelyFromWhetherAnythingHasBeenPruned() {
         try (var db = new RocksDbDatabase(directory)) {
             var full = new NodeValidationService(db, PARAMS, () -> 1_800_000_000L, new Mempool());

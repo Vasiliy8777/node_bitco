@@ -13,6 +13,7 @@ import ru.bitcoin.node.storage.block.*;
 import ru.bitcoin.node.storage.chain.RocksDbChainStateStore;
 import ru.bitcoin.node.storage.chain.RocksDbPruneStateStore;
 import ru.bitcoin.node.storage.rocksdb.RocksDbDatabase;
+import ru.bitcoin.node.storage.mempool.RocksDbMempoolStore;
 import ru.bitcoin.node.storage.undo.RocksDbUndoStore;
 import ru.bitcoin.node.storage.utxo.RocksDbUtxoStore;
 
@@ -29,6 +30,8 @@ public final class NodeValidationService {
     private final UtxoView coins;
     private final BlockProcessor processor;
     private final Mempool mempool;
+    private final RocksDbMempoolStore mempoolStore;
+    private final boolean persistMempool;
     private final NetworkParameters parameters;
     private final AdjustedTime time;
     private final RocksDbUtxoStore utxos;
@@ -202,17 +205,25 @@ public final class NodeValidationService {
 
     public NodeValidationService(RocksDbDatabase database, NetworkParameters parameters,
                                  AdjustedTime time, Mempool mempool) {
-        this(database, parameters, time, mempool, 0L, parameters.defaultAssumeValid());
+        this(database, parameters, time, mempool, 0L, parameters.defaultAssumeValid(), true);
     }
 
     public NodeValidationService(RocksDbDatabase database, NetworkParameters parameters,
                                  AdjustedTime time, Mempool mempool, long pruneTargetBytes) {
-        this(database, parameters, time, mempool, pruneTargetBytes, parameters.defaultAssumeValid());
+        this(database, parameters, time, mempool, pruneTargetBytes, parameters.defaultAssumeValid(), true);
     }
 
     public NodeValidationService(RocksDbDatabase database, NetworkParameters parameters,
                                  AdjustedTime time, Mempool mempool, long pruneTargetBytes, Hash256 assumedValidBlock) {
+        this(database, parameters, time, mempool, pruneTargetBytes, assumedValidBlock, true);
+    }
+
+    public NodeValidationService(RocksDbDatabase database, NetworkParameters parameters,
+                                 AdjustedTime time, Mempool mempool, long pruneTargetBytes,
+                                 Hash256 assumedValidBlock, boolean persistMempool) {
         this.mempool = Objects.requireNonNull(mempool);
+        this.mempoolStore = new RocksDbMempoolStore(database);
+        this.persistMempool = persistMempool;
         this.blockPruner = new BlockPruner(database, pruneTargetBytes);
         this.pruneState = new RocksDbPruneStateStore(database);
         this.pruneTargetBytes = pruneTargetBytes;
@@ -277,7 +288,9 @@ public final class NodeValidationService {
         coins = point -> utxos.find(point).map(coin -> new UtxoEntry(coin.amount(), coin.scriptPubKey(), coin.height(), coin.coinbase()));
         poolTip = chain.activeTip();
         synchronized (chain) {
+            if (persistMempool) restorePersistentMempool();
             mempool.revalidate(context(), coins, Set.of());
+            if (persistMempool) mempoolStore.replace(mempoolTransactions());
             blockPruner.prune(chain.activeTip());
         }
     }
@@ -299,18 +312,23 @@ public final class NodeValidationService {
     public MempoolEntry admit(Transaction transaction) {
         synchronized (chain) {
             synchronizePool();
-            mempool.expire();
-            var entry = mempool.admit(transaction, context(), coins);
-            revision++;
-            chain.notifyAll();
-            return entry;
+            var before = mempool.entries();
+            try {
+                mempool.expire();
+                var entry = mempool.admit(transaction, context(), coins);
+                revision++;
+                chain.notifyAll();
+                return entry;
+            } finally {
+                if (persistMempool) mempoolStore.apply(transactions(before), mempoolTransactions());
+            }
         }
     }
 
     public List<MempoolEntry> mempoolEntries() {
         synchronized (chain) {
             synchronizePool();
-            mempool.expire();
+            expirePersistent();
             return mempool.entries();
         }
     }
@@ -322,7 +340,7 @@ public final class NodeValidationService {
     public long feeFilterRate() {
         synchronized (chain) {
             synchronizePool();
-            mempool.expire();
+            expirePersistent();
             return mempool.feeFilterRate();
         }
     }
@@ -336,11 +354,16 @@ public final class NodeValidationService {
     public List<MempoolEntry> admitPackage(List<Transaction> transactions) {
         synchronized (chain) {
             synchronizePool();
-            mempool.expire();
-            var entries = mempool.admitPackage(transactions, context(), coins);
-            revision++;
-            chain.notifyAll();
-            return entries;
+            var before = mempool.entries();
+            try {
+                mempool.expire();
+                var entries = mempool.admitPackage(transactions, context(), coins);
+                revision++;
+                chain.notifyAll();
+                return entries;
+            } finally {
+                if (persistMempool) mempoolStore.apply(transactions(before), mempoolTransactions());
+            }
         }
     }
 
@@ -356,7 +379,7 @@ public final class NodeValidationService {
     public Block createMiningTemplate(byte[] payout, byte[] extraNonce, long maximumWeight, FeeRate minimumRate) {
         synchronized (chain) {
             synchronizePool();
-            mempool.expire();
+            expirePersistent();
             var parent = chain.activeTip();
             long now = time.currentTimeSeconds();
             long timestamp = Math.max(now, Math.addExact(MedianTimePast.calculate(parent, lookup), 1));
@@ -388,10 +411,61 @@ public final class NodeValidationService {
         for (var index : plan.blocksToDisconnect().reversed()) {
             for (var tx : requireBlock(index).transactions()) if (!tx.isCoinbase()) retry.add(tx);
         }
+        var before = mempool.entries();
         mempool.reconcile(context(), coins, confirmed, retry);
+        if (persistMempool) mempoolStore.apply(transactions(before), mempoolTransactions());
         poolTip = tip;
         revision++;
         chain.notifyAll();
+    }
+
+
+    private List<Transaction> mempoolTransactions() {
+        return transactions(mempool.entries());
+    }
+
+    private static List<Transaction> transactions(List<MempoolEntry> entries) {
+        return entries.stream().map(MempoolEntry::transaction).toList();
+    }
+
+    private void expirePersistent() {
+        var before = mempool.entries();
+        mempool.expire();
+        if (persistMempool) mempoolStore.apply(transactions(before), mempoolTransactions());
+    }
+
+    /**
+     * Reloads locally persisted transactions through normal mempool admission.
+     * Persistence is not a trust boundary: every transaction is revalidated
+     * against the current chain and policy before becoming live again.
+     */
+    private void restorePersistentMempool() {
+        List<Transaction> stored = mempoolStore.load();
+        if (stored.isEmpty()) return;
+
+        Map<Hash256, Transaction> pending = new LinkedHashMap<>();
+        for (Transaction tx : stored) pending.put(tx.txId(), tx);
+
+        // Restore parents before children without relying on RocksDB key order.
+        boolean progressed;
+        do {
+            progressed = false;
+            var iterator = pending.entrySet().iterator();
+            while (iterator.hasNext()) {
+                Transaction tx = iterator.next().getValue();
+                boolean parentStillPending = tx.inputs().stream()
+                        .anyMatch(input -> pending.containsKey(input.previousOutput().transactionId()));
+                if (parentStillPending) continue;
+                try {
+                    mempool.admit(tx, context(), coins);
+                } catch (MempoolAdmissionException | IllegalArgumentException ignored) {
+                    // Stale, expired-by-policy, conflicting, or otherwise invalid after restart.
+                }
+                iterator.remove();
+                progressed = true;
+            }
+        } while (progressed && !pending.isEmpty());
+        // Cyclic/impossible dependency sets remain pending and are intentionally discarded.
     }
 
     private Block requireBlock(BlockIndex index) {

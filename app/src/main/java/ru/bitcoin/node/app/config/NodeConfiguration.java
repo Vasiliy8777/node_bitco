@@ -77,7 +77,9 @@ public class NodeConfiguration {
             @Value("${bitcoin.prune:0}")
             long pruneMiB,
             @Value("${bitcoin.assume-valid:}")
-            String assumeValid
+            String assumeValid,
+            @Value("${bitcoin.persist-mempool:true}")
+            boolean persistMempool
     ) {
         long pruneTargetBytes = pruneTargetBytes(pruneMiB);
         var pruneState = new ru.bitcoin.node.storage.chain.RocksDbPruneStateStore(database);
@@ -115,7 +117,8 @@ public class NodeConfiguration {
                 adjustedTime,
                 new Mempool(),
                 pruneTargetBytes,
-                assumeValidHash(assumeValid, parameters)
+                assumeValidHash(assumeValid, parameters),
+                persistMempool
         );
     }
 
