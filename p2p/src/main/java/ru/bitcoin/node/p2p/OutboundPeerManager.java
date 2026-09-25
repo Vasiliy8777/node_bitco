@@ -208,7 +208,8 @@ public final class OutboundPeerManager {
 
                 String ineligibleReason =
                         longLivedOutboundIneligibilityReason(
-                                peer.remoteVersion()
+                                peer.remoteVersion(),
+                                startHeight
                         );
 
                 if (ineligibleReason != null) {
@@ -427,7 +428,8 @@ public final class OutboundPeerManager {
     }
 
     private static String longLivedOutboundIneligibilityReason(
-            VersionMessage version
+            VersionMessage version,
+            int localActiveHeight
     ) {
         if (version.version()
                 < VersionMessage.MIN_PEER_PROTOCOL_VERSION) {
@@ -444,14 +446,24 @@ public final class OutboundPeerManager {
             return "NODE_WITNESS is required";
         }
 
-        /*
-         * This manager currently owns full-relay outbound slots.
-         * NODE_NETWORK_LIMITED is intentionally not treated as a substitute
-         * here: such peers cannot serve arbitrary historical blocks and need
-         * a separate post-IBD/limited-history connection policy.
-         */
-        if ((services & VersionMessage.NODE_NETWORK) == 0) {
-            return "NODE_NETWORK is required for a full-relay outbound slot";
+        if (LimitedHistoryPeerPolicy.hasFullHistory(services)) {
+            return null;
+        }
+
+        if (!LimitedHistoryPeerPolicy.hasLimitedHistory(services)) {
+            return "NODE_NETWORK or NODE_NETWORK_LIMITED is required for a persistent outbound slot";
+        }
+
+        if (!LimitedHistoryPeerPolicy.canServeCurrentSyncPosition(
+                version,
+                localActiveHeight
+        )) {
+            return "NODE_NETWORK_LIMITED peer is too far behind local active height: remote="
+                    + version.startHeight()
+                    + ", local="
+                    + localActiveHeight
+                    + ", maximum lag="
+                    + LimitedHistoryPeerPolicy.ALLOW_CONNECTION_BLOCKS;
         }
 
         return null;

@@ -499,12 +499,27 @@ class OutboundPeerManagerTest {
     }
 
     @Test
-    void rejectsNodeNetworkLimitedPeerFromFullRelaySlot()
+    void acceptsNodeNetworkLimitedPeerWhenItIsWithinCoreAdmissionWindow()
             throws Exception {
 
         assertLongLivedOutboundEligibility(
                 VersionMessage.CURRENT_PROTOCOL_VERSION,
                 VersionMessage.NODE_NETWORK_LIMITED | VersionMessage.NODE_WITNESS,
+                1_000,
+                856,
+                true
+        );
+    }
+
+    @Test
+    void rejectsNodeNetworkLimitedPeerWhenItIsTooFarBehind()
+            throws Exception {
+
+        assertLongLivedOutboundEligibility(
+                VersionMessage.CURRENT_PROTOCOL_VERSION,
+                VersionMessage.NODE_NETWORK_LIMITED | VersionMessage.NODE_WITNESS,
+                1_000,
+                855,
                 false
         );
     }
@@ -525,6 +540,22 @@ class OutboundPeerManagerTest {
             long services,
             boolean eligible
     ) throws Exception {
+        assertLongLivedOutboundEligibility(
+                protocolVersion,
+                services,
+                100,
+                321,
+                eligible
+        );
+    }
+
+    private static void assertLongLivedOutboundEligibility(
+            int protocolVersion,
+            long services,
+            int localStartHeight,
+            int remoteStartHeight,
+            boolean eligible
+    ) throws Exception {
 
         try (ServerSocket serverSocket =
                      new ServerSocket(0)) {
@@ -534,7 +565,8 @@ class OutboundPeerManagerTest {
                             () -> runEligibilityPeer(
                                     serverSocket,
                                     protocolVersion,
-                                    services
+                                    services,
+                                    remoteStartHeight
                             )
                     );
 
@@ -582,7 +614,7 @@ class OutboundPeerManagerTest {
 
                     Peer peer =
                             outbound.connectOne(
-                                    100
+                                    localStartHeight
                             );
 
                     assertTrue(
@@ -613,7 +645,7 @@ class OutboundPeerManagerTest {
                     assertThrows(
                             IOException.class,
                             () -> outbound.connectOne(
-                                    100
+                                    localStartHeight
                             )
                     );
 
@@ -645,7 +677,8 @@ class OutboundPeerManagerTest {
     private static void runEligibilityPeer(
             ServerSocket serverSocket,
             int protocolVersion,
-            long services
+            long services,
+            int remoteStartHeight
     ) {
 
         try (Socket socket =
@@ -696,7 +729,7 @@ class OutboundPeerManagerTest {
                             NetworkAddress.unspecified(),
                             0x223456789ABCDEFL,
                             "/outbound-eligibility-test/",
-                            321,
+                            remoteStartHeight,
                             true
                     );
 
