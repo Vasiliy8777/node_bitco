@@ -33,21 +33,33 @@ public final class PeerAddressProtocol
     private final PeerAddressManager addressManager;
     private final PeerManager peerManager;
     private final java.util.function.LongSupplier nanoTime;
+    private final PeerAddressRelayManager relayManager;
     // Weak keys avoid retaining disconnected Peer instances; values never reference the peer.
     private final java.util.Map<Peer, AddressRelayBudget> budgets = new java.util.WeakHashMap<>();
 
     public PeerAddressProtocol(PeerAddressManager addressManager) {
-        this(addressManager, null);
+        this(addressManager, null, null, System::nanoTime);
     }
 
     public PeerAddressProtocol(PeerAddressManager addressManager, PeerManager peerManager) {
-        this(addressManager, peerManager, System::nanoTime);
+        this(addressManager, peerManager, peerManager == null ? null : new PeerAddressRelayManager(peerManager), System::nanoTime);
     }
 
     PeerAddressProtocol(PeerAddressManager addressManager, PeerManager peerManager,
                         java.util.function.LongSupplier nanoTime) {
+        this(addressManager, peerManager, peerManager == null ? null : new PeerAddressRelayManager(peerManager, nanoTime, false), nanoTime);
+    }
+
+    public PeerAddressProtocol(PeerAddressManager addressManager, PeerManager peerManager,
+                               PeerAddressRelayManager relayManager) {
+        this(addressManager, peerManager, relayManager, System::nanoTime);
+    }
+
+    private PeerAddressProtocol(PeerAddressManager addressManager, PeerManager peerManager,
+                                PeerAddressRelayManager relayManager, java.util.function.LongSupplier nanoTime) {
         this.addressManager = Objects.requireNonNull(addressManager, "addressManager");
         this.peerManager = peerManager;
+        this.relayManager = relayManager;
         this.nanoTime = Objects.requireNonNull(nanoTime, "nanoTime");
     }
 
@@ -66,14 +78,12 @@ public final class PeerAddressProtocol
                 "peer"
         );
 
-        if (peerManager == null
-                || peer.isInboundConnection()
-                || !peerManager.hasRole(
-                peer,
-                PeerConnectionRole.FULL_RELAY
-        )) {
+        if (peerManager == null || peer.isInboundConnection()
+                || peerManager.hasRole(peer, PeerConnectionRole.BLOCK_RELAY_ONLY)) {
             return;
         }
+
+        if (relayManager != null) relayManager.setupAddressRelay(peer);
 
         if (!peer.markGetAddrSent()) {
             return;
@@ -122,6 +132,12 @@ public final class PeerAddressProtocol
         if (peerManager != null
                 && peerManager.hasRole(peer, PeerConnectionRole.BLOCK_RELAY_ONLY)) {
             return;
+        }
+
+        if (relayManager != null && (message.command().equals("addr")
+                || message.command().equals("addrv2")
+                || message.command().equals("getaddr"))) {
+            relayManager.setupAddressRelay(peer);
         }
 
         try {
@@ -176,7 +192,7 @@ public final class PeerAddressProtocol
     ) {
 
         handleAddr(
-                sourceOf(peer),
+                peer, sourceOf(peer),
                 message,
                 budget(peer)
         );
@@ -188,13 +204,14 @@ public final class PeerAddressProtocol
     ) {
 
         handleAddrV2(
-                sourceOf(peer),
+                peer, sourceOf(peer),
                 message,
                 budget(peer)
         );
     }
 
     private void handleAddr(
+            Peer peer,
             PeerAddressSource source,
             BitcoinMessage message,
             AddressRelayBudget budget
@@ -225,11 +242,18 @@ public final class PeerAddressProtocol
                         source,
                         receivedAt
                 );
+                observeAndMaybeRelay(
+                        peer,
+                        peerAddress,
+                        entry.timestamp(),
+                        addrMessage.size()
+                );
             }
         }
     }
 
     private void handleAddrV2(
+            Peer peer,
             PeerAddressSource source,
             BitcoinMessage message,
             AddressRelayBudget budget
@@ -260,7 +284,24 @@ public final class PeerAddressProtocol
                         source,
                         receivedAt
                 );
+
+                observeAndMaybeRelay(
+                        peer,
+                        peerAddress,
+                        entry.timestamp(),
+                        addrV2Message.addresses().size()
+                );
             }
+        }
+    }
+
+    private void observeAndMaybeRelay(Peer origin, PeerAddress address, long announcedAt, int messageSize) {
+        if (relayManager == null) return;
+        relayManager.markKnown(origin, address);
+        long now = Instant.now().getEpochSecond();
+        boolean fresh = announcedAt > now - 10 * 60L && announcedAt <= now + 10 * 60L;
+        if (fresh && messageSize <= 10 && !origin.getAddrSent() && PeerNetGroup.isDiversifiable(address)) {
+            relayManager.relay(origin, address);
         }
     }
 

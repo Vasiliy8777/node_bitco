@@ -333,15 +333,24 @@ public class NodeConfiguration {
     }
 
     @Bean
+    public ru.bitcoin.node.p2p.address.PeerAddressRelayManager peerAddressRelayManager(
+            PeerManager peerManager
+    ) {
+        return new ru.bitcoin.node.p2p.address.PeerAddressRelayManager(peerManager);
+    }
+
+    @Bean
     public PeerAddressProtocol peerAddressProtocol(
             PeerAddressManager peerAddressManager,
-            PeerManager peerManager
+            PeerManager peerManager,
+            ru.bitcoin.node.p2p.address.PeerAddressRelayManager peerAddressRelayManager
     ) {
 
         PeerAddressProtocol protocol =
                 new PeerAddressProtocol(
                         peerAddressManager,
-                        peerManager
+                        peerManager,
+                        peerAddressRelayManager
                 );
 
         peerManager.addPeerListener(
