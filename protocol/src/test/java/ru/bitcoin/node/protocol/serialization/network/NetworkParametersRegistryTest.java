@@ -83,4 +83,25 @@ public class NetworkParametersRegistryTest {
         );
     }
 
+
+    @Test
+    void shouldExposeBitcoinCore31_1MinimumChainWorkAndAssumeValid() {
+        assertEquals(
+                new java.math.BigInteger("0000000000000000000000000000000000000001128750f82f4c366153a3a030", 16),
+                NetworkParametersRegistry.mainnet().minimumChainWork()
+        );
+        assertEquals(
+                "00000000000000000000ccebd6d74d9194d8dcdc1d177c478e094bfad51ba5ac",
+                NetworkParametersRegistry.mainnet().defaultAssumeValid().toDisplayHex()
+        );
+        assertEquals(
+                new java.math.BigInteger("0000000000000000000000000000000000000000000017dde1c649f3708d14b6", 16),
+                NetworkParametersRegistry.testnet().minimumChainWork()
+        );
+        assertEquals(
+                new java.math.BigInteger("00000000000000000000000000000000000000000000000000000b463ea0a4b8", 16),
+                NetworkParametersRegistry.signet().minimumChainWork()
+        );
+        assertEquals(java.math.BigInteger.ZERO, NetworkParametersRegistry.regtest().minimumChainWork());
+    }
 }

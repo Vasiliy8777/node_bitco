@@ -97,6 +97,8 @@ public final class MiningController {
 
     private void ensureReady() {
         if (closed || !ready.getAsBoolean()) throw new RpcException(-10, "Node is not synchronized or has no peers");
+        if (validation.activeTip().chainWork().compareTo(parameters.minimumChainWork()) < 0)
+            throw new RpcException(-10, "Active chain is below minimum chain work");
         if (parameters.network() == BitcoinNetwork.SIGNET) throw new RpcException(-8, "Signet mining requires challenge signing");
         if (parameters.network() != BitcoinNetwork.REGTEST
                 && validation.activeTip().header().timestamp().value() < java.time.Instant.now().getEpochSecond() - 7200)

@@ -327,7 +327,8 @@ public class NodeConfiguration {
                 blockSyncCoordinator,
                 headerResponseTimeout,
                 listen,
-                effectiveListenPort
+                effectiveListenPort,
+                parameters.minimumChainWork()
         );
     }
 

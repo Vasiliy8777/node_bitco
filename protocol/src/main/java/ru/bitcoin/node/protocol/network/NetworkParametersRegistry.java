@@ -77,7 +77,9 @@ public final class NetworkParametersRegistry {
                 481_824L,
                 false,
                 false,
-                false
+                false,
+                new BigInteger("0000000000000000000000000000000000000001128750f82f4c366153a3a030", 16),
+                Hash256.fromDisplayHex("00000000000000000000ccebd6d74d9194d8dcdc1d177c478e094bfad51ba5ac")
         );
     }
 
@@ -104,7 +106,9 @@ public final class NetworkParametersRegistry {
                 834_624L,
                 true,
                 false,
-                false
+                false,
+                new BigInteger("0000000000000000000000000000000000000000000017dde1c649f3708d14b6", 16),
+                Hash256.fromDisplayHex("000000007a61e4230b28ac5cb6b5e5a0130de37ac1faf2f8987d2fa6505b67f4")
         );
     }
 
@@ -128,7 +132,9 @@ public final class NetworkParametersRegistry {
                 1L,
                 false,
                 false,
-                false
+                false,
+                new BigInteger("00000000000000000000000000000000000000000000000000000b463ea0a4b8", 16),
+                Hash256.fromDisplayHex("00000008414aab61092ef93f1aacc54cf9e9f16af29ddad493b908a01ff5c329")
         );
     }
 
@@ -153,7 +159,9 @@ public final class NetworkParametersRegistry {
                 0L,
                 true,
                 false,
-                true
+                true,
+                BigInteger.ZERO,
+                new Hash256(new byte[Hash256.LENGTH])
         );
     }
 }

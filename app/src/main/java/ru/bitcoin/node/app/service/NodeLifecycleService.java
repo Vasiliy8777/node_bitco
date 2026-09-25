@@ -15,6 +15,7 @@ import ru.bitcoin.node.p2p.sync.HeaderSynchronizer;
 import ru.bitcoin.node.p2p.sync.PeerDiscovery;
 
 import java.io.IOException;
+import java.math.BigInteger;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -51,6 +52,7 @@ public final class NodeLifecycleService
     private final BlockSyncCoordinator blockSyncCoordinator;
 
     private final Duration headerResponseTimeout;
+    private final BigInteger minimumChainWork;
 
     private NodeLifecycleState state =
             NodeLifecycleState.NEW;
@@ -75,6 +77,26 @@ public final class NodeLifecycleService
             Duration headerResponseTimeout,
             boolean listen,
             int listenPort
+    ) {
+        this(validationService, syncInfrastructure, addressManager, peerDiscovery, outboundPeerManager,
+                outboundPeerSupervisor, peerManager, bitcoinServer, blockSyncCoordinator,
+                headerResponseTimeout, listen, listenPort, BigInteger.ZERO);
+    }
+
+    public NodeLifecycleService(
+            NodeValidationService validationService,
+            NodeSyncInfrastructure syncInfrastructure,
+            PeerAddressManager addressManager,
+            PeerDiscovery peerDiscovery,
+            OutboundPeerManager outboundPeerManager,
+            OutboundPeerSupervisor outboundPeerSupervisor,
+            PeerManager peerManager,
+            BitcoinServer bitcoinServer,
+            BlockSyncCoordinator blockSyncCoordinator,
+            Duration headerResponseTimeout,
+            boolean listen,
+            int listenPort,
+            BigInteger minimumChainWork
     ) {
         this.validationService =
                 Objects.requireNonNull(
@@ -135,6 +157,11 @@ public final class NodeLifecycleService
                         headerResponseTimeout,
                         "headerResponseTimeout"
                 );
+
+        this.minimumChainWork = Objects.requireNonNull(minimumChainWork, "minimumChainWork");
+        if (minimumChainWork.signum() < 0) {
+            throw new IllegalArgumentException("minimumChainWork must not be negative");
+        }
 
         if (headerResponseTimeout.isZero()
                 || headerResponseTimeout.isNegative()) {
@@ -457,6 +484,16 @@ public final class NodeLifecycleService
                             + activeTip.height()
                             + ", bestHeaderHeight="
                             + bestHeaderTip.height()
+            );
+        }
+
+
+        if (activeTip.chainWork().compareTo(minimumChainWork) < 0) {
+            throw new IllegalStateException(
+                    "Initial block synchronization ended below minimum chain work: activeChainWork="
+                            + activeTip.chainWork().toString(16)
+                            + ", minimumChainWork="
+                            + minimumChainWork.toString(16)
             );
         }
     }

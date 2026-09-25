@@ -3,6 +3,7 @@ package ru.bitcoin.node.protocol.network;
 import ru.bitcoin.node.common.types.Hash256;
 
 import java.math.BigInteger;
+import java.util.Objects;
 
 public final class NetworkParameters {
     private final long segwitHeight;
@@ -25,6 +26,8 @@ public final class NetworkParameters {
     private final boolean allowMinDifficultyBlocks;
     private final boolean enforceBip94;
     private final boolean noRetargeting;
+    private final BigInteger minimumChainWork;
+    private final Hash256 defaultAssumeValid;
 
     public NetworkParameters(
             BitcoinNetwork network,
@@ -44,6 +47,33 @@ public final class NetworkParameters {
             boolean allowMinDifficultyBlocks,
             boolean enforceBip94,
             boolean noRetargeting
+    ) {
+        this(network, magic, defaultPort, genesisBlockHash, bip16ExceptionBlockHash, powLimit,
+                targetSpacingSeconds, targetTimespanSeconds, subsidyHalvingInterval, bip34Height,
+                bip66Height, bip65Height, csvHeight, segwitHeight, allowMinDifficultyBlocks,
+                enforceBip94, noRetargeting, BigInteger.ZERO, new Hash256(new byte[Hash256.LENGTH]));
+    }
+
+    public NetworkParameters(
+            BitcoinNetwork network,
+            long magic,
+            int defaultPort,
+            Hash256 genesisBlockHash,
+            Hash256 bip16ExceptionBlockHash,
+            BigInteger powLimit,
+            long targetSpacingSeconds,
+            long targetTimespanSeconds,
+            long subsidyHalvingInterval,
+            long bip34Height,
+            long bip66Height,
+            long bip65Height,
+            long csvHeight,
+            long segwitHeight,
+            boolean allowMinDifficultyBlocks,
+            boolean enforceBip94,
+            boolean noRetargeting,
+            BigInteger minimumChainWork,
+            Hash256 defaultAssumeValid
     ) {
         if (segwitHeight < 0) {
             throw new IllegalArgumentException(
@@ -124,6 +154,11 @@ public final class NetworkParameters {
         this.allowMinDifficultyBlocks = allowMinDifficultyBlocks;
         this.enforceBip94 = enforceBip94;
         this.noRetargeting = noRetargeting;
+        if (minimumChainWork == null || minimumChainWork.signum() < 0) {
+            throw new IllegalArgumentException("minimumChainWork must not be negative");
+        }
+        this.minimumChainWork = minimumChainWork;
+        this.defaultAssumeValid = Objects.requireNonNull(defaultAssumeValid, "defaultAssumeValid");
         this.subsidyHalvingInterval = subsidyHalvingInterval;
         this.bip34Height = bip34Height;
         this.bip66Height = bip66Height;
@@ -177,6 +212,14 @@ public final class NetworkParameters {
 
     public boolean noRetargeting() {
         return noRetargeting;
+    }
+
+    public BigInteger minimumChainWork() {
+        return minimumChainWork;
+    }
+
+    public Hash256 defaultAssumeValid() {
+        return defaultAssumeValid;
     }
 
     public long subsidyHalvingInterval() {
