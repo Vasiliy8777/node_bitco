@@ -9,6 +9,7 @@ import ru.bitcoin.node.mempool.FeeRate;
 import ru.bitcoin.node.mempool.Mempool;
 import ru.bitcoin.node.p2p.*;
 import ru.bitcoin.node.p2p.message.*;
+import ru.bitcoin.node.p2p.sync.BlockDownloadScheduler;
 import ru.bitcoin.node.protocol.block.Block;
 import ru.bitcoin.node.protocol.network.NetworkParametersRegistry;
 import ru.bitcoin.node.storage.rocksdb.RocksDbDatabase;
@@ -120,6 +121,73 @@ class NodeRelayCompactBlockTest {
                 BitcoinMessage promotion = take(outgoing);
                 assertEquals("sendcmpct", promotion.command());
                 assertTrue(validation.findBlock(block.hash()).isPresent());
+                verify(peer, never()).close();
+            }
+        }
+    }
+
+    @Test
+    void schedulerSubmittedHashSuppressesCompactTransactionRoundTrip() throws Exception {
+        var parameters = NetworkParametersRegistry.regtest();
+        try (var db = new RocksDbDatabase(directory.resolve("scheduler-submitted"));
+             var peers = new PeerManager()) {
+
+            var validation = new NodeValidationService(
+                    db, parameters, () -> 1_800_000_000L, new Mempool());
+            var sync = new NodeSyncInfrastructure(
+                    db, parameters, () -> 1_800_000_000L);
+
+            var peer = mock(Peer.class);
+            when(peer.isReady()).thenReturn(true);
+            when(peer.remoteVersion()).thenReturn(compactCapableVersion());
+
+            var incoming = new AtomicReference<PeerMessageListener>();
+            doAnswer(call -> {
+                incoming.set(call.getArgument(0));
+                return null;
+            }).when(peer).addMessageListener(any());
+
+            var outgoing = new LinkedBlockingQueue<BitcoinMessage>();
+            doAnswer(call -> {
+                outgoing.add(call.getArgument(0));
+                return null;
+            }).when(peer).send(any());
+
+            peers.add(peer);
+
+            BlockDownloadScheduler scheduler = mock(BlockDownloadScheduler.class);
+
+            try (var relay = new NodeRelayService(validation, sync, peers, scheduler)) {
+                var mining = new MiningController(
+                        validation, relay, parameters, () -> true,
+                        new byte[]{0x51}, 4_000_000, new FeeRate(0));
+
+                Block block = MiningRpcTest.mineTemplate(
+                        mining.getBlockTemplate(Map.of("rules", List.of("segwit"))));
+
+                when(scheduler.hasSubmittedBlock(block.hash())).thenReturn(true);
+
+                incoming.get().onMessage(
+                        peer,
+                        BitcoinMessages.compactBlock(
+                                new CompactBlockMessage(
+                                        block.header(),
+                                        42L,
+                                        List.of(1L),
+                                        List.of()
+                                ),
+                                2
+                        )
+                );
+
+                /*
+                 * The scheduler still owns this hash even if its logical download
+                 * has already completed. No GETBLOCKTXN/GETDATA side lifecycle may
+                 * be started by relay.
+                 */
+                assertNull(outgoing.poll(300, TimeUnit.MILLISECONDS));
+                verify(scheduler, atLeastOnce()).hasSubmittedBlock(block.hash());
+                verify(scheduler, never()).acceptBlock(eq(peer), any(Block.class));
                 verify(peer, never()).close();
             }
         }

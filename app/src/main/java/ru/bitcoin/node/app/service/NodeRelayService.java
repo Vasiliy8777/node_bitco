@@ -291,7 +291,7 @@ public final class NodeRelayService implements AutoCloseable {
          * unrelated fallback lifecycles.
          */
         if (blockDownloadScheduler != null
-                && blockDownloadScheduler.hasPendingBlock(hash)) {
+                && blockDownloadScheduler.hasSubmittedBlock(hash)) {
             return;
         }
 
@@ -371,7 +371,7 @@ public final class NodeRelayService implements AutoCloseable {
          * remains authoritative.
          */
         if (blockDownloadScheduler != null
-                && blockDownloadScheduler.hasPendingBlock(hash)) {
+                && blockDownloadScheduler.hasSubmittedBlock(hash)) {
             return;
         }
 
@@ -402,10 +402,22 @@ public final class NodeRelayService implements AutoCloseable {
         var header = BlockHeaderParser.parse(new BitcoinReader(message.payload()));
         if (!takeCompactFallback(peer, header.hash())) return;
         Block block = BlockParser.parse(message.payload());
-        if (blockDownloadScheduler != null
-                && blockDownloadScheduler.acceptBlock(peer, block)) {
-            promoteHighBandwidthCompactPeer(peer);
-            return;
+        if (blockDownloadScheduler != null) {
+            if (blockDownloadScheduler.acceptBlock(peer, block)) {
+                promoteHighBandwidthCompactPeer(peer);
+                return;
+            }
+
+            /*
+             * A fallback response can race with another transport completing the
+             * same scheduler-owned hash. Once the scheduler session has submitted
+             * the hash, keep every late full-block response inside that lifecycle
+             * until the session closes. This prevents a second consensus-validation
+             * path after acceptBlock() has become one-shot false.
+             */
+            if (blockDownloadScheduler.hasSubmittedBlock(block.hash())) {
+                return;
+            }
         }
         // Full data uses ordinary consensus validation, without another reconstruction retry.
         if (validation.processBlock(block) == BlockProcessingResult.CONNECTED) {
