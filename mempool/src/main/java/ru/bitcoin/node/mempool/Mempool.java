@@ -267,4 +267,21 @@ public final class Mempool {
         return rollingFee.get(clock.instant().getEpochSecond(), entries.values().stream().mapToLong(MempoolEntry::virtualSize).sum(),
                 limits.maxPoolVirtualBytes(), limits.incrementalRelaySatPerKvB());
     }
+
+    /**
+     * Current BIP133 filter floor before privacy quantization.
+     *
+     * Bitcoin Core never advertises a fee filter below the node's configured
+     * minimum relay fee, even when the rolling mempool minimum is lower.
+     */
+    public synchronized long feeFilterRate() {
+        return Math.max(
+                minimumFeeRate(),
+                policy.minRelayFeeRate().satoshisPerKiloByte()
+        );
+    }
+
+    public synchronized long minimumRelayFeeRate() {
+        return policy.minRelayFeeRate().satoshisPerKiloByte();
+    }
 }

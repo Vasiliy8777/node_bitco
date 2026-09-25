@@ -253,6 +253,24 @@ public final class NodeValidationService {
         }
     }
 
+    /**
+     * Current local BIP133 fee-filter floor in sat/kvB, before privacy
+     * quantization performed by the relay layer.
+     */
+    public long feeFilterRate() {
+        synchronized (chain) {
+            synchronizePool();
+            mempool.expire();
+            return mempool.feeFilterRate();
+        }
+    }
+
+    public long minimumRelayFeeRate() {
+        synchronized (chain) {
+            return mempool.minimumRelayFeeRate();
+        }
+    }
+
     public List<MempoolEntry> admitPackage(List<Transaction> transactions) {
         synchronized (chain) {
             synchronizePool();

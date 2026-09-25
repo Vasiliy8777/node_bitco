@@ -21,6 +21,10 @@ final class TxRelayState {
 
     private long feeFilterSatPerKvB;
 
+    // BIP133 state for the filter we advertise to this peer.
+    private long feeFilterSentSatPerKvB;
+    private long nextFeeFilterSendNanos;
+
     private final LinkedHashMap<Hash256, Boolean> known =
             new LinkedHashMap<>(256, 0.75f, true);
 
@@ -57,6 +61,26 @@ final class TxRelayState {
             throw new IllegalArgumentException("fee filter must not be negative");
         }
         feeFilterSatPerKvB = value;
+    }
+
+
+    synchronized long feeFilterSentSatPerKvB() {
+        return feeFilterSentSatPerKvB;
+    }
+
+    synchronized void feeFilterSentSatPerKvB(long value) {
+        if (value < 0) {
+            throw new IllegalArgumentException("sent fee filter must not be negative");
+        }
+        feeFilterSentSatPerKvB = value;
+    }
+
+    synchronized long nextFeeFilterSendNanos() {
+        return nextFeeFilterSendNanos;
+    }
+
+    synchronized void nextFeeFilterSendNanos(long value) {
+        nextFeeFilterSendNanos = value;
     }
 
     synchronized void markKnown(Hash256 hash) {

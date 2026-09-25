@@ -643,9 +643,27 @@ class NodeRelayServiceTest {
     }
 
     private static BitcoinMessage take(BlockingQueue<BitcoinMessage> queue) throws InterruptedException {
-        var message = queue.poll(15, TimeUnit.SECONDS);
-        assertNotNull(message, "Expected network message");
-        return message;
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
+        while (true) {
+            long remaining = deadline - System.nanoTime();
+            if (remaining <= 0) {
+                fail("Expected network message");
+            }
+
+            BitcoinMessage message =
+                    queue.poll(remaining, TimeUnit.NANOSECONDS);
+
+            assertNotNull(message, "Expected network message");
+
+            /*
+             * Periodic BIP133 advertisement is independent control traffic and
+             * must not disturb tests that are specifically asserting another
+             * relay response.
+             */
+            if (!"feefilter".equals(message.command())) {
+                return message;
+            }
+        }
     }
     @Test
     void relaysConnectedBlockOnceAndExcludesSourcePeer() throws Exception {

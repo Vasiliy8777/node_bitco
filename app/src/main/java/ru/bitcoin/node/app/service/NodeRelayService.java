@@ -45,6 +45,13 @@ public final class NodeRelayService implements AutoCloseable {
             INVENTORY_BROADCAST_PER_SECOND * 5;
     static final int INVENTORY_BROADCAST_MAX = 1_000;
 
+    // BIP133 / Bitcoin Core v31.1.
+    static final int FEEFILTER_VERSION = 70_013;
+    static final long AVG_FEEFILTER_BROADCAST_INTERVAL_NANOS =
+            Duration.ofMinutes(10).toNanos();
+    static final long MAX_FEEFILTER_CHANGE_DELAY_NANOS =
+            Duration.ofMinutes(5).toNanos();
+
     private final AtomicLong outboundBytes = new AtomicLong();
 
     private final NodeValidationService validation;
@@ -70,6 +77,11 @@ public final class NodeRelayService implements AutoCloseable {
     private final ThreadPoolExecutor worker = new ThreadPoolExecutor(1, 1, 0, TimeUnit.SECONDS,
             new ArrayBlockingQueue<>(128), Thread.ofPlatform().daemon().name("bitcoin-relay").factory());
     private final TransactionRequestScheduler transactionRequests = new TransactionRequestScheduler();
+    private final FeeFilterRounder feeFilterRounder =
+            new FeeFilterRounder(
+                    1_000L,
+                    ThreadLocalRandom.current()
+            );
     private final Map<Hash256, Orphan> orphans = new LinkedHashMap<>();
     private final LinkedHashMap<Hash256, Boolean> announcedBlocks = new LinkedHashMap<>();
     private static final int MAX_RECENT_BLOCK_ANNOUNCEMENTS = 4096;
@@ -125,6 +137,7 @@ public final class NodeRelayService implements AutoCloseable {
                 if (!closed) {
                     dispatchTransactionRequests();
                     flushTransactionInventory();
+                    maybeSendFeeFilters();
                     expireCompactBlocks();
                 }
             });
@@ -800,6 +813,90 @@ public final class NodeRelayService implements AutoCloseable {
                     feeRate
             );
         }
+    }
+
+    private void maybeSendFeeFilters() {
+        long now = System.nanoTime();
+        long currentFilter = validation.feeFilterRate();
+        long minimumRelay = validation.minimumRelayFeeRate();
+
+        for (Peer peer : peers.readyPeers()) {
+            if (!peers.roleOf(peer).relaysTransactions()) {
+                continue;
+            }
+
+            VersionMessage version = peer.remoteVersion();
+            if (version == null || version.version() < FEEFILTER_VERSION) {
+                continue;
+            }
+
+            TxRelayState state = txRelayStates.get(peer);
+            if (state == null) {
+                continue;
+            }
+
+            long next = state.nextFeeFilterSendNanos();
+            long sent = state.feeFilterSentSatPerKvB();
+
+            if (next == 0L || now > next) {
+                long filterToSend =
+                        Math.max(
+                                feeFilterRounder.round(currentFilter),
+                                minimumRelay
+                        );
+
+                if (filterToSend != sent) {
+                    send(
+                            peer,
+                            BitcoinMessages.feeFilter(filterToSend)
+                    );
+                    state.feeFilterSentSatPerKvB(filterToSend);
+                }
+
+                state.nextFeeFilterSendNanos(
+                        saturatedAdd(
+                                now,
+                                randomExponentialDelayNanos(
+                                        AVG_FEEFILTER_BROADCAST_INTERVAL_NANOS
+                                )
+                        )
+                );
+                continue;
+            }
+
+            /*
+             * Core pulls a far-away broadcast forward when the local minimum
+             * changes by more than roughly 25% down or 33% up.
+             */
+            boolean significantChange =
+                    currentFilter < (3L * sent) / 4L
+                            || currentFilter > (4L * sent) / 3L;
+
+            if (significantChange
+                    && saturatedAdd(now, MAX_FEEFILTER_CHANGE_DELAY_NANOS) < next) {
+                state.nextFeeFilterSendNanos(
+                        saturatedAdd(
+                                now,
+                                ThreadLocalRandom.current().nextLong(
+                                        MAX_FEEFILTER_CHANGE_DELAY_NANOS
+                                )
+                        )
+                );
+            }
+        }
+    }
+
+    private static long randomExponentialDelayNanos(long mean) {
+        double u =
+                Math.max(
+                        ThreadLocalRandom.current().nextDouble(),
+                        1.0e-12
+                );
+        double delay = -Math.log(u) * mean;
+        if (delay >= Long.MAX_VALUE) {
+            return Long.MAX_VALUE;
+        }
+        return Math.max(1L, (long) delay);
     }
 
     private void flushTransactionInventory() {

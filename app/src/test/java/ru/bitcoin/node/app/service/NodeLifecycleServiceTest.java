@@ -2508,9 +2508,19 @@ class NodeLifecycleServiceTest {
                             input
                     ).orElseThrow();
 
-            if ("getaddr".equals(
-                    message.command()
-            )) {
+            /*
+             * FULL_RELAY peers may emit protocol-maintenance messages
+             * independently of header synchronization.
+             *
+             * GETADDR is part of address discovery.
+             *
+             * FEEFILTER (BIP133) may be sent immediately after handshake
+             * because a newly attached peer starts with no scheduled
+             * fee-filter broadcast. Neither message is part of the
+             * header-sync exchange exercised by these lifecycle tests.
+             */
+            if ("getaddr".equals(message.command())
+                    || "feefilter".equals(message.command())) {
                 continue;
             }
 
@@ -2532,6 +2542,7 @@ class NodeLifecycleServiceTest {
     ) throws IOException {
 
         while (true) {
+
             java.util.Optional<BitcoinMessage> message =
                     reader.read(input);
 
@@ -2539,10 +2550,30 @@ class NodeLifecycleServiceTest {
                 return;
             }
 
-            assertEquals(
-                    "getaddr",
-                    message.get().command(),
-                    "Unexpected protocol message while waiting for peer disconnect"
+            String command =
+                    message.get().command();
+
+            /*
+             * FULL_RELAY peers may have protocol-maintenance messages
+             * already queued while lifecycle shutdown is in progress.
+             *
+             * GETADDR belongs to address discovery.
+             *
+             * FEEFILTER (BIP133) belongs to transaction-relay policy.
+             *
+             * Receiving either before EOF does not mean that shutdown
+             * failed, therefore consume them and continue waiting for
+             * the actual socket close.
+             */
+            if ("getaddr".equals(command)
+                    || "feefilter".equals(command)) {
+
+                continue;
+            }
+
+            fail(
+                    "Unexpected protocol message while waiting for peer disconnect: "
+                            + command
             );
         }
     }
@@ -2553,12 +2584,17 @@ class NodeLifecycleServiceTest {
             BufferedInputStream input,
             BufferedOutputStream output
     ) throws IOException {
+
         while (true) {
+
             final java.util.Optional<BitcoinMessage> message;
 
             try {
+
                 message = reader.read(input);
+
             } catch (java.net.SocketTimeoutException timeout) {
+
                 return;
             }
 
@@ -2566,14 +2602,35 @@ class NodeLifecycleServiceTest {
                 return;
             }
 
-            BitcoinMessage wire = message.get();
+            BitcoinMessage wire =
+                    message.get();
 
-            if ("getaddr".equals(wire.command())) {
+            /*
+             * Protocol-maintenance messages are independent of the
+             * live header polling exercised by this helper.
+             *
+             * GETADDR belongs to address discovery.
+             *
+             * FEEFILTER (BIP133) may be emitted after handshake as part
+             * of transaction-relay policy. Neither message is a
+             * GETHEADERS request and neither should affect this test.
+             */
+            if ("getaddr".equals(wire.command())
+                    || "feefilter".equals(wire.command())) {
+
                 continue;
             }
 
+            /*
+             * Keep the test peer alive when the node performs its normal
+             * liveness probing.
+             */
             if ("ping".equals(wire.command())) {
-                PingMessage ping = BitcoinMessages.decodePing(wire);
+
+                PingMessage ping =
+                        BitcoinMessages.decodePing(
+                                wire
+                        );
 
                 output.write(
                         encoder.encode(
@@ -2584,10 +2641,16 @@ class NodeLifecycleServiceTest {
                                 )
                         )
                 );
+
                 output.flush();
+
                 continue;
             }
 
+            /*
+             * Every remaining message handled by this helper must belong
+             * to live header polling.
+             */
             assertEquals(
                     "getheaders",
                     wire.command()
@@ -2602,6 +2665,7 @@ class NodeLifecycleServiceTest {
                             )
                     )
             );
+
             output.flush();
         }
     }
@@ -2636,9 +2700,19 @@ class NodeLifecycleServiceTest {
                         var wire = reader.read(input);
                         if (wire.isEmpty()) return;
                         var message = wire.get();
-                        if (message.command().equals("getaddr")) {
+                        /*
+                         * Protocol-maintenance messages are independent of the
+                         * live synchronization exercised by this test.
+                         *
+                         * GETADDR belongs to address discovery.
+                         * FEEFILTER (BIP133) belongs to transaction-relay policy.
+                         */
+                        if (message.command().equals("getaddr")
+                                || message.command().equals("feefilter")) {
+
                             continue;
                         }
+
                         if (message.command().equals("getheaders")) {
                             var request = GetHeadersMessageCodec.decode(message.payload());
                             var current = branch.get();

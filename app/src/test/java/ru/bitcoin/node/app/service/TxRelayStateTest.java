@@ -56,4 +56,18 @@ final class TxRelayStateTest {
         bytes[0] = (byte) value;
         return new Hash256(bytes);
     }
+
+    @Test
+    void tracksOutboundFeeFilterIndependentlyFromReceivedFilter() {
+        TxRelayState state = new TxRelayState();
+
+        state.feeFilterSatPerKvB(2_000);
+        state.feeFilterSentSatPerKvB(3_000);
+        state.nextFeeFilterSendNanos(123_456L);
+
+        assertEquals(2_000L, state.feeFilterSatPerKvB());
+        assertEquals(3_000L, state.feeFilterSentSatPerKvB());
+        assertEquals(123_456L, state.nextFeeFilterSendNanos());
+    }
+
 }
