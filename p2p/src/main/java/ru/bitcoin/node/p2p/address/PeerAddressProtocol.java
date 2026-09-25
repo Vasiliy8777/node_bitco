@@ -341,7 +341,7 @@ public final class PeerAddressProtocol
             return;
         }
 
-        peer.send(
+        peer.sendAsync(
                 BitcoinMessages.addr(
                         new AddrMessage(
                                 entries
@@ -404,7 +404,7 @@ public final class PeerAddressProtocol
             return;
         }
 
-        peer.send(
+        peer.sendAsync(
                 BitcoinMessages.addrV2(
                         new AddrV2Message(
                                 entries

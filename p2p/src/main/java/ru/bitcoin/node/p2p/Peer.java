@@ -830,13 +830,18 @@ public final class Peer implements AutoCloseable {
             );
         }
 
-        connection.send(
+        sendAsync(
                 BitcoinMessages.pong(
                         new PongMessage(
                                 ping.nonce()
                         )
                 )
         );
+    }
+
+    public void sendAsync(BitcoinMessage message) throws IOException {
+        if (!isReady()) throw new IllegalStateException("Peer handshake is not complete");
+        connection.sendAsync(message, this::handleReaderFailure);
     }
 
     public void send(
