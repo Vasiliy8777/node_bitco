@@ -538,19 +538,12 @@ public final class SchedulerBlockDownloadSession
                 );
             }
 
-            Peer sourcePeer =
-                    state.externalSourcePeer != null
-                            ? state.externalSourcePeer
-                            : peer;
-
-            state.externalSourcePeer = null;
-
             return Optional.of(
                     new CompletedBlockDownload(
                             state.index,
                             state.blockHash,
                             block,
-                            sourcePeer
+                            peer
                     )
             );
         }
@@ -625,6 +618,45 @@ public final class SchedulerBlockDownloadSession
         return pendingCount;
     }
 
+    /**
+     * Returns whether this session still owns an unfinished download for the
+     * supplied block hash, regardless of whether a peer has already been
+     * assigned.
+     */
+    synchronized boolean hasPendingBlock(
+            Hash256 blockHash
+    ) {
+        Objects.requireNonNull(blockHash, "blockHash");
+
+        for (DownloadState state : states) {
+            if (!state.completed && state.blockHash.equals(blockHash)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Returns whether this active session has submitted the supplied block hash,
+     * including a block that has already been completed but has not yet left
+     * the session lifecycle. Alternative transports use this to suppress late
+     * duplicate delivery through a second validation path.
+     */
+    synchronized boolean hasSubmittedBlock(
+            Hash256 blockHash
+    ) {
+        Objects.requireNonNull(blockHash, "blockHash");
+
+        for (DownloadState state : states) {
+            if (state.blockHash.equals(blockHash)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     @Override
     public void close() {
 
@@ -692,8 +724,11 @@ public final class SchedulerBlockDownloadSession
         }
 
         DownloadState state = null;
+
         for (DownloadState candidate : states) {
-            if (!candidate.completed && candidate.blockHash.equals(block.hash())) {
+            if (!candidate.completed
+                    && candidate.blockHash.equals(block.hash())) {
+
                 state = candidate;
                 break;
             }
@@ -703,31 +738,124 @@ public final class SchedulerBlockDownloadSession
             return false;
         }
 
+        /*
+         * Complete the logical scheduler state here, atomically under the
+         * session monitor.
+         *
+         * Do not leave the state marked in-flight until the ordinary worker
+         * happens to return. Otherwise a peer disconnect/timeout can race with
+         * an already accepted compact block and incorrectly turn that success
+         * into a retry/failure.
+         */
         if (state.inFlight) {
-            Peer assignedPeer = inFlightTracker.peerForBlock(state.blockHash);
+
+            Peer assignedPeer =
+                    inFlightTracker.peerForBlock(
+                            state.blockHash
+                    );
+
             if (assignedPeer == null) {
-                throw new IllegalStateException("In-flight state has no owning peer");
+                throw new IllegalStateException(
+                        "In-flight state has no owning peer"
+                );
             }
 
-            state.externalSourcePeer = sourcePeer;
-            if (!assignedPeer.messageDispatcher().completePendingBlock(block)) {
-                state.externalSourcePeer = null;
-                return false;
+            Future<DownloadResult> ordinaryFuture =
+                    activeFutureForState(
+                            state
+                    );
+
+            if (ordinaryFuture == null) {
+                throw new IllegalStateException(
+                        "In-flight state has no active download task"
+                );
             }
-            return true;
+
+            /*
+             * Remove ordinary ownership before waking its dispatcher future.
+             * The worker is intentionally NOT cancelled: CompletableFuture.join()
+             * is not an interruptible wait. Supplying the block lets that worker
+             * unwind normally. Its later CompletionService entry is stale and is
+             * ignored because activeDownloads no longer owns the Future.
+             */
+            activeDownloads.remove(
+                    ordinaryFuture
+            );
+
+            inFlightTracker.remove(
+                    assignedPeer,
+                    state.blockHash
+            );
+
+            state.inFlight = false;
+            state.completed = true;
+
+            externalCompletions.addLast(
+                    new CompletedBlockDownload(
+                            state.index,
+                            state.blockHash,
+                            block,
+                            sourcePeer
+                    )
+            );
+
+            /*
+             * This also covers the narrow race where the scheduler has marked
+             * the hash in-flight but BlockSynchronizer has not registered its
+             * dispatcher future yet: PeerMessageDispatcher retains that early
+             * completion for the imminent registration.
+             */
+            assignedPeer.messageDispatcher()
+                    .completePendingBlock(
+                            block
+                    );
+
+        } else {
+
+            state.completed = true;
+
+            externalCompletions.addLast(
+                    new CompletedBlockDownload(
+                            state.index,
+                            state.blockHash,
+                            block,
+                            sourcePeer
+                    )
+            );
         }
 
-        state.completed = true;
-        externalCompletions.addLast(
-                new CompletedBlockDownload(
-                        state.index,
-                        state.blockHash,
-                        block,
-                        sourcePeer
-                )
-        );
+        /*
+         * Releasing an in-flight slot may make more submitted work immediately
+         * assignable. Keep the scheduler work-conserving.
+         */
+        List<Peer> readyPeers =
+                peerManager.readyPeers();
+
+        if (!readyPeers.isEmpty()) {
+            ensureExecutor(
+                    readyPeers.size()
+            );
+
+            assignAvailable(
+                    readyPeers
+            );
+        }
+
         notifyAll();
         return true;
+    }
+
+    private Future<DownloadResult> activeFutureForState(
+            DownloadState state
+    ) {
+
+        for (var entry : activeDownloads.entrySet()) {
+            if (entry.getValue().state() == state) {
+                return entry.getKey();
+            }
+        }
+
+        return null;
     }
 
     private void ensureExecutor(
@@ -975,7 +1103,6 @@ public final class SchedulerBlockDownloadSession
 
         private boolean inFlight;
         private boolean completed;
-        private Peer externalSourcePeer;
 
         private DownloadState(
                 int index,

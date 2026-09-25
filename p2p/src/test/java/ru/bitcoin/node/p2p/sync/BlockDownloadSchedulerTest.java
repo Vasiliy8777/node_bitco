@@ -1864,7 +1864,16 @@ class BlockDownloadSchedulerTest {
                 session.submit(List.of(block.hash()));
 
                 assertEquals(1, session.pendingCount());
+                assertTrue(scheduler.hasPendingBlock(block.hash()));
+                assertTrue(scheduler.hasSubmittedBlock(block.hash()));
                 assertTrue(scheduler.acceptBlock(sourcePeer, block));
+
+                // Logical completion is one-shot, but ownership remains with the
+                // active session until it closes. This suppresses a late duplicate
+                // alternative delivery from entering a second validation path.
+                assertFalse(scheduler.hasPendingBlock(block.hash()));
+                assertTrue(scheduler.hasSubmittedBlock(block.hash()));
+                assertFalse(scheduler.acceptBlock(sourcePeer, block));
 
                 CompletedBlockDownload completed = session.awaitCompleted();
 
@@ -1872,8 +1881,11 @@ class BlockDownloadSchedulerTest {
                 assertEquals(block, completed.block());
                 assertSame(sourcePeer, completed.sourcePeer());
                 assertEquals(0, session.pendingCount());
+                assertTrue(scheduler.hasSubmittedBlock(block.hash()));
                 assertFalse(scheduler.acceptBlock(sourcePeer, block));
             }
+
+            assertFalse(scheduler.hasSubmittedBlock(block.hash()));
         }
     }
 

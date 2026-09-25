@@ -100,6 +100,44 @@ public final class BlockDownloadScheduler {
         return false;
     }
 
+    /**
+     * Returns true when an active scheduler session already owns the block.
+     * Alternative transports use this to avoid starting a second network
+     * round-trip for a hash that is already being downloaded normally.
+     */
+    public boolean hasPendingBlock(
+            Hash256 blockHash
+    ) {
+        Objects.requireNonNull(blockHash, "blockHash");
+
+        for (SchedulerBlockDownloadSession session : activeSessions) {
+            if (session.hasPendingBlock(blockHash)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Returns true while an active scheduler session owns the submitted hash,
+     * even when an alternative transport has already completed that logical
+     * download and the completion is waiting to be consumed.
+     */
+    public boolean hasSubmittedBlock(
+            Hash256 blockHash
+    ) {
+        Objects.requireNonNull(blockHash, "blockHash");
+
+        for (SchedulerBlockDownloadSession session : activeSessions) {
+            if (session.hasSubmittedBlock(blockHash)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private void sessionClosed(
             SchedulerBlockDownloadSession session
     ) {

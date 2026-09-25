@@ -42,7 +42,8 @@ public final class NodeRelayService implements AutoCloseable {
     private final Map<Peer, PeerOutbound> outbound = new ConcurrentHashMap<>();
     private final Map<Peer, BlockAnnouncementState> blockAnnouncements = new ConcurrentHashMap<>();
     private final PendingCompactBlocks pendingCompactBlocks = new PendingCompactBlocks();
-    // Guarded by the map monitor; compact-block fallback is independent of bulk block download.
+    // Guarded by the map monitor. These are relay-owned fallbacks only; a hash already
+    // owned by BlockDownloadScheduler must stay in the scheduler's single download lifecycle.
     private final Map<Peer, Map<Hash256, Long>> compactFallbacks = new HashMap<>();
     private static final int MAX_COMPACT_FALLBACKS = 256;
     private static final int MAX_COMPACT_FALLBACKS_PER_PEER = 16;
@@ -279,6 +280,21 @@ public final class NodeRelayService implements AutoCloseable {
             return;
         }
 
+        /*
+         * The bulk scheduler already has an authoritative full-block request
+         * lifecycle for this hash. We may optimistically reconstruct a compact
+         * block without a round trip, but once transactions are missing we do
+         * not start GETBLOCKTXN in parallel with that existing download.
+         *
+         * This mirrors the important Core invariant that compact and ordinary
+         * block download share in-flight ownership instead of creating two
+         * unrelated fallback lifecycles.
+         */
+        if (blockDownloadScheduler != null
+                && blockDownloadScheduler.hasPendingBlock(hash)) {
+            return;
+        }
+
         var admission = pendingCompactBlocks.add(peer, hash, partial,
                 System.nanoTime() + COMPACT_BLOCK_TIMEOUT_NANOS, PendingCompactBlocks.estimateBytes(partial));
         if (admission == PendingCompactBlocks.Admission.DUPLICATE) return;
@@ -314,10 +330,23 @@ public final class NodeRelayService implements AutoCloseable {
          * scheduler. Let that existing lifecycle consume it first so the same
          * hash is not validated/downloaded through two independent paths.
          */
-        if (blockDownloadScheduler != null
-                && blockDownloadScheduler.acceptBlock(source, block)) {
-            promoteHighBandwidthCompactPeer(source);
-            return;
+        if (blockDownloadScheduler != null) {
+            if (blockDownloadScheduler.acceptBlock(source, block)) {
+                promoteHighBandwidthCompactPeer(source);
+                return;
+            }
+
+            /*
+             * acceptBlock() is intentionally one-shot. A late duplicate compact
+             * body can therefore arrive after the scheduler has already marked
+             * the same submitted hash complete but before BlockSyncCoordinator
+             * consumes and validates that completion. Keep that duplicate inside
+             * the scheduler lifecycle instead of validating the same block through
+             * the relay path as well.
+             */
+            if (blockDownloadScheduler.hasSubmittedBlock(block.hash())) {
+                return;
+            }
         }
 
         BlockProcessingResult result;
@@ -336,6 +365,16 @@ public final class NodeRelayService implements AutoCloseable {
     }
 
     private void requestFullBlock(Peer peer, Hash256 hash) {
+        /*
+         * Never create a relay-owned GETDATA fallback on top of a block already
+         * owned by the bulk scheduler. Its existing request/retry/timeout path
+         * remains authoritative.
+         */
+        if (blockDownloadScheduler != null
+                && blockDownloadScheduler.hasPendingBlock(hash)) {
+            return;
+        }
+
         synchronized (compactFallbacks) {
             if (closed || !attached.contains(peer)) return;
             var requests = compactFallbacks.computeIfAbsent(peer, ignored -> new HashMap<>());
