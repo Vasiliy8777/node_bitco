@@ -82,7 +82,7 @@ public final class NodeRelayService implements AutoCloseable {
                     1_000L,
                     ThreadLocalRandom.current()
             );
-    private final Map<Hash256, Orphan> orphans = new LinkedHashMap<>();
+    private final TxOrphanage orphanage = new TxOrphanage();
     private final LinkedHashMap<Hash256, Boolean> announcedBlocks = new LinkedHashMap<>();
     private static final int MAX_RECENT_BLOCK_ANNOUNCEMENTS = 4096;
     // Bitcoin Core v31.1 MAX_BLOCKS_TO_ANNOUNCE.
@@ -97,9 +97,6 @@ public final class NodeRelayService implements AutoCloseable {
     private final PeerMessageListener messages = this::enqueue;
     private final Consumer<Peer> connections = this::attach;
     private volatile boolean closed;
-
-    private record Orphan(Transaction transaction, long expires) {
-    }
 
 
     /**
@@ -163,6 +160,7 @@ public final class NodeRelayService implements AutoCloseable {
                 pendingCompactBlocks.removePeer(source);
                 synchronized (compactFallbacks) { compactFallbacks.remove(source); }
                 removeHighBandwidthCompactPeer(source);
+                orphanage.removePeer(source);
                 if (sender != null) sender.shutdownNow();
             });
         }
@@ -417,7 +415,18 @@ public final class NodeRelayService implements AutoCloseable {
         }
         if (result == BlockProcessingResult.CONNECTED) {
             promoteHighBandwidthCompactPeer(source);
+            handleConnectedBlockOrphans(block);
             relayConnectedBlock(block, source);
+        }
+    }
+
+    private void handleConnectedBlockOrphans(Block block) {
+        for (Transaction transaction : block.transactions()) {
+            orphanage.remove(transaction);
+            orphanage.removeConflicts(transaction);
+        }
+        for (Transaction transaction : block.transactions()) {
+            reconsiderOrphanDescendants(transaction);
         }
     }
 
@@ -479,6 +488,7 @@ public final class NodeRelayService implements AutoCloseable {
         // Full data uses ordinary consensus validation, without another reconstruction retry.
         if (validation.processBlock(block) == BlockProcessingResult.CONNECTED) {
             promoteHighBandwidthCompactPeer(peer);
+            handleConnectedBlockOrphans(block);
             relayConnectedBlock(block, peer);
         }
     }
@@ -534,43 +544,49 @@ public final class NodeRelayService implements AutoCloseable {
     }
 
     private void receiveTransaction(Peer peer, Transaction transaction) throws IOException {
-        orphans.values().removeIf(orphan -> orphan.expires() < System.nanoTime());
         if (!transactionRequests.isExpected(peer, transaction.txId(), transaction.wtxId())) return;
         transactionRequests.forget(transaction.txId(), transaction.wtxId());
         try {
             validation.admit(transaction);
             announceTransaction(transaction, peer);
-            boolean progress;
-            do {
-                progress = false;
-                for (var iterator = orphans.values().iterator(); iterator.hasNext(); ) {
-                    var orphan = iterator.next().transaction();
-                    try {
-                        validation.admit(orphan);
-                        iterator.remove();
-                        announceTransaction(orphan, null);
-                        progress = true;
-                    } catch (MempoolAdmissionException exception) {
-                        if (!exception.getMessage().startsWith("Missing UTXO:")) iterator.remove();
-                    } catch (ru.bitcoin.node.consensus.transaction.TransactionValidationException
-                             | ru.bitcoin.node.script.ScriptExecutionException |
-                             ru.bitcoin.node.script.ScriptParseException exception) {
-                        iterator.remove();
-                    }
-                }
-            } while (progress);
+            reconsiderOrphanDescendants(transaction);
         } catch (MempoolAdmissionException exception) {
-            if (exception.getMessage().startsWith("Missing UTXO:") && orphans.size() < 100
-                    && TransactionSerializer.serialize(transaction).length <= 100_000) {
-                orphans.put(transaction.txId(), new Orphan(transaction, System.nanoTime() + Duration.ofMinutes(2).toNanos()));
+            if (isMissingInput(exception) && orphanage.add(transaction, peer)) {
                 requestTransactions(peer, new InvMessage(transaction.inputs().stream()
-                        .map(input -> new InventoryVector(InventoryVector.MSG_TX, input.previousOutput().transactionId())).distinct().toList()));
+                        .map(input -> new InventoryVector(InventoryVector.MSG_TX, input.previousOutput().transactionId()))
+                        .distinct().toList()));
             }
         } catch (ru.bitcoin.node.consensus.transaction.TransactionValidationException
-                 | ru.bitcoin.node.script.ScriptExecutionException |
-                 ru.bitcoin.node.script.ScriptParseException exception) {
+                 | ru.bitcoin.node.script.ScriptExecutionException
+                 | ru.bitcoin.node.script.ScriptParseException exception) {
             log.debug("Rejected invalid transaction {}", transaction.txId());
         }
+    }
+
+    private void reconsiderOrphanDescendants(Transaction acceptedParent) {
+        ArrayDeque<Hash256> acceptedParents = new ArrayDeque<>();
+        acceptedParents.add(acceptedParent.txId());
+        while (!acceptedParents.isEmpty()) {
+            Hash256 parentTxid = acceptedParents.removeFirst();
+            for (Transaction orphan : orphanage.childrenOf(parentTxid)) {
+                try {
+                    validation.admit(orphan);
+                    orphanage.remove(orphan);
+                    announceTransaction(orphan, null);
+                    acceptedParents.addLast(orphan.txId());
+                } catch (MempoolAdmissionException exception) {
+                    if (!isMissingInput(exception)) orphanage.remove(orphan);
+                } catch (ru.bitcoin.node.consensus.transaction.TransactionValidationException
+                         | ru.bitcoin.node.script.ScriptExecutionException
+                         | ru.bitcoin.node.script.ScriptParseException exception) {
+                    orphanage.remove(orphan);
+                }
+            }
+        }
+    }
+
+    private static boolean isMissingInput(MempoolAdmissionException exception) {
+        return exception.getMessage() != null && exception.getMessage().startsWith("Missing UTXO:");
     }
 
     /**
@@ -711,6 +727,7 @@ public final class NodeRelayService implements AutoCloseable {
         var result = validation.processBlock(block);
         if (result == BlockProcessingResult.CONNECTED) {
             sync.headerSyncService().process(new HeadersMessage(List.of(block.header())));
+            handleConnectedBlockOrphans(block);
             relayConnectedBlock(block, null);
         }
         return result;
