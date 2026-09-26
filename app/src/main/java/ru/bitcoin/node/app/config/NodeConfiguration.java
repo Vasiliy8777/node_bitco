@@ -121,6 +121,10 @@ public class NodeConfiguration {
                 ru.bitcoin.node.chain.ChainstateConsistencyChecker.DEFAULT_REORG_SAFETY_DEPTH
         ).verify();
 
+        // Databases created before persistent validation-status metadata existed need a
+        // restart-safe backfill before RPC/fork diagnostics can classify old validated branches.
+        new ru.bitcoin.node.chain.BlockValidationStatusMigrator(database).migrate();
+
         return new NodeValidationService(
                 database,
                 parameters,

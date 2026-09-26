@@ -269,6 +269,43 @@ public final class RocksDbDatabase
         }
     }
 
+    /**
+     * Visits one namespace in byte order starting strictly after a previously visited key.
+     * A null cursor starts at the first key in the namespace. This is intended for
+     * restart-safe, bounded migrations that persist the last processed key.
+     */
+    public void visitPrefixAscendingAfter(
+            byte prefix,
+            byte[] exclusiveAfterKey,
+            java.util.function.BiPredicate<byte[], byte[]> visitor
+    ) {
+        ensureOpen();
+        java.util.Objects.requireNonNull(visitor, "visitor");
+        if (exclusiveAfterKey != null
+                && (exclusiveAfterKey.length == 0 || exclusiveAfterKey[0] != prefix)) {
+            throw new IllegalArgumentException("cursor must belong to the requested namespace");
+        }
+        try (var iterator = database.newIterator()) {
+            if (exclusiveAfterKey == null) {
+                iterator.seek(new byte[]{prefix});
+            } else {
+                iterator.seek(exclusiveAfterKey);
+                if (iterator.isValid() && java.util.Arrays.equals(iterator.key(), exclusiveAfterKey)) {
+                    iterator.next();
+                }
+            }
+            while (iterator.isValid()) {
+                byte[] key = iterator.key();
+                if (key.length == 0 || key[0] != prefix) break;
+                if (!visitor.test(key.clone(), iterator.value().clone())) break;
+                iterator.next();
+            }
+            iterator.status();
+        } catch (RocksDBException e) {
+            throw new IllegalStateException("Failed to visit RocksDB namespace after cursor", e);
+        }
+    }
+
     /** Visits keys in reverse byte order until the visitor returns false. */
     public void visitPrefixDescending(byte prefix, java.util.function.BiPredicate<byte[], byte[]> visitor) {
         ensureOpen();

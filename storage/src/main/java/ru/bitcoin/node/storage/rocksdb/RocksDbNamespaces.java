@@ -30,6 +30,7 @@ public final class RocksDbNamespaces {
     public static final byte BLOCK_HEIGHT_INDEX = 0x14;
     public static final byte BLOCK_HEIGHT_INDEX_VERSION = 0x15;
     public static final byte PRUNE_USAGE_VERSION = 0x16;
+    public static final byte BLOCK_VALIDATION_MIGRATION = 0x17;
 
     /** Legacy v1 prune-usage marker that collided with BLOCK_HEIGHT_INDEX. */
     public static final byte[] LEGACY_PRUNE_USAGE_VERSION_KEY = {BLOCK_HEIGHT_INDEX, 0x01};

@@ -97,6 +97,7 @@ public final class FullReindexer {
             var txIndex = new RocksDbTxIndexStore(database);
             var availability = new ru.bitcoin.node.storage.block.RocksDbBlockAvailabilityStore(database);
             var validationStatus = new ru.bitcoin.node.storage.block.RocksDbBlockValidationStatusStore(database);
+            var validationMigration = new ru.bitcoin.node.storage.block.RocksDbBlockValidationMigrationStore(database);
             BlockIndex genesisIndex = BlockIndexFactory.createGenesis(genesis.header());
 
             // One durable reset point. If power is lost after this commit, the marker makes
@@ -113,6 +114,7 @@ public final class FullReindexer {
                 txIndex.clear(batch);
                 availability.clear(batch);
                 validationStatus.clear(batch);
+                validationMigration.clear(batch);
                 chainstateMarker.clear(batch);
                 if (recoveryManifest != null) marker.markInProgress(batch, recoveryManifest);
                 else marker.markInProgress(batch); // resume of a legacy one-byte marker

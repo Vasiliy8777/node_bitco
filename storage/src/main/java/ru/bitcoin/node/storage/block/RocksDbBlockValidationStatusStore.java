@@ -2,13 +2,14 @@ package ru.bitcoin.node.storage.block;
 
 import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.storage.rocksdb.RocksDbDatabase;
+import ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces;
 import ru.bitcoin.node.storage.rocksdb.RocksDbWriteBatch;
 
 import java.util.Objects;
 
 /** Durable contextual-validation level for block-index entries. */
 public final class RocksDbBlockValidationStatusStore {
-    private static final byte PREFIX = 0x11;
+    private static final byte PREFIX = RocksDbNamespaces.BLOCK_VALIDATION_STATUS;
     private static final int HASH_SIZE = 32;
     public static final int SCRIPTS_VALID = 1;
 
