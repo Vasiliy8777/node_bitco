@@ -55,6 +55,7 @@ public final class NodeLifecycleService
 
     private final Duration headerResponseTimeout;
     private final BigInteger minimumChainWork;
+    private final MempoolCheckpointService mempoolCheckpointService;
 
     private NodeLifecycleState state =
             NodeLifecycleState.NEW;
@@ -121,11 +122,36 @@ public final class NodeLifecycleService
             int listenPort,
             BigInteger minimumChainWork
     ) {
+        this(validationService, syncInfrastructure, addressManager, addressManagerStore, peerDiscovery,
+                outboundPeerManager, outboundPeerSupervisor, peerManager, bitcoinServer, blockSyncCoordinator,
+                headerResponseTimeout, listen, listenPort, minimumChainWork, Duration.ofMinutes(15));
+    }
+
+    public NodeLifecycleService(
+            NodeValidationService validationService,
+            NodeSyncInfrastructure syncInfrastructure,
+            PeerAddressManager addressManager,
+            PeerAddressManagerStore addressManagerStore,
+            PeerDiscovery peerDiscovery,
+            OutboundPeerManager outboundPeerManager,
+            OutboundPeerSupervisor outboundPeerSupervisor,
+            PeerManager peerManager,
+            BitcoinServer bitcoinServer,
+            BlockSyncCoordinator blockSyncCoordinator,
+            Duration headerResponseTimeout,
+            boolean listen,
+            int listenPort,
+            BigInteger minimumChainWork,
+            Duration mempoolCheckpointInterval
+    ) {
         this.validationService =
                 Objects.requireNonNull(
                         validationService,
                         "validationService"
                 );
+
+        this.mempoolCheckpointService = new MempoolCheckpointService(
+                validationService, Objects.requireNonNull(mempoolCheckpointInterval, "mempoolCheckpointInterval"));
 
         this.syncInfrastructure =
                 Objects.requireNonNull(
@@ -317,6 +343,7 @@ public final class NodeLifecycleService
                     NodeLifecycleState.RUNNING
             );
 
+            mempoolCheckpointService.start();
             liveSync.run();
 
         } catch (IOException | RuntimeException exception) {
@@ -696,6 +723,9 @@ public final class NodeLifecycleService
 
         IOException closeFailure =
                 null;
+
+        // Stop periodic mempool writes before the final coherent shutdown snapshot.
+        mempoolCheckpointService.close();
 
         /*
          * Stop accepting inbound connections first.

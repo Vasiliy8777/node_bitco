@@ -338,7 +338,9 @@ public class NodeConfiguration {
             @Value("${bitcoin.p2p.port:0}")
             int listenPort,
             @Value("${bitcoin.p2p.header-response-timeout-millis:10000}")
-            long headerTimeoutMillis
+            long headerTimeoutMillis,
+            @Value("${bitcoin.mempool-checkpoint-interval-seconds:900}")
+            long mempoolCheckpointIntervalSeconds
     ) {
 
         Duration headerResponseTimeout =
@@ -365,7 +367,8 @@ public class NodeConfiguration {
                 headerResponseTimeout,
                 listen,
                 effectiveListenPort,
-                parameters.minimumChainWork()
+                parameters.minimumChainWork(),
+                checkpointInterval(mempoolCheckpointIntervalSeconds)
         );
     }
 
@@ -466,4 +469,11 @@ public class NodeConfiguration {
         return Math.multiplyExact(pruneMiB, 1024L * 1024L);
     }
 
+
+    static Duration checkpointInterval(long seconds) {
+        if (seconds < 0) {
+            throw new IllegalArgumentException("bitcoin.mempool-checkpoint-interval-seconds must not be negative");
+        }
+        return Duration.ofSeconds(seconds);
+    }
 }
