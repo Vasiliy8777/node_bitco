@@ -765,6 +765,36 @@ class PeerMessageDispatcherTest {
         );
     }
 
+    @Test
+    void shouldFailLateRegistrationsAfterTerminalClose() {
+        PeerMessageDispatcher dispatcher = new PeerMessageDispatcher(peer());
+        IOException failure = new IOException("Peer disconnected");
+
+        dispatcher.close(failure);
+
+        CompletableFuture<HeadersMessage> headers = dispatcher.registerHeaders();
+        CompletableFuture<Block> block = dispatcher.registerBlock(
+                GenesisBlockFactory.create(NetworkParametersRegistry.mainnet()).hash()
+        );
+
+        assertTrue(headers.isCompletedExceptionally());
+        assertTrue(block.isCompletedExceptionally());
+        assertSame(failure, assertThrows(CompletionException.class, headers::join).getCause());
+        assertSame(failure, assertThrows(CompletionException.class, block::join).getCause());
+    }
+
+    @Test
+    void shouldKeepFailAllPendingReusable() {
+        PeerMessageDispatcher dispatcher = new PeerMessageDispatcher(peer());
+        CompletableFuture<HeadersMessage> first = dispatcher.registerHeaders();
+
+        dispatcher.failAllPending(new IOException("request reset"));
+
+        assertTrue(first.isCompletedExceptionally());
+        CompletableFuture<HeadersMessage> replacement = dispatcher.registerHeaders();
+        assertFalse(replacement.isDone());
+    }
+
     private static Peer peer() {
 
         PeerConnection connection =

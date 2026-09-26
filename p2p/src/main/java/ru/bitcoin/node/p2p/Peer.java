@@ -1021,7 +1021,7 @@ public final class Peer implements AutoCloseable {
                     );
         }
 
-        messageDispatcher.failAllPending(
+        messageDispatcher.close(
                 failure
         );
 
@@ -1079,7 +1079,7 @@ public final class Peer implements AutoCloseable {
                     );
         }
 
-        messageDispatcher.failAllPending(
+        messageDispatcher.close(
                 closedFailure
         );
 

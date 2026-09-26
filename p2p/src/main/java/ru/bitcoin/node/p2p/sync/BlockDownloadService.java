@@ -118,6 +118,21 @@ public final class BlockDownloadService {
                 exception.addSuppressed(
                         closeException
                 );
+            } finally {
+                /*
+                 * The background reader owns the original CLOSED transition.
+                 * Its dispatcher is failed before Peer close-listeners are
+                 * notified, so this download thread can wake up while the
+                 * PeerManager close callback is still pending.
+                 *
+                 * Remove synchronously here as well. PeerManager.remove() is
+                 * idempotent, therefore the eventual close callback remains
+                 * safe. This guarantees that a failed download never returns
+                 * or retries with a CLOSED peer still exposed by the manager.
+                 */
+                peerManager.remove(
+                        peer
+                );
             }
 
             throw exception;

@@ -8,7 +8,6 @@ import ru.bitcoin.node.storage.rocksdb.RocksDbDatabase;
 import ru.bitcoin.node.storage.rocksdb.RocksDbWriteBatch;
 import ru.bitcoin.node.storage.undo.RocksDbUndoStore;
 
-import java.util.Comparator;
 import java.util.Objects;
 
 /** Deletes old raw block and undo payloads while retaining block-index metadata and the reorg window. */
@@ -76,19 +75,16 @@ public final class BlockPruner {
         var state = new RocksDbPruneStateStore(database);
         var availability = new ru.bitcoin.node.storage.block.RocksDbBlockAvailabilityStore(database);
 
-        // Use the block index as metadata. Do not deserialize every raw block merely to
-        // discover its hash/height; this remains bounded by index records even for large blocks.
-        var candidates = indexes.findAll().stream()
-                .filter(index -> index.height() > 0 && index.height() <= maxHeight)
-                .filter(index -> availability.hasData(index.hash()))
-                .sorted(Comparator.comparingLong(ru.bitcoin.node.storage.block.StoredBlockIndex::height))
-                .toList();
+        // Height-index iteration is ordered and stoppable: no full BlockIndex list is retained.
+        long[] usage = {before};
+        long[] pruned = {0L};
+        long[] highest = {-1L};
 
-        long usage = before;
-        long pruned = 0L;
-        long highest = -1L;
-        for (var candidate : candidates) {
-            if (stopAtBytes > 0 && usage <= stopAtBytes) break;
+        indexes.visitByHeightAscending(candidate -> {
+            if (candidate.height() > maxHeight) return false;
+            if (candidate.height() == 0 || !availability.hasData(candidate.hash())) return true;
+            if (stopAtBytes > 0 && usage[0] <= stopAtBytes) return false;
+
             long blockBytes = blocks.serializedSize(candidate.hash());
             long undoBytes = undos.serializedSize(candidate.hash());
             try (var batch = new RocksDbWriteBatch()) {
@@ -98,11 +94,12 @@ public final class BlockPruner {
                 state.recordHighestPrunedHeight(batch, candidate.height());
                 database.write(batch);
             }
-            usage = Math.max(0L, usage - blockBytes - undoBytes);
-            pruned++;
-            highest = Math.max(highest, candidate.height());
-        }
-        return new Result(before, usageBytes(), pruned, highest);
+            usage[0] = Math.max(0L, usage[0] - blockBytes - undoBytes);
+            pruned[0]++;
+            highest[0] = Math.max(highest[0], candidate.height());
+            return true;
+        });
+        return new Result(before, usageBytes(), pruned[0], highest[0]);
     }
 
     private long usageBytes() {

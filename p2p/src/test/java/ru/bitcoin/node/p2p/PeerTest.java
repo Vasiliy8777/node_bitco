@@ -1608,6 +1608,98 @@ class PeerTest {
     }
 
     @Test
+    void shouldFailRequestsRegisteredAfterPeerIsClosed()
+            throws Exception {
+
+        Peer peer =
+                new Peer(
+                        connection(),
+                        0L,
+                        0,
+                        true
+                );
+
+        peer.close();
+
+        CompletableFuture<Block> blockFuture =
+                peer.messageDispatcher()
+                        .registerBlock(
+                                GenesisBlockFactory.create(
+                                        NetworkParametersRegistry.mainnet()
+                                ).hash()
+                        );
+
+        CompletableFuture<HeadersMessage> headersFuture =
+                peer.messageDispatcher()
+                        .registerHeaders();
+
+        assertTrue(
+                blockFuture.isCompletedExceptionally()
+        );
+
+        assertTrue(
+                headersFuture.isCompletedExceptionally()
+        );
+
+        assertInstanceOf(
+                IOException.class,
+                assertThrows(
+                        CompletionException.class,
+                        blockFuture::join
+                ).getCause()
+        );
+
+        assertInstanceOf(
+                IOException.class,
+                assertThrows(
+                        CompletionException.class,
+                        headersFuture::join
+                ).getCause()
+        );
+    }
+
+    @Test
+    void shouldFailRequestsRegisteredAfterReaderFailure() {
+
+        Peer peer =
+                new Peer(
+                        connection(),
+                        0L,
+                        0,
+                        true
+                );
+
+        IOException failure =
+                new IOException(
+                        "reader failed before registration"
+                );
+
+        peer.handleReaderFailure(
+                failure
+        );
+
+        CompletableFuture<Block> blockFuture =
+                peer.messageDispatcher()
+                        .registerBlock(
+                                GenesisBlockFactory.create(
+                                        NetworkParametersRegistry.mainnet()
+                                ).hash()
+                        );
+
+        CompletableFuture<HeadersMessage> headersFuture =
+                peer.messageDispatcher()
+                        .registerHeaders();
+
+        assertTrue(
+                blockFuture.isCompletedExceptionally()
+        );
+
+        assertTrue(
+                headersFuture.isCompletedExceptionally()
+        );
+    }
+
+    @Test
     void shouldAcceptInboundConnection()
             throws Exception {
 

@@ -40,6 +40,13 @@ public final class PeerMessageDispatcher {
     private CompletableFuture<HeadersMessage>
             pendingHeaders;
 
+    /*
+     * Once the peer has terminated, no newly registered request may remain
+     * pending forever. Guarded by this dispatcher monitor together with the
+     * pending request maps, so registration and terminal failure are atomic.
+     */
+    private IOException terminalFailure;
+
     public PeerMessageDispatcher(
             Peer peer
     ) {
@@ -73,14 +80,19 @@ public final class PeerMessageDispatcher {
     public synchronized CompletableFuture<HeadersMessage>
     registerHeaders() {
 
+        CompletableFuture<HeadersMessage> future =
+                new CompletableFuture<>();
+
+        if (terminalFailure != null) {
+            future.completeExceptionally(terminalFailure);
+            return future;
+        }
+
         if (pendingHeaders != null) {
             throw new IllegalStateException(
                     "Headers request is already pending"
             );
         }
-
-        CompletableFuture<HeadersMessage> future =
-                new CompletableFuture<>();
 
         pendingHeaders =
                 future;
@@ -151,6 +163,14 @@ public final class PeerMessageDispatcher {
                 "blockHash"
         );
 
+        CompletableFuture<Block> future =
+                new CompletableFuture<>();
+
+        if (terminalFailure != null) {
+            future.completeExceptionally(terminalFailure);
+            return future;
+        }
+
         if (pendingBlocks.containsKey(
                 blockHash
         )) {
@@ -159,9 +179,6 @@ public final class PeerMessageDispatcher {
                             + blockHash.toDisplayHex()
             );
         }
-
-        CompletableFuture<Block> future =
-                new CompletableFuture<>();
 
         Block precompleted =
                 precompletedBlocks.remove(
@@ -274,13 +291,18 @@ public final class PeerMessageDispatcher {
                 "cause"
         );
 
-        failAllPendingBlocks(
-                cause
-        );
-
-        CompletableFuture<HeadersMessage> headersFuture;
+        final Map<Hash256, CompletableFuture<Block>> blocks;
+        final CompletableFuture<HeadersMessage> headersFuture;
 
         synchronized (this) {
+            blocks =
+                    new HashMap<>(
+                            pendingBlocks
+                    );
+
+            pendingBlocks.clear();
+            precompletedBlocks.clear();
+
             headersFuture =
                     pendingHeaders;
 
@@ -288,10 +310,53 @@ public final class PeerMessageDispatcher {
                     null;
         }
 
+        for (CompletableFuture<Block> future :
+                blocks.values()) {
+            future.completeExceptionally(
+                    cause
+            );
+        }
+
         if (headersFuture != null) {
             headersFuture.completeExceptionally(
                     cause
             );
+        }
+    }
+
+    /**
+     * Permanently terminates this dispatcher. Existing requests fail and any
+     * later registration is completed exceptionally with the terminal cause.
+     */
+    public void close(
+            IOException cause
+    ) {
+        Objects.requireNonNull(
+                cause,
+                "cause"
+        );
+
+        final Map<Hash256, CompletableFuture<Block>> blocks;
+        final CompletableFuture<HeadersMessage> headersFuture;
+
+        synchronized (this) {
+            if (terminalFailure == null) {
+                terminalFailure = cause;
+            }
+
+            blocks = new HashMap<>(pendingBlocks);
+            pendingBlocks.clear();
+            precompletedBlocks.clear();
+            headersFuture = pendingHeaders;
+            pendingHeaders = null;
+        }
+
+        for (CompletableFuture<Block> future : blocks.values()) {
+            future.completeExceptionally(cause);
+        }
+
+        if (headersFuture != null) {
+            headersFuture.completeExceptionally(cause);
         }
     }
 

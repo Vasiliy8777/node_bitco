@@ -193,6 +193,50 @@ class RocksDbBlockIndexStoreTest {
         }
     }
 
+    @Test
+    void heightIndexMigratesStreamsInOrderAndTracksDeletes() {
+        Path databasePath = tempDirectory.resolve("height-index");
+        try (var database = new RocksDbDatabase(databasePath)) {
+            var store = new RocksDbBlockIndexStore(database);
+            var genesis = storedGenesis();
+            store.save(genesis);
+
+            StoredBlockIndex[] byHeight = new StoredBlockIndex[4];
+            int[] insertionOrder = {3, 1, 2};
+            for (int height : insertionOrder) {
+                var original = genesis.header();
+                var header = new BlockHeader(original.version(), genesis.hash(), original.merkleRoot(),
+                        original.timestamp(), original.bits(), new UInt32(100 + height));
+                var index = new StoredBlockIndex(header.hash(), header, height,
+                        genesis.hash(), BigInteger.valueOf(1000L + height));
+                store.save(index);
+                byHeight[height] = index;
+            }
+
+            var heights = new java.util.ArrayList<Long>();
+            store.visitByHeightAscending(index -> {
+                heights.add(index.height());
+                return true;
+            });
+            assertEquals(java.util.List.of(0L, 1L, 2L, 3L), heights);
+
+            store.delete(byHeight[2].hash());
+            heights.clear();
+            store.visitByHeightAscending(index -> {
+                heights.add(index.height());
+                return true;
+            });
+            assertEquals(java.util.List.of(0L, 1L, 3L), heights);
+
+            var stopped = new java.util.ArrayList<Long>();
+            store.visitByHeightAscending(index -> {
+                stopped.add(index.height());
+                return index.height() < 1;
+            });
+            assertEquals(java.util.List.of(0L, 1L), stopped);
+        }
+    }
+
     private static StoredBlockIndex storedGenesis() {
 
         BlockHeader header =

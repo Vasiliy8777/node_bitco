@@ -13,6 +13,8 @@ public final class RocksDbBlockIndexStore
     private static final byte BLOCK_INDEX_PREFIX = 0x01;
     private static final byte WORK_INDEX_PREFIX = 0x08;
     private static final byte[] WORK_INDEX_VERSION_KEY = {0x09};
+    private static final byte HEIGHT_INDEX_PREFIX = 0x14;
+    private static final byte[] HEIGHT_INDEX_VERSION_KEY = {0x15};
 
     private final RocksDbDatabase database;
 
@@ -119,6 +121,57 @@ public final class RocksDbBlockIndexStore
         return Optional.ofNullable(result[0]);
     }
 
+    /**
+     * Streams primary block-index records in ascending height order without materializing
+     * the complete index. Returning false from the visitor stops the scan immediately.
+     */
+    public void visitByHeightAscending(java.util.function.Predicate<StoredBlockIndex> visitor) {
+        java.util.Objects.requireNonNull(visitor, "visitor");
+        ensureHeightIndex();
+        database.visitPrefixAscending(HEIGHT_INDEX_PREFIX, (key, value) -> {
+            if (key.length != 1 + 8 + HASH_SIZE || value.length != HASH_SIZE) return true;
+            long indexedHeight = java.nio.ByteBuffer.wrap(key, 1, 8).getLong();
+            Hash256 hash = new Hash256(value);
+            StoredBlockIndex current = find(hash).orElse(null);
+            if (current == null || current.height() != indexedHeight
+                    || !java.util.Arrays.equals(key, heightKey(current))) {
+                return true;
+            }
+            return visitor.test(current);
+        });
+    }
+
+    private void ensureHeightIndex() {
+        synchronized (database) {
+            byte[] version = database.get(HEIGHT_INDEX_VERSION_KEY);
+            if (version != null) {
+                if (!java.util.Arrays.equals(version, new byte[]{1})) {
+                    throw new IllegalStateException("Unsupported block height index version");
+                }
+                return;
+            }
+            class Migration implements AutoCloseable {
+                RocksDbWriteBatch batch = new RocksDbWriteBatch();
+                int count;
+                void add(StoredBlockIndex index) {
+                    batch.put(heightKey(index), index.hash().bytes());
+                    if (++count == 1024) {
+                        database.write(batch);
+                        batch.close();
+                        batch = new RocksDbWriteBatch();
+                        count = 0;
+                    }
+                }
+                public void close() { batch.close(); }
+            }
+            try (var migration = new Migration()) {
+                forEach(migration::add);
+                migration.batch.put(HEIGHT_INDEX_VERSION_KEY, new byte[]{1});
+                database.write(migration.batch);
+            }
+        }
+    }
+
     private void ensureWorkIndex() {
         synchronized (database) {
             byte[] version = database.get(WORK_INDEX_VERSION_KEY);
@@ -150,6 +203,14 @@ public final class RocksDbBlockIndexStore
                 database.write(migration.batch);
             }
         }
+    }
+
+    private static byte[] heightKey(StoredBlockIndex index) {
+        byte[] key = new byte[1 + 8 + HASH_SIZE];
+        key[0] = HEIGHT_INDEX_PREFIX;
+        java.nio.ByteBuffer.wrap(key, 1, 8).putLong(index.height());
+        System.arraycopy(index.hash().bytes(), 0, key, 9, HASH_SIZE);
+        return key;
     }
 
     private static byte[] workKey(StoredBlockIndex index) {
@@ -227,8 +288,12 @@ public final class RocksDbBlockIndexStore
             );
         }
 
-        find(blockIndex.hash()).ifPresent(previous -> batch.delete(workKey(previous)));
+        find(blockIndex.hash()).ifPresent(previous -> {
+            batch.delete(workKey(previous));
+            batch.delete(heightKey(previous));
+        });
         batch.put(workKey(blockIndex), blockIndex.hash().bytes());
+        batch.put(heightKey(blockIndex), blockIndex.hash().bytes());
         batch.put(
                 key(blockIndex.hash()),
                 StoredBlockIndexSerializer.serialize(
@@ -245,6 +310,8 @@ public final class RocksDbBlockIndexStore
         batch.deletePrefix(BLOCK_INDEX_PREFIX);
         batch.deletePrefix(WORK_INDEX_PREFIX);
         batch.delete(WORK_INDEX_VERSION_KEY);
+        batch.deletePrefix(HEIGHT_INDEX_PREFIX);
+        batch.delete(HEIGHT_INDEX_VERSION_KEY);
     }
 
     public void delete(
@@ -263,7 +330,10 @@ public final class RocksDbBlockIndexStore
             );
         }
 
-        find(hash).ifPresent(previous -> batch.delete(workKey(previous)));
+        find(hash).ifPresent(previous -> {
+            batch.delete(workKey(previous));
+            batch.delete(heightKey(previous));
+        });
         batch.delete(
                 key(hash)
         );
