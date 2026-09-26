@@ -638,14 +638,34 @@ public final class NodeValidationService {
         }
     }
 
-    /** Clear failure state related to a known block and reconsider the strongest eligible chain. */
+    /** Clear related failure roots and atomically activate the strongest available eligible chain. */
     public void reconsiderBlock(Hash256 hash) {
         Objects.requireNonNull(hash, "hash");
         synchronized (chain) {
             synchronizePool();
             if (lookup.find(hash) == null) throw new IllegalArgumentException("Block not found");
-            failureManager.reconsider(hash);
-            activateBestEligibleChain();
+
+            BlockFailureManager.ReconsiderationPlan reconsideration =
+                    failureManager.prepareReconsideration(
+                            hash,
+                            candidate -> blocks.find(candidate.hash()).isPresent());
+            BlockIndex current = chain.activeTip();
+            BlockIndex candidate = reconsideration.bestAvailable();
+
+            if (current.hash().equals(candidate.hash())) {
+                failureManager.commitReconsideration(reconsideration);
+            } else {
+                ReorganizationPlan plan = ReorganizationPlanner.plan(current, candidate, lookup);
+                PreparedChainReorganization prepared = reorganizationExecutor.prepare(
+                        new ChainUpdate(current, candidate, plan));
+
+                // No persistent failure root is cleared until every required block body,
+                // undo record and contextual/script check for the forced transition has
+                // succeeded. Administrative metadata and the chain transition then share
+                // the same RocksDB batch.
+                reorganizationExecutor.commit(prepared, batch ->
+                        failureManager.appendReconsideration(batch, reconsideration));
+            }
             finishManualChainChange();
         }
     }

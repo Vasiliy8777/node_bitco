@@ -83,31 +83,115 @@ public final class BlockFailureManager {
     }
 
     /**
-     * Clears manual/recorded failure roots related to this block, matching reconsider semantics.
+     * Precomputes reconsiderblock semantics without mutating persistent failure state.
+     * The strongest eligible header is kept separate from the strongest candidate whose
+     * block body is locally available for an immediate chain transition.
      */
-    public synchronized void reconsider(Hash256 hash) {
+    public synchronized ReconsiderationPlan prepareReconsideration(
+            Hash256 hash,
+            java.util.function.Predicate<BlockIndex> bodyAvailable
+    ) {
         Objects.requireNonNull(hash, "hash");
+        Objects.requireNonNull(bodyAvailable, "bodyAvailable");
+
         BlockIndex target = blockIndexStore.find(hash)
                 .map(BlockIndexStorageMapper::fromStored)
                 .orElseThrow(() -> new IllegalStateException(
                         "Cannot reconsider missing BlockIndex: " + hash.toDisplayHex()));
 
-        try (RocksDbWriteBatch batch = new RocksDbWriteBatch()) {
-            for (var stored : blockIndexStore.findAll()) {
-                BlockIndex candidate = BlockIndexStorageMapper.fromStored(stored);
-                if (!failureStore.isFailed(candidate.hash())) continue;
-                if (isAncestor(candidate, target) || isAncestor(target, candidate)) {
-                    failureStore.clearFailed(batch, candidate.hash());
-                }
+        java.util.Set<Hash256> rootsToClear = new java.util.HashSet<>();
+        for (var stored : blockIndexStore.findAll()) {
+            BlockIndex candidate = BlockIndexStorageMapper.fromStored(stored);
+            if (!failureStore.isFailed(candidate.hash())) continue;
+            if (isAncestor(candidate, target) || isAncestor(target, candidate)) {
+                rootsToClear.add(candidate.hash());
             }
-            database.write(batch);
         }
 
-        BlockIndex bestEligible = bestEligible();
+        BlockIndex bestHeader = blockIndexStore.findBest(stored ->
+                        !isFailedAfterClearing(BlockIndexStorageMapper.fromStored(stored), rootsToClear))
+                .map(BlockIndexStorageMapper::fromStored)
+                .orElseThrow(() -> new IllegalStateException(
+                        "No eligible block index remains after reconsidering " + hash.toDisplayHex()));
+
+        BlockIndex bestAvailable = blockIndexStore.findBest(stored -> {
+                    BlockIndex candidate = BlockIndexStorageMapper.fromStored(stored);
+                    return !isFailedAfterClearing(candidate, rootsToClear) && bodyAvailable.test(candidate);
+                })
+                .map(BlockIndexStorageMapper::fromStored)
+                .orElseThrow(() -> new IllegalStateException(
+                        "No eligible block with available data remains after reconsidering "
+                                + hash.toDisplayHex()));
+
+        return new ReconsiderationPlan(
+                java.util.Set.copyOf(rootsToClear),
+                bestHeader,
+                bestAvailable
+        );
+    }
+
+    /** Commits reconsideration metadata when no active-chain transition is required. */
+    public synchronized void commitReconsideration(ReconsiderationPlan plan) {
+        Objects.requireNonNull(plan, "plan");
         try (RocksDbWriteBatch batch = new RocksDbWriteBatch()) {
-            chainStateStore.saveBestHeaderTipHash(batch, bestEligible.hash());
+            appendReconsideration(batch, plan);
             database.write(batch);
         }
+    }
+
+    /** Appends a previously prepared reconsideration to a caller-owned atomic batch. */
+    public synchronized void appendReconsideration(
+            RocksDbWriteBatch batch,
+            ReconsiderationPlan plan
+    ) {
+        Objects.requireNonNull(batch, "batch");
+        Objects.requireNonNull(plan, "plan");
+        for (Hash256 root : plan.failureRootsToClear()) {
+            failureStore.clearFailed(batch, root);
+        }
+        chainStateStore.saveBestHeaderTipHash(batch, plan.bestHeader().hash());
+    }
+
+    private boolean isFailedAfterClearing(BlockIndex index, java.util.Set<Hash256> rootsToClear) {
+        BlockIndex cursor = index;
+        java.util.Set<Hash256> visited = new java.util.HashSet<>();
+        while (true) {
+            if (!visited.add(cursor.hash())) {
+                throw new IllegalStateException(
+                        "Cycle detected in block-index ancestry at " + cursor.hash().toDisplayHex());
+            }
+            if (!rootsToClear.contains(cursor.hash()) && failureStore.isFailed(cursor.hash())) {
+                return true;
+            }
+            if (cursor.height() == 0) return false;
+            Hash256 previous = cursor.previousBlockHash();
+            cursor = blockIndexStore.find(previous)
+                    .map(BlockIndexStorageMapper::fromStored)
+                    .orElseThrow(() -> new IllegalStateException(
+                            "Missing BlockIndex ancestor: " + previous.toDisplayHex()));
+        }
+    }
+
+    public record ReconsiderationPlan(
+            java.util.Set<Hash256> failureRootsToClear,
+            BlockIndex bestHeader,
+            BlockIndex bestAvailable
+    ) {
+        public ReconsiderationPlan {
+            failureRootsToClear = java.util.Set.copyOf(
+                    Objects.requireNonNull(failureRootsToClear, "failureRootsToClear"));
+            Objects.requireNonNull(bestHeader, "bestHeader");
+            Objects.requireNonNull(bestAvailable, "bestAvailable");
+        }
+    }
+
+    /**
+     * Metadata-only compatibility entry point. Application chain control should use
+     * prepareReconsideration plus an atomic chain-transition commit.
+     */
+    public synchronized void reconsider(Hash256 hash) {
+        ReconsiderationPlan plan = prepareReconsideration(hash, ignored -> true);
+        commitReconsideration(plan);
     }
 
     public synchronized BlockIndex bestEligible() {

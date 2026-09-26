@@ -122,4 +122,44 @@ class ManualChainControlIntegrationTest {
         }
     }
 
+    @Test
+    void failedReconsiderPreflightDoesNotClearFailureOrMoveActiveTip() throws Exception {
+        Block original102 = coreSpend(102);
+        Block alternative102 = reorg(102);
+        Block alternative103 = reorg(103);
+
+        try (var db = new RocksDbDatabase(directory)) {
+            var validation = service(db);
+            for (int height = 1; height <= 102; height++) {
+                assertEquals(BlockProcessingResult.CONNECTED, validation.processBlock(coreSpend(height)));
+            }
+            assertEquals(BlockProcessingResult.STORED_SIDE_CHAIN_CONTEXT_PENDING,
+                    validation.processBlock(alternative102));
+            assertEquals(BlockProcessingResult.CONNECTED, validation.processBlock(alternative103));
+
+            validation.invalidateBlock(alternative102.hash());
+            assertEquals(original102.hash(), validation.activeTip().hash());
+            assertTrue(validation.isBlockFailed(alternative102.hash()));
+            assertTrue(validation.isBlockFailed(alternative103.hash()));
+
+            // Reconsidering the alternative branch would disconnect original102.
+            // Make that transition impossible before any failure root may be cleared.
+            new RocksDbUndoStore(db).delete(original102.hash());
+
+            var error = assertThrows(IllegalStateException.class,
+                    () -> validation.reconsiderBlock(alternative102.hash()));
+            assertTrue(error.getMessage().contains("Undo data not found for disconnect"));
+            assertEquals(original102.hash(), validation.activeTip().hash());
+            assertTrue(validation.isBlockFailed(alternative102.hash()));
+            assertTrue(validation.isBlockFailed(alternative103.hash()));
+        }
+
+        try (var db = new RocksDbDatabase(directory)) {
+            var validation = service(db);
+            assertEquals(original102.hash(), validation.activeTip().hash());
+            assertTrue(validation.isBlockFailed(alternative102.hash()));
+            assertTrue(validation.isBlockFailed(alternative103.hash()));
+        }
+    }
+
 }
