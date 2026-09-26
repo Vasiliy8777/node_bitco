@@ -75,12 +75,13 @@ public final class BlockPruner {
         var blocks = new RocksDbBlockStore(database);
         var undos = new RocksDbUndoStore(database);
         var state = new RocksDbPruneStateStore(database);
+        var availability = new ru.bitcoin.node.storage.block.RocksDbBlockAvailabilityStore(database);
 
         // Use the block index as metadata. Do not deserialize every raw block merely to
         // discover its hash/height; this remains bounded by index records even for large blocks.
         var candidates = indexes.findAll().stream()
                 .filter(index -> index.height() > 0 && index.height() <= maxHeight)
-                .filter(index -> blocks.serializedSize(index.hash()) > 0L)
+                .filter(index -> availability.hasData(index.hash()))
                 .sorted(Comparator.comparingLong(ru.bitcoin.node.storage.block.StoredBlockIndex::height))
                 .toList();
 
@@ -94,6 +95,7 @@ public final class BlockPruner {
             try (var batch = new RocksDbWriteBatch()) {
                 blocks.delete(batch, candidate.hash());
                 undos.delete(batch, candidate.hash());
+                availability.clearDataAndUndo(batch, candidate.hash());
                 state.recordHighestPrunedHeight(batch, candidate.height());
                 database.write(batch);
             }

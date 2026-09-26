@@ -22,6 +22,7 @@ public final class RocksDbChainTransitionStorage {
     private final RocksDbUndoStore undoStore;
     private final RocksDbBlockIndexStore blockIndexStore;
     private final RocksDbChainStateStore chainStateStore;
+    private final ru.bitcoin.node.storage.block.RocksDbBlockAvailabilityStore availability;
 
     public RocksDbChainTransitionStorage(
             RocksDbDatabase database,
@@ -65,6 +66,7 @@ public final class RocksDbChainTransitionStorage {
         this.undoStore = undoStore;
         this.blockIndexStore = blockIndexStore;
         this.chainStateStore = chainStateStore;
+        this.availability = new ru.bitcoin.node.storage.block.RocksDbBlockAvailabilityStore(database);
     }
 
     public void commit(
@@ -181,6 +183,7 @@ public final class RocksDbChainTransitionStorage {
                         entry.getKey(),
                         entry.getValue()
                 );
+                availability.markUndo(batch, entry.getKey());
             }
 
             /*

@@ -41,6 +41,10 @@ class BlockPrunerTest {
             assertTrue(blocks.find(chain[2].hash()).isPresent());
             assertTrue(blocks.find(chain[3].hash()).isPresent());
             assertTrue(indexes.find(chain[0].hash()).isPresent());
+            var availability = new RocksDbBlockAvailabilityStore(db);
+            assertFalse(availability.hasData(chain[0].hash()));
+            assertFalse(availability.hasUndo(chain[0].hash()));
+            assertTrue(availability.hasData(chain[2].hash()));
             assertEquals(2, new RocksDbPruneStateStore(db).highestPrunedHeight().orElseThrow());
         }
     }

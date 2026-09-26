@@ -133,9 +133,11 @@ public final class RocksDbBlockStore
             );
         }
 
-        database.delete(
-                key(blockHash)
-        );
+        try (RocksDbWriteBatch batch = new RocksDbWriteBatch()) {
+            batch.delete(key(blockHash));
+            new RocksDbBlockAvailabilityStore(database).clearData(batch, blockHash);
+            database.write(batch);
+        }
     }
 
     public void delete(

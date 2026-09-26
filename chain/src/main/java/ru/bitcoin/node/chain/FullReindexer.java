@@ -75,6 +75,7 @@ public final class FullReindexer {
             var marker = new RocksDbFullReindexStateStore(database);
             var chainstateMarker = new RocksDbReindexStateStore(database);
             var txIndex = new RocksDbTxIndexStore(database);
+            var availability = new ru.bitcoin.node.storage.block.RocksDbBlockAvailabilityStore(database);
             BlockIndex genesisIndex = BlockIndexFactory.createGenesis(genesis.header());
 
             // One durable reset point. If power is lost after this commit, the marker makes
@@ -89,9 +90,11 @@ public final class FullReindexer {
                 // that references the pre-reindex block-index namespace. When txindex is enabled,
                 // NodeValidationService rebuilds it from genesis to the reconstructed active tip.
                 txIndex.clear(batch);
+                availability.clear(batch);
                 chainstateMarker.clear(batch);
                 marker.markInProgress(batch);
                 indexes.save(batch, BlockIndexStorageMapper.toStored(genesisIndex));
+                availability.markData(batch, genesisIndex.hash());
                 tips.saveActiveTipHash(batch, genesisIndex.hash());
                 tips.saveBestHeaderTipHash(batch, genesisIndex.hash());
                 database.write(batch);

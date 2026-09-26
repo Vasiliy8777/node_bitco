@@ -70,6 +70,8 @@ public final class ChainInitializer {
                         batch,
                         genesis
                 );
+                new ru.bitcoin.node.storage.block.RocksDbBlockAvailabilityStore(database)
+                        .markData(batch, genesis.hash());
 
                 indexes.save(
                         batch,

@@ -3,6 +3,7 @@ package ru.bitcoin.node.storage.undo;
 import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.storage.rocksdb.RocksDbDatabase;
 import ru.bitcoin.node.storage.rocksdb.RocksDbWriteBatch;
+import ru.bitcoin.node.storage.block.RocksDbBlockAvailabilityStore;
 
 import java.util.Optional;
 
@@ -94,9 +95,11 @@ public final class RocksDbUndoStore
             );
         }
 
-        database.delete(
-                key(blockHash)
-        );
+        try (RocksDbWriteBatch batch = new RocksDbWriteBatch()) {
+            batch.delete(key(blockHash));
+            new RocksDbBlockAvailabilityStore(database).clearUndo(batch, blockHash);
+            database.write(batch);
+        }
     }
 
     private static byte[] key(

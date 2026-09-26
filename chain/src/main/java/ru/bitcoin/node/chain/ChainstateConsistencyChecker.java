@@ -152,16 +152,17 @@ public final class ChainstateConsistencyChecker {
             RocksDbBlockStore blocks,
             RocksDbUndoStore undos
     ) {
+        var availability = new ru.bitcoin.node.storage.block.RocksDbBlockAvailabilityStore(database);
         if (recentDataDepth == 0) return 0L;
         BlockIndex cursor = activeTip;
         long checked = 0L;
         while (cursor.height() > 0 && checked < recentDataDepth) {
-            if (blocks.find(cursor.hash()).isEmpty()) {
+            if (!availability.hasData(cursor.hash())) {
                 throw new IllegalStateException(
                         "Startup consistency check failed: recent active block body is missing at height "
                                 + cursor.height() + ": " + cursor.hash().toDisplayHex());
             }
-            if (undos.find(cursor.hash()).isEmpty()) {
+            if (!availability.hasUndo(cursor.hash())) {
                 throw new IllegalStateException(
                         "Startup consistency check failed: recent active undo data is missing at height "
                                 + cursor.height() + ": " + cursor.hash().toDisplayHex());

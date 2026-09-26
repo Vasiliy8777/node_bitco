@@ -13,6 +13,7 @@ public final class KnownBlockStorage {
     private final RocksDbDatabase database;
     private final RocksDbBlockStore blockStore;
     private final RocksDbBlockIndexStore blockIndexStore;
+    private final ru.bitcoin.node.storage.block.RocksDbBlockAvailabilityStore availability;
 
     public KnownBlockStorage(
             RocksDbDatabase database,
@@ -40,11 +41,12 @@ public final class KnownBlockStorage {
         this.database = database;
         this.blockStore = blockStore;
         this.blockIndexStore = blockIndexStore;
+        this.availability = new ru.bitcoin.node.storage.block.RocksDbBlockAvailabilityStore(database);
     }
 
     public boolean hasBody(ru.bitcoin.node.common.types.Hash256 hash) {
         if (hash == null) throw new IllegalArgumentException("hash must not be null");
-        return blockStore.find(hash).isPresent();
+        return availability.hasData(hash);
     }
 
     public void save(
@@ -86,6 +88,7 @@ public final class KnownBlockStorage {
                     batch,
                     block
             );
+            availability.markData(batch, block.hash());
 
             blockIndexStore.save(
                     batch,
