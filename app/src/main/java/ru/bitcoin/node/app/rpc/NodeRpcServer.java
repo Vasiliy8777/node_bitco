@@ -181,12 +181,20 @@ public final class NodeRpcServer implements AutoCloseable {
                     transaction = validation.transactionInActiveBlock(txid, blockHash)
                             .orElseThrow(() -> new RpcException(-5, "No such transaction found in the provided block"));
                 } else {
-                    transaction = validation.mempoolEntry(txid)
-                            .map(entry -> entry.transaction())
-                            .orElseThrow(() -> new RpcException(
-                                    -5,
-                                    "No such mempool transaction. Provide a block hash to query blockchain transactions"
-                            ));
+                    var mempool = validation.mempoolEntry(txid);
+                    if (mempool.isPresent()) {
+                        transaction = mempool.orElseThrow().transaction();
+                    } else {
+                        var indexed = validation.indexedTransaction(txid);
+                        if (indexed.isEmpty()) {
+                            String message = validation.txIndexEnabled()
+                                    ? "No such mempool or blockchain transaction"
+                                    : "No such mempool transaction. Use -txindex or provide a block hash to query blockchain transactions";
+                            throw new RpcException(-5, message);
+                        }
+                        transaction = indexed.orElseThrow().transaction();
+                        blockInfo = indexed.orElseThrow().blockInfo();
+                    }
                 }
 
                 if (verbosity == 0)

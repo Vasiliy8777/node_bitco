@@ -15,6 +15,7 @@ import ru.bitcoin.node.storage.chain.RocksDbPruneStateStore;
 import ru.bitcoin.node.storage.rocksdb.RocksDbDatabase;
 import ru.bitcoin.node.storage.mempool.RocksDbMempoolStore;
 import ru.bitcoin.node.storage.mempool.PersistedMempoolEntry;
+import ru.bitcoin.node.storage.txindex.RocksDbTxIndexStore;
 import ru.bitcoin.node.storage.undo.RocksDbUndoStore;
 import ru.bitcoin.node.storage.utxo.RocksDbUtxoStore;
 
@@ -33,6 +34,8 @@ public final class NodeValidationService {
     private final Mempool mempool;
     private final RocksDbMempoolStore mempoolStore;
     private final boolean persistMempool;
+    private final boolean txIndexEnabled;
+    private final RocksDbTxIndexStore txIndexStore;
     private final NetworkParameters parameters;
     private final AdjustedTime time;
     private final RocksDbUtxoStore utxos;
@@ -254,25 +257,33 @@ public final class NodeValidationService {
 
     public NodeValidationService(RocksDbDatabase database, NetworkParameters parameters,
                                  AdjustedTime time, Mempool mempool) {
-        this(database, parameters, time, mempool, 0L, parameters.defaultAssumeValid(), true);
+        this(database, parameters, time, mempool, 0L, parameters.defaultAssumeValid(), true, false);
     }
 
     public NodeValidationService(RocksDbDatabase database, NetworkParameters parameters,
                                  AdjustedTime time, Mempool mempool, long pruneTargetBytes) {
-        this(database, parameters, time, mempool, pruneTargetBytes, parameters.defaultAssumeValid(), true);
+        this(database, parameters, time, mempool, pruneTargetBytes, parameters.defaultAssumeValid(), true, false);
     }
 
     public NodeValidationService(RocksDbDatabase database, NetworkParameters parameters,
                                  AdjustedTime time, Mempool mempool, long pruneTargetBytes, Hash256 assumedValidBlock) {
-        this(database, parameters, time, mempool, pruneTargetBytes, assumedValidBlock, true);
+        this(database, parameters, time, mempool, pruneTargetBytes, assumedValidBlock, true, false);
     }
 
     public NodeValidationService(RocksDbDatabase database, NetworkParameters parameters,
                                  AdjustedTime time, Mempool mempool, long pruneTargetBytes,
                                  Hash256 assumedValidBlock, boolean persistMempool) {
+        this(database, parameters, time, mempool, pruneTargetBytes, assumedValidBlock, persistMempool, false);
+    }
+
+    public NodeValidationService(RocksDbDatabase database, NetworkParameters parameters,
+                                 AdjustedTime time, Mempool mempool, long pruneTargetBytes,
+                                 Hash256 assumedValidBlock, boolean persistMempool, boolean txIndexEnabled) {
         this.mempool = Objects.requireNonNull(mempool);
         this.mempoolStore = new RocksDbMempoolStore(database);
         this.persistMempool = persistMempool;
+        this.txIndexEnabled = txIndexEnabled;
+        this.txIndexStore = new RocksDbTxIndexStore(database);
         this.blockPruner = new BlockPruner(database, pruneTargetBytes);
         this.pruneState = new RocksDbPruneStateStore(database);
         this.pruneTargetBytes = pruneTargetBytes;
@@ -346,6 +357,7 @@ public final class NodeValidationService {
                 mempoolPersistenceDirty = false;
             }
             blockPruner.prune(chain.activeTip());
+            if (txIndexEnabled) synchronizeTxIndex();
             initialBlockDownload.update(chain.activeTip());
         }
     }
@@ -358,6 +370,7 @@ public final class NodeValidationService {
             // and every later API call retries synchronization before exposing the pool.
             synchronizePool();
             if (result == BlockProcessingResult.CONNECTED) {
+                if (txIndexEnabled) synchronizeTxIndex();
                 blockPruner.prune(chain.activeTip());
                 initialBlockDownload.update(chain.activeTip());
             }
@@ -413,6 +426,56 @@ public final class NodeValidationService {
                     .flatMap(block -> block.transactions().stream()
                             .filter(tx -> tx.txId().equals(txid))
                             .findFirst());
+        }
+    }
+
+
+    public boolean txIndexEnabled() {
+        return txIndexEnabled;
+    }
+
+    /** Finds a confirmed transaction through the optional persistent transaction index. */
+    public Optional<IndexedTransaction> indexedTransaction(Hash256 txid) {
+        Objects.requireNonNull(txid, "txid");
+        synchronized (chain) {
+            if (!txIndexEnabled) return Optional.empty();
+            synchronizeTxIndex();
+            Hash256 blockHash = txIndexStore.findBlockHash(txid).orElse(null);
+            if (blockHash == null) return Optional.empty();
+            BlockIndex index = lookup.find(blockHash);
+            if (index == null || index.height() > chain.activeTip().height()) return Optional.empty();
+            BlockIndex active = activeAncestors.at(chain.activeTip(), index.height(), lookup);
+            if (active == null || !active.hash().equals(blockHash)) return Optional.empty();
+            return blocks.find(blockHash).flatMap(block -> block.transactions().stream()
+                    .filter(tx -> tx.txId().equals(txid)).findFirst()
+                    .map(tx -> new IndexedTransaction(tx, activeBlockInfo(blockHash).orElseThrow())));
+        }
+    }
+
+    public record IndexedTransaction(Transaction transaction, ActiveBlockInfo blockInfo) {}
+
+    private void synchronizeTxIndex() {
+        if (!txIndexEnabled) return;
+        BlockIndex activeTip = chain.activeTip();
+        Hash256 indexedHash = txIndexStore.bestIndexedBlockHash().orElse(null);
+        if (indexedHash == null) {
+            BlockIndex genesis = activeAncestors.at(activeTip, 0L, lookup);
+            if (genesis == null) throw new IllegalStateException("Cannot initialize txindex without genesis");
+            txIndexStore.initializeAt(genesis.hash());
+            indexedHash = genesis.hash();
+        }
+        BlockIndex indexed = lookup.find(indexedHash);
+        if (indexed == null) throw new IllegalStateException("txindex cursor references unknown block: " + indexedHash.toDisplayHex());
+        ReorganizationPlan plan = ReorganizationPlanner.plan(indexed, activeTip, lookup);
+        for (BlockIndex connect : plan.blocksToConnect()) {
+            Block block = blocks.find(connect.hash()).orElseThrow(() ->
+                    new IllegalStateException("Block body required to synchronize txindex: " + connect.hash().toDisplayHex()));
+            txIndexStore.append(block);
+        }
+        if (!txIndexStore.bestIndexedBlockHash().orElseThrow().equals(activeTip.hash())) {
+            // Reorg to an ancestor with no forward blocks: move only the cursor. Old mappings are harmless
+            // because indexedTransaction verifies active-chain membership before returning them.
+            txIndexStore.initializeAt(activeTip.hash());
         }
     }
 

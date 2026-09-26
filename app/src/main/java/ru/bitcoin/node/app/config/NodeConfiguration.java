@@ -81,10 +81,18 @@ public class NodeConfiguration {
             @Value("${bitcoin.assume-valid:}")
             String assumeValid,
             @Value("${bitcoin.persist-mempool:true}")
-            boolean persistMempool
+            boolean persistMempool,
+            @Value("${bitcoin.txindex:false}")
+            boolean txIndex
     ) {
         long pruneTargetBytes = pruneTargetBytes(pruneMiB);
         var pruneState = new ru.bitcoin.node.storage.chain.RocksDbPruneStateStore(database);
+        if (txIndex && pruneMiB > 0) {
+            throw new IllegalArgumentException("bitcoin.txindex is incompatible with bitcoin.prune");
+        }
+        if (txIndex && pruneState.hasPruned()) {
+            throw new IllegalStateException("bitcoin.txindex cannot be enabled after historical block data has been pruned; restore/redownload full block history first");
+        }
         if (fullReindex && reindexChainstate) {
             throw new IllegalArgumentException(
                     "bitcoin.reindex and bitcoin.reindex-chainstate cannot both be enabled");
@@ -120,7 +128,8 @@ public class NodeConfiguration {
                 new Mempool(),
                 pruneTargetBytes,
                 assumeValidHash(assumeValid, parameters),
-                persistMempool
+                persistMempool,
+                txIndex
         );
     }
 
