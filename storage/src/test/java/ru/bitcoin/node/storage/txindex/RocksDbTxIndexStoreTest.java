@@ -43,4 +43,25 @@ class RocksDbTxIndexStoreTest {
         }
     }
 
+    @Test
+    void batchClearParticipatesInCallersAtomicWrite() {
+        var block = GenesisBlockFactory.create(NetworkParametersRegistry.regtest());
+        try (var db = new RocksDbDatabase(directory)) {
+            var store = new RocksDbTxIndexStore(db);
+            store.append(block);
+            var txid = block.transactions().getFirst().txId();
+
+            try (var batch = new ru.bitcoin.node.storage.rocksdb.RocksDbWriteBatch()) {
+                store.clear(batch);
+                // Nothing is visible before the caller commits the shared batch.
+                assertEquals(block.hash(), store.bestIndexedBlockHash().orElseThrow());
+                assertEquals(block.hash(), store.findBlockHash(txid).orElseThrow());
+                db.write(batch);
+            }
+
+            assertTrue(store.bestIndexedBlockHash().isEmpty());
+            assertTrue(store.findBlockHash(txid).isEmpty());
+        }
+    }
+
 }

@@ -75,10 +75,16 @@ public final class RocksDbTxIndexStore {
 
     public void clear() {
         try (var batch = new RocksDbWriteBatch()) {
-            batch.deletePrefix(TX_PREFIX);
-            batch.delete(BEST_BLOCK_KEY);
+            clear(batch);
             database.write(batch);
         }
+    }
+
+    /** Clears transaction mappings and the durable cursor atomically with the caller's batch. */
+    public void clear(RocksDbWriteBatch batch) {
+        Objects.requireNonNull(batch, "batch");
+        batch.deletePrefix(TX_PREFIX);
+        batch.delete(BEST_BLOCK_KEY);
     }
 
     private static byte[] txKey(Hash256 txid) {

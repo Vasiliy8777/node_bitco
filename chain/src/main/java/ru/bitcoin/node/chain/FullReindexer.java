@@ -19,6 +19,7 @@ import ru.bitcoin.node.storage.rocksdb.RocksDbDatabase;
 import ru.bitcoin.node.storage.rocksdb.RocksDbWriteBatch;
 import ru.bitcoin.node.storage.undo.RocksDbUndoStore;
 import ru.bitcoin.node.storage.utxo.RocksDbUtxoStore;
+import ru.bitcoin.node.storage.txindex.RocksDbTxIndexStore;
 
 import java.util.*;
 
@@ -73,6 +74,7 @@ public final class FullReindexer {
             var failures = new RocksDbBlockFailureStore(database);
             var marker = new RocksDbFullReindexStateStore(database);
             var chainstateMarker = new RocksDbReindexStateStore(database);
+            var txIndex = new RocksDbTxIndexStore(database);
             BlockIndex genesisIndex = BlockIndexFactory.createGenesis(genesis.header());
 
             // One durable reset point. If power is lost after this commit, the marker makes
@@ -82,6 +84,11 @@ public final class FullReindexer {
                 utxos.clear(batch);
                 undos.clear(batch);
                 tips.clear(batch);
+                // A full block-index rebuild invalidates every txindex mapping/cursor as well.
+                // Clear it in the same durable reset so a crash can never expose a stale cursor
+                // that references the pre-reindex block-index namespace. When txindex is enabled,
+                // NodeValidationService rebuilds it from genesis to the reconstructed active tip.
+                txIndex.clear(batch);
                 chainstateMarker.clear(batch);
                 marker.markInProgress(batch);
                 indexes.save(batch, BlockIndexStorageMapper.toStored(genesisIndex));
