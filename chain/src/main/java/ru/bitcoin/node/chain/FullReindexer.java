@@ -4,6 +4,10 @@ import ru.bitcoin.node.chain.storage.KnownBlockStorage;
 import ru.bitcoin.node.chain.storage.RocksDbChainTransitionStorage;
 import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.consensus.time.AdjustedTime;
+import ru.bitcoin.node.consensus.block.BlockHeaderValidationException;
+import ru.bitcoin.node.consensus.block.BlockValidationException;
+import ru.bitcoin.node.consensus.transaction.TransactionValidationException;
+import ru.bitcoin.node.script.ScriptExecutionException;
 import ru.bitcoin.node.protocol.block.Block;
 import ru.bitcoin.node.protocol.block.BlockHeader;
 import ru.bitcoin.node.protocol.block.GenesisBlockFactory;
@@ -156,17 +160,45 @@ public final class FullReindexer {
                     }
                     Block block = blocks.find(hash).orElseThrow(() ->
                             new IllegalStateException("Block body disappeared during full reindex: " + hash.toDisplayHex()));
-                    BlockProcessingResult result = processor.process(block);
-                    if (result == BlockProcessingResult.UNKNOWN_PARENT) {
-                        throw new IllegalStateException("Topological full reindex produced UNKNOWN_PARENT for "
-                                + hash.toDisplayHex());
+                    try {
+                        BlockProcessingResult result = processor.process(block);
+                        if (result == BlockProcessingResult.UNKNOWN_PARENT) {
+                            throw new IllegalStateException("Topological full reindex produced UNKNOWN_PARENT for "
+                                    + hash.toDisplayHex());
+                        }
+                        if (result == BlockProcessingResult.ALREADY_IN_ACTIVE_CHAIN) {
+                            throw new IllegalStateException("Unexpected duplicate active block during full reindex: "
+                                    + hash.toDisplayHex());
+                        }
+                        replayed++;
+                        queue.addLast(hash);
+                    } catch (BlockHeaderValidationException
+                             | BlockValidationException
+                             | TransactionValidationException
+                             | ScriptExecutionException invalid) {
+                        /*
+                         * A raw side-chain body is not proof that it was ever contextually valid.
+                         * Full reindex must be able to rediscover an invalid side branch without
+                         * abandoning reconstruction of an otherwise valid active chain.
+                         *
+                         * Contextual/script validation may already have called markFailed() for
+                         * the actual failing ancestor. Early header/structure/witness failures
+                         * happen before KnownBlockStorage.save(), so create the candidate index
+                         * and failure metadata here. Storage/invariant exceptions are deliberately
+                         * not caught by this block and still abort reindex.
+                         */
+                        Set<Hash256> discoveredRoots = committedFailureRoots(hash, indexes, failures);
+                        if (discoveredRoots.isEmpty()) {
+                            persistEarlyRejectedBlock(block, indexes, failures, availability);
+                            discoveredRoots = Set.of(hash);
+                        }
+                        failedBranches.addAll(discoveredRoots);
+                        // The submitted block itself belongs to that failed branch even when
+                        // the observer identified an earlier ancestor as the actual failure root.
+                        failedBranches.add(hash);
+                        skippedFailed++;
+                        queue.addLast(hash);
                     }
-                    if (result == BlockProcessingResult.ALREADY_IN_ACTIVE_CHAIN) {
-                        throw new IllegalStateException("Unexpected duplicate active block during full reindex: "
-                                + hash.toDisplayHex());
-                    }
-                    replayed++;
-                    queue.addLast(hash);
                 }
             }
 
@@ -188,6 +220,54 @@ public final class FullReindexer {
         }
     }
 
+
+    private Set<Hash256> committedFailureRoots(
+            Hash256 hash,
+            RocksDbBlockIndexStore indexes,
+            RocksDbBlockFailureStore failures
+    ) {
+        var stored = indexes.find(hash);
+        if (stored.isEmpty()) return Set.of();
+
+        Set<Hash256> roots = new HashSet<>();
+        BlockIndex cursor = BlockIndexStorageMapper.fromStored(stored.orElseThrow());
+        Set<Hash256> visited = new HashSet<>();
+        while (true) {
+            if (!visited.add(cursor.hash())) {
+                throw new IllegalStateException("Cycle while resolving replay failure at "
+                        + cursor.hash().toDisplayHex());
+            }
+            if (failures.isFailed(cursor.hash())) roots.add(cursor.hash());
+            if (cursor.height() == 0) break;
+            Hash256 previous = cursor.previousBlockHash();
+            cursor = indexes.find(previous)
+                    .map(BlockIndexStorageMapper::fromStored)
+                    .orElseThrow(() -> new IllegalStateException(
+                            "Missing BlockIndex ancestor while resolving replay failure: "
+                                    + previous.toDisplayHex()));
+        }
+        return Set.copyOf(roots);
+    }
+
+    private void persistEarlyRejectedBlock(
+            Block block,
+            RocksDbBlockIndexStore indexes,
+            RocksDbBlockFailureStore failures,
+            ru.bitcoin.node.storage.block.RocksDbBlockAvailabilityStore availability
+    ) {
+        Hash256 parentHash = block.header().previousBlockHash();
+        BlockIndex parent = indexes.find(parentHash)
+                .map(BlockIndexStorageMapper::fromStored)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Missing parent BlockIndex for rejected raw block: " + parentHash.toDisplayHex()));
+        BlockIndex rejected = BlockIndexFactory.createChild(parent, block.header());
+        try (RocksDbWriteBatch batch = new RocksDbWriteBatch()) {
+            indexes.save(batch, BlockIndexStorageMapper.toStored(rejected));
+            availability.markData(batch, rejected.hash());
+            failures.markFailed(batch, rejected.hash());
+            database.write(batch);
+        }
+    }
 
     private long heightBeforeReset(Hash256 hash, RocksDbBlockIndexStore indexes, Graph graph, Hash256 genesisHash) {
         return indexes.find(hash).map(ru.bitcoin.node.storage.block.StoredBlockIndex::height)
