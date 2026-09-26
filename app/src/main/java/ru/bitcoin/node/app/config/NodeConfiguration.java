@@ -459,8 +459,9 @@ public class NodeConfiguration {
 
     static long pruneTargetBytes(long pruneMiB) {
         if (pruneMiB < 0) throw new IllegalArgumentException("bitcoin.prune must not be negative");
+        if (pruneMiB == 1) return ru.bitcoin.node.chain.BlockPruner.MANUAL_ONLY;
         if (pruneMiB > 0 && pruneMiB < 550) {
-            throw new IllegalArgumentException("bitcoin.prune must be 0 or at least 550 MiB");
+            throw new IllegalArgumentException("bitcoin.prune must be 0, 1 (manual), or at least 550 MiB");
         }
         return Math.multiplyExact(pruneMiB, 1024L * 1024L);
     }

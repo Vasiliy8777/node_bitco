@@ -79,7 +79,13 @@ public final class NodeValidationService {
         synchronized (chain) {
             boolean hasPruned = pruneState.hasPruned();
             long pruneHeight = hasPruned ? lowestAvailableActiveHeight() : 0L;
-            return new PruneInfo(blockPruner.enabled(), hasPruned, pruneHeight, pruneTargetBytes);
+            return new PruneInfo(
+                    blockPruner.enabled(),
+                    blockPruner.automatic(),
+                    hasPruned,
+                    pruneHeight,
+                    blockPruner.targetBytes()
+            );
         }
     }
 
@@ -106,7 +112,22 @@ public final class NodeValidationService {
         return 0L;
     }
 
-    public record PruneInfo(boolean enabled, boolean hasPruned, long pruneHeight, long targetBytes) {}
+    public record PruneInfo(
+            boolean enabled,
+            boolean automatic,
+            boolean hasPruned,
+            long pruneHeight,
+            long targetBytes
+    ) {}
+
+    /** Manual pruning entry point used by pruneblockchain RPC. */
+    public long pruneToHeight(long requestedHeight) {
+        synchronized (chain) {
+            BlockPruner.Result result = blockPruner.pruneToHeight(chain.activeTip(), requestedHeight);
+            if (result.highestPrunedHeight() >= 0) return result.highestPrunedHeight();
+            return pruneState.highestPrunedHeight().orElse(0L);
+        }
+    }
 
     /**
      * Immutable active-chain index view used by RPC/read-only services.

@@ -11,7 +11,9 @@ class PruneConfigurationTest {
     }
 
     @Test
-    void coreCompatibleMinimumIsEnforced() {
+    void coreCompatibleManualModeAndAutomaticMinimumAreEnforced() {
+        assertEquals(ru.bitcoin.node.chain.BlockPruner.MANUAL_ONLY, NodeConfiguration.pruneTargetBytes(1));
+        assertThrows(IllegalArgumentException.class, () -> NodeConfiguration.pruneTargetBytes(2));
         assertThrows(IllegalArgumentException.class, () -> NodeConfiguration.pruneTargetBytes(549));
         assertEquals(550L * 1024L * 1024L, NodeConfiguration.pruneTargetBytes(550));
     }

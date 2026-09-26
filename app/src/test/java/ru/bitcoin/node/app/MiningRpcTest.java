@@ -50,6 +50,8 @@ class MiningRpcTest {
                     var chainInfo = (Map<?, ?>) call(client, uri, "getblockchaininfo", List.of()).get("result");
                     assertEquals(false, chainInfo.get("pruned"));
                     assertFalse(chainInfo.containsKey("pruneheight"));
+                    var pruneDisabled = (Map<?, ?>) call(client, uri, "pruneblockchain", List.of(0)).get("error");
+                    assertEquals(-1, ((Number) pruneDisabled.get("code")).intValue());
                     assertEquals(true, chainInfo.get("initialblockdownload"));
                     assertEquals(0, ((Number) call(client, uri, "getconnectioncount", List.of()).get("result")).intValue());
                     assertEquals(List.of(), call(client, uri, "getpeerinfo", List.of()).get("result"));

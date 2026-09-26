@@ -134,6 +134,13 @@ class NodeValidationServiceTest {
             assertEquals(550L * 1024L * 1024L, pruned.pruneInfo().targetBytes());
             assertEquals(0L, pruned.pruneInfo().pruneHeight());
         }
+        try (var db = new RocksDbDatabase(directory)) {
+            var manual = new NodeValidationService(db, PARAMS, () -> 1_800_000_000L, new Mempool(), BlockPruner.MANUAL_ONLY);
+            assertTrue(manual.pruneInfo().enabled());
+            assertFalse(manual.pruneInfo().automatic());
+            assertFalse(manual.pruneInfo().hasPruned());
+            assertEquals(0L, manual.pruneInfo().targetBytes());
+        }
     }
 
     private static Transaction spend(OutPoint point, long value) {

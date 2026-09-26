@@ -318,6 +318,19 @@ public final class NodeRpcServer implements AutoCloseable {
             case "listbanned" -> requirePeerManager().banManager().entries().stream().map(entry -> Map.of(
                     "address", entry.subnet(), "ban_created", entry.banCreated(), "banned_until", entry.bannedUntil())).toList();
             case "clearbanned" -> { requirePeerManager().banManager().clear(); yield null; }
+            case "pruneblockchain" -> {
+                long height = longParam(params, 0, "height");
+                if (height < 0) throw new RpcException(-8, "Negative block height");
+                if (!validation.pruneInfo().enabled())
+                    throw new RpcException(-1, "Cannot prune blocks because node is not in prune mode");
+                try {
+                    yield validation.pruneToHeight(height);
+                } catch (IllegalArgumentException exception) {
+                    throw new RpcException(-8, exception.getMessage());
+                } catch (IllegalStateException exception) {
+                    throw new RpcException(-1, exception.getMessage());
+                }
+            }
             case "getblockchaininfo" -> {
                 var tip = validation.activeTip();
                 var prune = validation.pruneInfo();
@@ -330,8 +343,8 @@ public final class NodeRpcServer implements AutoCloseable {
                 info.put("pruned", prune.enabled());
                 if (prune.enabled()) {
                     info.put("pruneheight", prune.pruneHeight());
-                    info.put("automatic_pruning", true);
-                    info.put("prune_target_size", prune.targetBytes());
+                    info.put("automatic_pruning", prune.automatic());
+                    if (prune.automatic()) info.put("prune_target_size", prune.targetBytes());
                 }
                 yield info;
             }
