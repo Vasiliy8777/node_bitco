@@ -381,6 +381,41 @@ public final class NodeValidationService {
         }
     }
 
+    public Optional<MempoolEntry> mempoolEntry(Hash256 txid) {
+        Objects.requireNonNull(txid, "txid");
+        synchronized (chain) {
+            synchronizePool();
+            expirePersistent();
+            return mempool.entries().stream()
+                    .filter(entry -> entry.transaction().txId().equals(txid))
+                    .findFirst();
+        }
+    }
+
+    /**
+     * Finds a transaction only inside the explicitly supplied active-chain block.
+     * This deliberately does not emulate a global txindex.
+     */
+    public Optional<Transaction> transactionInActiveBlock(
+            Hash256 txid,
+            Hash256 blockHash
+    ) {
+        Objects.requireNonNull(txid, "txid");
+        Objects.requireNonNull(blockHash, "blockHash");
+        synchronized (chain) {
+            BlockIndex candidate = lookup.find(blockHash);
+            if (candidate == null) return Optional.empty();
+            BlockIndex tip = chain.activeTip();
+            if (candidate.height() > tip.height()) return Optional.empty();
+            BlockIndex active = activeAncestors.at(tip, candidate.height(), lookup);
+            if (active == null || !active.hash().equals(blockHash)) return Optional.empty();
+            return blocks.find(blockHash)
+                    .flatMap(block -> block.transactions().stream()
+                            .filter(tx -> tx.txId().equals(txid))
+                            .findFirst());
+        }
+    }
+
     public List<MempoolEntry> mempoolEntries() {
         synchronized (chain) {
             synchronizePool();

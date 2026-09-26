@@ -100,6 +100,36 @@ class MiningRpcTest {
                                     List.of(mined.hash().toDisplayHex(), 0)).get("result")
                     );
 
+                    var coinbase = mined.transactions().getFirst();
+                    assertEquals(
+                            HexFormat.of().formatHex(TransactionSerializer.serialize(coinbase)),
+                            call(client, uri, "getrawtransaction",
+                                    List.of(coinbase.txId().toDisplayHex(), 0,
+                                            mined.hash().toDisplayHex())).get("result")
+                    );
+                    var txJson = (Map<?, ?>) call(
+                            client, uri, "getrawtransaction",
+                            List.of(coinbase.txId().toDisplayHex(), 1,
+                                    mined.hash().toDisplayHex())
+                    ).get("result");
+                    assertEquals(coinbase.txId().toDisplayHex(), txJson.get("txid"));
+                    assertEquals(coinbase.wtxId().toDisplayHex(), txJson.get("hash"));
+                    assertEquals(mined.hash().toDisplayHex(), txJson.get("blockhash"));
+                    assertEquals(1, ((Number) txJson.get("confirmations")).intValue());
+
+                    var decoded = (Map<?, ?>) call(
+                            client, uri, "decoderawtransaction",
+                            List.of(HexFormat.of().formatHex(TransactionSerializer.serialize(coinbase)))
+                    ).get("result");
+                    assertEquals(coinbase.txId().toDisplayHex(), decoded.get("txid"));
+                    assertEquals(coinbase.outputs().size(), ((List<?>) decoded.get("vout")).size());
+
+                    assertEquals(
+                            -5,
+                            ((Number) ((Map<?, ?>) call(client, uri, "getrawtransaction",
+                                    List.of(coinbase.txId().toDisplayHex())).get("error")).get("code")).intValue()
+                    );
+
                     assertEquals(
                             -8,
                             ((Number) ((Map<?, ?>) call(client, uri, "getblockhash",

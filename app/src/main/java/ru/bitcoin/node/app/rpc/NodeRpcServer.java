@@ -7,6 +7,9 @@ import ru.bitcoin.node.app.NodeValidationService;
 import ru.bitcoin.node.app.service.NodeRelayService;
 import ru.bitcoin.node.app.sync.NodeSyncInfrastructure;
 import ru.bitcoin.node.protocol.serialization.TransactionParser;
+import ru.bitcoin.node.protocol.serialization.TransactionSerializer;
+import ru.bitcoin.node.consensus.transaction.TransactionWeight;
+import ru.bitcoin.node.protocol.transaction.Transaction;
 import ru.bitcoin.node.protocol.serialization.BlockHeaderSerializer;
 import ru.bitcoin.node.protocol.serialization.BlockSerializer;
 import ru.bitcoin.node.common.types.Hash256;
@@ -143,6 +146,72 @@ public final class NodeRpcServer implements AutoCloseable {
                     throw new RpcException(-26, exception.getMessage());
                 }
             }
+            case "decoderawtransaction" -> {
+                if (params.size() != 1 || !(params.getFirst() instanceof String raw))
+                    throw new RpcException(-32602, "Expected one raw transaction hex string");
+                try {
+                    Transaction transaction = TransactionParser.parse(HexFormat.of().parseHex(raw));
+                    yield transactionJson(transaction, null, null);
+                } catch (IllegalArgumentException | java.nio.BufferUnderflowException exception) {
+                    throw new RpcException(-22, "TX decode failed");
+                }
+            }
+            case "getrawtransaction" -> {
+                if (params.isEmpty() || params.size() > 3 || !(params.getFirst() instanceof String txidText))
+                    throw new RpcException(-32602, "Expected txid, optional verbosity and optional blockhash");
+                Hash256 txid = parseHash(txidText);
+                int verbosity = intOrBooleanVerbosity(params, 1, 0);
+                if (verbosity < 0 || verbosity > 1)
+                    throw new RpcException(-8, "Verbosity must be 0 or 1");
+
+                Transaction transaction;
+                NodeValidationService.ActiveBlockInfo blockInfo = null;
+
+                if (params.size() >= 3 && params.get(2) != null) {
+                    if (!(params.get(2) instanceof String blockHashText))
+                        throw new RpcException(-32602, "blockhash must be a string");
+                    Hash256 blockHash = parseHash(blockHashText);
+                    blockInfo = validation.activeBlockInfo(blockHash)
+                            .orElseThrow(() -> new RpcException(-5, "Block hash not found"));
+                    if (validation.findBlock(blockHash).isEmpty()) {
+                        if (validation.isPrunedActiveBlock(blockHash))
+                            throw new RpcException(-1, "Block not available (pruned data)");
+                        throw new RpcException(-1, "Block not available");
+                    }
+                    transaction = validation.transactionInActiveBlock(txid, blockHash)
+                            .orElseThrow(() -> new RpcException(-5, "No such transaction found in the provided block"));
+                } else {
+                    transaction = validation.mempoolEntry(txid)
+                            .map(entry -> entry.transaction())
+                            .orElseThrow(() -> new RpcException(
+                                    -5,
+                                    "No such mempool transaction. Provide a block hash to query blockchain transactions"
+                            ));
+                }
+
+                if (verbosity == 0)
+                    yield HexFormat.of().formatHex(TransactionSerializer.serialize(transaction));
+                yield transactionJson(transaction, blockInfo, null);
+            }
+            case "getmempoolentry" -> {
+                if (params.size() != 1 || !(params.getFirst() instanceof String txidText))
+                    throw new RpcException(-32602, "Expected one transaction id");
+                Hash256 txid = parseHash(txidText);
+                var entry = validation.mempoolEntry(txid)
+                        .orElseThrow(() -> new RpcException(-5, "Transaction not in mempool"));
+                var result = new LinkedHashMap<String, Object>();
+                result.put("vsize", entry.virtualSize());
+                result.put("weight", entry.weight());
+                result.put("time", entry.arrivalTime());
+                result.put("fees", Map.of("base", satoshisToBtc(entry.fee())));
+                result.put("depends", entry.transaction().inputs().stream()
+                        .map(input -> input.previousOutput().transactionId())
+                        .distinct()
+                        .filter(parent -> validation.mempoolEntry(parent).isPresent())
+                        .map(Hash256::toDisplayHex)
+                        .toList());
+                yield result;
+            }
             case "getblockhash" -> {
                 long height = longParam(params, 0, "height");
                 yield validation.activeBlockInfo(height)
@@ -211,6 +280,75 @@ public final class NodeRpcServer implements AutoCloseable {
                     validation.mempoolEntries().stream().map(entry -> entry.transaction().txId().toDisplayHex()).toList();
             default -> throw new RpcException(-32601, "Method not found");
         };
+    }
+
+    private int intOrBooleanVerbosity(List<?> params, int index, int defaultValue) {
+        if (params.size() <= index || params.get(index) == null) return defaultValue;
+        Object value = params.get(index);
+        if (value instanceof Boolean bool) return bool ? 1 : 0;
+        if (value instanceof Number number) return number.intValue();
+        throw new RpcException(-32602, "verbosity must be numeric or boolean");
+    }
+
+    private Map<String, Object> transactionJson(
+            Transaction transaction,
+            NodeValidationService.ActiveBlockInfo blockInfo,
+            Boolean inActiveChain
+    ) {
+        byte[] serialized = TransactionSerializer.serialize(transaction);
+        long weight = TransactionWeight.calculate(transaction);
+        var result = new LinkedHashMap<String, Object>();
+        result.put("txid", transaction.txId().toDisplayHex());
+        result.put("hash", transaction.wtxId().toDisplayHex());
+        result.put("version", transaction.version());
+        result.put("size", serialized.length);
+        result.put("vsize", TransactionWeight.virtualSize(weight));
+        result.put("weight", weight);
+        result.put("locktime", transaction.lockTime().value());
+
+        var vin = new ArrayList<Map<String, Object>>();
+        for (var input : transaction.inputs()) {
+            var item = new LinkedHashMap<String, Object>();
+            if (input.previousOutput().isCoinbase()) {
+                item.put("coinbase", HexFormat.of().formatHex(input.scriptSig()));
+            } else {
+                item.put("txid", input.previousOutput().transactionId().toDisplayHex());
+                item.put("vout", input.previousOutput().outputIndex().value());
+                item.put("scriptSig", Map.of("hex", HexFormat.of().formatHex(input.scriptSig())));
+            }
+            item.put("sequence", input.sequence().value());
+            if (!input.witness().isEmpty()) {
+                item.put("txinwitness", input.witness().items().stream()
+                        .map(bytes -> HexFormat.of().formatHex(bytes)).toList());
+            }
+            vin.add(item);
+        }
+        result.put("vin", vin);
+
+        var vout = new ArrayList<Map<String, Object>>();
+        for (int n = 0; n < transaction.outputs().size(); n++) {
+            var output = transaction.outputs().get(n);
+            var item = new LinkedHashMap<String, Object>();
+            item.put("value", satoshisToBtc(output.value()));
+            item.put("n", n);
+            item.put("scriptPubKey", Map.of("hex", HexFormat.of().formatHex(output.scriptPubKey())));
+            vout.add(item);
+        }
+        result.put("vout", vout);
+        result.put("hex", HexFormat.of().formatHex(serialized));
+
+        if (blockInfo != null) {
+            if (inActiveChain != null) result.put("in_active_chain", inActiveChain);
+            result.put("blockhash", blockInfo.index().hash().toDisplayHex());
+            result.put("confirmations", blockInfo.confirmations());
+            result.put("time", blockInfo.index().header().timestamp().value());
+            result.put("blocktime", blockInfo.index().header().timestamp().value());
+        }
+        return result;
+    }
+
+    private static java.math.BigDecimal satoshisToBtc(long satoshis) {
+        return java.math.BigDecimal.valueOf(satoshis, 8);
     }
 
     private Map<String, Object> blockHeaderJson(NodeValidationService.ActiveBlockInfo info) {
