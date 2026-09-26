@@ -201,4 +201,24 @@ public final class KnownPeerAddress {
         newBucketReferences =
                 0;
     }
+
+    synchronized void restoreMetadata(
+            Instant restoredLastSeen,
+            Instant restoredLastAttempt,
+            Instant restoredLastSuccess,
+            int restoredAttempts,
+            AddrManState restoredState,
+            int restoredNewBucketReferences
+    ) {
+        lastSeen = Objects.requireNonNull(restoredLastSeen, "restoredLastSeen");
+        lastAttempt = restoredLastAttempt;
+        lastSuccess = restoredLastSuccess;
+        if (restoredAttempts < 0) throw new IllegalArgumentException("restoredAttempts must not be negative");
+        attempts = restoredAttempts;
+        state = Objects.requireNonNull(restoredState, "restoredState");
+        if (restoredNewBucketReferences < 0 || restoredNewBucketReferences > PeerAddressManager.MAX_NEW_REFERENCES) {
+            throw new IllegalArgumentException("invalid restored NEW bucket reference count");
+        }
+        newBucketReferences = restoredNewBucketReferences;
+    }
 }

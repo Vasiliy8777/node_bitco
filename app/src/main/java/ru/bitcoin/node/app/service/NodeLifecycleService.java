@@ -11,6 +11,7 @@ import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.p2p.*;
 import ru.bitcoin.node.p2p.address.PeerAddress;
 import ru.bitcoin.node.p2p.address.PeerAddressManager;
+import ru.bitcoin.node.p2p.address.PeerAddressManagerStore;
 import ru.bitcoin.node.p2p.sync.HeaderSynchronizer;
 import ru.bitcoin.node.p2p.sync.PeerDiscovery;
 
@@ -39,6 +40,7 @@ public final class NodeLifecycleService
     private final NodeSyncInfrastructure syncInfrastructure;
 
     private final PeerAddressManager addressManager;
+    private final PeerAddressManagerStore addressManagerStore;
     private final PeerDiscovery peerDiscovery;
     private final OutboundPeerManager outboundPeerManager;
     private final OutboundPeerSupervisor outboundPeerSupervisor;
@@ -78,7 +80,7 @@ public final class NodeLifecycleService
             boolean listen,
             int listenPort
     ) {
-        this(validationService, syncInfrastructure, addressManager, peerDiscovery, outboundPeerManager,
+        this(validationService, syncInfrastructure, addressManager, null, peerDiscovery, outboundPeerManager,
                 outboundPeerSupervisor, peerManager, bitcoinServer, blockSyncCoordinator,
                 headerResponseTimeout, listen, listenPort, BigInteger.ZERO);
     }
@@ -87,6 +89,27 @@ public final class NodeLifecycleService
             NodeValidationService validationService,
             NodeSyncInfrastructure syncInfrastructure,
             PeerAddressManager addressManager,
+            PeerDiscovery peerDiscovery,
+            OutboundPeerManager outboundPeerManager,
+            OutboundPeerSupervisor outboundPeerSupervisor,
+            PeerManager peerManager,
+            BitcoinServer bitcoinServer,
+            BlockSyncCoordinator blockSyncCoordinator,
+            Duration headerResponseTimeout,
+            boolean listen,
+            int listenPort,
+            BigInteger minimumChainWork
+    ) {
+        this(validationService, syncInfrastructure, addressManager, null, peerDiscovery, outboundPeerManager,
+                outboundPeerSupervisor, peerManager, bitcoinServer, blockSyncCoordinator,
+                headerResponseTimeout, listen, listenPort, minimumChainWork);
+    }
+
+    public NodeLifecycleService(
+            NodeValidationService validationService,
+            NodeSyncInfrastructure syncInfrastructure,
+            PeerAddressManager addressManager,
+            PeerAddressManagerStore addressManagerStore,
             PeerDiscovery peerDiscovery,
             OutboundPeerManager outboundPeerManager,
             OutboundPeerSupervisor outboundPeerSupervisor,
@@ -115,6 +138,8 @@ public final class NodeLifecycleService
                         addressManager,
                         "addressManager"
                 );
+
+        this.addressManagerStore = addressManagerStore;
 
         this.peerDiscovery =
                 Objects.requireNonNull(
@@ -767,6 +792,17 @@ public final class NodeLifecycleService
                 closeFailure = mempoolFailure;
             } else {
                 closeFailure.addSuppressed(mempoolFailure);
+            }
+        }
+
+        if (addressManagerStore != null) {
+            try {
+                addressManagerStore.save(addressManager);
+            } catch (IOException exception) {
+                IOException addrManFailure = new IOException(
+                        "Failed to persist AddrMan during shutdown", exception);
+                if (closeFailure == null) closeFailure = addrManFailure;
+                else closeFailure.addSuppressed(addrManFailure);
             }
         }
 

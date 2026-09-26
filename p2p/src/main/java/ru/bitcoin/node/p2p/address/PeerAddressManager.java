@@ -545,6 +545,69 @@ public final class PeerAddressManager {
         return secretKey.clone();
     }
 
+    public synchronized Snapshot snapshot() {
+        List<EntrySnapshot> entrySnapshots = new ArrayList<>();
+        for (KnownPeerAddress known : addresses.values()) {
+            entrySnapshots.add(new EntrySnapshot(
+                    known.peerAddress(), known.source(), known.firstSeen(), known.lastSeen(),
+                    known.lastAttempt().orElse(null), known.lastSuccess().orElse(null),
+                    known.attempts(), known.state(), known.newBucketReferences()));
+        }
+        List<BucketSnapshot> bucketSnapshots = new ArrayList<>();
+        snapshotBuckets(bucketSnapshots, false, newBuckets);
+        snapshotBuckets(bucketSnapshots, true, triedBuckets);
+        return new Snapshot(secretKey.clone(), List.copyOf(entrySnapshots), List.copyOf(bucketSnapshots));
+    }
+
+    public static PeerAddressManager restore(Snapshot snapshot) {
+        Objects.requireNonNull(snapshot, "snapshot");
+        PeerAddressManager manager = new PeerAddressManager(snapshot.secretKey(), new SecureRandom());
+        for (EntrySnapshot entry : snapshot.entries()) {
+            PeerAddressKey key = PeerAddressKey.from(entry.address());
+            KnownPeerAddress known = new KnownPeerAddress(entry.address(), entry.source(), entry.firstSeen());
+            known.restoreMetadata(entry.lastSeen(), entry.lastAttempt(), entry.lastSuccess(),
+                    entry.attempts(), entry.state(), entry.newBucketReferences());
+            manager.addresses.put(key, known);
+        }
+        for (BucketSnapshot bucket : snapshot.buckets()) {
+            AddrManBucket[] table = bucket.tried() ? manager.triedBuckets : manager.newBuckets;
+            if (bucket.bucket() < 0 || bucket.bucket() >= table.length) throw new IllegalArgumentException("invalid AddrMan bucket");
+            PeerAddressKey key = PeerAddressKey.from(bucket.address());
+            if (!manager.addresses.containsKey(key)) throw new IllegalArgumentException("bucket references unknown address");
+            table[bucket.bucket()].put(bucket.slot(), key);
+        }
+        return manager;
+    }
+
+    private void snapshotBuckets(List<BucketSnapshot> out, boolean tried, AddrManBucket[] buckets) {
+        for (int bucket = 0; bucket < buckets.length; bucket++) {
+            for (int slot = 0; slot < BUCKET_SIZE; slot++) {
+                PeerAddressKey key = buckets[bucket].get(slot);
+                if (key != null) {
+                    KnownPeerAddress known = addresses.get(key);
+                    if (known == null) throw new IllegalStateException("AddrMan bucket references unknown address");
+                    out.add(new BucketSnapshot(tried, bucket, slot, known.peerAddress()));
+                }
+            }
+        }
+    }
+
+    public record Snapshot(byte[] secretKey, List<EntrySnapshot> entries, List<BucketSnapshot> buckets) {
+        public Snapshot {
+            Objects.requireNonNull(secretKey, "secretKey");
+            if (secretKey.length != 32) throw new IllegalArgumentException("AddrMan secret key must be 32 bytes");
+            secretKey = secretKey.clone();
+            entries = List.copyOf(entries);
+            buckets = List.copyOf(buckets);
+        }
+        @Override public byte[] secretKey() { return secretKey.clone(); }
+    }
+
+    public record EntrySnapshot(PeerAddress address, PeerAddressSource source, Instant firstSeen, Instant lastSeen,
+                                Instant lastAttempt, Instant lastSuccess, int attempts, AddrManState state,
+                                int newBucketReferences) {}
+    public record BucketSnapshot(boolean tried, int bucket, int slot, PeerAddress address) {}
+
     private List<KnownPeerAddress> eligible(
             AddrManState state,
             Set<PeerAddress> excludedAddresses,

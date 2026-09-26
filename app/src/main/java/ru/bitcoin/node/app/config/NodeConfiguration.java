@@ -14,6 +14,7 @@ import ru.bitcoin.node.consensus.time.AdjustedTime;
 import ru.bitcoin.node.mempool.Mempool;
 import ru.bitcoin.node.p2p.*;
 import ru.bitcoin.node.p2p.address.PeerAddressManager;
+import ru.bitcoin.node.p2p.address.PeerAddressManagerStore;
 import ru.bitcoin.node.p2p.address.PeerAddressProtocol;
 import ru.bitcoin.node.p2p.sync.BlockDownloadScheduler;
 import ru.bitcoin.node.p2p.sync.BlockDownloadService;
@@ -25,6 +26,7 @@ import ru.bitcoin.node.storage.rocksdb.RocksDbDatabase;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.io.IOException;
 import java.util.List;
 
 /**
@@ -137,14 +139,27 @@ public class NodeConfiguration {
     }
 
     @Bean
+    public PeerAddressManagerStore peerAddressManagerStore(
+            @Value("${bitcoin.data-directory}") String dataDirectory,
+            NetworkParameters parameters
+    ) {
+        return new PeerAddressManagerStore(Path.of(dataDirectory), parameters.magic());
+    }
+
+    @Bean
     public PeerAddressManager peerAddressManager(
             NetworkParameters parameters,
+            PeerAddressManagerStore store,
             @Value("${bitcoin.p2p.peers:}")
             String configuredPeers
     ) {
 
-        PeerAddressManager addressManager =
-                new PeerAddressManager();
+        PeerAddressManager addressManager;
+        try {
+            addressManager = store.load().orElseGet(PeerAddressManager::new);
+        } catch (IOException exception) {
+            throw new IllegalStateException("Failed to load persistent AddrMan", exception);
+        }
 
         if (configuredPeers == null
                 || configuredPeers.isBlank()) {
@@ -298,6 +313,7 @@ public class NodeConfiguration {
             NodeValidationService validationService,
             NodeSyncInfrastructure syncInfrastructure,
             PeerAddressManager addressManager,
+            PeerAddressManagerStore addressManagerStore,
             PeerDiscovery peerDiscovery,
             OutboundPeerManager outboundPeerManager,
             OutboundPeerSupervisor outboundPeerSupervisor,
@@ -327,6 +343,7 @@ public class NodeConfiguration {
                 validationService,
                 syncInfrastructure,
                 addressManager,
+                addressManagerStore,
                 peerDiscovery,
                 outboundPeerManager,
                 outboundPeerSupervisor,

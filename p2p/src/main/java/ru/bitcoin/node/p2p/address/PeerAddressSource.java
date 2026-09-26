@@ -17,13 +17,22 @@ public final class PeerAddressSource {
         return new PeerAddressSource(peerAddress.network(), peerAddress.rawAddress());
     }
 
+    public static PeerAddressSource fromRaw(PeerAddressNetwork network, byte[] address) {
+        return new PeerAddressSource(network, address);
+    }
+
     public static PeerAddressSource of(InetAddress address) {
         PeerAddress peer = new PeerAddress(address, 1, 0L);
         return new PeerAddressSource(peer.network(), peer.rawAddress());
     }
 
-    public PeerAddressNetwork network() { return network; }
-    public byte[] rawAddress() { return address.clone(); }
+    public PeerAddressNetwork network() {
+        return network;
+    }
+
+    public byte[] rawAddress() {
+        return address.clone();
+    }
 
     public InetAddress address() {
         if (network != PeerAddressNetwork.IPV4 && network != PeerAddressNetwork.IPV6 && network != PeerAddressNetwork.CJDNS) {
