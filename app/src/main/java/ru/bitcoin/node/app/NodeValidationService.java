@@ -105,6 +105,52 @@ public final class NodeValidationService {
 
     public record PruneInfo(boolean enabled, boolean hasPruned, long pruneHeight, long targetBytes) {}
 
+    /**
+     * Immutable active-chain index view used by RPC/read-only services.
+     */
+    public record ActiveBlockInfo(
+            BlockIndex index,
+            Hash256 nextBlockHash,
+            long confirmations
+    ) {}
+
+    public Optional<ActiveBlockInfo> activeBlockInfo(Hash256 hash) {
+        Objects.requireNonNull(hash, "hash");
+        synchronized (chain) {
+            BlockIndex candidate = lookup.find(hash);
+            if (candidate == null) return Optional.empty();
+            BlockIndex tip = chain.activeTip();
+            if (candidate.height() > tip.height()) return Optional.empty();
+            BlockIndex active = activeAncestors.at(tip, candidate.height(), lookup);
+            if (active == null || !active.hash().equals(hash)) return Optional.empty();
+            Hash256 next = candidate.height() < tip.height()
+                    ? activeAncestors.at(tip, candidate.height() + 1L, lookup).hash()
+                    : null;
+            return Optional.of(new ActiveBlockInfo(
+                    candidate,
+                    next,
+                    tip.height() - candidate.height() + 1L
+            ));
+        }
+    }
+
+    public Optional<ActiveBlockInfo> activeBlockInfo(long height) {
+        synchronized (chain) {
+            BlockIndex tip = chain.activeTip();
+            if (height < 0 || height > tip.height()) return Optional.empty();
+            BlockIndex index = activeAncestors.at(tip, height, lookup);
+            if (index == null) return Optional.empty();
+            Hash256 next = height < tip.height()
+                    ? activeAncestors.at(tip, height + 1L, lookup).hash()
+                    : null;
+            return Optional.of(new ActiveBlockInfo(
+                    index,
+                    next,
+                    tip.height() - height + 1L
+            ));
+        }
+    }
+
     public Optional<Block> findBlock(Hash256 hash) {
         synchronized (chain) {
             var candidate = lookup.find(hash);

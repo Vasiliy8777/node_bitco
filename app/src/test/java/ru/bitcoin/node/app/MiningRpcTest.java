@@ -67,6 +67,49 @@ class MiningRpcTest {
                     assertEquals(mined.hash(), validation.activeTip().hash());
                     assertEquals(mined.hash(), sync.headerChainState().bestHeaderTip().hash());
                     assertFalse(validation.isInitialBlockDownload());
+
+                    // Core-compatible active-chain read RPCs.
+                    assertEquals(
+                            mined.hash().toDisplayHex(),
+                            call(client, uri, "getblockhash", List.of(1)).get("result")
+                    );
+                    var headerJson = (Map<?, ?>) call(
+                            client, uri, "getblockheader", List.of(mined.hash().toDisplayHex())
+                    ).get("result");
+                    assertEquals(mined.hash().toDisplayHex(), headerJson.get("hash"));
+                    assertEquals(1, ((Number) headerJson.get("confirmations")).intValue());
+                    assertEquals(1, ((Number) headerJson.get("height")).intValue());
+                    assertEquals(
+                            HexFormat.of().formatHex(BlockHeaderSerializer.serialize(mined.header())),
+                            call(client, uri, "getblockheader",
+                                    List.of(mined.hash().toDisplayHex(), false)).get("result")
+                    );
+
+                    var blockJson = (Map<?, ?>) call(
+                            client, uri, "getblock", List.of(mined.hash().toDisplayHex())
+                    ).get("result");
+                    assertEquals(mined.hash().toDisplayHex(), blockJson.get("hash"));
+                    assertEquals(mined.transactions().size(), ((Number) blockJson.get("nTx")).intValue());
+                    assertEquals(
+                            mined.transactions().stream().map(tx -> tx.txId().toDisplayHex()).toList(),
+                            blockJson.get("tx")
+                    );
+                    assertEquals(
+                            HexFormat.of().formatHex(BlockSerializer.serialize(mined)),
+                            call(client, uri, "getblock",
+                                    List.of(mined.hash().toDisplayHex(), 0)).get("result")
+                    );
+
+                    assertEquals(
+                            -8,
+                            ((Number) ((Map<?, ?>) call(client, uri, "getblockhash",
+                                    List.of(2)).get("error")).get("code")).intValue()
+                    );
+                    assertEquals(
+                            -5,
+                            ((Number) ((Map<?, ?>) call(client, uri, "getblockheader",
+                                    List.of("00".repeat(32))).get("error")).get("code")).intValue()
+                    );
                     assertEquals("duplicate", call(client, uri, "submitblock", List.of(HexFormat.of().formatHex(BlockSerializer.serialize(mined)))).get("result"));
                     assertNotNull(call(client, uri, "submitblock", List.of("zz")).get("error"));
                     assertEquals(-32601, ((Number) ((Map<?, ?>) call(client, uri, "unknown", List.of()).get("error")).get("code")).intValue());
