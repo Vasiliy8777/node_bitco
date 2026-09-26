@@ -35,6 +35,8 @@ public final class NodeValidationService {
     private final UtxoView coins;
     private final BlockProcessor processor;
     private final RocksDbBlockIndexStore indexes;
+    private final RocksDbBlockAvailabilityStore availability;
+    private final RocksDbBlockValidationStatusStore validationStatus;
     private final BlockFailureManager failureManager;
     private final ChainReorganizationExecutor reorganizationExecutor;
     private final Mempool mempool;
@@ -318,6 +320,8 @@ public final class NodeValidationService {
         this.time = Objects.requireNonNull(time);
         utxos = new RocksDbUtxoStore(database);
         indexes = new RocksDbBlockIndexStore(database);
+        availability = new RocksDbBlockAvailabilityStore(database);
+        validationStatus = new RocksDbBlockValidationStatusStore(database);
         var failures =
                 new RocksDbBlockFailureStore(
                         database
@@ -672,6 +676,61 @@ public final class NodeValidationService {
             return chain.activeTip();
         }
     }
+
+    /** Persistent branch tips for Core-style getchaintips diagnostics. */
+    public List<ChainTipInfo> chainTips() {
+        synchronized (chain) {
+            List<StoredBlockIndex> all = indexes.findAll();
+            Set<Hash256> parents = new HashSet<>();
+            for (StoredBlockIndex index : all) {
+                if (index.height() > 0) parents.add(index.previousBlockHash());
+            }
+            BlockIndex activeTip = chain.activeTip();
+            List<ChainTipInfo> result = new ArrayList<>();
+            for (StoredBlockIndex stored : all) {
+                if (parents.contains(stored.hash())) continue;
+                BlockIndex tip = BlockIndexStorageMapper.fromStored(stored);
+                long branchLength = branchLengthFromActive(tip, activeTip);
+                String status;
+                if (tip.hash().equals(activeTip.hash())) {
+                    status = "active";
+                } else if (failureManager.isFailed(tip.hash())) {
+                    status = "invalid";
+                } else if (!availability.hasData(tip.hash())) {
+                    status = "headers-only";
+                } else if (validationStatus.isScriptsValid(tip.hash())) {
+                    status = "valid-fork";
+                } else {
+                    status = "valid-headers";
+                }
+                result.add(new ChainTipInfo(tip.height(), tip.hash(), branchLength, status));
+            }
+            result.sort(Comparator.comparingLong(ChainTipInfo::height).reversed()
+                    .thenComparing(info -> info.hash().toDisplayHex()));
+            return List.copyOf(result);
+        }
+    }
+
+    private long branchLengthFromActive(BlockIndex tip, BlockIndex activeTip) {
+        BlockIndex a = tip;
+        BlockIndex b = activeTip;
+        while (a.height() > b.height()) a = requireParent(a);
+        while (b.height() > a.height()) b = requireParent(b);
+        while (!a.hash().equals(b.hash())) {
+            a = requireParent(a);
+            b = requireParent(b);
+        }
+        return tip.height() - a.height();
+    }
+
+    private BlockIndex requireParent(BlockIndex index) {
+        BlockIndex parent = lookup.find(index.previousBlockHash());
+        if (parent == null) throw new IllegalStateException(
+                "Missing BlockIndex ancestor for chain tip " + index.hash().toDisplayHex());
+        return parent;
+    }
+
+    public record ChainTipInfo(long height, Hash256 hash, long branchLength, String status) {}
 
     /**
      * BIP23 proposal validation against the current active tip. The block is never

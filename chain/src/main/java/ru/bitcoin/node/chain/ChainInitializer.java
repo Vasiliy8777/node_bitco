@@ -72,6 +72,8 @@ public final class ChainInitializer {
                 );
                 new ru.bitcoin.node.storage.block.RocksDbBlockAvailabilityStore(database)
                         .markData(batch, genesis.hash());
+                new ru.bitcoin.node.storage.block.RocksDbBlockValidationStatusStore(database)
+                        .markScriptsValid(batch, genesis.hash());
 
                 indexes.save(
                         batch,

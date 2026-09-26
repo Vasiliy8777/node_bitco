@@ -385,6 +385,17 @@ public final class NodeRpcServer implements AutoCloseable {
                 }
                 yield null;
             }
+            case "getchaintips" -> {
+                if (!params.isEmpty()) throw new RpcException(-32602, "getchaintips takes no parameters");
+                yield validation.chainTips().stream().map(tip -> {
+                    var value = new LinkedHashMap<String, Object>();
+                    value.put("height", tip.height());
+                    value.put("hash", tip.hash().toDisplayHex());
+                    value.put("branchlen", tip.branchLength());
+                    value.put("status", tip.status());
+                    return value;
+                }).toList();
+            }
             case "getblockchaininfo" -> {
                 var tip = validation.activeTip();
                 var prune = validation.pruneInfo();

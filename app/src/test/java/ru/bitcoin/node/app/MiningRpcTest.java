@@ -116,6 +116,13 @@ class MiningRpcTest {
                     assertNull(call(client, uri, "reconsiderblock", List.of(mined.hash().toDisplayHex())).get("error"));
                     assertEquals(mined.hash(), validation.activeTip().hash());
 
+                    var chainTips = (List<?>) call(client, uri, "getchaintips", List.of()).get("result");
+                    assertEquals(1, chainTips.size());
+                    var onlyTip = (Map<?, ?>) chainTips.getFirst();
+                    assertEquals(mined.hash().toDisplayHex(), onlyTip.get("hash"));
+                    assertEquals(0, ((Number) onlyTip.get("branchlen")).intValue());
+                    assertEquals("active", onlyTip.get("status"));
+
                     // Core-compatible active-chain read RPCs.
                     assertEquals(
                             mined.hash().toDisplayHex(),

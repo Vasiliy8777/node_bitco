@@ -23,6 +23,7 @@ public final class RocksDbChainTransitionStorage {
     private final RocksDbBlockIndexStore blockIndexStore;
     private final RocksDbChainStateStore chainStateStore;
     private final ru.bitcoin.node.storage.block.RocksDbBlockAvailabilityStore availability;
+    private final ru.bitcoin.node.storage.block.RocksDbBlockValidationStatusStore validationStatus;
 
     public RocksDbChainTransitionStorage(
             RocksDbDatabase database,
@@ -67,6 +68,7 @@ public final class RocksDbChainTransitionStorage {
         this.blockIndexStore = blockIndexStore;
         this.chainStateStore = chainStateStore;
         this.availability = new ru.bitcoin.node.storage.block.RocksDbBlockAvailabilityStore(database);
+        this.validationStatus = new ru.bitcoin.node.storage.block.RocksDbBlockValidationStatusStore(database);
     }
 
     public void commit(
@@ -184,6 +186,9 @@ public final class RocksDbChainTransitionStorage {
                         entry.getValue()
                 );
                 availability.markUndo(batch, entry.getKey());
+                // Reaching this commit means full contextual/script validation for the
+                // connected block succeeded. Persist that fact for restart-safe fork diagnostics.
+                validationStatus.markScriptsValid(batch, entry.getKey());
             }
 
             /*
