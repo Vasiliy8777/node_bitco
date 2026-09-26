@@ -69,10 +69,30 @@ public final class FullReindexer {
 
             var indexes = new RocksDbBlockIndexStore(database);
             var tips = new RocksDbChainStateStore(database);
+            var marker = new RocksDbFullReindexStateStore(database);
+
+            // Preserve the pre-reindex target before the destructive reset. If this is a
+            // restart of a manifest-aware interrupted rebuild, the original target wins
+            // over the temporary genesis tips written by the reset transaction.
+            RocksDbFullReindexStateStore.Manifest recoveryManifest = marker.manifest().orElse(null);
+            if (recoveryManifest == null && !marker.isInProgress()) {
+                Hash256 expectedActive = tips.loadActiveTipHash().orElseThrow(() ->
+                        new IllegalStateException("Cannot reindex: active tip metadata is missing"));
+                Hash256 expectedBestHeader = tips.loadBestHeaderTipHash().orElseThrow(() ->
+                        new IllegalStateException("Cannot reindex: best-header metadata is missing"));
+                long activeHeight = heightBeforeReset(expectedActive, indexes, graph, genesis.hash());
+                long bestHeaderHeight = heightBeforeReset(expectedBestHeader, indexes, graph, genesis.hash());
+                recoveryManifest = new RocksDbFullReindexStateStore.Manifest(
+                        expectedActive, activeHeight, expectedBestHeader, bestHeaderHeight);
+            }
+            if (recoveryManifest != null && !graph.headers.containsKey(recoveryManifest.expectedActiveTipHash())) {
+                throw new IllegalStateException("Cannot reindex: expected active tip body is missing: "
+                        + recoveryManifest.expectedActiveTipHash().toDisplayHex());
+            }
+
             var utxos = new RocksDbUtxoStore(database);
             var undos = new RocksDbUndoStore(database);
             var failures = new RocksDbBlockFailureStore(database);
-            var marker = new RocksDbFullReindexStateStore(database);
             var chainstateMarker = new RocksDbReindexStateStore(database);
             var txIndex = new RocksDbTxIndexStore(database);
             var availability = new ru.bitcoin.node.storage.block.RocksDbBlockAvailabilityStore(database);
@@ -94,7 +114,8 @@ public final class FullReindexer {
                 availability.clear(batch);
                 validationStatus.clear(batch);
                 chainstateMarker.clear(batch);
-                marker.markInProgress(batch);
+                if (recoveryManifest != null) marker.markInProgress(batch, recoveryManifest);
+                else marker.markInProgress(batch); // resume of a legacy one-byte marker
                 indexes.save(batch, BlockIndexStorageMapper.toStored(genesisIndex));
                 availability.markData(batch, genesisIndex.hash());
                 validationStatus.markScriptsValid(batch, genesisIndex.hash());
@@ -152,6 +173,8 @@ public final class FullReindexer {
                     .map(BlockIndexStorageMapper::fromStored)
                     .orElseThrow(() -> new IllegalStateException("No eligible BlockIndex after full reindex"));
 
+            verifyRecoveryTarget(recoveryManifest, chainState.activeTip());
+
             try (RocksDbWriteBatch batch = new RocksDbWriteBatch()) {
                 tips.saveBestHeaderTipHash(batch, bestHeader.hash());
                 marker.clear(batch);
@@ -161,6 +184,44 @@ public final class FullReindexer {
             return new Result(chainState.activeTip().hash(), chainState.activeTip().height(),
                     bestHeader.hash(), bestHeader.height(), replayed, skippedFailed, graph.headers.size());
         }
+    }
+
+
+    private long heightBeforeReset(Hash256 hash, RocksDbBlockIndexStore indexes, Graph graph, Hash256 genesisHash) {
+        return indexes.find(hash).map(ru.bitcoin.node.storage.block.StoredBlockIndex::height)
+                .orElseGet(() -> heightInRawGraph(hash, graph, genesisHash));
+    }
+
+    private long heightInRawGraph(Hash256 hash, Graph graph, Hash256 genesisHash) {
+        long height = 0;
+        Hash256 cursor = hash;
+        Set<Hash256> seen = new HashSet<>();
+        while (!cursor.equals(genesisHash)) {
+            if (!seen.add(cursor)) throw new IllegalStateException("Cannot reindex: cycle while resolving expected tip height");
+            BlockHeader header = graph.headers.get(cursor);
+            if (header == null) {
+                throw new IllegalStateException("Cannot reindex: expected tip is absent from both block index and raw bodies: "
+                        + hash.toDisplayHex());
+            }
+            cursor = header.previousBlockHash();
+            height++;
+        }
+        return height;
+    }
+
+    private void verifyRecoveryTarget(RocksDbFullReindexStateStore.Manifest manifest, BlockIndex activeTip) {
+        if (manifest == null) return; // legacy interrupted rebuild had no recoverable target metadata
+        if (!activeTip.hash().equals(manifest.expectedActiveTipHash())
+                || activeTip.height() != manifest.expectedActiveTipHeight()) {
+            throw new IllegalStateException("Full reindex reconstructed a different active tip. Expected "
+                    + manifest.expectedActiveTipHash().toDisplayHex() + " at height "
+                    + manifest.expectedActiveTipHeight() + ", got " + activeTip.hash().toDisplayHex()
+                    + " at height " + activeTip.height());
+        }
+        // expectedBestHeader* is diagnostic recovery metadata only. A full reindex rebuilds
+        // the header index from the complete persisted raw-body graph and may legitimately
+        // discover a stronger header than a stale/corrupted pre-reindex best-header pointer.
+        // Requiring equality here would turn index repair into a false corruption failure.
     }
 
     private Graph scanAndValidateGraph(RocksDbBlockStore blocks) {

@@ -7,6 +7,8 @@ import ru.bitcoin.node.mempool.Mempool;
 import ru.bitcoin.node.protocol.network.NetworkParametersRegistry;
 import ru.bitcoin.node.protocol.serialization.BlockParser;
 import ru.bitcoin.node.storage.block.RocksDbBlockIndexStore;
+import ru.bitcoin.node.storage.block.RocksDbBlockStore;
+import ru.bitcoin.node.storage.chain.RocksDbFullReindexStateStore;
 import ru.bitcoin.node.storage.rocksdb.RocksDbDatabase;
 import ru.bitcoin.node.storage.txindex.RocksDbTxIndexStore;
 
@@ -66,4 +68,32 @@ class FullReindexIntegrationTest {
             assertEquals(expectedTip, txIndex.findBlockHash(indexedTxid).orElseThrow());
         }
     }
+    @Test
+    void refusesToSilentlyTruncateChainWhenExpectedActiveBodyIsMissing() throws Exception {
+        var parameters = NetworkParametersRegistry.regtest();
+        var time = (ru.bitcoin.node.consensus.time.AdjustedTime) () -> 1_800_000_000L;
+        try (var db = new RocksDbDatabase(directory)) {
+            var validation = new NodeValidationService(
+                    db, parameters, time, new Mempool(), 0L, parameters.defaultAssumeValid(), false, false);
+            ru.bitcoin.node.protocol.block.Block lastBlock = null;
+            for (int height = 1; height <= 3; height++) {
+                try (var in = Objects.requireNonNull(
+                        getClass().getResourceAsStream("/core-regtest/" + height + ".bin"))) {
+                    lastBlock = BlockParser.parse(in.readAllBytes());
+                    validation.processBlock(lastBlock);
+                }
+            }
+            var expectedTip = validation.activeTip().hash();
+            new RocksDbBlockStore(db).delete(Objects.requireNonNull(lastBlock).hash());
+
+            var error = assertThrows(IllegalStateException.class,
+                    () -> new FullReindexer(db, parameters, time).rebuild());
+            assertTrue(error.getMessage().contains("expected active tip body is missing"));
+            // Failure happened before destructive reset: original chain metadata/index remains intact.
+            assertEquals(expectedTip, validation.activeTip().hash());
+            assertTrue(new RocksDbBlockIndexStore(db).find(expectedTip).isPresent());
+            assertFalse(new RocksDbFullReindexStateStore(db).isInProgress());
+        }
+    }
+
 }
