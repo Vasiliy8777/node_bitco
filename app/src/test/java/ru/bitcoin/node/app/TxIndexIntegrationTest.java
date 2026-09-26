@@ -10,9 +10,12 @@ import ru.bitcoin.node.mining.coinbase.CoinbaseBuilder;
 import ru.bitcoin.node.protocol.block.Block;
 import ru.bitcoin.node.protocol.block.BlockHeader;
 import ru.bitcoin.node.protocol.network.NetworkParametersRegistry;
+import ru.bitcoin.node.protocol.serialization.BlockParser;
+import ru.bitcoin.node.storage.txindex.RocksDbTxIndexStore;
 import ru.bitcoin.node.storage.rocksdb.RocksDbDatabase;
 
 import java.nio.file.Path;
+import java.util.Objects;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -45,4 +48,47 @@ class TxIndexIntegrationTest {
                     .orElseThrow().blockInfo().index().hash());
         }
     }
+    @Test
+    void reorgRemovesDetachedTransactionMappingsAndIndexesWinningBranch() throws Exception {
+        var parameters = NetworkParametersRegistry.regtest();
+        try (var db = new RocksDbDatabase(directory)) {
+            var service = new NodeValidationService(db, parameters, () -> 1_800_000_000L, new Mempool(),
+                    0L, parameters.defaultAssumeValid(), false, true);
+
+            Block oldTip = null;
+            for (int height = 1; height <= 102; height++) {
+                Block block = BlockParser.parse(testResource("/core-spend/" + height + ".bin"));
+                assertEquals(ru.bitcoin.node.chain.BlockProcessingResult.CONNECTED, service.processBlock(block));
+                oldTip = block;
+            }
+            assertNotNull(oldTip);
+            var detachedTxid = oldTip.transactions().getFirst().txId();
+            var store = new RocksDbTxIndexStore(db);
+            assertEquals(oldTip.hash(), store.findBlockHash(detachedTxid).orElseThrow());
+
+            Block alternative102 = BlockParser.parse(testResource("/core-reorg/102.bin"));
+            Block alternative103 = BlockParser.parse(testResource("/core-reorg/103.bin"));
+            assertEquals(ru.bitcoin.node.chain.BlockProcessingResult.STORED_SIDE_CHAIN_CONTEXT_PENDING,
+                    service.processBlock(alternative102));
+            assertEquals(ru.bitcoin.node.chain.BlockProcessingResult.CONNECTED, service.processBlock(alternative103));
+
+            assertEquals(alternative103.hash(), service.activeTip().hash());
+            assertTrue(store.findBlockHash(detachedTxid).isEmpty(),
+                    "Detached active-chain transaction must be removed from txindex");
+            for (var tx : alternative102.transactions()) {
+                assertEquals(alternative102.hash(), store.findBlockHash(tx.txId()).orElseThrow());
+            }
+            for (var tx : alternative103.transactions()) {
+                assertEquals(alternative103.hash(), store.findBlockHash(tx.txId()).orElseThrow());
+            }
+            assertEquals(alternative103.hash(), store.bestIndexedBlockHash().orElseThrow());
+        }
+    }
+
+    private byte[] testResource(String name) throws Exception {
+        try (var in = Objects.requireNonNull(getClass().getResourceAsStream(name))) {
+            return in.readAllBytes();
+        }
+    }
+
 }

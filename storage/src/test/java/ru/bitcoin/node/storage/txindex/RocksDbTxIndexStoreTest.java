@@ -26,4 +26,21 @@ class RocksDbTxIndexStoreTest {
             assertTrue(store.findBlockHash(block.transactions().getFirst().txId()).isEmpty());
         }
     }
+    @Test
+    void rewindRemovesDisconnectedMappingsAndMovesCursorAtomically() {
+        var block = GenesisBlockFactory.create(NetworkParametersRegistry.regtest());
+        var parent = ru.bitcoin.node.common.types.Hash256.fromDisplayHex("11".repeat(32));
+        try (var db = new RocksDbDatabase(directory)) {
+            var store = new RocksDbTxIndexStore(db);
+            store.append(block);
+            var txid = block.transactions().getFirst().txId();
+            assertEquals(block.hash(), store.findBlockHash(txid).orElseThrow());
+
+            store.rewind(block, parent);
+
+            assertTrue(store.findBlockHash(txid).isEmpty());
+            assertEquals(parent, store.bestIndexedBlockHash().orElseThrow());
+        }
+    }
+
 }

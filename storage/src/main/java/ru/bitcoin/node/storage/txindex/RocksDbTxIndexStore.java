@@ -43,6 +43,27 @@ public final class RocksDbTxIndexStore {
         }
     }
 
+    /**
+     * Atomically removes mappings contributed by one disconnected active-chain block and
+     * rewinds the durable cursor to that block's parent. A mapping is deleted only when it
+     * still points at the disconnected block, so an already-replaced mapping is never erased.
+     */
+    public void rewind(Block disconnectedBlock, Hash256 newBestBlockHash) {
+        Objects.requireNonNull(disconnectedBlock, "disconnectedBlock");
+        Objects.requireNonNull(newBestBlockHash, "newBestBlockHash");
+        Hash256 disconnectedHash = disconnectedBlock.hash();
+        try (var batch = new RocksDbWriteBatch()) {
+            for (var tx : disconnectedBlock.transactions()) {
+                Hash256 mapped = findBlockHash(tx.txId()).orElse(null);
+                if (disconnectedHash.equals(mapped)) {
+                    batch.delete(txKey(tx.txId()));
+                }
+            }
+            batch.put(BEST_BLOCK_KEY, newBestBlockHash.bytes());
+            database.write(batch);
+        }
+    }
+
     /** Initializes the cursor at genesis. Bitcoin Core deliberately does not index genesis transactions. */
     public void initializeAt(Hash256 genesisHash) {
         Objects.requireNonNull(genesisHash, "genesisHash");

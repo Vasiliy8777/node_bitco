@@ -467,15 +467,20 @@ public final class NodeValidationService {
         BlockIndex indexed = lookup.find(indexedHash);
         if (indexed == null) throw new IllegalStateException("txindex cursor references unknown block: " + indexedHash.toDisplayHex());
         ReorganizationPlan plan = ReorganizationPlanner.plan(indexed, activeTip, lookup);
+        for (BlockIndex disconnect : plan.blocksToDisconnect()) {
+            Block block = blocks.find(disconnect.hash()).orElseThrow(() ->
+                    new IllegalStateException("Block body required to rewind txindex: " + disconnect.hash().toDisplayHex()));
+            txIndexStore.rewind(block, disconnect.previousBlockHash());
+        }
         for (BlockIndex connect : plan.blocksToConnect()) {
             Block block = blocks.find(connect.hash()).orElseThrow(() ->
                     new IllegalStateException("Block body required to synchronize txindex: " + connect.hash().toDisplayHex()));
             txIndexStore.append(block);
         }
-        if (!txIndexStore.bestIndexedBlockHash().orElseThrow().equals(activeTip.hash())) {
-            // Reorg to an ancestor with no forward blocks: move only the cursor. Old mappings are harmless
-            // because indexedTransaction verifies active-chain membership before returning them.
-            txIndexStore.initializeAt(activeTip.hash());
+        Hash256 synchronizedHash = txIndexStore.bestIndexedBlockHash().orElseThrow();
+        if (!synchronizedHash.equals(activeTip.hash())) {
+            throw new IllegalStateException("txindex synchronization stopped at "
+                    + synchronizedHash.toDisplayHex() + " instead of active tip " + activeTip.hash().toDisplayHex());
         }
     }
 
