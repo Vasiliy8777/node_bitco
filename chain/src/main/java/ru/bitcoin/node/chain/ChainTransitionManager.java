@@ -37,6 +37,14 @@ public final class ChainTransitionManager {
             ChainUpdate update,
             BlockReorganizationChanges changes
     ) {
+        commit(update, changes, batch -> {});
+    }
+
+    public void commit(
+            ChainUpdate update,
+            BlockReorganizationChanges changes,
+            java.util.function.Consumer<ru.bitcoin.node.storage.rocksdb.RocksDbWriteBatch> extraWrites
+    ) {
         if (update == null) {
             throw new IllegalArgumentException(
                     "update must not be null"
@@ -83,7 +91,8 @@ public final class ChainTransitionManager {
         transitionStorage.commit(
                 expectedOldTip,
                 newTip,
-                changes
+                changes,
+                extraWrites
         );
 
         /*

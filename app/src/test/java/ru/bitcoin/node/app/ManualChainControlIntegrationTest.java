@@ -8,6 +8,7 @@ import ru.bitcoin.node.protocol.block.Block;
 import ru.bitcoin.node.protocol.network.NetworkParametersRegistry;
 import ru.bitcoin.node.protocol.serialization.BlockParser;
 import ru.bitcoin.node.storage.rocksdb.RocksDbDatabase;
+import ru.bitcoin.node.storage.undo.RocksDbUndoStore;
 
 import java.io.InputStream;
 import java.nio.file.Path;
@@ -85,4 +86,40 @@ class ManualChainControlIntegrationTest {
             assertTrue(error.getMessage().contains("Genesis"));
         }
     }
+    @Test
+    void failedInvalidatePreflightDoesNotPersistFailureOrMoveActiveTip() throws Exception {
+        Block original102 = coreSpend(102);
+        Block alternative102 = reorg(102);
+        Block alternative103 = reorg(103);
+
+        try (var db = new RocksDbDatabase(directory)) {
+            var validation = service(db);
+            for (int height = 1; height <= 102; height++) {
+                assertEquals(BlockProcessingResult.CONNECTED, validation.processBlock(coreSpend(height)));
+            }
+            assertEquals(BlockProcessingResult.STORED_SIDE_CHAIN_CONTEXT_PENDING,
+                    validation.processBlock(alternative102));
+            assertEquals(BlockProcessingResult.CONNECTED, validation.processBlock(alternative103));
+            assertEquals(alternative103.hash(), validation.activeTip().hash());
+
+            // Force the administrative reorg to be impossible before any durable
+            // invalidateblock state is allowed to change.
+            new RocksDbUndoStore(db).delete(alternative103.hash());
+
+            var error = assertThrows(IllegalStateException.class,
+                    () -> validation.invalidateBlock(alternative102.hash()));
+            assertTrue(error.getMessage().contains("Undo data not found for disconnect"));
+            assertEquals(alternative103.hash(), validation.activeTip().hash());
+            assertFalse(validation.isBlockFailed(alternative102.hash()));
+            assertFalse(validation.isBlockFailed(alternative103.hash()));
+        }
+
+        try (var db = new RocksDbDatabase(directory)) {
+            var validation = service(db);
+            assertEquals(alternative103.hash(), validation.activeTip().hash());
+            assertFalse(validation.isBlockFailed(alternative102.hash()));
+            assertFalse(validation.isBlockFailed(alternative103.hash()));
+        }
+    }
+
 }

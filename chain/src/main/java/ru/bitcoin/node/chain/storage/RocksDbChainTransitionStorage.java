@@ -76,6 +76,15 @@ public final class RocksDbChainTransitionStorage {
             Hash256 newTip,
             BlockReorganizationChanges changes
     ) {
+        commit(expectedOldTip, newTip, changes, batch -> {});
+    }
+
+    public void commit(
+            Hash256 expectedOldTip,
+            Hash256 newTip,
+            BlockReorganizationChanges changes,
+            java.util.function.Consumer<RocksDbWriteBatch> extraWrites
+    ) {
         if (expectedOldTip == null) {
             throw new IllegalArgumentException(
                     "expectedOldTip must not be null"
@@ -89,9 +98,10 @@ public final class RocksDbChainTransitionStorage {
         }
 
         if (changes == null) {
-            throw new IllegalArgumentException(
-                    "changes must not be null"
-            );
+            throw new IllegalArgumentException("changes must not be null");
+        }
+        if (extraWrites == null) {
+            throw new IllegalArgumentException("extraWrites must not be null");
         }
 
         /*
@@ -200,12 +210,12 @@ public final class RocksDbChainTransitionStorage {
                     newTip
             );
 
-            /*
-             * Один atomic + sync RocksDB commit.
-             */
-            database.write(
-                    batch
-            );
+            // Administrative metadata (for example invalidateblock failure root
+            // and best-header pointer) joins the exact same durable transaction.
+            extraWrites.accept(batch);
+
+            /* Один atomic + sync RocksDB commit. */
+            database.write(batch);
         }
     }
 }

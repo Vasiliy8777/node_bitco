@@ -115,67 +115,32 @@ public final class ChainReorganizationExecutor {
         this.assumeValidPolicy = java.util.Objects.requireNonNull(assumeValidPolicy, "assumeValidPolicy");
     }
 
-    public void execute(
-            ChainUpdate update
-    ) {
-        if (update == null) {
-            throw new IllegalArgumentException(
-                    "update must not be null"
-            );
-        }
+    public void execute(ChainUpdate update) {
+        PreparedChainReorganization prepared = prepare(update);
+        commit(prepared);
+    }
 
-        ReorganizationPlan plan =
-                update.reorganizationPlan();
+    /** Fully loads and validates a reorganization without mutating persistent chain state. */
+    public PreparedChainReorganization prepare(ChainUpdate update) {
+        if (update == null) throw new IllegalArgumentException("update must not be null");
+        ReorganizationPlan plan = update.reorganizationPlan();
+        List<BlockToDisconnect> disconnectBlocks = loadDisconnectBlocks(plan.blocksToDisconnect());
+        List<BlockToConnect> connectBlocks = loadConnectBlocks(plan.blocksToConnect());
+        BlockReorganizationChanges changes = BlockReorganizationChangesBuilder.build(
+                disconnectBlocks, connectBlocks, utxoStore, networkParameters,
+                blockIndexLookup, invalidBlockObserver, assumeValidPolicy);
+        return new PreparedChainReorganization(update, changes);
+    }
 
-        /*
-         * Сначала полностью загружаем всё необходимое
-         * для отключаемой старой ветки.
-         */
-        List<BlockToDisconnect> disconnectBlocks =
-                loadDisconnectBlocks(
-                        plan.blocksToDisconnect()
-                );
+    public void commit(PreparedChainReorganization prepared) {
+        if (prepared == null) throw new IllegalArgumentException("prepared must not be null");
+        transitionManager.commit(prepared.update(), prepared.changes());
+    }
 
-        /*
-         * Затем полностью загружаем новую ветку.
-         *
-         * Если body хотя бы одного блока отсутствует,
-         * мы упадём здесь ДО любых изменений UTXO,
-         * active tip или RAM ChainState.
-         */
-        List<BlockToConnect> connectBlocks =
-                loadConnectBlocks(
-                        plan.blocksToConnect()
-                );
-
-        /*
-         * Строим полное изменение UTXO в памяти.
-         */
-        BlockReorganizationChanges changes =
-                BlockReorganizationChangesBuilder.build(
-                        disconnectBlocks,
-                        connectBlocks,
-                        utxoStore,
-                        networkParameters,
-                        blockIndexLookup,
-                        invalidBlockObserver,
-                        assumeValidPolicy
-                );
-
-        /*
-         * Только после успешной подготовки
-         * выполняем persistent transition.
-         *
-         * ChainTransitionManager:
-         *
-         * 1. проверяет RAM oldTip
-         * 2. делает atomic RocksDB commit
-         * 3. меняет RAM ChainState
-         */
-        transitionManager.commit(
-                update,
-                changes
-        );
+    public void commit(PreparedChainReorganization prepared,
+                       java.util.function.Consumer<ru.bitcoin.node.storage.rocksdb.RocksDbWriteBatch> extraWrites) {
+        if (prepared == null) throw new IllegalArgumentException("prepared must not be null");
+        transitionManager.commit(prepared.update(), prepared.changes(), extraWrites);
     }
 
     private List<BlockToDisconnect> loadDisconnectBlocks(

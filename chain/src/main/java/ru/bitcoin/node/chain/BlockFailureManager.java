@@ -56,6 +56,32 @@ public final class BlockFailureManager {
         }
     }
 
+
+    /** Computes the strongest candidate as if {@code hash} were failed, without writing anything. */
+    public synchronized BlockIndex bestEligibleAfterInvalidating(Hash256 hash) {
+        Objects.requireNonNull(hash, "hash");
+        BlockIndex failed = blockIndexStore.find(hash)
+                .map(BlockIndexStorageMapper::fromStored)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Cannot invalidate missing BlockIndex: " + hash.toDisplayHex()));
+        if (failed.height() == 0) throw new IllegalStateException("Genesis block cannot be marked failed");
+        return blockIndexStore.findBest(stored ->
+                        !failureResolver.isFailed(BlockIndexStorageMapper.fromStored(stored), hash))
+                .map(BlockIndexStorageMapper::fromStored)
+                .orElseThrow(() -> new IllegalStateException(
+                        "No eligible block index remains after invalidating " + hash.toDisplayHex()));
+    }
+
+    /** Appends manual invalidation metadata to a caller-owned atomic RocksDB batch. */
+    public synchronized void appendInvalidation(
+            RocksDbWriteBatch batch, Hash256 hash, BlockIndex bestEligible) {
+        Objects.requireNonNull(batch, "batch");
+        Objects.requireNonNull(hash, "hash");
+        Objects.requireNonNull(bestEligible, "bestEligible");
+        failureStore.markFailed(batch, hash);
+        chainStateStore.saveBestHeaderTipHash(batch, bestEligible.hash());
+    }
+
     /**
      * Clears manual/recorded failure roots related to this block, matching reconsider semantics.
      */

@@ -616,8 +616,24 @@ public final class NodeValidationService {
             BlockIndex index = lookup.find(hash);
             if (index == null) throw new IllegalArgumentException("Block not found");
             if (index.height() == 0) throw new IllegalArgumentException("Genesis block cannot be invalidated");
-            failureManager.markFailed(hash);
-            activateBestEligibleChain();
+            BlockIndex candidate = failureManager.bestEligibleAfterInvalidating(hash);
+            BlockIndex current = chain.activeTip();
+
+            if (current.hash().equals(candidate.hash())) {
+                // Invalidating a non-active branch needs no chain transition.
+                failureManager.markFailed(hash);
+            } else {
+                ReorganizationPlan plan = ReorganizationPlanner.plan(current, candidate, lookup);
+                PreparedChainReorganization prepared = reorganizationExecutor.prepare(
+                        new ChainUpdate(current, candidate, plan));
+
+                // Preparation above performs all body/undo loading and contextual/script
+                // validation before the administrative failure root becomes durable.
+                // The failure root, best-header pointer and chain transition are then
+                // committed in one RocksDB batch.
+                reorganizationExecutor.commit(prepared, batch ->
+                        failureManager.appendInvalidation(batch, hash, candidate));
+            }
             finishManualChainChange();
         }
     }
