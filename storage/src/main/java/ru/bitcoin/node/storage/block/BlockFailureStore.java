@@ -14,4 +14,8 @@ public interface BlockFailureStore {
     void markFailed(
             Hash256 hash
     );
+
+    default void clearFailed(Hash256 hash) {
+        throw new UnsupportedOperationException("Failure removal is not supported");
+    }
 }

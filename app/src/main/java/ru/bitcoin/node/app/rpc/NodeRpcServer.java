@@ -361,6 +361,30 @@ public final class NodeRpcServer implements AutoCloseable {
                     throw new RpcException(-1, exception.getMessage());
                 }
             }
+            case "invalidateblock" -> {
+                if (params.size() != 1 || !(params.get(0) instanceof String text))
+                    throw new RpcException(-32602, "Expected block hash");
+                try {
+                    validation.invalidateBlock(parseHash(text));
+                } catch (IllegalArgumentException exception) {
+                    throw new RpcException(-5, exception.getMessage());
+                } catch (IllegalStateException exception) {
+                    throw new RpcException(-1, exception.getMessage());
+                }
+                yield null;
+            }
+            case "reconsiderblock" -> {
+                if (params.size() != 1 || !(params.get(0) instanceof String text))
+                    throw new RpcException(-32602, "Expected block hash");
+                try {
+                    validation.reconsiderBlock(parseHash(text));
+                } catch (IllegalArgumentException exception) {
+                    throw new RpcException(-5, exception.getMessage());
+                } catch (IllegalStateException exception) {
+                    throw new RpcException(-1, exception.getMessage());
+                }
+                yield null;
+            }
             case "getblockchaininfo" -> {
                 var tip = validation.activeTip();
                 var prune = validation.pruneInfo();

@@ -110,6 +110,12 @@ class MiningRpcTest {
                     assertEquals(mined.hash(), sync.headerChainState().bestHeaderTip().hash());
                     assertFalse(validation.isInitialBlockDownload());
 
+                    // Manual chain control uses the same persistent failure/reorg machinery.
+                    assertNull(call(client, uri, "invalidateblock", List.of(mined.hash().toDisplayHex())).get("error"));
+                    assertEquals(0, validation.activeTip().height());
+                    assertNull(call(client, uri, "reconsiderblock", List.of(mined.hash().toDisplayHex())).get("error"));
+                    assertEquals(mined.hash(), validation.activeTip().hash());
+
                     // Core-compatible active-chain read RPCs.
                     assertEquals(
                             mined.hash().toDisplayHex(),

@@ -79,6 +79,19 @@ public final class RocksDbBlockFailureStore
         batch.put(key(hash), FAILED_VALUE);
     }
 
+
+    @Override
+    public void clearFailed(Hash256 hash) {
+        Objects.requireNonNull(hash, "hash");
+        database.delete(key(hash));
+    }
+
+    public void clearFailed(RocksDbWriteBatch batch, Hash256 hash) {
+        Objects.requireNonNull(batch, "batch");
+        Objects.requireNonNull(hash, "hash");
+        batch.delete(key(hash));
+    }
+
     private static byte[] key(
             Hash256 hash
     ) {

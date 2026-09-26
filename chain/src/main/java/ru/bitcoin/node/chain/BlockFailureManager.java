@@ -55,4 +55,61 @@ public final class BlockFailureManager {
             database.write(batch);
         }
     }
+
+    /**
+     * Clears manual/recorded failure roots related to this block, matching reconsider semantics.
+     */
+    public synchronized void reconsider(Hash256 hash) {
+        Objects.requireNonNull(hash, "hash");
+        BlockIndex target = blockIndexStore.find(hash)
+                .map(BlockIndexStorageMapper::fromStored)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Cannot reconsider missing BlockIndex: " + hash.toDisplayHex()));
+
+        try (RocksDbWriteBatch batch = new RocksDbWriteBatch()) {
+            for (var stored : blockIndexStore.findAll()) {
+                BlockIndex candidate = BlockIndexStorageMapper.fromStored(stored);
+                if (!failureStore.isFailed(candidate.hash())) continue;
+                if (isAncestor(candidate, target) || isAncestor(target, candidate)) {
+                    failureStore.clearFailed(batch, candidate.hash());
+                }
+            }
+            database.write(batch);
+        }
+
+        BlockIndex bestEligible = bestEligible();
+        try (RocksDbWriteBatch batch = new RocksDbWriteBatch()) {
+            chainStateStore.saveBestHeaderTipHash(batch, bestEligible.hash());
+            database.write(batch);
+        }
+    }
+
+    public synchronized BlockIndex bestEligible() {
+        return blockIndexStore.findBest(stored ->
+                        !failureResolver.isFailed(BlockIndexStorageMapper.fromStored(stored)))
+                .map(BlockIndexStorageMapper::fromStored)
+                .orElseThrow(() -> new IllegalStateException("No eligible block index remains"));
+    }
+
+    public synchronized boolean isFailed(Hash256 hash) {
+        BlockIndex index = blockIndexStore.find(hash)
+                .map(BlockIndexStorageMapper::fromStored)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Missing BlockIndex: " + hash.toDisplayHex()));
+        return failureResolver.isFailed(index);
+    }
+
+    private boolean isAncestor(BlockIndex ancestor, BlockIndex descendant) {
+        if (ancestor.height() > descendant.height()) return false;
+        BlockIndex cursor = descendant;
+        while (cursor.height() > ancestor.height()) {
+            Hash256 previous = cursor.previousBlockHash();
+            cursor = blockIndexStore.find(previous)
+                    .map(BlockIndexStorageMapper::fromStored)
+                    .orElseThrow(() -> new IllegalStateException(
+                            "Missing BlockIndex ancestor: " + previous.toDisplayHex()));
+        }
+        return cursor.hash().equals(ancestor.hash());
+    }
+
 }

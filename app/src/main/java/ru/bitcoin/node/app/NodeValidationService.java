@@ -34,6 +34,9 @@ public final class NodeValidationService {
     private final RocksDbBlockStore blocks;
     private final UtxoView coins;
     private final BlockProcessor processor;
+    private final RocksDbBlockIndexStore indexes;
+    private final BlockFailureManager failureManager;
+    private final ChainReorganizationExecutor reorganizationExecutor;
     private final Mempool mempool;
     private final RocksDbMempoolStore mempoolStore;
     private final boolean persistMempool;
@@ -314,7 +317,7 @@ public final class NodeValidationService {
         this.parameters = Objects.requireNonNull(parameters);
         this.time = Objects.requireNonNull(time);
         utxos = new RocksDbUtxoStore(database);
-        var indexes = new RocksDbBlockIndexStore(database);
+        indexes = new RocksDbBlockIndexStore(database);
         var failures =
                 new RocksDbBlockFailureStore(
                         database
@@ -329,7 +332,7 @@ public final class NodeValidationService {
                         failures
                 );
 
-        var failureManager =
+        failureManager =
                 new BlockFailureManager(
                         database,
                         failures,
@@ -340,7 +343,7 @@ public final class NodeValidationService {
         chain = new ChainInitializer(database, parameters).initialize();
         initialBlockDownload = new InitialBlockDownloadState(parameters, time::currentTimeSeconds);
         var storage = new RocksDbChainTransitionStorage(database, utxos, undos, indexes, tips);
-        var executor = new ChainReorganizationExecutor(
+        reorganizationExecutor = new ChainReorganizationExecutor(
                 blocks,
                 undos,
                 utxos,
@@ -364,7 +367,7 @@ public final class NodeValidationService {
                                 blocks,
                                 indexes
                         ),
-                        executor,
+                        reorganizationExecutor,
                         parameters,
                         time,
                         failureManager,
@@ -599,6 +602,69 @@ public final class NodeValidationService {
             initialBlockDownload.update(chain.activeTip());
             return initialBlockDownload.isInitialBlockDownload();
         }
+    }
+
+    /** Manually invalidate a known non-genesis block and activate the best remaining chain. */
+    public void invalidateBlock(Hash256 hash) {
+        Objects.requireNonNull(hash, "hash");
+        synchronized (chain) {
+            synchronizePool();
+            BlockIndex index = lookup.find(hash);
+            if (index == null) throw new IllegalArgumentException("Block not found");
+            if (index.height() == 0) throw new IllegalArgumentException("Genesis block cannot be invalidated");
+            failureManager.markFailed(hash);
+            activateBestEligibleChain();
+            finishManualChainChange();
+        }
+    }
+
+    /** Clear failure state related to a known block and reconsider the strongest eligible chain. */
+    public void reconsiderBlock(Hash256 hash) {
+        Objects.requireNonNull(hash, "hash");
+        synchronized (chain) {
+            synchronizePool();
+            if (lookup.find(hash) == null) throw new IllegalArgumentException("Block not found");
+            failureManager.reconsider(hash);
+            activateBestEligibleChain();
+            finishManualChainChange();
+        }
+    }
+
+    public boolean isBlockFailed(Hash256 hash) {
+        synchronized (chain) {
+            return failureManager.isFailed(hash);
+        }
+    }
+
+    private void activateBestEligibleChain() {
+        BlockIndex candidate = indexes.findBest(stored ->
+                        blocks.find(stored.hash()).isPresent() && !failureManager.isFailed(stored.hash()))
+                .map(BlockIndexStorageMapper::fromStored)
+                .orElseThrow(() -> new IllegalStateException("No eligible block with available data remains"));
+
+        BlockIndex current = chain.activeTip();
+        if (current.hash().equals(candidate.hash())) return;
+
+        /*
+         * Manual chain control is deliberately different from ordinary best-chain
+         * selection. After invalidateblock the current tip can have more chainwork
+         * than every remaining eligible branch, but it is no longer a valid
+         * candidate. ChainState.prepareUpdate() correctly refuses a lower-work
+         * chain during normal block processing, so using it here would leave the
+         * manually-invalidated branch active. Build the forced transition directly
+         * and let the normal reorganization executor perform the same validated,
+         * atomic UTXO/undo transition used by automatic reorgs.
+         */
+        ReorganizationPlan plan = ReorganizationPlanner.plan(current, candidate, lookup);
+        reorganizationExecutor.execute(new ChainUpdate(current, candidate, plan));
+    }
+
+    private void finishManualChainChange() {
+        synchronizePool();
+        if (txIndexEnabled) synchronizeTxIndex();
+        initialBlockDownload.update(chain.activeTip());
+        revision++;
+        chain.notifyAll();
     }
 
     public BlockIndex activeTip() {
