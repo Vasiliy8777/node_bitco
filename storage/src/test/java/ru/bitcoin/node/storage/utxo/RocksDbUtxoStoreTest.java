@@ -241,4 +241,24 @@ class RocksDbUtxoStoreTest {
         );
     }
 
+    @Test
+    void computesUtxoSetStatisticsWithoutLoadingWholeSet() {
+        try (var database = new ru.bitcoin.node.storage.rocksdb.RocksDbDatabase(tempDirectory.resolve("stats"))) {
+            var store = new RocksDbUtxoStore(database);
+            store.save(new ru.bitcoin.node.protocol.transaction.OutPoint(
+                            ru.bitcoin.node.common.types.Hash256.fromDisplayHex("11".repeat(32)),
+                            new ru.bitcoin.node.common.types.UInt32(0)),
+                    new StoredUtxo(25_000L, new byte[]{0x51}, 1L, false));
+            store.save(new ru.bitcoin.node.protocol.transaction.OutPoint(
+                            ru.bitcoin.node.common.types.Hash256.fromDisplayHex("22".repeat(32)),
+                            new ru.bitcoin.node.common.types.UInt32(1)),
+                    new StoredUtxo(75_000L, new byte[]{0x51, 0x51}, 2L, true));
+            var stats = store.statistics();
+            org.junit.jupiter.api.Assertions.assertEquals(2L, stats.txouts());
+            org.junit.jupiter.api.Assertions.assertEquals(100_000L, stats.totalAmount());
+            org.junit.jupiter.api.Assertions.assertEquals(103L, stats.bogoSize());
+            org.junit.jupiter.api.Assertions.assertTrue(stats.diskSize() > 0L);
+        }
+    }
+
 }

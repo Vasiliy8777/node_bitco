@@ -111,6 +111,16 @@ class MiningRpcTest {
                     );
 
                     var coinbase = mined.transactions().getFirst();
+                    var txout = (Map<?, ?>) call(client, uri, "gettxout",
+                            List.of(coinbase.txId().toDisplayHex(), 0)).get("result");
+                    assertNotNull(txout);
+                    assertEquals(1, ((Number) txout.get("confirmations")).intValue());
+                    assertEquals(true, txout.get("coinbase"));
+                    var utxoInfo = (Map<?, ?>) call(client, uri, "gettxoutsetinfo", List.of()).get("result");
+                    assertEquals(1, ((Number) utxoInfo.get("height")).intValue());
+                    assertEquals(mined.hash().toDisplayHex(), utxoInfo.get("bestblock"));
+                    assertTrue(((Number) utxoInfo.get("txouts")).longValue() >= 1L);
+                    assertTrue(((Number) utxoInfo.get("total_amount")).doubleValue() > 0.0);
                     assertEquals(
                             HexFormat.of().formatHex(TransactionSerializer.serialize(coinbase)),
                             call(client, uri, "getrawtransaction",

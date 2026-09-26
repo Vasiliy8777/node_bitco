@@ -229,6 +229,36 @@ public final class NodeRpcServer implements AutoCloseable {
                         .toList());
                 yield result;
             }
+            case "gettxout" -> {
+                if (params.size() < 2 || params.size() > 3 || !(params.getFirst() instanceof String txidText)
+                        || !(params.get(1) instanceof Number voutNumber))
+                    throw new RpcException(-32602, "Expected txid, vout and optional include_mempool");
+                long vout = voutNumber.longValue();
+                boolean includeMempool = booleanParam(params, 2, true);
+                var output = validation.txOut(parseHash(txidText), vout, includeMempool);
+                if (output.isEmpty()) yield null;
+                var coin = output.get();
+                var result = new LinkedHashMap<String, Object>();
+                result.put("bestblock", validation.activeTip().hash().toDisplayHex());
+                result.put("confirmations", coin.confirmations());
+                result.put("value", satoshisToBtc(coin.amount()));
+                result.put("scriptPubKey", Map.of("hex", HexFormat.of().formatHex(coin.scriptPubKey())));
+                result.put("coinbase", coin.coinbase());
+                yield result;
+            }
+            case "gettxoutsetinfo" -> {
+                if (!params.isEmpty())
+                    throw new RpcException(-32602, "This node currently supports gettxoutsetinfo without optional arguments");
+                var stats = validation.utxoSetInfo();
+                var result = new LinkedHashMap<String, Object>();
+                result.put("height", stats.height());
+                result.put("bestblock", stats.bestBlock().toDisplayHex());
+                result.put("txouts", stats.txouts());
+                result.put("bogosize", stats.bogoSize());
+                result.put("disk_size", stats.diskSize());
+                result.put("total_amount", satoshisToBtc(stats.totalAmount()));
+                yield result;
+            }
             case "getblockhash" -> {
                 long height = longParam(params, 0, "height");
                 yield validation.activeBlockInfo(height)

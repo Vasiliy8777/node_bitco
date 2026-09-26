@@ -9,6 +9,9 @@ import ru.bitcoin.node.mempool.*;
 import ru.bitcoin.node.protocol.block.Block;
 import ru.bitcoin.node.protocol.network.NetworkParameters;
 import ru.bitcoin.node.protocol.transaction.Transaction;
+import ru.bitcoin.node.protocol.transaction.OutPoint;
+import ru.bitcoin.node.protocol.transaction.TxOut;
+import ru.bitcoin.node.common.types.UInt32;
 import ru.bitcoin.node.storage.block.*;
 import ru.bitcoin.node.storage.chain.RocksDbChainStateStore;
 import ru.bitcoin.node.storage.chain.RocksDbPruneStateStore;
@@ -414,6 +417,49 @@ public final class NodeValidationService {
             }
         }
     }
+
+    /** Current spendable output, optionally with the mempool overlaid on chainstate. */
+    public Optional<TxOutInfo> txOut(Hash256 txid, long outputIndex, boolean includeMempool) {
+        Objects.requireNonNull(txid, "txid");
+        if (outputIndex < 0 || outputIndex > UInt32.MAX_VALUE)
+            throw new IllegalArgumentException("vout out of range");
+        synchronized (chain) {
+            synchronizePool();
+            expirePersistent();
+            OutPoint outPoint = new OutPoint(txid, new UInt32(outputIndex));
+            if (includeMempool) {
+                boolean spent = mempool.entries().stream().flatMap(entry -> entry.transaction().inputs().stream())
+                        .anyMatch(input -> input.previousOutput().equals(outPoint));
+                if (spent) return Optional.empty();
+                for (MempoolEntry entry : mempool.entries()) {
+                    Transaction tx = entry.transaction();
+                    if (tx.txId().equals(txid)) {
+                        if (outputIndex >= tx.outputs().size()) return Optional.empty();
+                        TxOut output = tx.outputs().get((int) outputIndex);
+                        return Optional.of(new TxOutInfo(output.value(), output.scriptPubKey(), 0L, false, 0L));
+                    }
+                }
+            }
+            return utxos.find(outPoint).map(coin -> new TxOutInfo(
+                    coin.amount(), coin.scriptPubKey(), coin.height(), coin.coinbase(),
+                    Math.addExact(Math.subtractExact(chain.activeTip().height(), coin.height()), 1L)));
+        }
+    }
+
+    /** Stable UTXO-set statistics at the current active tip. */
+    public UtxoSetInfo utxoSetInfo() {
+        synchronized (chain) {
+            var stats = utxos.statistics();
+            return new UtxoSetInfo(chain.activeTip().height(), chain.activeTip().hash(),
+                    stats.txouts(), stats.bogoSize(), stats.diskSize(), stats.totalAmount());
+        }
+    }
+
+    public record TxOutInfo(long amount, byte[] scriptPubKey, long height, boolean coinbase, long confirmations) {
+        public TxOutInfo { scriptPubKey = scriptPubKey.clone(); }
+        @Override public byte[] scriptPubKey() { return scriptPubKey.clone(); }
+    }
+    public record UtxoSetInfo(long height, Hash256 bestBlock, long txouts, long bogoSize, long diskSize, long totalAmount) {}
 
     public Optional<MempoolEntry> mempoolEntry(Hash256 txid) {
         Objects.requireNonNull(txid, "txid");

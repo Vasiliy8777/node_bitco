@@ -215,4 +215,20 @@ public final class RocksDbUtxoStore
         batch.deletePrefix(UTXO_PREFIX);
     }
 
+    /** Computes chainstate statistics while the caller holds the chainstate lock. */
+    public Statistics statistics() {
+        final long[] txouts = {0L};
+        final long[] totalAmount = {0L};
+        final long[] bogoSize = {0L};
+        database.forEachValueByPrefix(UTXO_PREFIX, bytes -> {
+            StoredUtxo coin = StoredUtxoSerializer.deserialize(bytes);
+            txouts[0] = Math.incrementExact(txouts[0]);
+            totalAmount[0] = Math.addExact(totalAmount[0], coin.amount());
+            bogoSize[0] = Math.addExact(bogoSize[0], 50L + coin.scriptPubKey().length);
+        });
+        return new Statistics(txouts[0], bogoSize[0], database.valueBytesByPrefix(UTXO_PREFIX), totalAmount[0]);
+    }
+
+    public record Statistics(long txouts, long bogoSize, long diskSize, long totalAmount) {}
+
 }
