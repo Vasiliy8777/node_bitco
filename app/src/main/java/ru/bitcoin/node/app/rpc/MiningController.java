@@ -37,9 +37,15 @@ public final class MiningController {
         this.minimumFee = minimumFee;
     }
 
+    public Object handleBlockTemplate(Map<String, Object> request) throws InterruptedException {
+        Object modeValue = request.getOrDefault("mode", "template");
+        if (!(modeValue instanceof String mode)) throw new RpcException(-8, "Invalid mode");
+        if ("proposal".equals(mode)) return validateProposal(request);
+        if (!"template".equals(mode)) throw new RpcException(-8, "Invalid mode");
+        return getBlockTemplate(request);
+    }
+
     public Map<String, Object> getBlockTemplate(Map<String, Object> request) throws InterruptedException {
-        if (!"template".equals(request.getOrDefault("mode", "template")))
-            throw new RpcException(-8, "Only template mode is supported");
         if (!(request.get("rules") instanceof List<?> rules) || !rules.contains("segwit"))
             throw new RpcException(-8, "Client must support segwit (rules: [segwit])");
         ensureReady();
@@ -68,6 +74,7 @@ public final class MiningController {
         }
         var result = new LinkedHashMap<String, Object>();
         result.put("version", block.header().version());
+        result.put("capabilities", List.of("proposal"));
         result.put("rules", List.of("csv", "!segwit", "taproot"));
         result.put("vbavailable", Map.of());
         result.put("vbrequired", 0);
@@ -91,6 +98,19 @@ public final class MiningController {
         if (coinbase.outputs().size() > 1)
             result.put("default_witness_commitment", HexFormat.of().formatHex(coinbase.outputs().getLast().scriptPubKey()));
         return result;
+    }
+
+    private Object validateProposal(Map<String, Object> request) {
+        if (!(request.get("data") instanceof String hex))
+            throw new RpcException(-32602, "Missing data String key for proposal");
+        final ru.bitcoin.node.protocol.block.Block block;
+        try {
+            block = BlockParser.parse(HexFormat.of().parseHex(hex));
+        } catch (RuntimeException exception) {
+            throw new RpcException(-22, "Block decode failed");
+        }
+        var result = validation.validateBlockProposal(block);
+        return result.valid() ? null : result.rejectReason();
     }
 
     private String longPollId() { return validation.activeTip().hash().toDisplayHex() + ":" + validation.revision(); }

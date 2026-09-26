@@ -65,7 +65,39 @@ class MiningRpcTest {
                     var response = call(client, uri, "getblocktemplate", List.of(Map.of("rules", List.of("segwit"))));
                     assertNull(response.get("error"));
                     var template = (Map<?, ?>) response.get("result");
+                    assertEquals(List.of("proposal"), template.get("capabilities"));
                     Block mined = mineTemplate(template);
+
+                    // BIP23 proposal validates the complete candidate without requiring/recording PoW.
+                    Block proposalBlock = mined;
+                    for (long nonce = 0; nonce <= 0xffff_ffffL; nonce++) {
+                        var header = new BlockHeader(
+                                mined.header().version(), mined.header().previousBlockHash(), mined.header().merkleRoot(),
+                                mined.header().timestamp(), mined.header().bits(), new UInt32(nonce));
+                        if (!ru.bitcoin.node.consensus.pow.ProofOfWork.isValid(header, parameters)) {
+                            proposalBlock = new Block(header, mined.transactions());
+                            break;
+                        }
+                    }
+                    assertFalse(ru.bitcoin.node.consensus.pow.ProofOfWork.isValid(proposalBlock.header(), parameters));
+                    var proposal = call(client, uri, "getblocktemplate", List.of(Map.of(
+                            "mode", "proposal",
+                            "data", HexFormat.of().formatHex(BlockSerializer.serialize(proposalBlock)))));
+                    assertNull(proposal.get("error"));
+                    assertNull(proposal.get("result"));
+                    assertEquals(0, validation.activeTip().height());
+
+                    var badHeader = new BlockHeader(
+                            mined.header().version(), mined.header().previousBlockHash(),
+                            new ru.bitcoin.node.common.types.Hash256(new byte[32]),
+                            mined.header().timestamp(), mined.header().bits(), mined.header().nonce());
+                    var badProposalBlock = new Block(badHeader, mined.transactions());
+                    var badProposal = call(client, uri, "getblocktemplate", List.of(Map.of(
+                            "mode", "proposal",
+                            "data", HexFormat.of().formatHex(BlockSerializer.serialize(badProposalBlock)))));
+                    assertNull(badProposal.get("error"));
+                    assertNotNull(badProposal.get("result"));
+                    assertEquals(0, validation.activeTip().height());
                     var next = client.sendAsync(request(uri, "getblocktemplate", List.of(Map.of("rules", List.of("segwit"),
                             "longpollid", template.get("longpollid")))), HttpResponse.BodyHandlers.ofString());
                     var submitted = call(client, uri, "submitblock", List.of(HexFormat.of().formatHex(BlockSerializer.serialize(mined))));
@@ -161,6 +193,9 @@ class MiningRpcTest {
                                     List.of("00".repeat(32))).get("error")).get("code")).intValue()
                     );
                     assertEquals("duplicate", call(client, uri, "submitblock", List.of(HexFormat.of().formatHex(BlockSerializer.serialize(mined)))).get("result"));
+                    assertEquals("duplicate", call(client, uri, "getblocktemplate", List.of(Map.of(
+                            "mode", "proposal",
+                            "data", HexFormat.of().formatHex(BlockSerializer.serialize(mined))))).get("result"));
                     assertNotNull(call(client, uri, "submitblock", List.of("zz")).get("error"));
                     assertEquals(-32601, ((Number) ((Map<?, ?>) call(client, uri, "unknown", List.of()).get("error")).get("code")).intValue());
                 }

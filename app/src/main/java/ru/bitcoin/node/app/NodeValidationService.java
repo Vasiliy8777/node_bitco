@@ -608,6 +608,47 @@ public final class NodeValidationService {
     }
 
     /**
+     * BIP23 proposal validation against the current active tip. The block is never
+     * persisted, relayed, or connected and proof of work is deliberately skipped.
+     */
+    public ProposalResult validateBlockProposal(Block block) {
+        Objects.requireNonNull(block, "block");
+        synchronized (chain) {
+            BlockIndex known = lookup.find(block.hash());
+            if (known != null) return new ProposalResult(false, "duplicate");
+
+            BlockIndex parent = chain.activeTip();
+            if (!block.header().previousBlockHash().equals(parent.hash()))
+                return new ProposalResult(false, "inconclusive-not-best-prevblk");
+
+            try {
+                ru.bitcoin.node.consensus.block.BlockValidator.validateStructure(block);
+                ChainHeaderValidator.validateWithoutProofOfWork(
+                        block.header(), parent, lookup, parameters, time);
+                long height = Math.addExact(parent.height(), 1L);
+                long previousMtp = MedianTimePast.calculate(parent, lookup);
+                long lockTimeCutoff = LockTimeCutoff.calculate(
+                        height, block.header().timestamp().value(), previousMtp, parameters);
+                BlockIndex candidate = BlockIndexFactory.createChild(parent, block.header());
+                ru.bitcoin.node.chain.utxo.BlockConnectChangesBuilder.build(
+                        block, height, lockTimeCutoff, previousMtp, utxos, parameters,
+                        new AncestorMedianTimePastResolver(candidate, lookup));
+                return new ProposalResult(true, null);
+            } catch (ru.bitcoin.node.consensus.block.BlockValidationException
+                     | ru.bitcoin.node.consensus.block.BlockHeaderValidationException
+                     | ru.bitcoin.node.consensus.transaction.TransactionValidationException
+                     | ru.bitcoin.node.script.ScriptExecutionException
+                     | ru.bitcoin.node.script.ScriptParseException
+                     | IllegalArgumentException exception) {
+                String reason = exception.getMessage();
+                return new ProposalResult(false, reason == null || reason.isBlank() ? "rejected" : reason);
+            }
+        }
+    }
+
+    public record ProposalResult(boolean valid, String rejectReason) { }
+
+    /**
      * Fresh template from one coherent chain/mempool snapshot. Does not search PoW.
      */
     public Block createMiningTemplate(byte[] payout, byte[] extraNonce, long maximumWeight, FeeRate minimumRate) {

@@ -142,7 +142,7 @@ public final class NodeRpcServer implements AutoCloseable {
             case "getblocktemplate" -> {
                 if (params.size() != 1 || !(params.getFirst() instanceof Map<?, ?>))
                     throw new RpcException(-32602, "Expected one template request object");
-                yield mining.getBlockTemplate((Map<String, Object>) params.getFirst());
+                yield mining.handleBlockTemplate((Map<String, Object>) params.getFirst());
             }
             case "submitblock" -> mining.submitBlock(stringParam(params));
             case "sendrawtransaction" -> {

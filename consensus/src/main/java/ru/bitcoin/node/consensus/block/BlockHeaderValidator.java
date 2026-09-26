@@ -18,6 +18,28 @@ public final class BlockHeaderValidator {
             long adjustedTimeSeconds,
             NetworkParameters parameters
     ) {
+        validate(header, expectedBits, medianTimePast, adjustedTimeSeconds, parameters, true);
+    }
+
+    /** BIP23 proposal validation uses all contextual header checks except proof of work. */
+    public static void validateWithoutProofOfWork(
+            BlockHeader header,
+            UInt32 expectedBits,
+            long medianTimePast,
+            long adjustedTimeSeconds,
+            NetworkParameters parameters
+    ) {
+        validate(header, expectedBits, medianTimePast, adjustedTimeSeconds, parameters, false);
+    }
+
+    private static void validate(
+            BlockHeader header,
+            UInt32 expectedBits,
+            long medianTimePast,
+            long adjustedTimeSeconds,
+            NetworkParameters parameters,
+            boolean checkProofOfWork
+    ) {
         if (medianTimePast < 0) {
             throw new IllegalArgumentException(
                     "medianTimePast must not be negative"
@@ -117,7 +139,7 @@ public final class BlockHeaderValidator {
          * target <= network powLimit
          * hash <= target
          */
-        if (!ProofOfWork.isValid(
+        if (checkProofOfWork && !ProofOfWork.isValid(
                 header,
                 parameters
         )) {

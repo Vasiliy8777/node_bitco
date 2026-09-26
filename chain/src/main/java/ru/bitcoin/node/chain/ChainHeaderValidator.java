@@ -16,7 +16,7 @@ public final class ChainHeaderValidator {
 
     /** Shared difficulty calculation for a candidate extending this parent. */
     public static UInt32 nextBits(BlockIndex parent, BlockIndexLookup lookup,
-                                 NetworkParameters parameters, UInt32 timestamp) {
+                                  NetworkParameters parameters, UInt32 timestamp) {
         java.util.Objects.requireNonNull(parent);
         java.util.Objects.requireNonNull(lookup);
         java.util.Objects.requireNonNull(parameters);
@@ -109,6 +109,26 @@ public final class ChainHeaderValidator {
                 adjustedTime.currentTimeSeconds(),
                 parameters
         );
+    }
+
+    /** Contextual BIP23 proposal check: identical to normal header validation except PoW. */
+    public static void validateWithoutProofOfWork(
+            BlockHeader header,
+            BlockIndex parent,
+            BlockIndexLookup lookup,
+            NetworkParameters parameters,
+            AdjustedTime adjustedTime
+    ) {
+        if (header == null || parent == null || lookup == null || parameters == null || adjustedTime == null)
+            throw new IllegalArgumentException("Proposal header validation arguments must not be null");
+        if (!header.previousBlockHash().equals(parent.hash()))
+            throw new IllegalArgumentException("Header previous block hash does not match parent");
+        long nextHeight = Math.addExact(parent.height(), 1L);
+        validateBlockVersion(header, nextHeight, parameters);
+        long medianTimePast = MedianTimePast.calculate(parent, lookup);
+        UInt32 expectedBits = calculateExpectedBits(nextHeight, header, parent, lookup, parameters);
+        BlockHeaderValidator.validateWithoutProofOfWork(
+                header, expectedBits, medianTimePast, adjustedTime.currentTimeSeconds(), parameters);
     }
 
     static UInt32 calculateExpectedBits(
