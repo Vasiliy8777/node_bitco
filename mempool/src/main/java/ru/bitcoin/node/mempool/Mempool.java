@@ -30,12 +30,23 @@ public final class Mempool {
     }
 
     public synchronized MempoolEntry admit(Transaction transaction, MempoolValidationContext context, UtxoView chainUtxos) {
-        return admitInternal(transaction, context, chainUtxos, false);
+        return admitInternal(transaction, context, chainUtxos, false, false, null);
+    }
+
+    /** Revalidates a persisted transaction while preserving its original local admission time. */
+    public synchronized MempoolEntry admitRestored(Transaction transaction, long arrivalTime,
+                                                   MempoolValidationContext context, UtxoView chainUtxos) {
+        if (arrivalTime < 0) throw new IllegalArgumentException("arrivalTime must not be negative");
+        return admitInternal(transaction, context, chainUtxos, false, false, arrivalTime);
     }
     private MempoolEntry admitInternal(Transaction transaction, MempoolValidationContext context, UtxoView chainUtxos, boolean packageMode) {
-        return admitInternal(transaction, context, chainUtxos, packageMode, false);
+        return admitInternal(transaction, context, chainUtxos, packageMode, false, null);
     }
     private MempoolEntry admitInternal(Transaction transaction, MempoolValidationContext context, UtxoView chainUtxos, boolean packageMode, boolean bypassLimits) {
+        return admitInternal(transaction, context, chainUtxos, packageMode, bypassLimits, null);
+    }
+    private MempoolEntry admitInternal(Transaction transaction, MempoolValidationContext context, UtxoView chainUtxos,
+                                       boolean packageMode, boolean bypassLimits, Long restoredArrivalTime) {
         Objects.requireNonNull(transaction, "transaction");
         Objects.requireNonNull(context, "context");
         Objects.requireNonNull(chainUtxos, "chainUtxos");
@@ -72,7 +83,8 @@ public final class Mempool {
         if (!packageMode) policy.validateFee(fee, Math.max(weight, sigops * 20));
         ru.bitcoin.node.mempool.policy.StandardTransactionPolicy.validateDustFee(transaction, fee, policy.dustRelaySatPerKvB());
         PackagePolicy.ephemeralSpends(transaction, entries, policy.dustRelaySatPerKvB());
-        var entry = new MempoolEntry(transaction, fee, weight, clock.instant().getEpochSecond(), sigops);
+        long arrivalTime = restoredArrivalTime != null ? restoredArrivalTime : clock.instant().getEpochSecond();
+        var entry = new MempoolEntry(transaction, fee, weight, arrivalTime, sigops);
         if (!packageMode && fee < new FeeRate(minimumFeeRate()).feeForVSize(entry.virtualSize())) throw new MempoolAdmissionException("mempool-min-fee");
         MempoolGraphPolicy.replacement(entries, conflicts, evicted, entry, limits);
         Map<Hash256, MempoolEntry> candidate = new LinkedHashMap<>(entries);

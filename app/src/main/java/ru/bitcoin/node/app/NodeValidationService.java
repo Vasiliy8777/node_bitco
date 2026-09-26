@@ -14,6 +14,7 @@ import ru.bitcoin.node.storage.chain.RocksDbChainStateStore;
 import ru.bitcoin.node.storage.chain.RocksDbPruneStateStore;
 import ru.bitcoin.node.storage.rocksdb.RocksDbDatabase;
 import ru.bitcoin.node.storage.mempool.RocksDbMempoolStore;
+import ru.bitcoin.node.storage.mempool.PersistedMempoolEntry;
 import ru.bitcoin.node.storage.undo.RocksDbUndoStore;
 import ru.bitcoin.node.storage.utxo.RocksDbUtxoStore;
 
@@ -292,7 +293,8 @@ public final class NodeValidationService {
         synchronized (chain) {
             if (persistMempool) restorePersistentMempool();
             mempool.revalidate(context(), coins, Set.of());
-            if (persistMempool) mempoolStore.replace(mempoolTransactions());
+            mempool.expire();
+            if (persistMempool) mempoolStore.replace(persistedMempoolEntries());
             blockPruner.prune(chain.activeTip());
             initialBlockDownload.update(chain.activeTip());
         }
@@ -324,7 +326,7 @@ public final class NodeValidationService {
                 chain.notifyAll();
                 return entry;
             } finally {
-                if (persistMempool) mempoolStore.apply(transactions(before), mempoolTransactions());
+                if (persistMempool) mempoolStore.apply(persistedEntries(before), persistedMempoolEntries());
             }
         }
     }
@@ -366,7 +368,7 @@ public final class NodeValidationService {
                 chain.notifyAll();
                 return entries;
             } finally {
-                if (persistMempool) mempoolStore.apply(transactions(before), mempoolTransactions());
+                if (persistMempool) mempoolStore.apply(persistedEntries(before), persistedMempoolEntries());
             }
         }
     }
@@ -425,25 +427,27 @@ public final class NodeValidationService {
         }
         var before = mempool.entries();
         mempool.reconcile(context(), coins, confirmed, retry);
-        if (persistMempool) mempoolStore.apply(transactions(before), mempoolTransactions());
+        if (persistMempool) mempoolStore.apply(persistedEntries(before), persistedMempoolEntries());
         poolTip = tip;
         revision++;
         chain.notifyAll();
     }
 
 
-    private List<Transaction> mempoolTransactions() {
-        return transactions(mempool.entries());
+    private List<PersistedMempoolEntry> persistedMempoolEntries() {
+        return persistedEntries(mempool.entries());
     }
 
-    private static List<Transaction> transactions(List<MempoolEntry> entries) {
-        return entries.stream().map(MempoolEntry::transaction).toList();
+    private static List<PersistedMempoolEntry> persistedEntries(List<MempoolEntry> entries) {
+        return entries.stream()
+                .map(entry -> new PersistedMempoolEntry(entry.transaction(), entry.arrivalTime()))
+                .toList();
     }
 
     private void expirePersistent() {
         var before = mempool.entries();
         mempool.expire();
-        if (persistMempool) mempoolStore.apply(transactions(before), mempoolTransactions());
+        if (persistMempool) mempoolStore.apply(persistedEntries(before), persistedMempoolEntries());
     }
 
     /**
@@ -452,11 +456,11 @@ public final class NodeValidationService {
      * against the current chain and policy before becoming live again.
      */
     private void restorePersistentMempool() {
-        List<Transaction> stored = mempoolStore.load();
+        List<PersistedMempoolEntry> stored = mempoolStore.load();
         if (stored.isEmpty()) return;
 
-        Map<Hash256, Transaction> pending = new LinkedHashMap<>();
-        for (Transaction tx : stored) pending.put(tx.txId(), tx);
+        Map<Hash256, PersistedMempoolEntry> pending = new LinkedHashMap<>();
+        for (PersistedMempoolEntry entry : stored) pending.put(entry.transaction().txId(), entry);
 
         // Restore parents before children without relying on RocksDB key order.
         boolean progressed;
@@ -464,12 +468,19 @@ public final class NodeValidationService {
             progressed = false;
             var iterator = pending.entrySet().iterator();
             while (iterator.hasNext()) {
-                Transaction tx = iterator.next().getValue();
+                PersistedMempoolEntry persisted = iterator.next().getValue();
+                Transaction tx = persisted.transaction();
                 boolean parentStillPending = tx.inputs().stream()
                         .anyMatch(input -> pending.containsKey(input.previousOutput().transactionId()));
                 if (parentStillPending) continue;
                 try {
-                    mempool.admit(tx, context(), coins);
+                    // Legacy transaction-only entries use arrivalTime=0 and are intentionally
+                    // admitted with current time once, then rewritten in the metadata format.
+                    if (persisted.arrivalTime() == 0L) {
+                        mempool.admit(tx, context(), coins);
+                    } else {
+                        mempool.admitRestored(tx, persisted.arrivalTime(), context(), coins);
+                    }
                 } catch (MempoolAdmissionException | IllegalArgumentException ignored) {
                     // Stale, expired-by-policy, conflicting, or otherwise invalid after restart.
                 }

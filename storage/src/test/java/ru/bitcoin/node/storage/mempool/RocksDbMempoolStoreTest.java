@@ -21,14 +21,30 @@ class RocksDbMempoolStoreTest {
         var tx2 = tx((byte) 2, true);
         try (var db = new RocksDbDatabase(temp.resolve("db"))) {
             var store = new RocksDbMempoolStore(db);
-            store.apply(List.of(), List.of(tx1, tx2));
+            var e1 = new PersistedMempoolEntry(tx1, 1_000L);
+            var e2 = new PersistedMempoolEntry(tx2, 2_000L);
+            store.apply(List.of(), List.of(e1, e2));
             assertEquals(2, store.load().size());
-            store.apply(List.of(tx1, tx2), List.of(tx2));
+            store.apply(List.of(e1, e2), List.of(e2));
         }
         try (var db = new RocksDbDatabase(temp.resolve("db"))) {
             var loaded = new RocksDbMempoolStore(db).load();
             assertEquals(1, loaded.size());
-            assertEquals(tx2.wtxId(), loaded.getFirst().wtxId());
+            assertEquals(tx2.wtxId(), loaded.getFirst().transaction().wtxId());
+            assertEquals(2_000L, loaded.getFirst().arrivalTime());
+        }
+    }
+
+    @Test
+    void replacePreservesArrivalTimeMetadata() {
+        var transaction = tx((byte) 3, true);
+        try (var db = new RocksDbDatabase(temp.resolve("metadata"))) {
+            var store = new RocksDbMempoolStore(db);
+            store.replace(List.of(new PersistedMempoolEntry(transaction, 123_456L)));
+            var loaded = store.load();
+            assertEquals(1, loaded.size());
+            assertEquals(123_456L, loaded.getFirst().arrivalTime());
+            assertEquals(transaction.wtxId(), loaded.getFirst().transaction().wtxId());
         }
     }
 
