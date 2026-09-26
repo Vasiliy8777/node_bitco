@@ -41,6 +41,7 @@ public final class NodeValidationService {
     private final long pruneTargetBytes;
     private BlockIndex poolTip;
     private long revision;
+    private boolean mempoolPersistenceDirty;
     private final ActiveChainAncestors activeAncestors = new ActiveChainAncestors();
     private final InitialBlockDownloadState initialBlockDownload;
 
@@ -294,7 +295,10 @@ public final class NodeValidationService {
             if (persistMempool) restorePersistentMempool();
             mempool.revalidate(context(), coins, Set.of());
             mempool.expire();
-            if (persistMempool) mempoolStore.replace(persistedMempoolEntries());
+            if (persistMempool) {
+                mempoolStore.replace(persistedMempoolEntries());
+                mempoolPersistenceDirty = false;
+            }
             blockPruner.prune(chain.activeTip());
             initialBlockDownload.update(chain.activeTip());
         }
@@ -326,7 +330,7 @@ public final class NodeValidationService {
                 chain.notifyAll();
                 return entry;
             } finally {
-                if (persistMempool) mempoolStore.apply(persistedEntries(before), persistedMempoolEntries());
+                markMempoolPersistenceDirty(before);
             }
         }
     }
@@ -368,7 +372,7 @@ public final class NodeValidationService {
                 chain.notifyAll();
                 return entries;
             } finally {
-                if (persistMempool) mempoolStore.apply(persistedEntries(before), persistedMempoolEntries());
+                markMempoolPersistenceDirty(before);
             }
         }
     }
@@ -427,7 +431,7 @@ public final class NodeValidationService {
         }
         var before = mempool.entries();
         mempool.reconcile(context(), coins, confirmed, retry);
-        if (persistMempool) mempoolStore.apply(persistedEntries(before), persistedMempoolEntries());
+        markMempoolPersistenceDirty(before);
         poolTip = tip;
         revision++;
         chain.notifyAll();
@@ -447,7 +451,38 @@ public final class NodeValidationService {
     private void expirePersistent() {
         var before = mempool.entries();
         mempool.expire();
-        if (persistMempool) mempoolStore.apply(persistedEntries(before), persistedMempoolEntries());
+        markMempoolPersistenceDirty(before);
+    }
+
+    /**
+     * Writes one coherent durable mempool snapshot. Normal mempool mutation does
+     * not perform RocksDB I/O; persistence is flushed explicitly during clean
+     * node shutdown (and may be invoked by operational tooling).
+     */
+    public void flushPersistentMempool() {
+        if (!persistMempool) return;
+        synchronized (chain) {
+            synchronizePool();
+            var beforeExpiry = mempool.entries();
+            mempool.expire();
+            markMempoolPersistenceDirty(beforeExpiry);
+            if (!mempoolPersistenceDirty) return;
+            mempoolStore.replace(persistedMempoolEntries());
+            mempoolPersistenceDirty = false;
+        }
+    }
+
+    public boolean isMempoolPersistenceDirty() {
+        synchronized (chain) {
+            return persistMempool && mempoolPersistenceDirty;
+        }
+    }
+
+    private void markMempoolPersistenceDirty(List<MempoolEntry> before) {
+        if (!persistMempool) return;
+        if (!before.equals(mempool.entries())) {
+            mempoolPersistenceDirty = true;
+        }
     }
 
     /**

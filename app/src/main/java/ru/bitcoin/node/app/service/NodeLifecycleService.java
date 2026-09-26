@@ -751,6 +751,25 @@ public final class NodeLifecycleService
             }
         }
 
+        try {
+
+            validationService.flushPersistentMempool();
+
+        } catch (RuntimeException exception) {
+
+            IOException mempoolFailure =
+                    new IOException(
+                            "Failed to persist mempool during shutdown",
+                            exception
+                    );
+
+            if (closeFailure == null) {
+                closeFailure = mempoolFailure;
+            } else {
+                closeFailure.addSuppressed(mempoolFailure);
+            }
+        }
+
         if (closeFailure == null) {
 
             synchronized (this) {

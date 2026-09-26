@@ -85,11 +85,37 @@ class NodeValidationServiceTest {
             service.admit(parent);
             service.admit(child);
             assertEquals(2, service.mempoolEntries().size());
+            assertTrue(service.isMempoolPersistenceDirty());
+            service.flushPersistentMempool();
+            assertFalse(service.isMempoolPersistenceDirty());
         }
         try (var db = new RocksDbDatabase(directory)) {
             var restored = new NodeValidationService(db, PARAMS, () -> 1_800_000_000L, new Mempool());
             assertEquals(List.of(parent.txId(), child.txId()),
                     restored.mempoolEntries().stream().map(e -> e.transaction().txId()).toList());
+        }
+    }
+
+    @Test
+    void mempoolMutationsRemainInMemoryUntilExplicitPersistenceFlush() {
+        OutPoint fund = new OutPoint(Hash256.fromDisplayHex("33".repeat(32)), new UInt32(0));
+        Transaction transaction;
+
+        try (var db = new RocksDbDatabase(directory)) {
+            var service = new NodeValidationService(db, PARAMS, () -> 1_800_000_000L, new Mempool());
+            new RocksDbUtxoStore(db).save(fund, new StoredUtxo(100_000, SCRIPT, 0, false));
+            transaction = spend(fund, 90_000);
+            service.admit(transaction);
+            assertTrue(service.isMempoolPersistenceDirty());
+
+            // No per-transaction RocksDB persistence anymore.
+            assertTrue(new ru.bitcoin.node.storage.mempool.RocksDbMempoolStore(db).load().isEmpty());
+
+            service.flushPersistentMempool();
+            assertFalse(service.isMempoolPersistenceDirty());
+            assertEquals(List.of(transaction.txId()),
+                    new ru.bitcoin.node.storage.mempool.RocksDbMempoolStore(db).load().stream()
+                            .map(entry -> entry.transaction().txId()).toList());
         }
     }
 
