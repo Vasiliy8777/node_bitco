@@ -13,6 +13,7 @@ import ru.bitcoin.node.protocol.transaction.Transaction;
 import ru.bitcoin.node.protocol.serialization.BlockHeaderSerializer;
 import ru.bitcoin.node.protocol.serialization.BlockSerializer;
 import ru.bitcoin.node.common.types.Hash256;
+import ru.bitcoin.node.p2p.PeerManager;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -38,10 +39,17 @@ public final class NodeRpcServer implements AutoCloseable {
     private final NodeRelayService relay;
     private final NodeSyncInfrastructure sync;
     private final BooleanSupplier ready;
+    private final PeerManager peerManager;
 
     public NodeRpcServer(InetSocketAddress address, String user, String password, MiningController mining,
                          NodeValidationService validation, NodeRelayService relay, NodeSyncInfrastructure sync,
                          BooleanSupplier ready) throws IOException {
+        this(address, user, password, mining, validation, relay, sync, ready, null);
+    }
+
+    public NodeRpcServer(InetSocketAddress address, String user, String password, MiningController mining,
+                         NodeValidationService validation, NodeRelayService relay, NodeSyncInfrastructure sync,
+                         BooleanSupplier ready, PeerManager peerManager) throws IOException {
         if (address.isUnresolved() || !address.getAddress().isLoopbackAddress())
             throw new IllegalArgumentException("RPC must bind to a loopback address");
         if (user.isBlank() || user.contains(":") || password.isBlank())
@@ -53,6 +61,7 @@ public final class NodeRpcServer implements AutoCloseable {
         this.relay = relay;
         this.sync = sync;
         this.ready = ready;
+        this.peerManager = peerManager;
         server = HttpServer.create(address, 16);
         server.createContext("/", this::handle);
         server.setExecutor(executor);
@@ -264,6 +273,51 @@ public final class NodeRpcServer implements AutoCloseable {
                         .map(tx -> tx.txId().toDisplayHex()).toList());
                 yield result;
             }
+            case "getconnectioncount" -> requirePeerManager().size();
+            case "getpeerinfo" -> requirePeerManager().peers().stream().map(peer -> {
+                var info = new LinkedHashMap<String, Object>();
+                var remote = peer.remoteAddress();
+                info.put("addr", remote == null ? "" : remote.getHostString() + ":" + remote.getPort());
+                info.put("inbound", peer.isInboundConnection());
+                info.put("connection_type", requirePeerManager().roleOf(peer).name().toLowerCase(Locale.ROOT));
+                info.put("state", peer.state().name().toLowerCase(Locale.ROOT));
+                peer.lastPingRoundTrip().ifPresent(v -> info.put("pingtime", v.toNanos() / 1_000_000_000.0));
+                peer.minPingRoundTrip().ifPresent(v -> info.put("minping", v.toNanos() / 1_000_000_000.0));
+                if (peer.isReady()) {
+                    var version = peer.remoteVersion();
+                    info.put("version", version.version());
+                    info.put("subver", version.userAgent());
+                    info.put("services", String.format("%016x", version.services()));
+                    info.put("startingheight", version.startHeight());
+                }
+                return info;
+            }).toList();
+            case "disconnectnode" -> {
+                String host = stringParam(params);
+                try { requirePeerManager().disconnect(java.net.InetAddress.getByName(host)); }
+                catch (java.net.UnknownHostException e) { throw new RpcException(-8, "Invalid address"); }
+                yield null;
+            }
+            case "setban" -> {
+                if (params.size() < 2 || params.size() > 4 || !(params.get(0) instanceof String subnet) || !(params.get(1) instanceof String command))
+                    throw new RpcException(-32602, "Expected subnet, command, optional bantime and absolute");
+                if (command.equals("add")) {
+                    long banTime = params.size() > 2 && params.get(2) != null ? ((Number) params.get(2)).longValue() : 0L;
+                    boolean absolute = params.size() > 3 && params.get(3) != null && (Boolean) params.get(3);
+                    requirePeerManager().banManager().ban(subnet, banTime, absolute);
+                    for (var peer : requirePeerManager().peers()) {
+                        var remote = peer.remoteAddress();
+                        if (remote != null && remote.getAddress() != null && requirePeerManager().banManager().isBanned(remote.getAddress()))
+                            try { peer.close(); } catch (IOException ignored) { }
+                    }
+                } else if (command.equals("remove")) {
+                    if (!requirePeerManager().banManager().unban(subnet)) throw new RpcException(-30, "Unban failed");
+                } else throw new RpcException(-8, "Command must be add or remove");
+                yield null;
+            }
+            case "listbanned" -> requirePeerManager().banManager().entries().stream().map(entry -> Map.of(
+                    "address", entry.subnet(), "ban_created", entry.banCreated(), "banned_until", entry.bannedUntil())).toList();
+            case "clearbanned" -> { requirePeerManager().banManager().clear(); yield null; }
             case "getblockchaininfo" -> {
                 var tip = validation.activeTip();
                 var prune = validation.pruneInfo();
@@ -422,6 +476,11 @@ public final class NodeRpcServer implements AutoCloseable {
         if (params.size() != 1 || !(params.getFirst() instanceof String value))
             throw new RpcException(-32602, "Expected one hexadecimal string");
         return value;
+    }
+
+    private PeerManager requirePeerManager() {
+        if (peerManager == null) throw new RpcException(-32601, "Network RPC unavailable");
+        return peerManager;
     }
 
     private void respond(HttpExchange exchange, int status, Object value) throws IOException {

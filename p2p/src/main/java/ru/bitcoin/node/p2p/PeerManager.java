@@ -15,13 +15,19 @@ public final class PeerManager
     private final List<java.util.function.Consumer<Peer>> listeners = new ArrayList<>();
     private final Map<Peer, PeerConnectionRole> roles = new IdentityHashMap<>();
     private final PeerDiscouragementManager discouragementManager;
+    private final PeerBanManager banManager;
 
     public PeerManager() {
-        this(new PeerDiscouragementManager());
+        this(new PeerDiscouragementManager(), new PeerBanManager());
     }
 
     public PeerManager(PeerDiscouragementManager discouragementManager) {
+        this(discouragementManager, new PeerBanManager());
+    }
+
+    public PeerManager(PeerDiscouragementManager discouragementManager, PeerBanManager banManager) {
         this.discouragementManager = Objects.requireNonNull(discouragementManager, "discouragementManager");
+        this.banManager = Objects.requireNonNull(banManager, "banManager");
     }
 
     /** Callbacks only attach nonblocking observers; called under the manager lock. */
@@ -116,6 +122,17 @@ public final class PeerManager
 
     public PeerDiscouragementManager discouragementManager() {
         return discouragementManager;
+    }
+
+    public PeerBanManager banManager() { return banManager; }
+
+    public void disconnect(java.net.InetAddress address) {
+        for (Peer peer : peers()) {
+            java.net.InetSocketAddress remote = peer.remoteAddress();
+            if (remote != null && address.equals(remote.getAddress())) {
+                try { peer.close(); } catch (IOException ignored) { }
+            }
+        }
     }
 
     public synchronized void remove(

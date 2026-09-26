@@ -42,7 +42,7 @@ class MiningRpcTest {
             try (var relay = new NodeRelayService(validation, sync, peers)) {
                 var mining = new MiningController(validation, relay, parameters, ready::get, new byte[]{0x51}, 4_000_000, new FeeRate(0));
                 try (var rpc = new NodeRpcServer(new InetSocketAddress("127.0.0.1", 0), "test", "test-password",
-                        mining, validation, relay, sync, ready::get); var client = HttpClient.newHttpClient()) {
+                        mining, validation, relay, sync, ready::get, peers); var client = HttpClient.newHttpClient()) {
                     URI uri = URI.create("http://127.0.0.1:" + rpc.port());
                     String body = JSON.writeValueAsString(Map.of("id", 1, "method", "getblocktemplate", "params", List.of(Map.of("rules", List.of("segwit")))));
                     assertEquals(401, client.send(HttpRequest.newBuilder(uri).POST(HttpRequest.BodyPublishers.ofString(body)).build(), HttpResponse.BodyHandlers.ofString()).statusCode());
@@ -51,6 +51,14 @@ class MiningRpcTest {
                     assertEquals(false, chainInfo.get("pruned"));
                     assertFalse(chainInfo.containsKey("pruneheight"));
                     assertEquals(true, chainInfo.get("initialblockdownload"));
+                    assertEquals(0, ((Number) call(client, uri, "getconnectioncount", List.of()).get("result")).intValue());
+                    assertEquals(List.of(), call(client, uri, "getpeerinfo", List.of()).get("result"));
+                    assertNull(call(client, uri, "setban", List.of("192.0.2.99/24", "add", 3600, false)).get("error"));
+                    var banned = (List<?>) call(client, uri, "listbanned", List.of()).get("result");
+                    assertEquals(1, banned.size());
+                    assertEquals("192.0.2.0/24", ((Map<?, ?>) banned.getFirst()).get("address"));
+                    assertNull(call(client, uri, "clearbanned", List.of()).get("error"));
+                    assertEquals(List.of(), call(client, uri, "listbanned", List.of()).get("result"));
                     ready.set(true);
                     var response = call(client, uri, "getblocktemplate", List.of(Map.of("rules", List.of("segwit"))));
                     assertNull(response.get("error"));

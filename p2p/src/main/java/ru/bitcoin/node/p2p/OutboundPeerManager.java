@@ -232,7 +232,8 @@ public final class OutboundPeerManager {
             );
 
             if (address.isDirectSocketAddress()
-                    && discouragementManager.isDiscouraged(address.address())) {
+                    && (discouragementManager.isDiscouraged(address.address())
+                    || peerManager.banManager().isBanned(address.address()))) {
                 continue;
             }
 

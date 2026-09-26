@@ -228,8 +228,11 @@ public class NodeConfiguration {
     }
 
     @Bean(destroyMethod = "close")
-    public PeerManager peerManager() {
-        return new PeerManager();
+    public PeerManager peerManager(@Value("${bitcoin.data-directory}") String dataDirectory) {
+        return new PeerManager(
+                new PeerDiscouragementManager(),
+                new PeerBanManager(Path.of(dataDirectory))
+        );
     }
 
     @Bean(initMethod = "start", destroyMethod = "close")

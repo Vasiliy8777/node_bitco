@@ -228,7 +228,8 @@ public final class BitcoinServer
                         currentServerSocket.accept();
 
                 if (socket.getInetAddress() != null
-                        && discouragementManager.isDiscouraged(socket.getInetAddress())) {
+                        && (discouragementManager.isDiscouraged(socket.getInetAddress())
+                        || peerManager.banManager().isBanned(socket.getInetAddress()))) {
                     closeQuietly(socket);
                     socket = null;
                     continue;
