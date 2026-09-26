@@ -289,7 +289,7 @@ public class NodeConfiguration {
                 syncInfrastructure.blockIndexLookup(),
                 syncInfrastructure.blockStore(),
                 1024,
-                nodeRelayService::relayConnectedBlock
+                nodeRelayService::onConnectedBlock
         );
     }
 

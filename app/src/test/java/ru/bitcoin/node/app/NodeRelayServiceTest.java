@@ -628,6 +628,50 @@ class NodeRelayServiceTest {
     }
 
 
+    @Test
+    void localParentSubmissionReconsidersPreviouslyReceivedOrphan() throws Exception {
+        var parameters = NetworkParametersRegistry.regtest();
+        byte[] script = HexFormat.of().parseHex("a914" + HexFormat.of().formatHex(Hash160.hash(new byte[]{0x51})) + "87");
+        try (var db = new RocksDbDatabase(directory.resolve("local-parent-orphan"));
+             var peers = new PeerManager()) {
+            var validation = new NodeValidationService(db, parameters, () -> 1_800_000_000L, new Mempool());
+            var sync = new NodeSyncInfrastructure(db, parameters, () -> 1_800_000_000L);
+            var fund = new OutPoint(Hash256.fromDisplayHex("31".repeat(32)), new UInt32(0));
+            new RocksDbUtxoStore(db).save(fund, new StoredUtxo(100_000, script, 0, false));
+            var parent = spend(fund, 90_000, script);
+            var child = spend(new OutPoint(parent.txId(), new UInt32(0)), 80_000, script);
+
+            var source = mock(Peer.class);
+            var version = mock(VersionMessage.class);
+            when(version.relay()).thenReturn(true);
+            when(source.isReady()).thenReturn(true);
+            when(source.remoteVersion()).thenReturn(version);
+            var incoming = new AtomicReference<PeerMessageListener>();
+            doAnswer(invocation -> { incoming.set(invocation.getArgument(0)); return null; })
+                    .when(source).addMessageListener(any());
+            var outbound = new LinkedBlockingQueue<BitcoinMessage>();
+            doAnswer(invocation -> { outbound.add(invocation.getArgument(0)); return null; })
+                    .when(source).send(any());
+            peers.add(source);
+
+            try (var relay = new NodeRelayService(validation, sync, peers)) {
+                incoming.get().onMessage(source, BitcoinMessages.inv(new InvMessage(List.of(
+                        new InventoryVector(InventoryVector.MSG_TX, child.txId())))));
+                assertEquals(child.txId(), BitcoinMessages.decodeGetData(take(outbound)).inventory().getFirst().hash());
+                incoming.get().onMessage(source, new BitcoinMessage("tx", TransactionSerializer.serialize(child)));
+                assertEquals(parent.txId(), BitcoinMessages.decodeGetData(take(outbound)).inventory().getFirst().hash());
+                assertTrue(validation.mempoolEntries().isEmpty());
+
+                assertEquals(parent.txId(), relay.submitTransaction(parent));
+                assertEquals(Set.of(parent.txId(), child.txId()),
+                        validation.mempoolEntries().stream()
+                                .map(entry -> entry.transaction().txId())
+                                .collect(java.util.stream.Collectors.toSet()));
+            }
+        }
+    }
+
+
     private static List<InventoryVector> unknownTransactions(int count, int seed) {
         List<InventoryVector> inventory = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {

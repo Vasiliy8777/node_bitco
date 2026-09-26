@@ -416,8 +416,7 @@ public final class NodeRelayService implements AutoCloseable {
         }
         if (result == BlockProcessingResult.CONNECTED) {
             promoteHighBandwidthCompactPeer(source);
-            handleConnectedBlockOrphans(block);
-            relayConnectedBlock(block, source);
+            onConnectedBlock(block, source);
         }
     }
 
@@ -489,8 +488,7 @@ public final class NodeRelayService implements AutoCloseable {
         // Full data uses ordinary consensus validation, without another reconstruction retry.
         if (validation.processBlock(block) == BlockProcessingResult.CONNECTED) {
             promoteHighBandwidthCompactPeer(peer);
-            handleConnectedBlockOrphans(block);
-            relayConnectedBlock(block, peer);
+            onConnectedBlock(block, peer);
         }
     }
 
@@ -728,10 +726,20 @@ public final class NodeRelayService implements AutoCloseable {
         var result = validation.processBlock(block);
         if (result == BlockProcessingResult.CONNECTED) {
             sync.headerSyncService().process(new HeadersMessage(List.of(block.header())));
-            handleConnectedBlockOrphans(block);
-            relayConnectedBlock(block, null);
+            onConnectedBlock(block, null);
         }
         return result;
+    }
+
+    /**
+     * Completes application-level work for a block that has already become active.
+     * This is the single post-connect hook used by relay, RPC/local submission and
+     * bulk block synchronization so orphan cleanup/reconsideration cannot be skipped.
+     */
+    public void onConnectedBlock(Block block, Peer source) {
+        Objects.requireNonNull(block, "block");
+        handleConnectedBlockOrphans(block);
+        relayConnectedBlock(block, source);
     }
 
     /**
@@ -781,6 +789,7 @@ public final class NodeRelayService implements AutoCloseable {
     public Hash256 submitTransaction(Transaction transaction) {
         validation.admit(transaction);
         announceTransaction(transaction, null);
+        reconsiderOrphanDescendants(transaction);
         return transaction.txId();
     }
 
