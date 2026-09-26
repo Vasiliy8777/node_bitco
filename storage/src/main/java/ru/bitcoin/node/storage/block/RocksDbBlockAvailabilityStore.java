@@ -76,8 +76,18 @@ public final class RocksDbBlockAvailabilityStore {
     private void update(RocksDbWriteBatch batch, Hash256 hash, int set, int clear) {
         Objects.requireNonNull(batch, "batch");
         Objects.requireNonNull(hash, "hash");
-        int next = (status(hash) | set) & ~clear;
-        batch.put(key(AVAILABILITY_PREFIX, hash), new byte[]{(byte) next});
+        byte[] metadataKey = key(AVAILABILITY_PREFIX, hash);
+        RocksDbWriteBatch.PendingValue pending = batch.pendingValue(metadataKey);
+
+        final int current;
+        if (pending.touched()) {
+            current = pending.value() == null ? 0 : decode(pending.value());
+        } else {
+            current = status(hash);
+        }
+
+        int next = (current | set) & ~clear;
+        batch.put(metadataKey, new byte[]{(byte) next});
     }
 
     private static int decode(byte[] value) {

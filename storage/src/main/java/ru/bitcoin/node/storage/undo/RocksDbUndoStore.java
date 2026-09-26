@@ -45,12 +45,10 @@ public final class RocksDbUndoStore
             );
         }
 
-        database.put(
-                key(blockHash),
-                BlockUndoDataSerializer.serialize(
-                        undoData
-                )
-        );
+        try (RocksDbWriteBatch batch = new RocksDbWriteBatch()) {
+            save(batch, blockHash, undoData);
+            database.write(batch);
+        }
     }
 
     @Override
@@ -96,8 +94,7 @@ public final class RocksDbUndoStore
         }
 
         try (RocksDbWriteBatch batch = new RocksDbWriteBatch()) {
-            batch.delete(key(blockHash));
-            new RocksDbBlockAvailabilityStore(database).clearUndo(batch, blockHash);
+            delete(batch, blockHash);
             database.write(batch);
         }
     }
@@ -162,6 +159,7 @@ public final class RocksDbUndoStore
                         undoData
                 )
         );
+        new RocksDbBlockAvailabilityStore(database).markUndo(batch, blockHash);
     }
 
     public void delete(
@@ -183,6 +181,7 @@ public final class RocksDbUndoStore
         batch.delete(
                 key(blockHash)
         );
+        new RocksDbBlockAvailabilityStore(database).clearUndo(batch, blockHash);
     }
     /** Removes the complete persistent namespace in the caller's atomic batch. */
     public void clear(RocksDbWriteBatch batch) {

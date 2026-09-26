@@ -40,10 +40,10 @@ public final class RocksDbBlockStore
             );
         }
 
-        database.put(
-                key(block.header().hash()),
-                BlockSerializer.serialize(block)
-        );
+        try (RocksDbWriteBatch batch = new RocksDbWriteBatch()) {
+            save(batch, block);
+            database.write(batch);
+        }
     }
 
     public void save(
@@ -62,10 +62,12 @@ public final class RocksDbBlockStore
             );
         }
 
+        Hash256 hash = block.header().hash();
         batch.put(
-                key(block.header().hash()),
+                key(hash),
                 BlockSerializer.serialize(block)
         );
+        new RocksDbBlockAvailabilityStore(database).markData(batch, hash);
     }
 
     @Override
@@ -134,8 +136,7 @@ public final class RocksDbBlockStore
         }
 
         try (RocksDbWriteBatch batch = new RocksDbWriteBatch()) {
-            batch.delete(key(blockHash));
-            new RocksDbBlockAvailabilityStore(database).clearData(batch, blockHash);
+            delete(batch, blockHash);
             database.write(batch);
         }
     }
@@ -159,6 +160,7 @@ public final class RocksDbBlockStore
         batch.delete(
                 key(blockHash)
         );
+        new RocksDbBlockAvailabilityStore(database).clearData(batch, blockHash);
     }
 
     private static byte[] key(

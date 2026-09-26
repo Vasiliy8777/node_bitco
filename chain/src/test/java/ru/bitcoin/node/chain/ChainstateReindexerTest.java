@@ -8,6 +8,12 @@ import ru.bitcoin.node.protocol.network.NetworkParameters;
 import ru.bitcoin.node.protocol.network.NetworkParametersRegistry;
 import ru.bitcoin.node.storage.chain.RocksDbChainStateStore;
 import ru.bitcoin.node.storage.chain.RocksDbReindexStateStore;
+import ru.bitcoin.node.storage.block.RocksDbBlockAvailabilityStore;
+import ru.bitcoin.node.storage.undo.BlockUndoData;
+import ru.bitcoin.node.storage.undo.RocksDbUndoStore;
+
+import java.util.List;
+
 import ru.bitcoin.node.storage.rocksdb.RocksDbDatabase;
 
 import java.nio.file.Path;
@@ -47,6 +53,28 @@ class ChainstateReindexerTest {
             assertEquals(state.activeTip().hash(), new RocksDbChainStateStore(database)
                     .loadBestHeaderTipHash().orElseThrow());
             assertTrue(new RocksDbReindexStateStore(database).loadTargetTipHash().isEmpty());
+        }
+    }
+
+
+    @Test
+    void chainstateResetClearsStaleUndoAvailabilityBeforeReplay() {
+        try (RocksDbDatabase database = new RocksDbDatabase(tempDirectory.resolve("undo-flags"))) {
+            var state = new ChainInitializer(database, REGTEST).initialize();
+            var hash = state.activeTip().hash();
+            var undos = new RocksDbUndoStore(database);
+            var availability = new RocksDbBlockAvailabilityStore(database);
+
+            // Genesis never needs undo, but seed a stale payload/flag to model pre-reset state.
+            undos.save(hash, new BlockUndoData(List.of()));
+            assertTrue(availability.hasData(hash));
+            assertTrue(availability.hasUndo(hash));
+
+            new ChainstateReindexer(database, REGTEST, TIME).rebuild();
+
+            assertTrue(availability.hasData(hash));
+            assertFalse(availability.hasUndo(hash));
+            assertTrue(undos.find(hash).isEmpty());
         }
     }
 

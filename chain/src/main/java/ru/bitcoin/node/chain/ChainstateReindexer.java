@@ -62,6 +62,7 @@ public final class ChainstateReindexer {
             var tips = new RocksDbChainStateStore(database);
             var utxos = new RocksDbUtxoStore(database);
             var undos = new RocksDbUndoStore(database);
+            var availability = new ru.bitcoin.node.storage.block.RocksDbBlockAvailabilityStore(database);
             var failures = new RocksDbBlockFailureStore(database);
             var marker = new RocksDbReindexStateStore(database);
             BlockIndexLookup lookup = new StoredBlockIndexLookup(indexes);
@@ -113,6 +114,11 @@ public final class ChainstateReindexer {
             try (RocksDbWriteBatch batch = new RocksDbWriteBatch()) {
                 utxos.clear(batch);
                 undos.clear(batch);
+                // The undo namespace is being rebuilt from scratch. Keep HAVE_DATA intact,
+                // but clear every durable HAVE_UNDO bit in the same reset transaction.
+                for (var stored : indexes.findAll()) {
+                    availability.clearUndo(batch, stored.hash());
+                }
                 tips.clear(batch);
                 marker.saveTargetTipHash(batch, target.hash());
                 tips.saveActiveTipHash(batch, storedGenesis.hash());

@@ -8,6 +8,9 @@ public final class RocksDbWriteBatch
 
     private final WriteBatch batch;
     private final java.util.BitSet changedPrefixes = new java.util.BitSet(256);
+    private final java.util.Map<ByteArrayKey, byte[]> pendingPuts = new java.util.HashMap<>();
+    private final java.util.Set<ByteArrayKey> pendingDeletes = new java.util.HashSet<>();
+    private final java.util.BitSet deletedPrefixes = new java.util.BitSet(256);
 
     private boolean closed;
 
@@ -39,6 +42,9 @@ public final class RocksDbWriteBatch
                     value
             );
             if (key.length > 0) changedPrefixes.set(Byte.toUnsignedInt(key[0]));
+            ByteArrayKey tracked = new ByteArrayKey(key);
+            pendingPuts.put(tracked, value.clone());
+            pendingDeletes.remove(tracked);
         } catch (RocksDBException e) {
             throw new IllegalStateException(
                     "Failed to add put operation to RocksDB batch",
@@ -63,6 +69,9 @@ public final class RocksDbWriteBatch
                     key
             );
             if (key.length > 0) changedPrefixes.set(Byte.toUnsignedInt(key[0]));
+            ByteArrayKey tracked = new ByteArrayKey(key);
+            pendingPuts.remove(tracked);
+            pendingDeletes.add(tracked);
         } catch (RocksDBException e) {
             throw new IllegalStateException(
                     "Failed to add delete operation to RocksDB batch",
@@ -91,12 +100,53 @@ public final class RocksDbWriteBatch
                     new byte[]{(byte) (unsignedPrefix + 1)}
             );
             changedPrefixes.set(unsignedPrefix);
+            deletedPrefixes.set(unsignedPrefix);
+            pendingPuts.keySet().removeIf(k -> k.prefix() == unsignedPrefix);
+            pendingDeletes.removeIf(k -> k.prefix() == unsignedPrefix);
         } catch (RocksDBException e) {
             throw new IllegalStateException(
                     "Failed to add namespace delete to RocksDB batch",
                     e
             );
         }
+    }
+
+
+    /** Read-your-writes lookup for stores maintaining metadata in the same atomic batch. */
+    public PendingValue pendingValue(byte[] key) {
+        ensureOpen();
+        if (key == null) throw new IllegalArgumentException("key must not be null");
+        ByteArrayKey tracked = new ByteArrayKey(key);
+        byte[] value = pendingPuts.get(tracked);
+        if (value != null) return new PendingValue(true, value);
+        if (pendingDeletes.contains(tracked)
+                || (key.length > 0 && deletedPrefixes.get(Byte.toUnsignedInt(key[0])))) {
+            return new PendingValue(true, null);
+        }
+        return new PendingValue(false, null);
+    }
+
+    public record PendingValue(boolean touched, byte[] value) {
+        public PendingValue {
+            value = value == null ? null : value.clone();
+        }
+        @Override public byte[] value() { return value == null ? null : value.clone(); }
+    }
+
+    private static final class ByteArrayKey {
+        private final byte[] bytes;
+        private final int hash;
+        private ByteArrayKey(byte[] bytes) {
+            this.bytes = bytes.clone();
+            this.hash = java.util.Arrays.hashCode(this.bytes);
+        }
+        private int prefix() {
+            return bytes.length == 0 ? -1 : Byte.toUnsignedInt(bytes[0]);
+        }
+        @Override public boolean equals(Object other) {
+            return other instanceof ByteArrayKey that && java.util.Arrays.equals(bytes, that.bytes);
+        }
+        @Override public int hashCode() { return hash; }
     }
 
     WriteBatch nativeBatch() {
