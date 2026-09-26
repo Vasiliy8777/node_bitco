@@ -3,6 +3,7 @@ package ru.bitcoin.node.storage.block;
 import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.storage.rocksdb.RocksDbDatabase;
 import ru.bitcoin.node.storage.rocksdb.RocksDbWriteBatch;
+import ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces;
 
 import java.util.List;
 import java.util.Optional;
@@ -10,11 +11,13 @@ import java.util.Optional;
 public final class RocksDbBlockIndexStore
         implements BlockIndexStore {
     private static final int HASH_SIZE = 32;
-    private static final byte BLOCK_INDEX_PREFIX = 0x01;
-    private static final byte WORK_INDEX_PREFIX = 0x08;
-    private static final byte[] WORK_INDEX_VERSION_KEY = {0x09};
-    private static final byte HEIGHT_INDEX_PREFIX = 0x14;
-    private static final byte[] HEIGHT_INDEX_VERSION_KEY = {0x15};
+    private static final byte BLOCK_INDEX_PREFIX = RocksDbNamespaces.BLOCK_INDEX;
+    private static final byte WORK_INDEX_PREFIX = RocksDbNamespaces.BLOCK_WORK_INDEX;
+    private static final byte[] WORK_INDEX_VERSION_KEY =
+            RocksDbNamespaces.singletonKey(RocksDbNamespaces.BLOCK_WORK_INDEX_VERSION);
+    private static final byte HEIGHT_INDEX_PREFIX = RocksDbNamespaces.BLOCK_HEIGHT_INDEX;
+    private static final byte[] HEIGHT_INDEX_VERSION_KEY =
+            RocksDbNamespaces.singletonKey(RocksDbNamespaces.BLOCK_HEIGHT_INDEX_VERSION);
 
     private final RocksDbDatabase database;
 

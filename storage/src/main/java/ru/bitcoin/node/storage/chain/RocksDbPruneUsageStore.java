@@ -3,15 +3,17 @@ package ru.bitcoin.node.storage.chain;
 import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.storage.rocksdb.RocksDbDatabase;
 import ru.bitcoin.node.storage.rocksdb.RocksDbWriteBatch;
+import ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces;
 
 import java.nio.ByteBuffer;
 import java.util.Objects;
 
 /** Compact persistent serialized-payload byte index used by pruning. */
 public final class RocksDbPruneUsageStore {
-    private static final byte BLOCK_SIZE_PREFIX = 0x12;
-    private static final byte UNDO_SIZE_PREFIX = 0x13;
-    private static final byte[] VERSION_KEY = {0x14, 0x01};
+    private static final byte BLOCK_SIZE_PREFIX = RocksDbNamespaces.PRUNE_BLOCK_SIZE;
+    private static final byte UNDO_SIZE_PREFIX = RocksDbNamespaces.PRUNE_UNDO_SIZE;
+    private static final byte[] VERSION_KEY = RocksDbNamespaces.singletonKey(RocksDbNamespaces.PRUNE_USAGE_VERSION);
+    private static final byte[] LEGACY_VERSION_KEY = RocksDbNamespaces.LEGACY_PRUNE_USAGE_VERSION_KEY;
     private static final byte VERSION = 1;
     private static final byte BLOCK_PREFIX = 0x05;
     private static final byte UNDO_PREFIX = 0x04;
@@ -27,14 +29,30 @@ public final class RocksDbPruneUsageStore {
         synchronized (database) {
             byte[] version = database.get(VERSION_KEY);
             if (version != null) {
-                if (version.length != 1 || version[0] != VERSION)
-                    throw new IllegalStateException("Unsupported prune usage index version");
+                requireSupportedVersion(version);
                 return;
             }
+
+            byte[] legacyVersion = database.get(LEGACY_VERSION_KEY);
+            if (legacyVersion != null) {
+                requireSupportedVersion(legacyVersion);
+                try (var batch = new RocksDbWriteBatch()) {
+                    batch.put(VERSION_KEY, new byte[]{VERSION});
+                    batch.delete(LEGACY_VERSION_KEY);
+                    database.write(batch);
+                }
+                return;
+            }
+
             rebuildPrefix(BLOCK_PREFIX, BLOCK_SIZE_PREFIX);
             rebuildPrefix(UNDO_PREFIX, UNDO_SIZE_PREFIX);
             database.put(VERSION_KEY, new byte[]{VERSION});
         }
+    }
+
+    private static void requireSupportedVersion(byte[] version) {
+        if (version.length != 1 || version[0] != VERSION)
+            throw new IllegalStateException("Unsupported prune usage index version");
     }
 
     private void rebuildPrefix(byte payloadPrefix, byte sizePrefix) {
