@@ -3,6 +3,7 @@ package ru.bitcoin.node.chain;
 import ru.bitcoin.node.storage.block.RocksDbBlockIndexStore;
 import ru.bitcoin.node.storage.block.RocksDbBlockStore;
 import ru.bitcoin.node.storage.chain.RocksDbPruneStateStore;
+import ru.bitcoin.node.storage.chain.RocksDbPruneUsageStore;
 import ru.bitcoin.node.storage.rocksdb.RocksDbDatabase;
 import ru.bitcoin.node.storage.rocksdb.RocksDbWriteBatch;
 import ru.bitcoin.node.storage.undo.RocksDbUndoStore;
@@ -15,8 +16,6 @@ public final class BlockPruner {
     public static final int MIN_BLOCKS_TO_KEEP = 288;
     /** Sentinel used by the application for Core-style manual-only prune mode (-prune=1). */
     public static final long MANUAL_ONLY = -1L;
-    private static final byte BLOCK_PREFIX = 0x05;
-    private static final byte UNDO_PREFIX = 0x04;
 
     private final RocksDbDatabase database;
     private final long targetBytes;
@@ -107,7 +106,7 @@ public final class BlockPruner {
     }
 
     private long usageBytes() {
-        return Math.addExact(database.valueBytesByPrefix(BLOCK_PREFIX), database.valueBytesByPrefix(UNDO_PREFIX));
+        return new RocksDbPruneUsageStore(database).usageBytes();
     }
 
     public record Result(long bytesBefore, long bytesAfter, long blocksPruned, long highestPrunedHeight) {}

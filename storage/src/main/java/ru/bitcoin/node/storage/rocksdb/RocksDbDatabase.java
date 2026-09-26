@@ -215,6 +215,24 @@ public final class RocksDbDatabase
         }
     }
 
+    /** Visits keys and values in one namespace without retaining the namespace in Java memory. */
+    public void forEachEntryByPrefix(byte prefix, java.util.function.BiConsumer<byte[], byte[]> visitor) {
+        ensureOpen();
+        java.util.Objects.requireNonNull(visitor, "visitor");
+        try (var iterator = database.newIterator()) {
+            iterator.seek(new byte[]{prefix});
+            while (iterator.isValid()) {
+                byte[] key = iterator.key();
+                if (key.length == 0 || key[0] != prefix) break;
+                visitor.accept(key.clone(), iterator.value().clone());
+                iterator.next();
+            }
+            iterator.status();
+        } catch (RocksDBException e) {
+            throw new IllegalStateException("Failed to visit RocksDB namespace entries", e);
+        }
+    }
+
     /** Visits one namespace without retaining its contents in Java memory. */
     public void forEachValueByPrefix(byte prefix, java.util.function.Consumer<byte[]> visitor) {
         ensureOpen();

@@ -4,6 +4,7 @@ import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.storage.rocksdb.RocksDbDatabase;
 import ru.bitcoin.node.storage.rocksdb.RocksDbWriteBatch;
 import ru.bitcoin.node.storage.block.RocksDbBlockAvailabilityStore;
+import ru.bitcoin.node.storage.chain.RocksDbPruneUsageStore;
 
 import java.util.Optional;
 
@@ -79,8 +80,7 @@ public final class RocksDbUndoStore
 
     public long serializedSize(Hash256 blockHash) {
         if (blockHash == null) throw new IllegalArgumentException("blockHash must not be null");
-        byte[] value = database.get(key(blockHash));
-        return value == null ? 0L : value.length;
+        return new RocksDbPruneUsageStore(database).undoSize(blockHash);
     }
 
     @Override
@@ -153,13 +153,10 @@ public final class RocksDbUndoStore
             );
         }
 
-        batch.put(
-                key(blockHash),
-                BlockUndoDataSerializer.serialize(
-                        undoData
-                )
-        );
+        byte[] serialized = BlockUndoDataSerializer.serialize(undoData);
+        batch.put(key(blockHash), serialized);
         new RocksDbBlockAvailabilityStore(database).markUndo(batch, blockHash);
+        new RocksDbPruneUsageStore(database).setUndoSize(batch, blockHash, serialized.length);
     }
 
     public void delete(
@@ -178,10 +175,9 @@ public final class RocksDbUndoStore
             );
         }
 
-        batch.delete(
-                key(blockHash)
-        );
+        batch.delete(key(blockHash));
         new RocksDbBlockAvailabilityStore(database).clearUndo(batch, blockHash);
+        new RocksDbPruneUsageStore(database).setUndoSize(batch, blockHash, 0L);
     }
     /** Removes the complete persistent namespace in the caller's atomic batch. */
     public void clear(RocksDbWriteBatch batch) {
@@ -189,6 +185,7 @@ public final class RocksDbUndoStore
             throw new IllegalArgumentException("batch must not be null");
         }
         batch.deletePrefix(UNDO_PREFIX);
+        new RocksDbPruneUsageStore(database).clearUndoSizes(batch);
     }
 
 }

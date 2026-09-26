@@ -6,6 +6,7 @@ import ru.bitcoin.node.protocol.serialization.BlockParser;
 import ru.bitcoin.node.protocol.serialization.BlockSerializer;
 import ru.bitcoin.node.storage.rocksdb.RocksDbDatabase;
 import ru.bitcoin.node.storage.rocksdb.RocksDbWriteBatch;
+import ru.bitcoin.node.storage.chain.RocksDbPruneUsageStore;
 
 import java.util.Optional;
 
@@ -63,11 +64,10 @@ public final class RocksDbBlockStore
         }
 
         Hash256 hash = block.header().hash();
-        batch.put(
-                key(hash),
-                BlockSerializer.serialize(block)
-        );
+        byte[] serialized = BlockSerializer.serialize(block);
+        batch.put(key(hash), serialized);
         new RocksDbBlockAvailabilityStore(database).markData(batch, hash);
+        new RocksDbPruneUsageStore(database).setBlockSize(batch, hash, serialized.length);
     }
 
     @Override
@@ -121,8 +121,7 @@ public final class RocksDbBlockStore
 
     public long serializedSize(Hash256 blockHash) {
         if (blockHash == null) throw new IllegalArgumentException("blockHash must not be null");
-        byte[] value = database.get(key(blockHash));
-        return value == null ? 0L : value.length;
+        return new RocksDbPruneUsageStore(database).blockSize(blockHash);
     }
 
     @Override
@@ -157,10 +156,9 @@ public final class RocksDbBlockStore
             );
         }
 
-        batch.delete(
-                key(blockHash)
-        );
+        batch.delete(key(blockHash));
         new RocksDbBlockAvailabilityStore(database).clearData(batch, blockHash);
+        new RocksDbPruneUsageStore(database).setBlockSize(batch, blockHash, 0L);
     }
 
     private static byte[] key(
