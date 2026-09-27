@@ -604,6 +604,41 @@ public final class NodeRpcServer implements AutoCloseable {
                 result.put("header", filter.header().toDisplayHex());
                 yield result;
             }
+            case "dumptxoutset" -> {
+                if (params.isEmpty() || params.size() > 2 || !(params.getFirst() instanceof String pathText))
+                    throw new RpcException(-32602, "Expected path and optional type");
+                if (params.size() == 2 && params.get(1) != null && !(params.get(1) instanceof String))
+                    throw new RpcException(-32602, "Snapshot type must be a string");
+                String type = params.size() == 2 && params.get(1) != null ? (String) params.get(1) : "latest";
+                if (!type.equals("latest")) throw new RpcException(-8, "Only latest snapshots are supported");
+                try {
+                    var dump = validation.dumpUtxoSnapshot(java.nio.file.Path.of(pathText));
+                    var result = new LinkedHashMap<String,Object>();
+                    result.put("coins_written", dump.coinsWritten());
+                    result.put("base_hash", dump.baseHash().toDisplayHex());
+                    result.put("base_height", dump.baseHeight());
+                    result.put("path", dump.path().toString());
+                    yield result;
+                } catch (java.nio.file.FileAlreadyExistsException exception) {
+                    throw new RpcException(-8, "Snapshot file already exists");
+                } catch (IOException exception) {
+                    throw new RpcException(-1, "Unable to write UTXO snapshot: " + exception.getMessage());
+                }
+            }
+            case "getchainstates" -> {
+                if (!params.isEmpty()) throw new RpcException(-32602, "getchainstates takes no parameters");
+                var result = new LinkedHashMap<String,Object>();
+                result.put("headers", sync.headerChainState().bestHeaderTip().height());
+                result.put("chainstates", validation.chainStates().stream().map(state -> {
+                    var item = new LinkedHashMap<String,Object>();
+                    item.put("blocks", state.blocks());
+                    item.put("bestblockhash", state.bestBlockHash().toDisplayHex());
+                    if (state.snapshot()) item.put("snapshot_blockhash", state.bestBlockHash().toDisplayHex());
+                    item.put("validated", state.validated());
+                    return item;
+                }).toList());
+                yield result;
+            }
             case "getblockchaininfo" -> {
                 var tip = validation.activeTip();
                 var prune = validation.pruneInfo();

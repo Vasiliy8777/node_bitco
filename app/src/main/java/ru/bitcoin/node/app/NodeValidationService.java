@@ -59,6 +59,7 @@ public final class NodeValidationService {
     private final NetworkParameters parameters;
     private final AdjustedTime time;
     private final RocksDbUtxoStore utxos;
+    private final RocksDbDatabase database;
     private final BlockPruner blockPruner;
     private final RocksDbPruneStateStore pruneState;
     private final long pruneTargetBytes;
@@ -357,6 +358,7 @@ public final class NodeValidationService {
                                  Hash256 assumedValidBlock, boolean persistMempool, boolean txIndexEnabled,
                                  boolean coinStatsIndexEnabled, boolean blockFilterIndexEnabled,
                                  boolean txOutSpenderIndexEnabled) {
+        this.database = Objects.requireNonNull(database);
         this.mempool = Objects.requireNonNull(mempool);
         this.mempoolStore = new RocksDbMempoolStore(database);
         this.persistMempool = persistMempool;
@@ -538,6 +540,26 @@ public final class NodeValidationService {
     }
     public record UtxoSetInfo(long height, Hash256 bestBlock, long transactions, long txouts, long bogoSize,
                               long diskSize, long totalAmount, Hash256 hashSerialized3, Hash256 muhash) {}
+
+    /** Writes a stable Bitcoin Core v2 UTXO snapshot of the current active chainstate. */
+    public ru.bitcoin.node.storage.utxo.UtxoSnapshotWriter.Result dumpUtxoSnapshot(java.nio.file.Path path) throws java.io.IOException {
+        synchronized (chain) {
+            synchronizePool();
+            BlockIndex tip = chain.activeTip();
+            return ru.bitcoin.node.storage.utxo.UtxoSnapshotWriter.write(
+                    database, parameters.magic(), tip.hash(), tip.height(), path);
+        }
+    }
+
+    /** Current single-chainstate view; extended when snapshot chainstates are introduced. */
+    public java.util.List<ChainStateInfo> chainStates() {
+        synchronized (chain) {
+            BlockIndex tip = chain.activeTip();
+            return java.util.List.of(new ChainStateInfo(tip.height(), tip.hash(), false, true));
+        }
+    }
+
+    public record ChainStateInfo(long blocks, Hash256 bestBlockHash, boolean snapshot, boolean validated) {}
 
     public Optional<MempoolEntry> mempoolEntry(Hash256 txid) {
         Objects.requireNonNull(txid, "txid");
