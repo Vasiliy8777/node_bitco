@@ -80,7 +80,7 @@ public final class Mempool {
         long fee = MempoolValidator.validate(transaction, context, view);
         long sigops = ru.bitcoin.node.consensus.transaction.TransactionSigOpCost.calculate(transaction, view,
                 ru.bitcoin.node.mempool.policy.StandardScriptVerifyFlags.STANDARD);
-        if (!packageMode) policy.validateFee(fee, Math.max(weight, sigops * 20));
+        if (!packageMode) policy.validateFee(fee, Math.max(weight, Math.multiplyExact(sigops, 80)));
         ru.bitcoin.node.mempool.policy.StandardTransactionPolicy.validateDustFee(transaction, fee, policy.dustRelaySatPerKvB());
         PackagePolicy.ephemeralSpends(transaction, entries, policy.dustRelaySatPerKvB());
         long arrivalTime = restoredArrivalTime != null ? restoredArrivalTime : clock.instant().getEpochSecond();
@@ -259,6 +259,63 @@ public final class Mempool {
     }
     public synchronized boolean isEmpty() { return entries.isEmpty(); }
     public synchronized List<MempoolEntry> entries() { return List.copyOf(entries.values()); }
+
+    /** Atomic Core-v31-style view of one connected mempool cluster. */
+    public synchronized Optional<ClusterView> cluster(Hash256 txId) {
+        Objects.requireNonNull(txId, "txId");
+        if (!entries.containsKey(txId)) return Optional.empty();
+        Set<Hash256> ids = ClusterLinearization.connected(entries, List.of(txId));
+        List<ClusterLinearization.Chunk> chunks = ClusterLinearization.chunks(entries, ids);
+        long adjustedWeight = ids.stream().mapToLong(id -> entries.get(id).adjustedWeight()).sum();
+        return Optional.of(new ClusterView(adjustedWeight, ids.size(), chunks));
+    }
+
+    /** Atomic whole-mempool feerate diagram, in descending mining order. */
+    public synchronized List<ClusterLinearization.Chunk> feeRateDiagram() {
+        return ClusterLinearization.mempoolDiagram(entries);
+    }
+
+    /** Atomic graph data used by getmempoolentry. Sets include the transaction itself. */
+    public synchronized Optional<EntryGraphView> graphView(Hash256 txId) {
+        Objects.requireNonNull(txId, "txId");
+        MempoolEntry entry = entries.get(txId);
+        if (entry == null) return Optional.empty();
+        Set<Hash256> ancestors = MempoolGraphPolicy.ancestors(entries, txId);
+        Set<Hash256> descendants = MempoolGraphPolicy.descendants(entries, Set.of(txId));
+        Set<Hash256> parents = new LinkedHashSet<>();
+        for (var input : entry.transaction().inputs()) {
+            Hash256 parent = input.previousOutput().transactionId();
+            if (entries.containsKey(parent)) parents.add(parent);
+        }
+        Set<Hash256> children = new LinkedHashSet<>();
+        for (var candidate : entries.entrySet()) {
+            if (candidate.getValue().transaction().inputs().stream()
+                    .anyMatch(input -> input.previousOutput().transactionId().equals(txId))) children.add(candidate.getKey());
+        }
+        Set<Hash256> cluster = ClusterLinearization.connected(entries, List.of(txId));
+        ClusterLinearization.Chunk chunk = ClusterLinearization.chunks(entries, cluster).stream()
+                .filter(value -> value.transactions().contains(txId)).findFirst().orElseThrow();
+        long ancestorVsize = ancestors.stream().mapToLong(id -> entries.get(id).virtualSize()).sum();
+        long descendantVsize = descendants.stream().mapToLong(id -> entries.get(id).virtualSize()).sum();
+        long ancestorFee = ancestors.stream().mapToLong(id -> entries.get(id).fee()).sum();
+        long descendantFee = descendants.stream().mapToLong(id -> entries.get(id).fee()).sum();
+        return Optional.of(new EntryGraphView(entry, ancestors, descendants, Set.copyOf(parents), Set.copyOf(children), chunk,
+                ancestorVsize, descendantVsize, ancestorFee, descendantFee));
+    }
+
+    public record ClusterView(long adjustedWeight, int transactionCount, List<ClusterLinearization.Chunk> chunks) {
+        public ClusterView { chunks = List.copyOf(chunks); }
+    }
+
+    public record EntryGraphView(MempoolEntry entry, Set<Hash256> ancestors, Set<Hash256> descendants,
+                                 Set<Hash256> parents, Set<Hash256> children, ClusterLinearization.Chunk chunk,
+                                 long ancestorVirtualSize, long descendantVirtualSize,
+                                 long ancestorFee, long descendantFee) {
+        public EntryGraphView {
+            Objects.requireNonNull(entry); ancestors = Set.copyOf(ancestors); descendants = Set.copyOf(descendants);
+            parents = Set.copyOf(parents); children = Set.copyOf(children); Objects.requireNonNull(chunk);
+        }
+    }
 
     /** Returns the mempool transaction currently spending the outpoint, if any. */
     public synchronized Optional<Transaction> spendingTransaction(OutPoint outPoint) {

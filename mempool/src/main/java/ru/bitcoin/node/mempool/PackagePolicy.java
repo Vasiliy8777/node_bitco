@@ -76,7 +76,7 @@ final class PackagePolicy {
         if (newFee < oldFee || newFee - oldFee < new FeeRate(limits.incrementalRelaySatPerKvB()).feeForVSize(newSize))
             fail("package-rbf-fees");
         var parent = after.get(txs.getFirst().txId());
-        if (newFee * 1000 / newSize <= parent.fee() * 1000 / parent.virtualSize())
+        if (ClusterLinearization.compareRate(newFee, newSize, parent.fee(), parent.virtualSize()) <= 0)
             fail("package-rbf-child-must-improve-parent-rate");
         Set<Hash256> oldAffected = ClusterLinearization.connected(before, conflicts);
         List<ClusterLinearization.Chunk> oldCurve = ClusterLinearization.chunks(before, oldAffected);

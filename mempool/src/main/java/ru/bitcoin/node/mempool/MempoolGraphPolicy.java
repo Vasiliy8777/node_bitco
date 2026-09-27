@@ -110,22 +110,23 @@ final class MempoolGraphPolicy {
         long removedRate = 0;
         while (size(entries, entries.keySet()) > maximumSize) {
             Set<Hash256> worst = null;
-            long worstFee = 0, worstSize = 1;
+            long worstFee = 0, worstSize = 1, worstVsize = 1;
             for (Set<Hash256> cluster : ClusterLinearization.clusters(entries)) {
                 List<ClusterLinearization.Chunk> chunks = ClusterLinearization.chunks(entries, cluster);
                 ClusterLinearization.Chunk tail = chunks.getLast();
                 Set<Hash256> candidate = descendants(entries, new HashSet<>(tail.transactions()));
                 long fee = candidate.stream().mapToLong(id -> entries.get(id).fee()).sum();
-                long bytes = size(entries, candidate);
+                long bytes = candidate.stream().mapToLong(id -> entries.get(id).adjustedWeight()).sum();
                 if (worst == null || ClusterLinearization.compareRate(fee, bytes, worstFee, worstSize) < 0) {
                     worst = candidate;
                     worstFee = fee;
                     worstSize = bytes;
+                    worstVsize = size(entries, candidate);
                 }
             }
             if (worst == null) throw new IllegalStateException("Unable to select mempool eviction candidate");
             if (added != null && worst.contains(added)) fail("mempool-full");
-            removedRate = Math.max(removedRate, worstFee * 1000 / worstSize);
+            removedRate = Math.max(removedRate, Math.multiplyExact(worstFee, 1000) / worstVsize);
             worst.forEach(entries::remove);
         }
         return removedRate;

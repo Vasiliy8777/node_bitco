@@ -750,6 +750,32 @@ public final class NodeValidationService {
         }
     }
 
+    public Optional<Mempool.ClusterView> mempoolCluster(Hash256 txid) {
+        Objects.requireNonNull(txid, "txid");
+        synchronized (chain) {
+            synchronizePool();
+            expirePersistent();
+            return mempool.cluster(txid);
+        }
+    }
+
+    public Optional<Mempool.EntryGraphView> mempoolGraphEntry(Hash256 txid) {
+        Objects.requireNonNull(txid, "txid");
+        synchronized (chain) {
+            synchronizePool();
+            expirePersistent();
+            return mempool.graphView(txid);
+        }
+    }
+
+    public List<ClusterLinearization.Chunk> mempoolFeeRateDiagram() {
+        synchronized (chain) {
+            synchronizePool();
+            expirePersistent();
+            return mempool.feeRateDiagram();
+        }
+    }
+
     /**
      * Current local BIP133 fee-filter floor in sat/kvB, before privacy
      * quantization performed by the relay layer.

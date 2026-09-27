@@ -124,7 +124,13 @@ class MiningRpcTest {
                     assertEquals(true, mempoolInfo.get("loaded"));
                     assertEquals(validation.mempoolEntries().size(), ((Number) mempoolInfo.get("size")).intValue());
                     assertEquals(300_000_000L, ((Number) mempoolInfo.get("maxmempool")).longValue());
+                    assertEquals(64, ((Number) mempoolInfo.get("limitclustercount")).intValue());
+                    assertEquals(101_000L, ((Number) mempoolInfo.get("limitclustersize")).longValue());
+                    assertEquals(true, mempoolInfo.get("optimal"));
                     assertEquals(true, mempoolInfo.get("fullrbf"));
+                    assertEquals(List.of(), call(client, uri, "getmempoolfeeratediagram", List.of()).get("result"));
+                    var missingCluster = call(client, uri, "getmempoolcluster", List.of("00".repeat(32)));
+                    assertEquals(-5, ((Number) ((Map<?, ?>) missingCluster.get("error")).get("code")).intValue());
 
                     var networkInfo = (Map<?, ?>) call(client, uri, "getnetworkinfo", List.of()).get("result");
                     assertEquals(70017, ((Number) networkInfo.get("protocolversion")).intValue());
@@ -297,6 +303,7 @@ class MiningRpcTest {
     private static Map<?, ?> call(HttpClient client, URI uri, String method, List<?> params) throws Exception {
         return JSON.readValue(client.send(request(uri, method, params), HttpResponse.BodyHandlers.ofString()).body(), Map.class);
     }
+
     private static int error(Map<?, ?> response) {
         return ((Number) ((Map<?, ?>) response.get("error"))
                 .get("code"))

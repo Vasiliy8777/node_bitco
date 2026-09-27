@@ -44,7 +44,7 @@ class ClusterLinearizationTest {
         assertEquals(2, chunks.size());
         assertEquals(List.of(p.txId()), chunks.get(0).transactions());
         assertEquals(List.of(c.txId()), chunks.get(1).transactions());
-        assertTrue(ClusterLinearization.compareRate(chunks.get(0).fee(), chunks.get(0).virtualSize(), chunks.get(1).fee(), chunks.get(1).virtualSize()) >= 0);
+        assertTrue(ClusterLinearization.compareRate(chunks.get(0).fee(), chunks.get(0).adjustedWeight(), chunks.get(1).fee(), chunks.get(1).adjustedWeight()) >= 0);
     }
 
     @Test
@@ -100,4 +100,19 @@ class ClusterLinearizationTest {
                 ClusterLinearization.chunks(newMap, ids),
                 ClusterLinearization.chunks(oldMap, ids)) > 0);
     }
+    @Test
+    void usesExactAdjustedWeightInsteadOfRoundedVirtualSizeForFeerate() {
+        var a = tx(List.of(Hash256.fromDisplayHex("33".repeat(32))), 10);
+        var b = tx(List.of(Hash256.fromDisplayHex("44".repeat(32))), 11);
+        var ea = new MempoolEntry(a, 1_000, 401, 0, 0);
+        var eb = new MempoolEntry(b, 1_000, 404, 0, 0);
+        assertEquals(ea.virtualSize(), eb.virtualSize()); // both round to 101 vB
+        var m = map(ea, eb);
+        var order = ClusterLinearization.linearize(m, new LinkedHashSet<>(List.of(b.txId(), a.txId())));
+        assertEquals(a.txId(), order.getFirst()); // 1000/401 > 1000/404
+        var chunks = ClusterLinearization.chunks(m, List.of(a.txId()));
+        assertEquals(401, chunks.getFirst().adjustedWeight());
+        assertEquals(101, chunks.getFirst().virtualSize());
+    }
+
 }

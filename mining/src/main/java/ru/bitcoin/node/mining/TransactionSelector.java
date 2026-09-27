@@ -38,8 +38,8 @@ public final class TransactionSelector {
                     weight = Math.addExact(weight, e.weight()); sigops = Math.addExact(sigops, e.sigOpCost());
                 }
                 if (weight > weightBudget || sigops > sigopsBudget) { cursor.blocked = true; continue; }
-                if (best == null || ClusterLinearization.compareRate(chunk.fee(), chunk.virtualSize(),
-                        best.peek().fee(), best.peek().virtualSize()) > 0) best = cursor;
+                if (best == null || ClusterLinearization.compareRate(chunk.fee(), chunk.adjustedWeight(),
+                        best.peek().fee(), best.peek().adjustedWeight()) > 0) best = cursor;
             }
             if (best == null) return List.copyOf(result);
             ClusterLinearization.Chunk chosen = best.take();

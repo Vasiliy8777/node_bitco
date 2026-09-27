@@ -500,4 +500,14 @@ class MempoolTest {
                 )
         );
     }
+    @Test
+    void mempoolEntryUsesCoreSigopsAdjustedVirtualSize() {
+        Fixture fixture = createFixture();
+        long rawWeight = 400;
+        long sigOpCost = 40;
+        MempoolEntry entry = new MempoolEntry(fixture.transaction(), 10_000, rawWeight, 0, sigOpCost);
+        assertEquals(3_200, entry.adjustedWeight());
+        assertEquals(800, entry.virtualSize());
+    }
+
 }

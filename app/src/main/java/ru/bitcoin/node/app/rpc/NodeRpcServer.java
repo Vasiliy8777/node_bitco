@@ -227,19 +227,56 @@ public final class NodeRpcServer implements AutoCloseable {
                 if (params.size() != 1 || !(params.getFirst() instanceof String txidText))
                     throw new RpcException(-32602, "Expected one transaction id");
                 Hash256 txid = parseHash(txidText);
-                var entry = validation.mempoolEntry(txid)
+                var view = validation.mempoolGraphEntry(txid)
                         .orElseThrow(() -> new RpcException(-5, "Transaction not in mempool"));
+                var entry = view.entry();
                 var result = new LinkedHashMap<String, Object>();
                 result.put("vsize", entry.virtualSize());
+                result.put("vsize_adjusted", entry.virtualSize());
+                result.put("vsize_bip141", ru.bitcoin.node.consensus.transaction.TransactionWeight.virtualSize(entry.weight()));
                 result.put("weight", entry.weight());
                 result.put("time", entry.arrivalTime());
-                result.put("fees", Map.of("base", satoshisToBtc(entry.fee())));
-                result.put("depends", entry.transaction().inputs().stream()
-                        .map(input -> input.previousOutput().transactionId())
-                        .distinct()
-                        .filter(parent -> validation.mempoolEntry(parent).isPresent())
-                        .map(Hash256::toDisplayHex)
-                        .toList());
+                result.put("ancestorcount", view.ancestors().size());
+                result.put("ancestorsize", view.ancestorVirtualSize());
+                result.put("descendantcount", view.descendants().size());
+                result.put("descendantsize", view.descendantVirtualSize());
+                result.put("chunkweight", view.chunk().adjustedWeight());
+                result.put("wtxid", entry.transaction().wtxId().toDisplayHex());
+                result.put("fees", Map.of(
+                        "base", satoshisToBtc(entry.fee()),
+                        "modified", satoshisToBtc(entry.fee()),
+                        "ancestor", satoshisToBtc(view.ancestorFee()),
+                        "descendant", satoshisToBtc(view.descendantFee()),
+                        "chunk", satoshisToBtc(view.chunk().fee())));
+                result.put("depends", view.parents().stream().map(Hash256::toDisplayHex).sorted().toList());
+                result.put("spentby", view.children().stream().map(Hash256::toDisplayHex).sorted().toList());
+                yield result;
+            }
+            case "getmempoolcluster" -> {
+                if (params.size() != 1 || !(params.getFirst() instanceof String txidText))
+                    throw new RpcException(-32602, "Expected one transaction id");
+                Hash256 txid = parseHash(txidText);
+                var cluster = validation.mempoolCluster(txid)
+                        .orElseThrow(() -> new RpcException(-5, "Transaction not in mempool"));
+                var result = new LinkedHashMap<String, Object>();
+                result.put("clusterweight", cluster.adjustedWeight());
+                result.put("txcount", cluster.transactionCount());
+                result.put("chunks", cluster.chunks().stream().map(chunk -> Map.of(
+                        "chunkfee", satoshisToBtc(chunk.fee()),
+                        "chunkweight", chunk.adjustedWeight(),
+                        "txs", chunk.transactions().stream().map(Hash256::toDisplayHex).toList()
+                )).toList());
+                yield result;
+            }
+            case "getmempoolfeeratediagram" -> {
+                if (!params.isEmpty()) throw new RpcException(-32602, "getmempoolfeeratediagram takes no parameters");
+                long weight = 0, fee = 0;
+                List<Map<String, Object>> result = new ArrayList<>();
+                for (var chunk : validation.mempoolFeeRateDiagram()) {
+                    weight = Math.addExact(weight, chunk.adjustedWeight());
+                    fee = Math.addExact(fee, chunk.fee());
+                    result.add(Map.of("weight", weight, "fee", satoshisToBtc(fee)));
+                }
                 yield result;
             }
             case "gettxspendingprevout" -> {
@@ -580,6 +617,9 @@ public final class NodeRpcServer implements AutoCloseable {
                 info.put("minrelaytxfee", satoshisPerKvBToBtcPerKvB(validation.minimumRelayFeeRate()));
                 info.put("incrementalrelayfee", satoshisPerKvBToBtcPerKvB(MempoolLimits.DEFAULT.incrementalRelaySatPerKvB()));
                 info.put("unbroadcastcount", 0);
+                info.put("limitclustercount", MempoolLimits.DEFAULT.clusterCount());
+                info.put("limitclustersize", MempoolLimits.DEFAULT.clusterVirtualBytes());
+                info.put("optimal", true);
                 info.put("fullrbf", true);
                 yield info;
             }

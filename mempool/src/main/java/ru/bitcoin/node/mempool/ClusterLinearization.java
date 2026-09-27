@@ -17,11 +17,11 @@ public final class ClusterLinearization {
     private ClusterLinearization() {
     }
 
-    public record Chunk(List<Hash256> transactions, long fee, long virtualSize) {
+    public record Chunk(List<Hash256> transactions, long fee, long virtualSize, long adjustedWeight) {
         public Chunk {
             transactions = List.copyOf(transactions);
             if (transactions.isEmpty()) throw new IllegalArgumentException("chunk must not be empty");
-            if (fee < 0 || virtualSize <= 0) throw new IllegalArgumentException("invalid chunk totals");
+            if (fee < 0 || virtualSize <= 0 || adjustedWeight <= 0) throw new IllegalArgumentException("invalid chunk totals");
         }
     }
 
@@ -51,7 +51,7 @@ public final class ClusterLinearization {
             for (Hash256 id : remaining) {
                 LinkedHashSet<Hash256> packageIds = new LinkedHashSet<>();
                 collectAncestors(id, entries, remaining, new HashSet<>(), packageIds);
-                long fee = fee(entries, packageIds), size = size(entries, packageIds);
+                long fee = fee(entries, packageIds), size = adjustedWeight(entries, packageIds);
                 if (best == null || compareRate(fee, size, bestFee, bestSize) > 0
                         || (compareRate(fee, size, bestFee, bestSize) == 0 && comparePackage(packageIds, best) < 0)) {
                     best = List.copyOf(packageIds);
@@ -76,19 +76,21 @@ public final class ClusterLinearization {
         List<Chunk> result = new ArrayList<>();
         int start = 0;
         while (start < linearization.size()) {
-            long fee = 0, size = 0, bestFee = 0, bestSize = 1;
+            long fee = 0, size = 0, vsize = 0, bestFee = 0, bestSize = 1, bestVsize = 0;
             int bestEnd = -1;
             for (int i = start; i < linearization.size(); i++) {
                 MempoolEntry entry = require(entries, linearization.get(i));
                 fee = Math.addExact(fee, entry.fee());
-                size = Math.addExact(size, entry.virtualSize());
+                size = Math.addExact(size, entry.adjustedWeight());
+                vsize = Math.addExact(vsize, entry.virtualSize());
                 if (bestEnd < 0 || compareRate(fee, size, bestFee, bestSize) > 0) {
                     bestEnd = i + 1;
                     bestFee = fee;
                     bestSize = size;
+                    bestVsize = vsize;
                 }
             }
-            result.add(new Chunk(linearization.subList(start, bestEnd), bestFee, bestSize));
+            result.add(new Chunk(linearization.subList(start, bestEnd), bestFee, bestVsize, bestSize));
             start = bestEnd;
         }
         return List.copyOf(result);
@@ -104,7 +106,7 @@ public final class ClusterLinearization {
         List<Chunk> result = new ArrayList<>();
         for (Set<Hash256> cluster : clusters(entries)) result.addAll(chunks(entries, cluster));
         result.sort((a, b) -> {
-            int rate = compareRate(b.fee(), b.virtualSize(), a.fee(), a.virtualSize());
+            int rate = compareRate(b.fee(), b.adjustedWeight(), a.fee(), a.adjustedWeight());
             if (rate != 0) return rate;
             return comparePackage(a.transactions(), b.transactions());
         });
@@ -192,6 +194,12 @@ public final class ClusterLinearization {
         return v;
     }
 
+    private static long adjustedWeight(Map<Hash256, MempoolEntry> entries, Collection<Hash256> ids) {
+        long v = 0;
+        for (Hash256 id : ids) v = Math.addExact(v, require(entries, id).adjustedWeight());
+        return v;
+    }
+
     public static int compareRate(long fa, long sa, long fb, long sb) {
         if (sa <= 0 || sb <= 0) throw new IllegalArgumentException("size must be positive");
         return BigInteger.valueOf(fa).multiply(BigInteger.valueOf(sb)).compareTo(BigInteger.valueOf(fb).multiply(BigInteger.valueOf(sa)));
@@ -200,7 +208,7 @@ public final class ClusterLinearization {
     private static void addBreakpoints(List<Chunk> chunks, Set<Long> points) {
         long x = 0;
         for (Chunk c : chunks) {
-            x = Math.addExact(x, c.virtualSize());
+            x = Math.addExact(x, c.adjustedWeight());
             points.add(x);
         }
     }
@@ -213,10 +221,10 @@ public final class ClusterLinearization {
         long remaining = x;
         for (Chunk chunk : chunks) {
             if (remaining <= 0) break;
-            if (remaining < chunk.virtualSize())
-                return new Rational(fee.multiply(BigInteger.valueOf(chunk.virtualSize())).add(BigInteger.valueOf(chunk.fee()).multiply(BigInteger.valueOf(remaining))), BigInteger.valueOf(chunk.virtualSize()));
+            if (remaining < chunk.adjustedWeight())
+                return new Rational(fee.multiply(BigInteger.valueOf(chunk.adjustedWeight())).add(BigInteger.valueOf(chunk.fee()).multiply(BigInteger.valueOf(remaining))), BigInteger.valueOf(chunk.adjustedWeight()));
             fee = fee.add(BigInteger.valueOf(chunk.fee()));
-            remaining -= chunk.virtualSize();
+            remaining -= chunk.adjustedWeight();
         }
         return new Rational(fee, BigInteger.ONE);
     }

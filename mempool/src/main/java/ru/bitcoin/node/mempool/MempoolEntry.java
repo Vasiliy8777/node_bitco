@@ -15,10 +15,13 @@ public record MempoolEntry(
         this(transaction, fee, weight, arrivalTime, 0);
     }
 
+    /** Bitcoin Core-style sigops-adjusted weight used by cluster feerate calculations. */
+    public long adjustedWeight() {
+        return Math.max(weight, Math.multiplyExact(sigOpCost, 80));
+    }
+
     public long virtualSize() {
-        return TransactionWeight.virtualSize(
-                        Math.max(weight, Math.multiplyExact(sigOpCost, 20))
-        );
+        return TransactionWeight.virtualSize(adjustedWeight());
     }
 
     public FeeRate feeRate() {
