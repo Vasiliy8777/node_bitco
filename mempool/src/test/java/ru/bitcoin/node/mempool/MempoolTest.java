@@ -94,6 +94,22 @@ class MempoolTest {
     }
 
     @Test
+    void spendingTransactionMustResolveOutpointConflict() {
+        Fixture fixture = createFixture();
+        Mempool mempool = new Mempool();
+        mempool.admit(
+                fixture.transaction(),
+                new MempoolValidationContext(SPENDING_HEIGHT, 1_700_000_000L, height -> 1_600_000_000L),
+                fixture.utxoView()
+        );
+        OutPoint spent = fixture.transaction().inputs().getFirst().previousOutput();
+        assertEquals(fixture.transaction().txId(),
+                mempool.spendingTransaction(spent).orElseThrow().txId());
+        assertTrue(mempool.spendingTransaction(
+                new OutPoint(new Hash256(new byte[32]), new UInt32(7))).isEmpty());
+    }
+
+    @Test
     void duplicateTransactionMustBeRejected() {
 
         Fixture fixture =

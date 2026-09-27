@@ -13,6 +13,8 @@ import ru.bitcoin.node.protocol.transaction.Transaction;
 import ru.bitcoin.node.protocol.serialization.BlockHeaderSerializer;
 import ru.bitcoin.node.protocol.serialization.BlockSerializer;
 import ru.bitcoin.node.common.types.Hash256;
+import ru.bitcoin.node.common.types.UInt32;
+import ru.bitcoin.node.protocol.transaction.OutPoint;
 import ru.bitcoin.node.p2p.PeerManager;
 import ru.bitcoin.node.p2p.message.VersionMessage;
 import ru.bitcoin.node.mempool.MempoolLimits;
@@ -230,6 +232,59 @@ public final class NodeRpcServer implements AutoCloseable {
                         .filter(parent -> validation.mempoolEntry(parent).isPresent())
                         .map(Hash256::toDisplayHex)
                         .toList());
+                yield result;
+            }
+            case "gettxspendingprevout" -> {
+                if (params.isEmpty() || params.size() > 2 || !(params.getFirst() instanceof List<?> outputs))
+                    throw new RpcException(-32602, "Expected outputs array and optional options object");
+                if (outputs.isEmpty()) throw new RpcException(-8, "Invalid parameter, outputs are missing");
+                Map<?, ?> options = Map.of();
+                if (params.size() == 2) {
+                    if (!(params.get(1) instanceof Map<?, ?> map)) throw new RpcException(-32602, "Expected options object");
+                    for (Object key : map.keySet()) {
+                        if (!(key instanceof String text) || (!text.equals("mempool_only") && !text.equals("return_spending_tx")))
+                            throw new RpcException(-32602, "Unknown named parameter");
+                    }
+                    options = map;
+                }
+                boolean mempoolOnly = !validation.txOutSpenderIndexEnabled();
+                if (options.containsKey("mempool_only")) {
+                    if (!(options.get("mempool_only") instanceof Boolean value)) throw new RpcException(-32602, "mempool_only must be boolean");
+                    mempoolOnly = value;
+                }
+                boolean returnSpendingTx = false;
+                if (options.containsKey("return_spending_tx")) {
+                    if (!(options.get("return_spending_tx") instanceof Boolean value)) throw new RpcException(-32602, "return_spending_tx must be boolean");
+                    returnSpendingTx = value;
+                }
+                List<Map<String, Object>> result = new ArrayList<>(outputs.size());
+                for (Object raw : outputs) {
+                    if (!(raw instanceof Map<?, ?> output) || output.size() != 2
+                            || !(output.get("txid") instanceof String txidText)
+                            || !(output.get("vout") instanceof Number voutNumber))
+                        throw new RpcException(-32602, "Each output must contain txid and vout");
+                    long vout = voutNumber.longValue();
+                    if (vout < 0) throw new RpcException(-8, "Invalid parameter, vout cannot be negative");
+                    if (vout > 0xffff_ffffL) throw new RpcException(-8, "Invalid parameter, vout is out of range");
+                    Hash256 txid = parseHash(txidText);
+                    OutPoint outPoint = new OutPoint(txid, new UInt32(vout));
+                    NodeValidationService.SpendingTransaction spender;
+                    try {
+                        spender = validation.spendingTransaction(outPoint, mempoolOnly).orElse(null);
+                    } catch (IllegalStateException exception) {
+                        throw new RpcException(-1, exception.getMessage());
+                    }
+                    var rendered = new LinkedHashMap<String, Object>();
+                    rendered.put("txid", txid.toDisplayHex());
+                    rendered.put("vout", vout);
+                    if (spender != null) {
+                        rendered.put("spendingtxid", spender.transaction().txId().toDisplayHex());
+                        if (returnSpendingTx) rendered.put("spendingtx",
+                                HexFormat.of().formatHex(TransactionSerializer.serialize(spender.transaction())));
+                        if (spender.confirmed()) rendered.put("blockhash", spender.blockHash().toDisplayHex());
+                    }
+                    result.add(rendered);
+                }
                 yield result;
             }
             case "gettxout" -> {
@@ -544,6 +599,7 @@ public final class NodeRpcServer implements AutoCloseable {
                 String requested = params.isEmpty() ? null : (String) params.getFirst();
                 var indexes = new LinkedHashMap<String, Object>();
                 addIndexInfo(indexes, requested, "txindex", validation.txIndexEnabled(), validation.activeTip().height());
+                addIndexInfo(indexes, requested, "txospenderindex", validation.txOutSpenderIndexEnabled(), validation.activeTip().height());
                 addIndexInfo(indexes, requested, "coinstatsindex", validation.coinStatsIndexEnabled(), validation.activeTip().height());
                 addIndexInfo(indexes, requested, "basic block filter index", validation.blockFilterIndexEnabled(), validation.activeTip().height());
                 yield indexes;

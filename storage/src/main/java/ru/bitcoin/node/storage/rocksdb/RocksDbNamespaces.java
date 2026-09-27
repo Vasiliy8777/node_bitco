@@ -43,6 +43,8 @@ public final class RocksDbNamespaces {
     public static final byte BLOCK_FILTER_INDEX = 0x20;
     public static final byte BLOCK_FILTER_HEADER_INDEX = 0x21;
     public static final byte BLOCK_FILTER_INDEX_STATE = 0x22;
+    public static final byte TXO_SPENDER_INDEX = 0x23;
+    public static final byte TXO_SPENDER_INDEX_STATE = 0x24;
 
     /** Legacy v1 prune-usage marker that collided with BLOCK_HEIGHT_INDEX. */
     public static final byte[] LEGACY_PRUNE_USAGE_VERSION_KEY = {BLOCK_HEIGHT_INDEX, 0x01};

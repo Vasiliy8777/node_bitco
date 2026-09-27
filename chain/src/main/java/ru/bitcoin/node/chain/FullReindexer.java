@@ -24,6 +24,7 @@ import ru.bitcoin.node.storage.rocksdb.RocksDbWriteBatch;
 import ru.bitcoin.node.storage.undo.RocksDbUndoStore;
 import ru.bitcoin.node.storage.utxo.RocksDbUtxoStore;
 import ru.bitcoin.node.storage.txindex.RocksDbTxIndexStore;
+import ru.bitcoin.node.storage.txospender.RocksDbTxOutSpenderIndexStore;
 
 import java.util.*;
 
@@ -97,6 +98,7 @@ public final class FullReindexer {
             var failures = new RocksDbBlockFailureStore(database);
             var chainstateMarker = new RocksDbReindexStateStore(database);
             var txIndex = new RocksDbTxIndexStore(database);
+            var txOutSpenderIndex = new RocksDbTxOutSpenderIndexStore(database);
             var availability = new ru.bitcoin.node.storage.block.RocksDbBlockAvailabilityStore(database);
             var validationStatus = new ru.bitcoin.node.storage.block.RocksDbBlockValidationStatusStore(database);
             var validationMigration = new ru.bitcoin.node.storage.block.RocksDbBlockValidationMigrationStore(database);
@@ -114,6 +116,9 @@ public final class FullReindexer {
                 // that references the pre-reindex block-index namespace. When txindex is enabled,
                 // NodeValidationService rebuilds it from genesis to the reconstructed active tip.
                 txIndex.clear(batch);
+                batch.deletePrefix(ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.TXO_SPENDER_INDEX);
+                batch.delete(ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.singletonKey(
+                        ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.TXO_SPENDER_INDEX_STATE));
                 availability.clear(batch);
                 validationStatus.clear(batch);
                 validationMigration.clear(batch);

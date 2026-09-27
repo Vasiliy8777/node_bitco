@@ -19,6 +19,7 @@ import ru.bitcoin.node.storage.rocksdb.RocksDbDatabase;
 import ru.bitcoin.node.storage.mempool.RocksDbMempoolStore;
 import ru.bitcoin.node.storage.mempool.PersistedMempoolEntry;
 import ru.bitcoin.node.storage.txindex.RocksDbTxIndexStore;
+import ru.bitcoin.node.storage.txospender.RocksDbTxOutSpenderIndexStore;
 import ru.bitcoin.node.storage.coinstats.RocksDbCoinStatsIndexStore;
 import ru.bitcoin.node.storage.blockfilter.RocksDbBlockFilterIndexStore;
 import ru.bitcoin.node.storage.undo.RocksDbUndoStore;
@@ -46,6 +47,8 @@ public final class NodeValidationService {
     private final boolean persistMempool;
     private final boolean txIndexEnabled;
     private final RocksDbTxIndexStore txIndexStore;
+    private final boolean txOutSpenderIndexEnabled;
+    private final RocksDbTxOutSpenderIndexStore txOutSpenderIndexStore;
     private final boolean coinStatsIndexEnabled;
     private final RocksDbCoinStatsIndexStore coinStatsIndexStore;
     private final CoinStatsIndexService coinStatsIndex;
@@ -345,11 +348,22 @@ public final class NodeValidationService {
                                  AdjustedTime time, Mempool mempool, long pruneTargetBytes,
                                  Hash256 assumedValidBlock, boolean persistMempool, boolean txIndexEnabled,
                                  boolean coinStatsIndexEnabled, boolean blockFilterIndexEnabled) {
+        this(database, parameters, time, mempool, pruneTargetBytes, assumedValidBlock, persistMempool,
+                txIndexEnabled, coinStatsIndexEnabled, blockFilterIndexEnabled, false);
+    }
+
+    public NodeValidationService(RocksDbDatabase database, NetworkParameters parameters,
+                                 AdjustedTime time, Mempool mempool, long pruneTargetBytes,
+                                 Hash256 assumedValidBlock, boolean persistMempool, boolean txIndexEnabled,
+                                 boolean coinStatsIndexEnabled, boolean blockFilterIndexEnabled,
+                                 boolean txOutSpenderIndexEnabled) {
         this.mempool = Objects.requireNonNull(mempool);
         this.mempoolStore = new RocksDbMempoolStore(database);
         this.persistMempool = persistMempool;
         this.txIndexEnabled = txIndexEnabled;
         this.txIndexStore = new RocksDbTxIndexStore(database);
+        this.txOutSpenderIndexEnabled = txOutSpenderIndexEnabled;
+        this.txOutSpenderIndexStore = new RocksDbTxOutSpenderIndexStore(database);
         this.coinStatsIndexEnabled = coinStatsIndexEnabled;
         this.coinStatsIndexStore = new RocksDbCoinStatsIndexStore(database);
         this.blockFilterIndexEnabled = blockFilterIndexEnabled;
@@ -431,6 +445,7 @@ public final class NodeValidationService {
                 mempoolPersistenceDirty = false;
             }
             if (txIndexEnabled) synchronizeTxIndex();
+            if (txOutSpenderIndexEnabled) synchronizeTxOutSpenderIndex();
             if (coinStatsIndexEnabled) synchronizeCoinStatsIndex();
             if (blockFilterIndexEnabled) synchronizeBlockFilterIndex();
             blockPruner.prune(chain.activeTip());
@@ -447,6 +462,7 @@ public final class NodeValidationService {
             synchronizePool();
             if (result == BlockProcessingResult.CONNECTED) {
                 if (txIndexEnabled) synchronizeTxIndex();
+                if (txOutSpenderIndexEnabled) synchronizeTxOutSpenderIndex();
                 if (coinStatsIndexEnabled) synchronizeCoinStatsIndex();
                 if (blockFilterIndexEnabled) synchronizeBlockFilterIndex();
                 blockPruner.prune(chain.activeTip());
@@ -604,6 +620,37 @@ public final class NodeValidationService {
 
     public record IndexedTransaction(Transaction transaction, ActiveBlockInfo blockInfo) {}
 
+    public boolean txOutSpenderIndexEnabled() { return txOutSpenderIndexEnabled; }
+
+    /** Resolves an outpoint spender using mempool first and the optional active-chain index second. */
+    public Optional<SpendingTransaction> spendingTransaction(OutPoint outPoint, boolean mempoolOnly) {
+        Objects.requireNonNull(outPoint, "outPoint");
+        synchronized (chain) {
+            synchronizePool();
+            Optional<Transaction> mempoolSpender = mempool.spendingTransaction(outPoint);
+            if (mempoolSpender.isPresent()) return Optional.of(new SpendingTransaction(mempoolSpender.get(), null));
+            if (mempoolOnly) return Optional.empty();
+            if (!txOutSpenderIndexEnabled) throw new IllegalStateException(
+                    "Mempool lacks a relevant spend, and txospenderindex is unavailable.");
+            synchronizeTxOutSpenderIndex();
+            var indexed = txOutSpenderIndexStore.find(outPoint).orElse(null);
+            if (indexed == null) return Optional.empty();
+            BlockIndex blockIndex = lookup.find(indexed.blockHash());
+            if (blockIndex == null || blockIndex.height() > chain.activeTip().height()) return Optional.empty();
+            BlockIndex active = activeAncestors.at(chain.activeTip(), blockIndex.height(), lookup);
+            if (active == null || !active.hash().equals(indexed.blockHash())) return Optional.empty();
+            Transaction transaction = blocks.find(indexed.blockHash()).flatMap(block -> block.transactions().stream()
+                    .filter(tx -> tx.txId().equals(indexed.transactionId())).findFirst()).orElseThrow(() ->
+                    new IllegalStateException("txospenderindex references missing spending transaction "+ indexed.transactionId().toDisplayHex()));
+            return Optional.of(new SpendingTransaction(transaction, indexed.blockHash()));
+        }
+    }
+
+    public record SpendingTransaction(Transaction transaction, Hash256 blockHash) {
+        public SpendingTransaction { Objects.requireNonNull(transaction, "transaction"); }
+        public boolean confirmed() { return blockHash != null; }
+    }
+
     public boolean blockFilterIndexEnabled() { return blockFilterIndexEnabled; }
 
     public Optional<BlockFilterInfo> blockFilter(Hash256 blockHash) {
@@ -663,6 +710,36 @@ public final class NodeValidationService {
             throw new IllegalStateException("txindex synchronization stopped at "
                     + synchronizedHash.toDisplayHex() + " instead of active tip " + activeTip.hash().toDisplayHex());
         }
+    }
+
+    private void synchronizeTxOutSpenderIndex() {
+        if (!txOutSpenderIndexEnabled) return;
+        BlockIndex activeTip = chain.activeTip();
+        Hash256 indexedHash = txOutSpenderIndexStore.bestIndexedBlockHash().orElse(null);
+        if (indexedHash == null) {
+            BlockIndex genesis = activeAncestors.at(activeTip, 0L, lookup);
+            if (genesis == null) throw new IllegalStateException("Cannot initialize txospenderindex without genesis");
+            txOutSpenderIndexStore.initializeAt(genesis.hash());
+            indexedHash = genesis.hash();
+        }
+        BlockIndex indexed = lookup.find(indexedHash);
+        if (indexed == null) throw new IllegalStateException(
+                "txospenderindex cursor references unknown block: " + indexedHash.toDisplayHex());
+        ReorganizationPlan plan = ReorganizationPlanner.plan(indexed, activeTip, lookup);
+        for (BlockIndex disconnect : plan.blocksToDisconnect()) {
+            Block block = blocks.find(disconnect.hash()).orElseThrow(() ->
+                    new IllegalStateException("Block body required to rewind txospenderindex: " + disconnect.hash().toDisplayHex()));
+            txOutSpenderIndexStore.rewind(block, disconnect.previousBlockHash());
+        }
+        for (BlockIndex connect : plan.blocksToConnect()) {
+            Block block = blocks.find(connect.hash()).orElseThrow(() ->
+                    new IllegalStateException("Block body required to synchronize txospenderindex: " + connect.hash().toDisplayHex()));
+            txOutSpenderIndexStore.append(block);
+        }
+        Hash256 synchronizedHash = txOutSpenderIndexStore.bestIndexedBlockHash().orElseThrow();
+        if (!synchronizedHash.equals(activeTip.hash())) throw new IllegalStateException(
+                "txospenderindex synchronization stopped at " + synchronizedHash.toDisplayHex()
+                        + " instead of active tip " + activeTip.hash().toDisplayHex());
     }
 
     public List<MempoolEntry> mempoolEntries() {
@@ -809,6 +886,7 @@ public final class NodeValidationService {
     private void finishManualChainChange() {
         synchronizePool();
         if (txIndexEnabled) synchronizeTxIndex();
+        if (txOutSpenderIndexEnabled) synchronizeTxOutSpenderIndex();
         if (coinStatsIndexEnabled) synchronizeCoinStatsIndex();
         if (blockFilterIndexEnabled) synchronizeBlockFilterIndex();
         initialBlockDownload.update(chain.activeTip());

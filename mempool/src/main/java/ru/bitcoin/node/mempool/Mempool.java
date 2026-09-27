@@ -260,6 +260,15 @@ public final class Mempool {
     public synchronized boolean isEmpty() { return entries.isEmpty(); }
     public synchronized List<MempoolEntry> entries() { return List.copyOf(entries.values()); }
 
+    /** Returns the mempool transaction currently spending the outpoint, if any. */
+    public synchronized Optional<Transaction> spendingTransaction(OutPoint outPoint) {
+        Objects.requireNonNull(outPoint, "outPoint");
+        Hash256 spender = spent.get(outPoint);
+        if (spender == null) return Optional.empty();
+        MempoolEntry entry = entries.get(spender);
+        return entry == null ? Optional.empty() : Optional.of(entry.transaction());
+    }
+
     public synchronized int expire() {
         long cutoff = clock.instant().getEpochSecond() - limits.expirySeconds();
         int before = entries.size();
