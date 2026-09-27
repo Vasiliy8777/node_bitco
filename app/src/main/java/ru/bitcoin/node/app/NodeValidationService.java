@@ -20,6 +20,7 @@ import ru.bitcoin.node.storage.mempool.RocksDbMempoolStore;
 import ru.bitcoin.node.storage.mempool.PersistedMempoolEntry;
 import ru.bitcoin.node.storage.txindex.RocksDbTxIndexStore;
 import ru.bitcoin.node.storage.coinstats.RocksDbCoinStatsIndexStore;
+import ru.bitcoin.node.storage.blockfilter.RocksDbBlockFilterIndexStore;
 import ru.bitcoin.node.storage.undo.RocksDbUndoStore;
 import ru.bitcoin.node.storage.utxo.RocksDbUtxoStore;
 
@@ -48,6 +49,9 @@ public final class NodeValidationService {
     private final boolean coinStatsIndexEnabled;
     private final RocksDbCoinStatsIndexStore coinStatsIndexStore;
     private final CoinStatsIndexService coinStatsIndex;
+    private final boolean blockFilterIndexEnabled;
+    private final RocksDbBlockFilterIndexStore blockFilterIndexStore;
+    private final BlockFilterIndexService blockFilterIndex;
     private final RocksDbUndoStore undos;
     private final NetworkParameters parameters;
     private final AdjustedTime time;
@@ -326,13 +330,21 @@ public final class NodeValidationService {
     public NodeValidationService(RocksDbDatabase database, NetworkParameters parameters,
                                  AdjustedTime time, Mempool mempool, long pruneTargetBytes,
                                  Hash256 assumedValidBlock, boolean persistMempool, boolean txIndexEnabled) {
-        this(database, parameters, time, mempool, pruneTargetBytes, assumedValidBlock, persistMempool, txIndexEnabled, false);
+        this(database, parameters, time, mempool, pruneTargetBytes, assumedValidBlock, persistMempool, txIndexEnabled, false, false);
     }
 
     public NodeValidationService(RocksDbDatabase database, NetworkParameters parameters,
                                  AdjustedTime time, Mempool mempool, long pruneTargetBytes,
                                  Hash256 assumedValidBlock, boolean persistMempool, boolean txIndexEnabled,
                                  boolean coinStatsIndexEnabled) {
+        this(database, parameters, time, mempool, pruneTargetBytes, assumedValidBlock, persistMempool,
+                txIndexEnabled, coinStatsIndexEnabled, false);
+    }
+
+    public NodeValidationService(RocksDbDatabase database, NetworkParameters parameters,
+                                 AdjustedTime time, Mempool mempool, long pruneTargetBytes,
+                                 Hash256 assumedValidBlock, boolean persistMempool, boolean txIndexEnabled,
+                                 boolean coinStatsIndexEnabled, boolean blockFilterIndexEnabled) {
         this.mempool = Objects.requireNonNull(mempool);
         this.mempoolStore = new RocksDbMempoolStore(database);
         this.persistMempool = persistMempool;
@@ -340,6 +352,8 @@ public final class NodeValidationService {
         this.txIndexStore = new RocksDbTxIndexStore(database);
         this.coinStatsIndexEnabled = coinStatsIndexEnabled;
         this.coinStatsIndexStore = new RocksDbCoinStatsIndexStore(database);
+        this.blockFilterIndexEnabled = blockFilterIndexEnabled;
+        this.blockFilterIndexStore = new RocksDbBlockFilterIndexStore(database);
         this.blockPruner = new BlockPruner(database, pruneTargetBytes, parameters.pruneAfterHeight());
         this.pruneState = new RocksDbPruneStateStore(database);
         this.pruneTargetBytes = pruneTargetBytes;
@@ -358,6 +372,7 @@ public final class NodeValidationService {
         blocks = new RocksDbBlockStore(database);
         lookup = new StoredBlockIndexLookup(indexes);
         coinStatsIndex = new CoinStatsIndexService(coinStatsIndexStore, blocks, undos, lookup, activeAncestors);
+        blockFilterIndex = new BlockFilterIndexService(blockFilterIndexStore, blocks, undos, lookup, activeAncestors);
         var failureResolver =
                 new BlockFailureResolver(
                         lookup,
@@ -415,9 +430,10 @@ public final class NodeValidationService {
                 mempoolStore.replace(persistedMempoolEntries());
                 mempoolPersistenceDirty = false;
             }
-            blockPruner.prune(chain.activeTip());
             if (txIndexEnabled) synchronizeTxIndex();
             if (coinStatsIndexEnabled) synchronizeCoinStatsIndex();
+            if (blockFilterIndexEnabled) synchronizeBlockFilterIndex();
+            blockPruner.prune(chain.activeTip());
             initialBlockDownload.update(chain.activeTip());
         }
     }
@@ -432,6 +448,7 @@ public final class NodeValidationService {
             if (result == BlockProcessingResult.CONNECTED) {
                 if (txIndexEnabled) synchronizeTxIndex();
                 if (coinStatsIndexEnabled) synchronizeCoinStatsIndex();
+                if (blockFilterIndexEnabled) synchronizeBlockFilterIndex();
                 blockPruner.prune(chain.activeTip());
                 initialBlockDownload.update(chain.activeTip());
             }
@@ -586,6 +603,33 @@ public final class NodeValidationService {
     }
 
     public record IndexedTransaction(Transaction transaction, ActiveBlockInfo blockInfo) {}
+
+    public boolean blockFilterIndexEnabled() { return blockFilterIndexEnabled; }
+
+    public Optional<BlockFilterInfo> blockFilter(Hash256 blockHash) {
+        Objects.requireNonNull(blockHash, "blockHash");
+        synchronized (chain) {
+            if (!blockFilterIndexEnabled) return Optional.empty();
+            synchronizeBlockFilterIndex();
+            BlockIndex index = lookup.find(blockHash);
+            if (index == null || index.height() > chain.activeTip().height()) return Optional.empty();
+            BlockIndex active = activeAncestors.at(chain.activeTip(), index.height(), lookup);
+            if (active == null || !active.hash().equals(blockHash)) return Optional.empty();
+            return blockFilterIndex.find(blockHash).map(record -> new BlockFilterInfo(record.filter(), record.header()));
+        }
+    }
+
+    public record BlockFilterInfo(byte[] filter, Hash256 header) {
+        public BlockFilterInfo {
+            filter = Objects.requireNonNull(filter, "filter").clone();
+            Objects.requireNonNull(header, "header");
+        }
+        @Override public byte[] filter() { return filter.clone(); }
+    }
+
+    private void synchronizeBlockFilterIndex() {
+        if (blockFilterIndexEnabled) blockFilterIndex.synchronize(chain.activeTip());
+    }
 
     private void synchronizeCoinStatsIndex() {
         if (coinStatsIndexEnabled) coinStatsIndex.synchronize(chain.activeTip());
@@ -766,6 +810,7 @@ public final class NodeValidationService {
         synchronizePool();
         if (txIndexEnabled) synchronizeTxIndex();
         if (coinStatsIndexEnabled) synchronizeCoinStatsIndex();
+        if (blockFilterIndexEnabled) synchronizeBlockFilterIndex();
         initialBlockDownload.update(chain.activeTip());
         revision++;
         chain.notifyAll();

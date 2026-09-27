@@ -442,6 +442,22 @@ public final class NodeRpcServer implements AutoCloseable {
                     return value;
                 }).toList();
             }
+            case "getblockfilter" -> {
+                if (params.isEmpty() || params.size() > 2 || !(params.getFirst() instanceof String hashText))
+                    throw new RpcException(-32602, "Expected block hash and optional filter type");
+                String filterType = params.size() == 2 ? String.valueOf(params.get(1)) : "basic";
+                if (!"basic".equals(filterType)) throw new RpcException(-5, "Unknown filtertype " + filterType);
+                if (!validation.blockFilterIndexEnabled())
+                    throw new RpcException(-1, "Index is not enabled for filtertype basic");
+                Hash256 hash = parseHash(hashText);
+                if (validation.activeBlockInfo(hash).isEmpty()) throw new RpcException(-5, "Block not found");
+                var filter = validation.blockFilter(hash).orElseThrow(() ->
+                        new RpcException(-1, "Block filter index is not synchronized to the requested block"));
+                var result = new LinkedHashMap<String, Object>();
+                result.put("filter", HexFormat.of().formatHex(filter.filter()));
+                result.put("header", filter.header().toDisplayHex());
+                yield result;
+            }
             case "getblockchaininfo" -> {
                 var tip = validation.activeTip();
                 var prune = validation.pruneInfo();
@@ -529,6 +545,7 @@ public final class NodeRpcServer implements AutoCloseable {
                 var indexes = new LinkedHashMap<String, Object>();
                 addIndexInfo(indexes, requested, "txindex", validation.txIndexEnabled(), validation.activeTip().height());
                 addIndexInfo(indexes, requested, "coinstatsindex", validation.coinStatsIndexEnabled(), validation.activeTip().height());
+                addIndexInfo(indexes, requested, "basic block filter index", validation.blockFilterIndexEnabled(), validation.activeTip().height());
                 yield indexes;
             }
             case "getmininginfo" ->

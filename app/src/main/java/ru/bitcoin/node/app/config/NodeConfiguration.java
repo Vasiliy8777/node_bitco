@@ -85,7 +85,9 @@ public class NodeConfiguration {
             @Value("${bitcoin.txindex:false}")
             boolean txIndex,
             @Value("${bitcoin.coinstatsindex:false}")
-            boolean coinStatsIndex
+            boolean coinStatsIndex,
+            @Value("${bitcoin.blockfilterindex:false}")
+            boolean blockFilterIndex
     ) {
         long pruneTargetBytes = pruneTargetBytes(pruneMiB);
         var pruneState = new ru.bitcoin.node.storage.chain.RocksDbPruneStateStore(database);
@@ -94,6 +96,10 @@ public class NodeConfiguration {
         }
         if (txIndex && pruneState.hasPruned()) {
             throw new IllegalStateException("bitcoin.txindex cannot be enabled after historical block data has been pruned; restore/redownload full block history first");
+        }
+        if (blockFilterIndex && pruneState.hasPruned()
+                && !new ru.bitcoin.node.storage.blockfilter.RocksDbBlockFilterIndexStore(database).initialized()) {
+            throw new IllegalStateException("bitcoin.blockfilterindex cannot be enabled for the first time after historical block/undo data has been pruned; restore/redownload full history first");
         }
         if (fullReindex && reindexChainstate) {
             throw new IllegalArgumentException(
@@ -136,7 +142,8 @@ public class NodeConfiguration {
                 assumeValidHash(assumeValid, parameters),
                 persistMempool,
                 txIndex,
-                coinStatsIndex
+                coinStatsIndex,
+                blockFilterIndex
         );
     }
 
