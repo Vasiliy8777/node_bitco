@@ -31,8 +31,11 @@ class PeerConnectionTest {
             listener.setReceiveBufferSize(1024);
             listener.bind(new java.net.InetSocketAddress("127.0.0.1", 0));
             var accepted = CompletableFuture.supplyAsync(() -> {
-                try { return listener.accept(); }
-                catch (java.io.IOException exception) { throw new java.io.UncheckedIOException(exception); }
+                try {
+                    return listener.accept();
+                } catch (java.io.IOException exception) {
+                    throw new java.io.UncheckedIOException(exception);
+                }
             });
             try (var connection = new PeerConnection(NetworkParametersRegistry.regtest())) {
                 connection.connect("127.0.0.1", listener.getLocalPort());
@@ -44,7 +47,8 @@ class PeerConnectionTest {
                         try {
                             for (int i = 0; i < 100; i++) connection.send(message);
                             throw new AssertionError("Remote is not reading; writes should block");
-                        } catch (java.io.IOException | IllegalStateException expected) { }
+                        } catch (java.io.IOException | IllegalStateException expected) {
+                        }
                     });
                     assertTrue(started.await(5, TimeUnit.SECONDS));
                     assertThrows(java.util.concurrent.TimeoutException.class, () -> writer.get(200, TimeUnit.MILLISECONDS));
@@ -670,6 +674,7 @@ class PeerConnectionTest {
             throw new RuntimeException(e);
         }
     }
+
     @Test
     void shouldRejectMessageFromDifferentBitcoinNetwork()
             throws Exception {
@@ -730,6 +735,7 @@ class PeerConnectionTest {
             );
         }
     }
+
     @Test
     void shouldNegotiateV2AndExchangeEncryptedBitcoinMessages() throws Exception {
         try (ServerSocket serverSocket = new ServerSocket(0)) {
@@ -741,16 +747,18 @@ class PeerConnectionTest {
                     BitcoinMessage request = connection.receive().orElseThrow();
                     assertEquals("ping", request.command());
                     connection.send(new BitcoinMessage("pong", request.payload()));
-                } catch (Exception e) { throw new RuntimeException(e); }
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
             });
             try (PeerConnection connection = new PeerConnection(NetworkParametersRegistry.regtest(), 5_000, 5_000)) {
                 connection.connectV2("127.0.0.1", serverSocket.getLocalPort());
                 assertTrue(connection.isV2Transport());
                 assertEquals(32, connection.transportSessionId().length);
-                connection.send(new BitcoinMessage("ping", new byte[]{9,8,7}));
+                connection.send(new BitcoinMessage("ping", new byte[]{9, 8, 7}));
                 BitcoinMessage response = connection.receive().orElseThrow();
                 assertEquals("pong", response.command());
-                assertArrayEquals(new byte[]{9,8,7}, response.payload());
+                assertArrayEquals(new byte[]{9, 8, 7}, response.payload());
             }
             server.get(5, TimeUnit.SECONDS);
         }
@@ -765,7 +773,9 @@ class PeerConnectionTest {
                     assertFalse(connection.acceptNegotiated(socket, true));
                     BitcoinMessage request = connection.receive().orElseThrow();
                     assertEquals("version", request.command());
-                } catch (Exception e) { throw new RuntimeException(e); }
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
             });
             try (Socket socket = new Socket("127.0.0.1", serverSocket.getLocalPort())) {
                 var output = socket.getOutputStream();
@@ -774,6 +784,60 @@ class PeerConnectionTest {
                 output.flush();
             }
             server.get(5, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void v2HandshakeUsesDedicatedTimeoutInsteadOfNormalReadTimeout() throws Exception {
+        try (ServerSocket serverSocket = new ServerSocket(0)) {
+            CompletableFuture<Void> server = CompletableFuture.runAsync(() -> {
+                try (Socket socket = serverSocket.accept()) {
+                    // Read the initiator ElligatorSwift key, then deliberately stall.
+                    socket.getInputStream().readNBytes(64);
+                    Thread.sleep(1_000);
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            });
+            long started = System.nanoTime();
+            try (PeerConnection connection = new PeerConnection(
+                    NetworkParametersRegistry.regtest(), 5_000, 5_000)) {
+                assertThrows(java.net.SocketTimeoutException.class,
+                        () -> connection.connectV2("127.0.0.1", serverSocket.getLocalPort(), 150));
+                assertFalse(connection.isConnected());
+            }
+            long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+            assertTrue(elapsedMillis < 2_000, "v2 handshake must not inherit the 5 second normal read timeout");
+            server.get(3, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void inboundV1NegotiationRestoresNormalReadTimeout() throws Exception {
+        try (ServerSocket serverSocket = new ServerSocket(0)) {
+            CompletableFuture<Void> server = CompletableFuture.runAsync(() -> {
+                try (Socket socket = serverSocket.accept();
+                     PeerConnection connection = new PeerConnection(
+                             NetworkParametersRegistry.mainnet(), 5_000, 2_000)) {
+                    assertFalse(connection.acceptNegotiated(socket, true, 100));
+                    Thread.sleep(250);
+                    BitcoinMessage request = connection.receive().orElseThrow();
+                    assertEquals("version", request.command());
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            });
+            try (Socket socket = new Socket("127.0.0.1", serverSocket.getLocalPort())) {
+                var output = socket.getOutputStream();
+                byte[] message = new BitcoinMessageEncoder(NetworkParametersRegistry.mainnet())
+                        .encode(new BitcoinMessage("version", new byte[0]));
+                output.write(message, 0, 16);
+                output.flush();
+                Thread.sleep(300);
+                output.write(message, 16, message.length - 16);
+                output.flush();
+            }
+            server.get(3, TimeUnit.SECONDS);
         }
     }
 

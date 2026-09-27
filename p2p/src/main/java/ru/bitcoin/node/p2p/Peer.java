@@ -57,6 +57,7 @@ public final class Peer implements AutoCloseable {
             new SecureRandom();
 
     private final PeerConnection connection;
+    private volatile boolean v2Fallback;
     private final long localServices;
     private final int startHeight;
     private final boolean relay;
@@ -253,6 +254,8 @@ public final class Peer implements AutoCloseable {
 
     public boolean isV2Transport() { return connection.isV2Transport(); }
     public byte[] transportSessionId() { return connection.transportSessionId(); }
+    public boolean usedV2Fallback() { return v2Fallback; }
+    void markV2Fallback() { this.v2Fallback = true; }
 
     public void accept(
             java.net.Socket socket

@@ -44,17 +44,24 @@ public final class NodeRpcServer implements AutoCloseable {
     private final NodeSyncInfrastructure sync;
     private final BooleanSupplier ready;
     private final PeerManager peerManager;
+    private final long localServices;
     private final long startedNanos = System.nanoTime();
 
     public NodeRpcServer(InetSocketAddress address, String user, String password, MiningController mining,
                          NodeValidationService validation, NodeRelayService relay, NodeSyncInfrastructure sync,
                          BooleanSupplier ready) throws IOException {
-        this(address, user, password, mining, validation, relay, sync, ready, null);
+        this(address, user, password, mining, validation, relay, sync, ready, null, VersionMessage.DEFAULT_SERVICES);
     }
 
     public NodeRpcServer(InetSocketAddress address, String user, String password, MiningController mining,
                          NodeValidationService validation, NodeRelayService relay, NodeSyncInfrastructure sync,
                          BooleanSupplier ready, PeerManager peerManager) throws IOException {
+        this(address, user, password, mining, validation, relay, sync, ready, peerManager, VersionMessage.DEFAULT_SERVICES);
+    }
+
+    public NodeRpcServer(InetSocketAddress address, String user, String password, MiningController mining,
+                         NodeValidationService validation, NodeRelayService relay, NodeSyncInfrastructure sync,
+                         BooleanSupplier ready, PeerManager peerManager, long localServices) throws IOException {
         if (address.isUnresolved() || !address.getAddress().isLoopbackAddress())
             throw new IllegalArgumentException("RPC must bind to a loopback address");
         if (user.isBlank() || user.contains(":") || password.isBlank())
@@ -67,6 +74,7 @@ public final class NodeRpcServer implements AutoCloseable {
         this.sync = sync;
         this.ready = ready;
         this.peerManager = peerManager;
+        this.localServices = localServices;
         server = HttpServer.create(address, 16);
         server.createContext("/", this::handle);
         server.setExecutor(executor);
@@ -411,6 +419,10 @@ public final class NodeRpcServer implements AutoCloseable {
                 info.put("addr", remote == null ? "" : remote.getHostString() + ":" + remote.getPort());
                 info.put("inbound", peer.isInboundConnection());
                 info.put("connection_type", requirePeerManager().roleOf(peer).name().toLowerCase(Locale.ROOT));
+                info.put("transport_protocol_type", peer.isV2Transport() ? "v2" : "v1");
+                byte[] sessionId = peer.transportSessionId();
+                info.put("session_id", sessionId == null ? "" : HexFormat.of().formatHex(sessionId));
+                info.put("v2_fallback", peer.usedV2Fallback());
                 info.put("state", peer.state().name().toLowerCase(Locale.ROOT));
                 peer.lastPingRoundTrip().ifPresent(v -> info.put("pingtime", v.toNanos() / 1_000_000_000.0));
                 peer.minPingRoundTrip().ifPresent(v -> info.put("minping", v.toNanos() / 1_000_000_000.0));
@@ -573,9 +585,7 @@ public final class NodeRpcServer implements AutoCloseable {
             }
             case "getnetworkinfo" -> {
                 requireNoParams(method, params);
-                long services = validation.pruneInfo().enabled()
-                        ? VersionMessage.NODE_WITNESS | VersionMessage.NODE_NETWORK_LIMITED
-                        : VersionMessage.DEFAULT_SERVICES;
+                long services = localServices;
                 var info = new LinkedHashMap<String, Object>();
                 info.put("version", 1);
                 info.put("subversion", "/java-bitcoin-node:0.0.1/");
@@ -588,6 +598,8 @@ public final class NodeRpcServer implements AutoCloseable {
                 info.put("connections", peerManager == null ? 0 : peerManager.size());
                 info.put("connections_in", peerManager == null ? 0 : peerManager.peers().stream().filter(ru.bitcoin.node.p2p.Peer::isInboundConnection).count());
                 info.put("connections_out", peerManager == null ? 0 : peerManager.peers().stream().filter(p -> !p.isInboundConnection()).count());
+                info.put("connections_v1", peerManager == null ? 0 : peerManager.peers().stream().filter(p -> !p.isV2Transport()).count());
+                info.put("connections_v2", peerManager == null ? 0 : peerManager.peers().stream().filter(ru.bitcoin.node.p2p.Peer::isV2Transport).count());
                 info.put("relayfee", satoshisPerKvBToBtcPerKvB(validation.minimumRelayFeeRate()));
                 info.put("incrementalfee", satoshisPerKvBToBtcPerKvB(MempoolLimits.DEFAULT.incrementalRelaySatPerKvB()));
                 info.put("warnings", "");

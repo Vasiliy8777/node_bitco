@@ -38,6 +38,7 @@ public final class PeerConnection implements AutoCloseable {
             30_000;
 
     public static final int DEFAULT_WRITE_TIMEOUT_MILLIS = 10_000;
+    public static final int DEFAULT_V2_HANDSHAKE_TIMEOUT_MILLIS = 5_000;
     private static final ScheduledThreadPoolExecutor WRITE_DEADLINES = createWriteDeadlines();
 
     private static ScheduledThreadPoolExecutor createWriteDeadlines() {
@@ -214,9 +215,16 @@ public final class PeerConnection implements AutoCloseable {
 
     /** Establish a BIP324 v2 transport before the Bitcoin VERSION handshake. */
     public void connectV2(String host, int port) throws IOException {
+        connectV2(host, port, DEFAULT_V2_HANDSHAKE_TIMEOUT_MILLIS);
+    }
+
+    public void connectV2(String host, int port, int handshakeTimeoutMillis) throws IOException {
+        if (handshakeTimeoutMillis <= 0) throw new IllegalArgumentException("handshakeTimeoutMillis must be positive");
         connect(host, port);
         try {
+            socket.setSoTimeout(handshakeTimeoutMillis);
             v2Transport = Bip324TransportSession.initiate(input, output, networkParameters, new SecureRandom());
+            socket.setSoTimeout(readTimeoutMillis);
         } catch (IOException | RuntimeException failure) {
             try { close(); } catch (IOException closeFailure) { failure.addSuppressed(closeFailure); }
             throw failure;
@@ -228,18 +236,25 @@ public final class PeerConnection implements AutoCloseable {
      * consumed only speculatively and restored through BufferedInputStream mark/reset.
      */
     public boolean acceptNegotiated(Socket acceptedSocket, boolean allowV2) throws IOException {
+        return acceptNegotiated(acceptedSocket, allowV2, DEFAULT_V2_HANDSHAKE_TIMEOUT_MILLIS);
+    }
+
+    public boolean acceptNegotiated(Socket acceptedSocket, boolean allowV2, int handshakeTimeoutMillis) throws IOException {
+        if (handshakeTimeoutMillis <= 0) throw new IllegalArgumentException("handshakeTimeoutMillis must be positive");
         accept(acceptedSocket);
         if (!allowV2) return false;
+        socket.setSoTimeout(handshakeTimeoutMillis);
         input.mark(16);
         byte[] prefix = input.readNBytes(16);
         if (prefix.length < 16) throw new IOException("EOF while discriminating Bitcoin transport");
         byte[] v1 = Bip324TransportSession.v1Prefix(networkParameters);
-        if (Arrays.equals(prefix, v1)) { input.reset(); return false; }
+        if (Arrays.equals(prefix, v1)) { input.reset(); socket.setSoTimeout(readTimeoutMillis); return false; }
         // A v1 VERSION header for another network is not a valid v2 initiation.
         if (Arrays.equals(Arrays.copyOfRange(prefix, 4, 16), Arrays.copyOfRange(v1, 4, 16)))
             throw new IOException("Bitcoin v1 VERSION uses different network magic");
         try {
             v2Transport = Bip324TransportSession.respond(input, output, networkParameters, new SecureRandom(), prefix);
+            socket.setSoTimeout(readTimeoutMillis);
             return true;
         } catch (IOException | RuntimeException failure) {
             try { close(); } catch (IOException closeFailure) { failure.addSuppressed(closeFailure); }

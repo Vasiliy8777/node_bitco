@@ -103,6 +103,7 @@ public final class BitcoinClient
                     try { peer.close(); } catch (IOException closeFailure) { v2Failure.addSuppressed(closeFailure); }
                     // BIP324 recommends reconnecting with v1 after immediate v2 failure.
                     peer = newPeer(startHeight, connectionRelay);
+                    peer.markV2Fallback();
                     peer.connect(host, port);
                 }
             } else {
