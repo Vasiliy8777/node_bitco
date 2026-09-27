@@ -31,7 +31,7 @@ import java.util.*;
  * Application entry point for block and transaction admission. The caller owns
  * the database lifetime and must not mutate these stores through another processor.
  */
-public final class NodeValidationService {
+public final class NodeValidationService implements AutoCloseable {
     private final ChainState chain;
     private final BlockIndexLookup lookup;
     private final RocksDbBlockStore blocks;
@@ -60,6 +60,9 @@ public final class NodeValidationService {
     private final AdjustedTime time;
     private final RocksDbUtxoStore utxos;
     private final ru.bitcoin.node.storage.utxo.RocksDbSnapshotChainStateStore snapshotChainStateStore;
+    private final AssumeUtxoBackgroundValidator assumeUtxoBackgroundValidator;
+    private volatile boolean backgroundValidationStop;
+    private volatile Thread backgroundValidationThread;
     private final RocksDbDatabase database;
     private final BlockPruner blockPruner;
     private final RocksDbPruneStateStore pruneState;
@@ -393,6 +396,8 @@ public final class NodeValidationService {
         undos = new RocksDbUndoStore(database);
         blocks = new RocksDbBlockStore(database);
         lookup = new StoredBlockIndexLookup(indexes);
+        assumeUtxoBackgroundValidator = new AssumeUtxoBackgroundValidator(database, parameters, lookup);
+        assumeUtxoBackgroundValidator.initializeIfNeeded();
         coinStatsIndex = new CoinStatsIndexService(coinStatsIndexStore, blocks, undos, lookup, activeAncestors);
         blockFilterIndex = new BlockFilterIndexService(blockFilterIndexStore, blocks, undos, lookup, activeAncestors);
         var failureResolver =
@@ -459,6 +464,7 @@ public final class NodeValidationService {
             blockPruner.prune(chain.activeTip());
             initialBlockDownload.update(chain.activeTip());
         }
+        ensureBackgroundValidationWorker();
     }
 
     public BlockProcessingResult processBlock(Block block) {
@@ -569,9 +575,13 @@ public final class NodeValidationService {
             BlockIndex normal = lookup.find(state.normalTipHash());
             BlockIndex active = chain.activeTip();
             long normalHeight = normal == null ? state.normalTipHeight() : normal.height();
+            var bg = assumeUtxoBackgroundValidator.state();
+            boolean fullyValidated = bg != null && bg.status() == ru.bitcoin.node.storage.utxo.RocksDbAssumeUtxoBackgroundStore.Status.VALIDATED;
+            long backgroundHeight = bg == null ? normalHeight : bg.tipHeight();
+            Hash256 backgroundHash = bg == null ? state.normalTipHash() : bg.tipHash();
             return java.util.List.of(
-                    new ChainStateInfo(normalHeight, state.normalTipHash(), false, false),
-                    new ChainStateInfo(active.height(), active.hash(), true, true));
+                    new ChainStateInfo(backgroundHeight, backgroundHash, false, true),
+                    new ChainStateInfo(active.height(), active.hash(), true, fullyValidated));
         }
     }
 
@@ -626,6 +636,8 @@ public final class NodeValidationService {
                 initialBlockDownload.update(snapshotTip);
                 revision++;
                 chain.notifyAll();
+                assumeUtxoBackgroundValidator.initializeIfNeeded();
+                ensureBackgroundValidationWorker();
                 return verified;
             } catch (RuntimeException e) {
                 throw new java.io.IOException("Unable to activate verified snapshot", e);
@@ -1272,4 +1284,49 @@ public final class NodeValidationService {
     private Block requireBlock(BlockIndex index) {
         return blocks.find(index.hash()).orElseThrow(() -> new IllegalStateException("Missing chain-update block: " + index.hash()));
     }
+
+    /** Current historical AssumeUTXO validation progress, if a snapshot is active. */
+    public java.util.Optional<BackgroundValidationInfo> backgroundValidationInfo() {
+        var s = assumeUtxoBackgroundValidator.state();
+        if (s == null) return java.util.Optional.empty();
+        return java.util.Optional.of(new BackgroundValidationInfo(s.status().name().toLowerCase(java.util.Locale.ROOT), s.tipHeight(), s.tipHash()));
+    }
+
+    public record BackgroundValidationInfo(String status, long height, Hash256 bestBlockHash) {}
+
+    private synchronized void ensureBackgroundValidationWorker() {
+        if (snapshotChainStateStore.load().isEmpty() || backgroundValidationStop) return;
+        Thread existing = backgroundValidationThread;
+        if (existing != null && existing.isAlive()) return;
+        Thread worker = new Thread(() -> {
+            while (!backgroundValidationStop) {
+                try {
+                    AssumeUtxoBackgroundValidator.Step step;
+                    synchronized (chain) { step = assumeUtxoBackgroundValidator.step(); }
+                    if (step == AssumeUtxoBackgroundValidator.Step.INACTIVE
+                            || step == AssumeUtxoBackgroundValidator.Step.VALIDATED
+                            || step == AssumeUtxoBackgroundValidator.Step.INVALID) return;
+                    if (step == AssumeUtxoBackgroundValidator.Step.WAITING_FOR_BLOCK) Thread.sleep(1000L);
+                    else Thread.yield();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                } catch (RuntimeException e) {
+                    // Preserve durable progress. A transient storage/body condition can be retried after restart.
+                    return;
+                }
+            }
+        }, "assumeutxo-background-validation");
+        worker.setDaemon(true);
+        backgroundValidationThread = worker;
+        worker.start();
+    }
+
+    @Override
+    public synchronized void close() {
+        backgroundValidationStop = true;
+        Thread worker = backgroundValidationThread;
+        if (worker != null) worker.interrupt();
+    }
+
 }

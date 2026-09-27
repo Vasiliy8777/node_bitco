@@ -48,6 +48,7 @@ public final class RocksDbNamespaces {
     public static final byte SNAPSHOT_UTXO_STAGING = 0x25;
     public static final byte SNAPSHOT_IMPORT_STATE = 0x26;
     public static final byte SNAPSHOT_CHAINSTATE = 0x27;
+    public static final byte ASSUMEUTXO_BACKGROUND_STATE = 0x28;
 
     /** Legacy v1 prune-usage marker that collided with BLOCK_HEIGHT_INDEX. */
     public static final byte[] LEGACY_PRUNE_USAGE_VERSION_KEY = {BLOCK_HEIGHT_INDEX, 0x01};
