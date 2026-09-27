@@ -114,6 +114,33 @@ class MiningRpcTest {
                     assertEquals(mined.hash(), sync.headerChainState().bestHeaderTip().hash());
                     assertFalse(validation.isInitialBlockDownload());
 
+                    // Operational/Core-style status RPCs use the same coherent active-chain snapshot.
+                    assertEquals(1, ((Number) call(client, uri, "getblockcount", List.of()).get("result")).intValue());
+                    assertEquals(mined.hash().toDisplayHex(), call(client, uri, "getbestblockhash", List.of()).get("result"));
+                    assertTrue(((Number) call(client, uri, "getdifficulty", List.of()).get("result")).doubleValue() > 0.0d);
+                    assertTrue(((Number) call(client, uri, "uptime", List.of()).get("result")).longValue() >= 0L);
+
+                    var mempoolInfo = (Map<?, ?>) call(client, uri, "getmempoolinfo", List.of()).get("result");
+                    assertEquals(true, mempoolInfo.get("loaded"));
+                    assertEquals(validation.mempoolEntries().size(), ((Number) mempoolInfo.get("size")).intValue());
+                    assertEquals(300_000_000L, ((Number) mempoolInfo.get("maxmempool")).longValue());
+                    assertEquals(true, mempoolInfo.get("fullrbf"));
+
+                    var networkInfo = (Map<?, ?>) call(client, uri, "getnetworkinfo", List.of()).get("result");
+                    assertEquals(70017, ((Number) networkInfo.get("protocolversion")).intValue());
+                    assertEquals(0, ((Number) networkInfo.get("connections")).intValue());
+                    assertEquals(true, networkInfo.get("networkactive"));
+
+                    var blockChainInfo = (Map<?, ?>) call(client, uri, "getblockchaininfo", List.of()).get("result");
+                    assertEquals("regtest", blockChainInfo.get("chain"));
+                    assertEquals(1, ((Number) blockChainInfo.get("blocks")).intValue());
+                    assertTrue(((Number) blockChainInfo.get("difficulty")).doubleValue() > 0.0d);
+
+                    var indexes = (Map<?, ?>) call(client, uri, "getindexinfo", List.of()).get("result");
+                    assertTrue(indexes.isEmpty());
+                    assertEquals(0.0d, ((Number) call(client, uri, "getnetworkhashps", List.of(120, 0)).get("result")).doubleValue());
+                    assertTrue(((Number) call(client, uri, "getnetworkhashps", List.of(120, 1)).get("result")).doubleValue() >= 0.0d);
+
                     // Manual chain control uses the same persistent failure/reorg machinery.
                     assertNull(call(client, uri, "invalidateblock", List.of(mined.hash().toDisplayHex())).get("error"));
                     assertEquals(0, validation.activeTip().height());

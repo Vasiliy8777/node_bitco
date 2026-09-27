@@ -14,6 +14,8 @@ import ru.bitcoin.node.protocol.serialization.BlockHeaderSerializer;
 import ru.bitcoin.node.protocol.serialization.BlockSerializer;
 import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.p2p.PeerManager;
+import ru.bitcoin.node.p2p.message.VersionMessage;
+import ru.bitcoin.node.mempool.MempoolLimits;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -40,6 +42,7 @@ public final class NodeRpcServer implements AutoCloseable {
     private final NodeSyncInfrastructure sync;
     private final BooleanSupplier ready;
     private final PeerManager peerManager;
+    private final long startedNanos = System.nanoTime();
 
     public NodeRpcServer(InetSocketAddress address, String user, String password, MiningController mining,
                          NodeValidationService validation, NodeRelayService relay, NodeSyncInfrastructure sync,
@@ -443,10 +446,12 @@ public final class NodeRpcServer implements AutoCloseable {
                 var tip = validation.activeTip();
                 var prune = validation.pruneInfo();
                 var info = new LinkedHashMap<String, Object>();
+                info.put("chain", chainName());
                 info.put("blocks", tip.height());
                 info.put("headers", sync.headerChainState().bestHeaderTip().height());
                 info.put("bestblockhash", tip.hash().toDisplayHex());
                 info.put("chainwork", String.format("%064x", tip.chainWork()));
+                info.put("difficulty", difficulty());
                 info.put("initialblockdownload", validation.isInitialBlockDownload());
                 info.put("pruned", prune.enabled());
                 if (prune.enabled()) {
@@ -456,6 +461,76 @@ public final class NodeRpcServer implements AutoCloseable {
                 }
                 yield info;
             }
+            case "getblockcount" -> {
+                requireNoParams(method, params);
+                yield validation.activeTip().height();
+            }
+            case "getbestblockhash" -> {
+                requireNoParams(method, params);
+                yield validation.activeTip().hash().toDisplayHex();
+            }
+            case "getdifficulty" -> {
+                requireNoParams(method, params);
+                yield difficulty();
+            }
+            case "getnetworkhashps" -> {
+                if (params.size() > 2) throw new RpcException(-32602, "getnetworkhashps takes at most two parameters");
+                int lookup = params.isEmpty() ? 120 : numberParam(params, 0).intValue();
+                long height = params.size() < 2 ? -1L : numberParam(params, 1).longValue();
+                yield networkHashPs(lookup, height);
+            }
+            case "uptime" -> {
+                requireNoParams(method, params);
+                yield TimeUnit.NANOSECONDS.toSeconds(System.nanoTime() - startedNanos);
+            }
+            case "getmempoolinfo" -> {
+                requireNoParams(method, params);
+                var entries = validation.mempoolEntries();
+                long bytes = entries.stream().mapToLong(e -> e.virtualSize()).sum();
+                var info = new LinkedHashMap<String, Object>();
+                info.put("loaded", true);
+                info.put("size", entries.size());
+                info.put("bytes", bytes);
+                info.put("usage", bytes);
+                info.put("maxmempool", MempoolLimits.DEFAULT.maxPoolVirtualBytes());
+                info.put("mempoolminfee", satoshisPerKvBToBtcPerKvB(validation.feeFilterRate()));
+                info.put("minrelaytxfee", satoshisPerKvBToBtcPerKvB(validation.minimumRelayFeeRate()));
+                info.put("incrementalrelayfee", satoshisPerKvBToBtcPerKvB(MempoolLimits.DEFAULT.incrementalRelaySatPerKvB()));
+                info.put("unbroadcastcount", 0);
+                info.put("fullrbf", true);
+                yield info;
+            }
+            case "getnetworkinfo" -> {
+                requireNoParams(method, params);
+                long services = validation.pruneInfo().enabled()
+                        ? VersionMessage.NODE_WITNESS | VersionMessage.NODE_NETWORK_LIMITED
+                        : VersionMessage.DEFAULT_SERVICES;
+                var info = new LinkedHashMap<String, Object>();
+                info.put("version", 1);
+                info.put("subversion", "/java-bitcoin-node:0.0.1/");
+                info.put("protocolversion", VersionMessage.CURRENT_PROTOCOL_VERSION);
+                info.put("localservices", String.format("%016x", services));
+                info.put("localservicesnames", serviceNames(services));
+                info.put("localrelay", true);
+                info.put("timeoffset", 0);
+                info.put("networkactive", true);
+                info.put("connections", peerManager == null ? 0 : peerManager.size());
+                info.put("connections_in", peerManager == null ? 0 : peerManager.peers().stream().filter(ru.bitcoin.node.p2p.Peer::isInboundConnection).count());
+                info.put("connections_out", peerManager == null ? 0 : peerManager.peers().stream().filter(p -> !p.isInboundConnection()).count());
+                info.put("relayfee", satoshisPerKvBToBtcPerKvB(validation.minimumRelayFeeRate()));
+                info.put("incrementalfee", satoshisPerKvBToBtcPerKvB(MempoolLimits.DEFAULT.incrementalRelaySatPerKvB()));
+                info.put("warnings", "");
+                yield info;
+            }
+            case "getindexinfo" -> {
+                if (params.size() > 1 || (!params.isEmpty() && !(params.getFirst() instanceof String)))
+                    throw new RpcException(-32602, "Expected optional index name");
+                String requested = params.isEmpty() ? null : (String) params.getFirst();
+                var indexes = new LinkedHashMap<String, Object>();
+                addIndexInfo(indexes, requested, "txindex", validation.txIndexEnabled(), validation.activeTip().height());
+                addIndexInfo(indexes, requested, "coinstatsindex", validation.coinStatsIndexEnabled(), validation.activeTip().height());
+                yield indexes;
+            }
             case "getmininginfo" ->
                     Map.of("blocks", validation.activeTip().height(), "pooledtx", validation.mempoolEntries().size(),
                             "miningready", ready.getAsBoolean());
@@ -463,6 +538,80 @@ public final class NodeRpcServer implements AutoCloseable {
                     validation.mempoolEntries().stream().map(entry -> entry.transaction().txId().toDisplayHex()).toList();
             default -> throw new RpcException(-32601, "Method not found");
         };
+    }
+
+    private static void requireNoParams(String method, List<?> params) {
+        if (!params.isEmpty()) throw new RpcException(-32602, method + " takes no parameters");
+    }
+
+    private static Number numberParam(List<?> params, int index) {
+        Object value = params.get(index);
+        if (!(value instanceof Number number)) throw new RpcException(-32602, "Expected numeric parameter");
+        return number;
+    }
+
+    private String chainName() {
+        return switch (validation.networkParameters().network()) {
+            case MAINNET -> "main";
+            case TESTNET -> "test";
+            case SIGNET -> "signet";
+            case REGTEST -> "regtest";
+        };
+    }
+
+    private double difficulty() {
+        var target = ru.bitcoin.node.consensus.pow.CompactTarget.decode(validation.activeTip().header().bits().value());
+        if (target.signum() <= 0) return 0.0d;
+        var difficultyOne = ru.bitcoin.node.consensus.pow.CompactTarget.decode(0x1d00ffffL);
+        return new java.math.BigDecimal(difficultyOne)
+                .divide(new java.math.BigDecimal(target), java.math.MathContext.DECIMAL64)
+                .doubleValue();
+    }
+
+    private double networkHashPs(int lookup, long requestedHeight) {
+        var tip = validation.activeTip();
+        if (lookup < -1 || lookup == 0)
+            throw new RpcException(-8, "Invalid nblocks. Must be a positive number or -1.");
+        if (requestedHeight < -1 || requestedHeight > tip.height())
+            throw new RpcException(-8, "Block does not exist at specified height");
+        long height = requestedHeight < 0 ? tip.height() : requestedHeight;
+        var end = validation.activeBlockInfo(height).orElseThrow(() -> new RpcException(-8, "Block height out of range")).index();
+        if (height == 0) return 0.0d;
+        int blocks = lookup == -1
+                ? Math.toIntExact(height % validation.networkParameters().difficultyAdjustmentInterval() + 1)
+                : lookup;
+        blocks = Math.min(blocks, Math.toIntExact(height));
+        long startHeight = height - blocks;
+        var start = validation.activeBlockInfo(startHeight).orElseThrow().index();
+        long minTime = end.header().timestamp().value();
+        long maxTime = minTime;
+        for (long h = startHeight; h <= height; h++) {
+            long timestamp = validation.activeBlockInfo(h).orElseThrow().index().header().timestamp().value();
+            minTime = Math.min(minTime, timestamp);
+            maxTime = Math.max(maxTime, timestamp);
+        }
+        if (maxTime == minTime) return 0.0d;
+        java.math.BigInteger work = end.chainWork().subtract(start.chainWork());
+        return new java.math.BigDecimal(work)
+                .divide(java.math.BigDecimal.valueOf(maxTime - minTime), java.math.MathContext.DECIMAL64)
+                .doubleValue();
+    }
+
+    private static java.math.BigDecimal satoshisPerKvBToBtcPerKvB(long value) {
+        return java.math.BigDecimal.valueOf(value, 8);
+    }
+
+    private static List<String> serviceNames(long services) {
+        var result = new ArrayList<String>();
+        if ((services & VersionMessage.NODE_NETWORK) != 0) result.add("NETWORK");
+        if ((services & VersionMessage.NODE_WITNESS) != 0) result.add("WITNESS");
+        if ((services & VersionMessage.NODE_NETWORK_LIMITED) != 0) result.add("NETWORK_LIMITED");
+        return List.copyOf(result);
+    }
+
+    private static void addIndexInfo(Map<String, Object> target, String requested, String name, boolean enabled, long height) {
+        if (!enabled || (requested != null && !requested.equals(name))) return;
+        target.put(name, Map.of("synced", true, "best_block_height", height));
     }
 
     private int intOrBooleanVerbosity(List<?> params, int index, int defaultValue) {

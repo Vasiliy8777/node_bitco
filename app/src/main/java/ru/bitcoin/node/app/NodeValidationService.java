@@ -61,6 +61,11 @@ public final class NodeValidationService {
     private final ActiveChainAncestors activeAncestors = new ActiveChainAncestors();
     private final InitialBlockDownloadState initialBlockDownload;
 
+    /** Immutable network parameters used by this validation instance. */
+    public NetworkParameters networkParameters() {
+        return parameters;
+    }
+
     public long revision() {
         synchronized (chain) {
             synchronizePool();
