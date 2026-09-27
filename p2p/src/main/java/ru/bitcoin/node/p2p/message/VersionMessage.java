@@ -9,6 +9,8 @@ public final class VersionMessage {
 
     public static final long NODE_NETWORK = 1L << 0;
     public static final long NODE_WITNESS = 1L << 3;
+    /** BIP157: node serves BIP158 basic compact block filters. */
+    public static final long NODE_COMPACT_FILTERS = 1L << 6;
     public static final long NODE_NETWORK_LIMITED = 1L << 10;
 
     public static final long DEFAULT_SERVICES =

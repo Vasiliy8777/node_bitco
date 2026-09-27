@@ -259,12 +259,17 @@ public class NodeConfiguration {
     @Bean
     public BitcoinClient bitcoinClient(
             NetworkParameters parameters,
-            @Value("${bitcoin.prune:0}") long pruneMiB
+            @Value("${bitcoin.prune:0}") long pruneMiB,
+            @Value("${bitcoin.blockfilterindex:false}") boolean blockFilterIndex,
+            @Value("${bitcoin.p2p.peer-block-filters:false}") boolean peerBlockFilters
     ) {
         long services = pruneMiB > 0
                 ? ru.bitcoin.node.p2p.message.VersionMessage.NODE_WITNESS
                 | ru.bitcoin.node.p2p.message.VersionMessage.NODE_NETWORK_LIMITED
                 : ru.bitcoin.node.p2p.message.VersionMessage.DEFAULT_SERVICES;
+        if (blockFilterIndex && peerBlockFilters) {
+            services |= ru.bitcoin.node.p2p.message.VersionMessage.NODE_COMPACT_FILTERS;
+        }
         return new BitcoinClient(parameters, services, true);
     }
 
@@ -416,15 +421,35 @@ public class NodeConfiguration {
     public BitcoinServer bitcoinServer(
             NetworkParameters parameters,
             PeerManager peerManager,
-            @Value("${bitcoin.p2p.max-inbound-peers:32}")
-            int maxInboundPeers
+            @Value("${bitcoin.p2p.max-inbound-peers:32}") int maxInboundPeers,
+            @Value("${bitcoin.prune:0}") long pruneMiB,
+            @Value("${bitcoin.blockfilterindex:false}") boolean blockFilterIndex,
+            @Value("${bitcoin.p2p.peer-block-filters:false}") boolean peerBlockFilters
     ) {
-        return new BitcoinServer(
-                parameters,
-                peerManager,
-                ru.bitcoin.node.p2p.message.VersionMessage.DEFAULT_SERVICES,
-                true,
-                maxInboundPeers
+        long services = pruneMiB > 0
+                ? ru.bitcoin.node.p2p.message.VersionMessage.NODE_WITNESS
+                | ru.bitcoin.node.p2p.message.VersionMessage.NODE_NETWORK_LIMITED
+                : ru.bitcoin.node.p2p.message.VersionMessage.DEFAULT_SERVICES;
+        if (blockFilterIndex && peerBlockFilters) {
+            services |= ru.bitcoin.node.p2p.message.VersionMessage.NODE_COMPACT_FILTERS;
+        }
+        return new BitcoinServer(parameters, peerManager, services, true, maxInboundPeers);
+    }
+
+    @Bean(destroyMethod = "close")
+    public ru.bitcoin.node.app.service.CompactBlockFilterPeerService compactBlockFilterPeerService(
+            PeerManager peerManager,
+            NodeValidationService validationService,
+            @Value("${bitcoin.blockfilterindex:false}") boolean blockFilterIndex,
+            @Value("${bitcoin.p2p.peer-block-filters:false}") boolean peerBlockFilters
+    ) {
+        if (peerBlockFilters && !blockFilterIndex) {
+            throw new IllegalStateException(
+                    "bitcoin.p2p.peer-block-filters=true requires bitcoin.blockfilterindex=true"
+            );
+        }
+        return new ru.bitcoin.node.app.service.CompactBlockFilterPeerService(
+                peerManager, validationService, blockFilterIndex && peerBlockFilters
         );
     }
 
