@@ -11,6 +11,7 @@ import java.util.Objects;
 /** Bitcoin Core compatible MuHash3072 multiset accumulator. */
 public final class MuHash3072 {
     private static final int BYTE_SIZE = 384;
+    public static final int SERIALIZED_STATE_SIZE = BYTE_SIZE * 2;
     private static final BigInteger MODULUS = BigInteger.ONE.shiftLeft(3072).subtract(BigInteger.valueOf(1_103_717L));
     private BigInteger numerator = BigInteger.ONE;
     private BigInteger denominator = BigInteger.ONE;
@@ -23,6 +24,27 @@ public final class MuHash3072 {
     public MuHash3072 remove(byte[] data) {
         denominator = denominator.multiply(toElement(data)).mod(MODULUS);
         return this;
+    }
+
+    /** Durable accumulator state used by persistent indexes. */
+    public byte[] serializeState() {
+        byte[] out = new byte[SERIALIZED_STATE_SIZE];
+        System.arraycopy(toLittleEndian(numerator, BYTE_SIZE), 0, out, 0, BYTE_SIZE);
+        System.arraycopy(toLittleEndian(denominator, BYTE_SIZE), 0, out, BYTE_SIZE, BYTE_SIZE);
+        return out;
+    }
+
+    public static MuHash3072 fromSerializedState(byte[] state) {
+        Objects.requireNonNull(state, "state");
+        if (state.length != SERIALIZED_STATE_SIZE)
+            throw new IllegalArgumentException("MuHash3072 state must be " + SERIALIZED_STATE_SIZE + " bytes");
+        MuHash3072 result = new MuHash3072();
+        result.numerator = fromLittleEndian(Arrays.copyOfRange(state, 0, BYTE_SIZE));
+        result.denominator = fromLittleEndian(Arrays.copyOfRange(state, BYTE_SIZE, SERIALIZED_STATE_SIZE));
+        if (result.numerator.signum() <= 0 || result.numerator.compareTo(MODULUS) >= 0
+                || result.denominator.signum() <= 0 || result.denominator.compareTo(MODULUS) >= 0)
+            throw new IllegalArgumentException("Invalid MuHash3072 serialized state");
+        return result;
     }
 
     /** Final commitment without mutating the accumulator. */

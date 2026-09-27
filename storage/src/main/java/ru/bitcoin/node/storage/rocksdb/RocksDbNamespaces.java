@@ -37,6 +37,9 @@ public final class RocksDbNamespaces {
     public static final byte FULL_REINDEX_RAW_QUEUE = 0x1A;
     public static final byte FULL_REINDEX_RAW_HEIGHT = 0x1B;
     public static final byte FULL_REINDEX_FAILED_BRANCH = 0x1C;
+    public static final byte COINSTATS_INDEX = 0x1D;
+    public static final byte COINSTATS_INDEX_STATE = 0x1E;
+    public static final byte COINSTATS_TXOUT_COUNT = 0x1F;
 
     /** Legacy v1 prune-usage marker that collided with BLOCK_HEIGHT_INDEX. */
     public static final byte[] LEGACY_PRUNE_USAGE_VERSION_KEY = {BLOCK_HEIGHT_INDEX, 0x01};

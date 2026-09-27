@@ -254,32 +254,51 @@ public final class NodeRpcServer implements AutoCloseable {
                     throw new RpcException(-8, "'" + hashType + "' is not a supported hash_type");
                 Object hashOrHeight = params.size() > 1 ? params.get(1) : null;
                 boolean useIndex = booleanParam(params, 2, true);
+
+                NodeValidationService.UtxoSetInfo stats;
+                boolean usedIndex = false;
                 if (hashOrHeight != null) {
                     if (!(hashOrHeight instanceof String) && !(hashOrHeight instanceof Number))
                         throw new RpcException(-32602, "hash_or_height must be a block hash or height");
-                    throw new RpcException(-8,
-                            "Querying specific block heights requires coinstatsindex");
+                    if (hashType.equals("hash_serialized_3"))
+                        throw new RpcException(-8, "hash_serialized_3 cannot be queried for a specific block");
+                    if (!useIndex || !validation.coinStatsIndexEnabled())
+                        throw new RpcException(-8, "Querying specific block heights requires coinstatsindex");
+                    usedIndex = true;
+                    if (hashOrHeight instanceof Number number) {
+                        long height = number.longValue();
+                        stats = validation.indexedUtxoSetInfo(height)
+                                .orElseThrow(() -> new RpcException(-8, "Block height out of range"));
+                    } else {
+                        Hash256 hash = parseHash((String) hashOrHeight);
+                        var active = validation.activeBlockInfo(hash)
+                                .orElseThrow(() -> new RpcException(-5, "Block not found"));
+                        stats = validation.indexedUtxoSetInfo(active.index().hash())
+                                .orElseThrow(() -> new RpcException(-32603, "Coinstats index is not synchronized to the requested block"));
+                    }
+                } else if (useIndex && validation.coinStatsIndexEnabled() && !hashType.equals("hash_serialized_3")) {
+                    usedIndex = true;
+                    stats = validation.indexedUtxoSetInfo(validation.activeTip().hash()).orElseThrow(() ->
+                            new RpcException(-32603, "Coinstats index is not synchronized to the active tip"));
+                } else {
+                    stats = validation.utxoSetInfo(switch (hashType) {
+                        case "hash_serialized_3" -> ru.bitcoin.node.storage.utxo.RocksDbUtxoStore.HashType.HASH_SERIALIZED_3;
+                        case "muhash" -> ru.bitcoin.node.storage.utxo.RocksDbUtxoStore.HashType.MUHASH;
+                        case "none" -> ru.bitcoin.node.storage.utxo.RocksDbUtxoStore.HashType.NONE;
+                        default -> throw new IllegalStateException("unreachable hash type");
+                    });
                 }
-                // Signature-compatible with Bitcoin Core. Until the persistent
-                // coinstatsindex is implemented, current-tip statistics are
-                // computed directly from the chainstate regardless of use_index.
-                var stats = validation.utxoSetInfo(switch (hashType) {
-                    case "hash_serialized_3" -> ru.bitcoin.node.storage.utxo.RocksDbUtxoStore.HashType.HASH_SERIALIZED_3;
-                    case "muhash" -> ru.bitcoin.node.storage.utxo.RocksDbUtxoStore.HashType.MUHASH;
-                    case "none" -> ru.bitcoin.node.storage.utxo.RocksDbUtxoStore.HashType.NONE;
-                    default -> throw new IllegalStateException("unreachable hash type");
-                });
                 var result = new LinkedHashMap<String, Object>();
                 result.put("height", stats.height());
                 result.put("bestblock", stats.bestBlock().toDisplayHex());
-                result.put("transactions", stats.transactions());
+                if (!usedIndex) result.put("transactions", stats.transactions());
                 result.put("txouts", stats.txouts());
                 result.put("bogosize", stats.bogoSize());
                 if (hashType.equals("hash_serialized_3"))
                     result.put("hash_serialized_3", stats.hashSerialized3().toDisplayHex());
                 if (hashType.equals("muhash"))
                     result.put("muhash", stats.muhash().toDisplayHex());
-                result.put("disk_size", stats.diskSize());
+                if (!usedIndex) result.put("disk_size", stats.diskSize());
                 result.put("total_amount", satoshisToBtc(stats.totalAmount()));
                 yield result;
             }

@@ -83,7 +83,9 @@ public class NodeConfiguration {
             @Value("${bitcoin.persist-mempool:true}")
             boolean persistMempool,
             @Value("${bitcoin.txindex:false}")
-            boolean txIndex
+            boolean txIndex,
+            @Value("${bitcoin.coinstatsindex:false}")
+            boolean coinStatsIndex
     ) {
         long pruneTargetBytes = pruneTargetBytes(pruneMiB);
         var pruneState = new ru.bitcoin.node.storage.chain.RocksDbPruneStateStore(database);
@@ -133,7 +135,8 @@ public class NodeConfiguration {
                 pruneTargetBytes,
                 assumeValidHash(assumeValid, parameters),
                 persistMempool,
-                txIndex
+                txIndex,
+                coinStatsIndex
         );
     }
 

@@ -19,6 +19,7 @@ import ru.bitcoin.node.storage.rocksdb.RocksDbDatabase;
 import ru.bitcoin.node.storage.mempool.RocksDbMempoolStore;
 import ru.bitcoin.node.storage.mempool.PersistedMempoolEntry;
 import ru.bitcoin.node.storage.txindex.RocksDbTxIndexStore;
+import ru.bitcoin.node.storage.coinstats.RocksDbCoinStatsIndexStore;
 import ru.bitcoin.node.storage.undo.RocksDbUndoStore;
 import ru.bitcoin.node.storage.utxo.RocksDbUtxoStore;
 
@@ -44,6 +45,10 @@ public final class NodeValidationService {
     private final boolean persistMempool;
     private final boolean txIndexEnabled;
     private final RocksDbTxIndexStore txIndexStore;
+    private final boolean coinStatsIndexEnabled;
+    private final RocksDbCoinStatsIndexStore coinStatsIndexStore;
+    private final CoinStatsIndexService coinStatsIndex;
+    private final RocksDbUndoStore undos;
     private final NetworkParameters parameters;
     private final AdjustedTime time;
     private final RocksDbUtxoStore utxos;
@@ -316,11 +321,20 @@ public final class NodeValidationService {
     public NodeValidationService(RocksDbDatabase database, NetworkParameters parameters,
                                  AdjustedTime time, Mempool mempool, long pruneTargetBytes,
                                  Hash256 assumedValidBlock, boolean persistMempool, boolean txIndexEnabled) {
+        this(database, parameters, time, mempool, pruneTargetBytes, assumedValidBlock, persistMempool, txIndexEnabled, false);
+    }
+
+    public NodeValidationService(RocksDbDatabase database, NetworkParameters parameters,
+                                 AdjustedTime time, Mempool mempool, long pruneTargetBytes,
+                                 Hash256 assumedValidBlock, boolean persistMempool, boolean txIndexEnabled,
+                                 boolean coinStatsIndexEnabled) {
         this.mempool = Objects.requireNonNull(mempool);
         this.mempoolStore = new RocksDbMempoolStore(database);
         this.persistMempool = persistMempool;
         this.txIndexEnabled = txIndexEnabled;
         this.txIndexStore = new RocksDbTxIndexStore(database);
+        this.coinStatsIndexEnabled = coinStatsIndexEnabled;
+        this.coinStatsIndexStore = new RocksDbCoinStatsIndexStore(database);
         this.blockPruner = new BlockPruner(database, pruneTargetBytes, parameters.pruneAfterHeight());
         this.pruneState = new RocksDbPruneStateStore(database);
         this.pruneTargetBytes = pruneTargetBytes;
@@ -335,9 +349,10 @@ public final class NodeValidationService {
                         database
                 );
         var tips = new RocksDbChainStateStore(database);
-        var undos = new RocksDbUndoStore(database);
+        undos = new RocksDbUndoStore(database);
         blocks = new RocksDbBlockStore(database);
         lookup = new StoredBlockIndexLookup(indexes);
+        coinStatsIndex = new CoinStatsIndexService(coinStatsIndexStore, blocks, undos, lookup, activeAncestors);
         var failureResolver =
                 new BlockFailureResolver(
                         lookup,
@@ -397,6 +412,7 @@ public final class NodeValidationService {
             }
             blockPruner.prune(chain.activeTip());
             if (txIndexEnabled) synchronizeTxIndex();
+            if (coinStatsIndexEnabled) synchronizeCoinStatsIndex();
             initialBlockDownload.update(chain.activeTip());
         }
     }
@@ -410,6 +426,7 @@ public final class NodeValidationService {
             synchronizePool();
             if (result == BlockProcessingResult.CONNECTED) {
                 if (txIndexEnabled) synchronizeTxIndex();
+                if (coinStatsIndexEnabled) synchronizeCoinStatsIndex();
                 blockPruner.prune(chain.activeTip());
                 initialBlockDownload.update(chain.activeTip());
             }
@@ -524,6 +541,27 @@ public final class NodeValidationService {
         return txIndexEnabled;
     }
 
+    public boolean coinStatsIndexEnabled() { return coinStatsIndexEnabled; }
+
+    public Optional<UtxoSetInfo> indexedUtxoSetInfo(Hash256 blockHash) {
+        Objects.requireNonNull(blockHash, "blockHash");
+        synchronized (chain) {
+            if (!coinStatsIndexEnabled) return Optional.empty();
+            synchronizeCoinStatsIndex();
+            return coinStatsIndex.find(blockHash).map(stats -> new UtxoSetInfo(
+                    stats.height(), stats.blockHash(), stats.transactions(), stats.txouts(),
+                    stats.bogoSize(), 0L, stats.totalAmount(), null, stats.muhash()));
+        }
+    }
+
+    public Optional<UtxoSetInfo> indexedUtxoSetInfo(long height) {
+        synchronized (chain) {
+            if (!coinStatsIndexEnabled || height < 0 || height > chain.activeTip().height()) return Optional.empty();
+            BlockIndex index = activeAncestors.at(chain.activeTip(), height, lookup);
+            return index == null ? Optional.empty() : indexedUtxoSetInfo(index.hash());
+        }
+    }
+
     /** Finds a confirmed transaction through the optional persistent transaction index. */
     public Optional<IndexedTransaction> indexedTransaction(Hash256 txid) {
         Objects.requireNonNull(txid, "txid");
@@ -543,6 +581,10 @@ public final class NodeValidationService {
     }
 
     public record IndexedTransaction(Transaction transaction, ActiveBlockInfo blockInfo) {}
+
+    private void synchronizeCoinStatsIndex() {
+        if (coinStatsIndexEnabled) coinStatsIndex.synchronize(chain.activeTip());
+    }
 
     private void synchronizeTxIndex() {
         if (!txIndexEnabled) return;
@@ -718,6 +760,7 @@ public final class NodeValidationService {
     private void finishManualChainChange() {
         synchronizePool();
         if (txIndexEnabled) synchronizeTxIndex();
+        if (coinStatsIndexEnabled) synchronizeCoinStatsIndex();
         initialBlockDownload.update(chain.activeTip());
         revision++;
         chain.notifyAll();
