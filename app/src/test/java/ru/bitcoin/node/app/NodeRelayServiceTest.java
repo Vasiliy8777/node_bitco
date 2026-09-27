@@ -15,16 +15,19 @@ import ru.bitcoin.node.protocol.serialization.TransactionSerializer;
 import ru.bitcoin.node.protocol.transaction.*;
 import ru.bitcoin.node.storage.rocksdb.RocksDbDatabase;
 import ru.bitcoin.node.storage.utxo.*;
+
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
+
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class NodeRelayServiceTest {
-    @TempDir Path directory;
+    @TempDir
+    Path directory;
 
     @Test
     void newBlockAnnouncementRunsBetweenHistoricalBlockResponses() throws Exception {
@@ -35,7 +38,10 @@ class NodeRelayServiceTest {
         var peer = mock(Peer.class);
         when(peer.isReady()).thenReturn(true);
         var incoming = new AtomicReference<PeerMessageListener>();
-        doAnswer(call -> { incoming.set(call.getArgument(0)); return null; }).when(peer).addMessageListener(any());
+        doAnswer(call -> {
+            incoming.set(call.getArgument(0));
+            return null;
+        }).when(peer).addMessageListener(any());
         var entered = new CountDownLatch(1);
         var release = new CountDownLatch(1);
         var first = new java.util.concurrent.atomic.AtomicBoolean(true);
@@ -72,7 +78,8 @@ class NodeRelayServiceTest {
         }
     }
 
-    @Test void requestsMissingParentRetriesChildAndServesAdmittedTransaction() throws Exception {
+    @Test
+    void requestsMissingParentRetriesChildAndServesAdmittedTransaction() throws Exception {
         var parameters = NetworkParametersRegistry.regtest();
         byte[] script = HexFormat.of().parseHex("a914" + HexFormat.of().formatHex(Hash160.hash(new byte[]{0x51})) + "87");
         try (var db = new RocksDbDatabase(directory); var peers = new PeerManager()) {
@@ -92,11 +99,20 @@ class NodeRelayServiceTest {
             when(destination.remoteVersion()).thenReturn(version);
             when(destination.remoteWtxidRelay()).thenReturn(true);
             var incoming = new AtomicReference<PeerMessageListener>();
-            doAnswer(invocation -> { incoming.set(invocation.getArgument(0)); return null; }).when(source).addMessageListener(any());
+            doAnswer(invocation -> {
+                incoming.set(invocation.getArgument(0));
+                return null;
+            }).when(source).addMessageListener(any());
             var requests = new LinkedBlockingQueue<BitcoinMessage>();
             var announcements = new LinkedBlockingQueue<BitcoinMessage>();
-            doAnswer(invocation -> { requests.add(invocation.getArgument(0)); return null; }).when(source).send(any());
-            doAnswer(invocation -> { announcements.add(invocation.getArgument(0)); return null; }).when(destination).send(any());
+            doAnswer(invocation -> {
+                requests.add(invocation.getArgument(0));
+                return null;
+            }).when(source).send(any());
+            doAnswer(invocation -> {
+                announcements.add(invocation.getArgument(0));
+                return null;
+            }).when(destination).send(any());
             peers.add(source);
             try (var relay = new NodeRelayService(validation, sync, peers)) {
                 peers.add(destination); // New connections must be observed too.
@@ -152,6 +168,53 @@ class NodeRelayServiceTest {
                 assertEquals(List.of(unknown), BitcoinMessages.decodeNotFound(take(requests)).inventory());
             }
             verify(source).removeMessageListener(incoming.get());
+        }
+    }
+
+    @Test
+    void opportunisticallyAcceptsLowFeeParentWithOrphanChildAsPackage() throws Exception {
+        var parameters = NetworkParametersRegistry.regtest();
+        byte[] script = HexFormat.of().parseHex("a914" + HexFormat.of().formatHex(Hash160.hash(new byte[]{0x51})) + "87");
+        try (var db = new RocksDbDatabase(directory.resolve("package-relay")); var peers = new PeerManager()) {
+            var validation = new NodeValidationService(db, parameters, () -> 1_800_000_000L, new Mempool());
+            var sync = new NodeSyncInfrastructure(db, parameters, () -> 1_800_000_000L);
+            var fund = new OutPoint(Hash256.fromDisplayHex("33".repeat(32)), new UInt32(0));
+            new RocksDbUtxoStore(db).save(fund, new StoredUtxo(100_000, script, 0, false));
+            var parent = spend(fund, 100_000, script); // zero fee: must fail individual relay admission
+            var child = spend(new OutPoint(parent.txId(), new UInt32(0)), 90_000, script);
+            assertThrows(ru.bitcoin.node.mempool.MempoolAdmissionException.class, () -> validation.admit(parent));
+
+            var source = mock(Peer.class);
+            var version = mock(VersionMessage.class);
+            when(version.relay()).thenReturn(true);
+            when(source.isReady()).thenReturn(true);
+            when(source.remoteVersion()).thenReturn(version);
+            when(source.remoteWtxidRelay()).thenReturn(true);
+            var incoming = new AtomicReference<PeerMessageListener>();
+            doAnswer(invocation -> {
+                incoming.set(invocation.getArgument(0));
+                return null;
+            }).when(source).addMessageListener(any());
+            var outbound = new LinkedBlockingQueue<BitcoinMessage>();
+            doAnswer(invocation -> {
+                outbound.add(invocation.getArgument(0));
+                return null;
+            }).when(source).send(any());
+            peers.add(source);
+            try (var relay = new NodeRelayService(validation, sync, peers)) {
+                incoming.get().onMessage(source, BitcoinMessages.inv(new InvMessage(List.of(new InventoryVector(5, child.wtxId())))));
+                assertEquals(child.wtxId(), BitcoinMessages.decodeGetData(take(outbound)).inventory().getFirst().hash());
+                incoming.get().onMessage(source, new BitcoinMessage("tx", TransactionSerializer.serialize(child)));
+                assertEquals(parent.txId(), BitcoinMessages.decodeGetData(take(outbound)).inventory().getFirst().hash());
+                assertTrue(validation.mempoolEntries().isEmpty());
+
+                incoming.get().onMessage(source, new BitcoinMessage("tx", TransactionSerializer.serialize(parent)));
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                while (validation.mempoolEntries().size() != 2 && System.nanoTime() < deadline) Thread.sleep(10);
+                assertEquals(2, validation.mempoolEntries().size());
+                assertTrue(validation.mempoolEntry(parent.txId()).isPresent());
+                assertTrue(validation.mempoolEntry(child.txId()).isPresent());
+            }
         }
     }
 
@@ -398,10 +461,16 @@ class NodeRelayServiceTest {
             when(peer.isReady()).thenReturn(true);
 
             var incoming = new AtomicReference<PeerMessageListener>();
-            doAnswer(invocation -> { incoming.set(invocation.getArgument(0)); return null; })
+            doAnswer(invocation -> {
+                incoming.set(invocation.getArgument(0));
+                return null;
+            })
                     .when(peer).addMessageListener(any());
             var outbound = new LinkedBlockingQueue<BitcoinMessage>();
-            doAnswer(invocation -> { outbound.add(invocation.getArgument(0)); return null; })
+            doAnswer(invocation -> {
+                outbound.add(invocation.getArgument(0));
+                return null;
+            })
                     .when(peer).send(any());
 
             peers.add(peer);
@@ -436,9 +505,15 @@ class NodeRelayServiceTest {
 
             var slowIncoming = new AtomicReference<PeerMessageListener>();
             var fastIncoming = new AtomicReference<PeerMessageListener>();
-            doAnswer(invocation -> { slowIncoming.set(invocation.getArgument(0)); return null; })
+            doAnswer(invocation -> {
+                slowIncoming.set(invocation.getArgument(0));
+                return null;
+            })
                     .when(slow).addMessageListener(any());
-            doAnswer(invocation -> { fastIncoming.set(invocation.getArgument(0)); return null; })
+            doAnswer(invocation -> {
+                fastIncoming.set(invocation.getArgument(0));
+                return null;
+            })
                     .when(fast).addMessageListener(any());
 
             var slowSendEntered = new CountDownLatch(1);
@@ -452,7 +527,10 @@ class NodeRelayServiceTest {
             }).when(slow).send(any());
 
             var fastOutbound = new LinkedBlockingQueue<BitcoinMessage>();
-            doAnswer(invocation -> { fastOutbound.add(invocation.getArgument(0)); return null; })
+            doAnswer(invocation -> {
+                fastOutbound.add(invocation.getArgument(0));
+                return null;
+            })
                     .when(fast).send(any());
 
             peers.add(slow);
@@ -555,10 +633,16 @@ class NodeRelayServiceTest {
             var peer = mock(Peer.class);
             when(peer.isReady()).thenReturn(true);
             var incoming = new AtomicReference<PeerMessageListener>();
-            doAnswer(invocation -> { incoming.set(invocation.getArgument(0)); return null; })
+            doAnswer(invocation -> {
+                incoming.set(invocation.getArgument(0));
+                return null;
+            })
                     .when(peer).addMessageListener(any());
             var outbound = new LinkedBlockingQueue<BitcoinMessage>();
-            doAnswer(invocation -> { outbound.add(invocation.getArgument(0)); return null; })
+            doAnswer(invocation -> {
+                outbound.add(invocation.getArgument(0));
+                return null;
+            })
                     .when(peer).send(any());
             peers.add(peer);
 
@@ -601,14 +685,26 @@ class NodeRelayServiceTest {
             when(second.isReady()).thenReturn(true);
             var firstIncoming = new AtomicReference<PeerMessageListener>();
             var secondIncoming = new AtomicReference<PeerMessageListener>();
-            doAnswer(invocation -> { firstIncoming.set(invocation.getArgument(0)); return null; })
+            doAnswer(invocation -> {
+                firstIncoming.set(invocation.getArgument(0));
+                return null;
+            })
                     .when(first).addMessageListener(any());
-            doAnswer(invocation -> { secondIncoming.set(invocation.getArgument(0)); return null; })
+            doAnswer(invocation -> {
+                secondIncoming.set(invocation.getArgument(0));
+                return null;
+            })
                     .when(second).addMessageListener(any());
             var firstOutbound = new LinkedBlockingQueue<BitcoinMessage>();
             var secondOutbound = new LinkedBlockingQueue<BitcoinMessage>();
-            doAnswer(invocation -> { firstOutbound.add(invocation.getArgument(0)); return null; }).when(first).send(any());
-            doAnswer(invocation -> { secondOutbound.add(invocation.getArgument(0)); return null; }).when(second).send(any());
+            doAnswer(invocation -> {
+                firstOutbound.add(invocation.getArgument(0));
+                return null;
+            }).when(first).send(any());
+            doAnswer(invocation -> {
+                secondOutbound.add(invocation.getArgument(0));
+                return null;
+            }).when(second).send(any());
             peers.add(first);
             peers.add(second);
 
@@ -647,10 +743,16 @@ class NodeRelayServiceTest {
             when(source.isReady()).thenReturn(true);
             when(source.remoteVersion()).thenReturn(version);
             var incoming = new AtomicReference<PeerMessageListener>();
-            doAnswer(invocation -> { incoming.set(invocation.getArgument(0)); return null; })
+            doAnswer(invocation -> {
+                incoming.set(invocation.getArgument(0));
+                return null;
+            })
                     .when(source).addMessageListener(any());
             var outbound = new LinkedBlockingQueue<BitcoinMessage>();
-            doAnswer(invocation -> { outbound.add(invocation.getArgument(0)); return null; })
+            doAnswer(invocation -> {
+                outbound.add(invocation.getArgument(0));
+                return null;
+            })
                     .when(source).send(any());
             peers.add(source);
 
@@ -709,6 +811,7 @@ class NodeRelayServiceTest {
             }
         }
     }
+
     @Test
     void relaysConnectedBlockOnceAndExcludesSourcePeer() throws Exception {
         var parameters = NetworkParametersRegistry.regtest();

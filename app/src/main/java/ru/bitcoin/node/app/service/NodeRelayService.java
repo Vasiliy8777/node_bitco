@@ -554,12 +554,39 @@ public final class NodeRelayService implements AutoCloseable {
                 requestTransactions(peer, new InvMessage(transaction.inputs().stream()
                         .map(input -> new InventoryVector(InventoryVector.MSG_TX, input.previousOutput().transactionId()))
                         .distinct().toList()));
+            } else {
+                tryOpportunisticOneParentOneChildPackage(peer, transaction);
             }
         } catch (ru.bitcoin.node.consensus.transaction.TransactionValidationException
                  | ru.bitcoin.node.script.ScriptExecutionException
                  | ru.bitcoin.node.script.ScriptParseException exception) {
             log.debug("Rejected invalid transaction {}", transaction.txId());
         }
+    }
+
+    /**
+     * Core-style opportunistic 1-parent-1-child package acceptance.  A child may
+     * arrive first and be kept in the orphanage while its parent is individually
+     * below the relay/mempool feerate floor.  When that parent arrives, evaluate
+     * parent+child atomically so the child's fee can pay for the parent.
+     */
+    private boolean tryOpportunisticOneParentOneChildPackage(Peer source, Transaction parent) {
+        for (Transaction child : orphanage.childrenOf(parent.txId())) {
+            try {
+                validation.admitPackage(List.of(parent, child));
+                orphanage.remove(child);
+                announceTransaction(parent, source);
+                announceTransaction(child, source);
+                reconsiderOrphanDescendants(child);
+                return true;
+            } catch (MempoolAdmissionException
+                     | ru.bitcoin.node.consensus.transaction.TransactionValidationException
+                     | ru.bitcoin.node.script.ScriptExecutionException
+                     | ru.bitcoin.node.script.ScriptParseException ignored) {
+                // Another orphan may form a valid 1P1C package with this parent.
+            }
+        }
+        return false;
     }
 
     private void reconsiderOrphanDescendants(Transaction acceptedParent) {
@@ -791,6 +818,31 @@ public final class NodeRelayService implements AutoCloseable {
         announceTransaction(transaction, null);
         reconsiderOrphanDescendants(transaction);
         return transaction.txId();
+    }
+
+    public record PackageSubmission(List<MempoolEntry> entries, List<Hash256> replacedTransactions) {
+        public PackageSubmission {
+            entries = List.copyOf(entries);
+            replacedTransactions = List.copyOf(replacedTransactions);
+        }
+    }
+
+    /** Atomically submits a child-with-parents package and relays every accepted member. */
+    public PackageSubmission submitPackage(List<Transaction> transactions) {
+        List<Transaction> packageTransactions = List.copyOf(transactions);
+        Set<Hash256> before = validation.mempoolEntries().stream()
+                .map(entry -> entry.transaction().txId()).collect(java.util.stream.Collectors.toSet());
+        List<MempoolEntry> accepted = validation.admitPackage(packageTransactions);
+        Set<Hash256> after = validation.mempoolEntries().stream()
+                .map(entry -> entry.transaction().txId()).collect(java.util.stream.Collectors.toSet());
+        List<Hash256> replaced = before.stream().filter(id -> !after.contains(id)).toList();
+        for (Transaction transaction : packageTransactions) {
+            orphanage.remove(transaction);
+            orphanage.removeConflicts(transaction);
+            announceTransaction(transaction, null);
+        }
+        for (Transaction transaction : packageTransactions) reconsiderOrphanDescendants(transaction);
+        return new PackageSubmission(accepted, replaced);
     }
 
     private void announceTransaction(Transaction transaction, Peer source) {

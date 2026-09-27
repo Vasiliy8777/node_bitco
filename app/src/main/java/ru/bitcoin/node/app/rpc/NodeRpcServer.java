@@ -168,6 +168,48 @@ public final class NodeRpcServer implements AutoCloseable {
                     throw new RpcException(-26, exception.getMessage());
                 }
             }
+            case "submitpackage" -> {
+                if (params.isEmpty() || params.size() > 3 || !(params.getFirst() instanceof List<?> rawPackage))
+                    throw new RpcException(-32602, "Expected package array and optional maxfeerate/maxburnamount");
+                if (rawPackage.isEmpty() || rawPackage.size() > 25)
+                    throw new RpcException(-8, "Array must contain between 1 and 25 transactions");
+                List<Transaction> transactions = new ArrayList<>(rawPackage.size());
+                try {
+                    for (Object raw : rawPackage) {
+                        if (!(raw instanceof String hex)) throw new RpcException(-32602, "Package transactions must be hex strings");
+                        transactions.add(TransactionParser.parse(HexFormat.of().parseHex(hex)));
+                    }
+                } catch (IllegalArgumentException | java.nio.BufferUnderflowException exception) {
+                    throw new RpcException(-22, "TX decode failed");
+                }
+                try {
+                    var submission = relay.submitPackage(transactions);
+                    var accepted = submission.entries();
+                    var txResults = new LinkedHashMap<String, Object>();
+                    for (int i = 0; i < transactions.size(); i++) {
+                        Transaction tx = transactions.get(i);
+                        var entry = accepted.get(i);
+                        var result = new LinkedHashMap<String, Object>();
+                        result.put("txid", tx.txId().toDisplayHex());
+                        result.put("vsize", entry.virtualSize());
+                        result.put("vsize_adjusted", entry.virtualSize());
+                        result.put("vsize_bip141", ru.bitcoin.node.consensus.transaction.TransactionWeight.virtualSize(entry.weight()));
+                        result.put("fees", Map.of("base", satoshisToBtc(entry.fee())));
+                        txResults.put(tx.wtxId().toDisplayHex(), result);
+                    }
+                    var result = new LinkedHashMap<String, Object>();
+                    result.put("package_msg", "success");
+                    result.put("tx-results", txResults);
+                    result.put("replaced-transactions", submission.replacedTransactions().stream()
+                            .map(Hash256::toDisplayHex).toList());
+                    yield result;
+                } catch (ru.bitcoin.node.mempool.MempoolAdmissionException
+                         | ru.bitcoin.node.consensus.transaction.TransactionValidationException
+                         | ru.bitcoin.node.script.ScriptExecutionException
+                         | ru.bitcoin.node.script.ScriptParseException exception) {
+                    throw new RpcException(-26, exception.getMessage());
+                }
+            }
             case "decoderawtransaction" -> {
                 if (params.size() != 1 || !(params.getFirst() instanceof String raw))
                     throw new RpcException(-32602, "Expected one raw transaction hex string");
