@@ -3,6 +3,7 @@ package ru.bitcoin.node.app;
 import ru.bitcoin.node.chain.*;
 import ru.bitcoin.node.chain.utxo.BlockReorganizationChangesBuilder;
 import ru.bitcoin.node.chain.utxo.BlockToConnect;
+import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.consensus.transaction.LockTimeCutoff;
 import ru.bitcoin.node.protocol.block.Block;
 import ru.bitcoin.node.protocol.network.NetworkParameters;
@@ -41,6 +42,36 @@ final class AssumeUtxoBackgroundValidator {
     }
 
     RocksDbAssumeUtxoBackgroundStore.State state() { return progress.load().orElse(null); }
+
+    record MissingBlock(Hash256 hash, long height) {}
+
+    List<MissingBlock> missingBlocks(int limit) {
+        if (limit <= 0) throw new IllegalArgumentException("limit must be positive");
+        var snap = snapshotState.load().orElse(null);
+        var state = progress.load().orElse(null);
+        if (snap == null || state == null || state.status() != RocksDbAssumeUtxoBackgroundStore.Status.RUNNING
+                || state.tipHeight() >= snap.snapshotBaseHeight()) return List.of();
+        BlockIndex current = lookup.find(state.tipHash());
+        BlockIndex target = lookup.find(snap.snapshotBaseHash());
+        if (current == null || target == null) return List.of();
+        long lastHeight = Math.min(snap.snapshotBaseHeight(), current.height() + limit);
+        java.util.ArrayList<MissingBlock> result = new java.util.ArrayList<>();
+        for (long height = current.height() + 1; height <= lastHeight; height++) {
+            BlockIndex next = ancestor(target, height);
+            if (next == null) break;
+            if (blocks.find(next.hash()).isEmpty()) result.add(new MissingBlock(next.hash(), next.height()));
+        }
+        return List.copyOf(result);
+    }
+
+    void storeDownloadedBlock(MissingBlock expected, Block block) {
+        if (expected == null || block == null) throw new IllegalArgumentException("expected/block must not be null");
+        if (!block.hash().equals(expected.hash())) throw new IllegalArgumentException("Downloaded historical block hash mismatch");
+        BlockIndex index = lookup.find(expected.hash());
+        if (index == null || index.height() != expected.height()) throw new IllegalArgumentException("Downloaded historical block is not the expected indexed block");
+        ru.bitcoin.node.consensus.block.BlockValidator.validateStructure(block);
+        blocks.save(block);
+    }
 
     Step step() {
         var snap = snapshotState.load().orElse(null);

@@ -323,13 +323,16 @@ public class NodeConfiguration {
     public BlockDownloadScheduler blockDownloadScheduler(
             PeerManager peerManager,
             BlockDownloadService blockDownloadService,
-            BlockDownloadTimeoutPolicy timeoutPolicy
+            BlockDownloadTimeoutPolicy timeoutPolicy,
+            NodeValidationService validationService
     ) {
-        return new BlockDownloadScheduler(
+        BlockDownloadScheduler scheduler = new BlockDownloadScheduler(
                 peerManager,
                 blockDownloadService,
                 timeoutPolicy
         );
+        validationService.attachBackgroundBlockDownloadScheduler(scheduler);
+        return scheduler;
     }
 
     @Bean

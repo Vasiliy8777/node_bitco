@@ -63,6 +63,7 @@ public final class NodeValidationService implements AutoCloseable {
     private final AssumeUtxoBackgroundValidator assumeUtxoBackgroundValidator;
     private volatile boolean backgroundValidationStop;
     private volatile Thread backgroundValidationThread;
+    private volatile ru.bitcoin.node.p2p.sync.BlockDownloadScheduler backgroundBlockDownloadScheduler;
     private final RocksDbDatabase database;
     private final BlockPruner blockPruner;
     private final RocksDbPruneStateStore pruneState;
@@ -1286,6 +1287,46 @@ public final class NodeValidationService implements AutoCloseable {
         return blocks.find(index.hash()).orElseThrow(() -> new IllegalStateException("Missing chain-update block: " + index.hash()));
     }
 
+    /** Attaches the ordinary P2P block scheduler to AssumeUTXO historical validation. */
+    public void attachBackgroundBlockDownloadScheduler(ru.bitcoin.node.p2p.sync.BlockDownloadScheduler scheduler) {
+        this.backgroundBlockDownloadScheduler = java.util.Objects.requireNonNull(scheduler, "scheduler");
+        ensureBackgroundValidationWorker();
+    }
+
+    private static final int ASSUMEUTXO_BACKGROUND_DOWNLOAD_WINDOW = 32;
+
+    private boolean fetchMissingBackgroundBlocks() {
+        var scheduler = backgroundBlockDownloadScheduler;
+        var missing = assumeUtxoBackgroundValidator.missingBlocks(ASSUMEUTXO_BACKGROUND_DOWNLOAD_WINDOW);
+        if (scheduler == null || missing.isEmpty()) return false;
+        java.util.Map<Hash256, AssumeUtxoBackgroundValidator.MissingBlock> expected = new java.util.HashMap<>();
+        java.util.List<ru.bitcoin.node.p2p.sync.BlockDownloadRequest> requests = new java.util.ArrayList<>(missing.size());
+        for (var item : missing) {
+            expected.put(item.hash(), item);
+            requests.add(new ru.bitcoin.node.p2p.sync.BlockDownloadRequest(item.hash(), item.height()));
+        }
+        boolean storedAny = false;
+        try (var session = scheduler.openSession()) {
+            session.submitRequests(requests);
+            while (session.pendingCount() > 0) {
+                var completed = session.awaitCompleted();
+                var item = expected.get(completed.requestedHash());
+                if (item == null) continue;
+                try {
+                    assumeUtxoBackgroundValidator.storeDownloadedBlock(item, completed.block());
+                    storedAny = true;
+                } catch (ru.bitcoin.node.consensus.block.BlockValidationException | IllegalArgumentException badBody) {
+                    if (completed.sourcePeer() != null) {
+                        try { completed.sourcePeer().close(); } catch (java.io.IOException closeFailure) { badBody.addSuppressed(closeFailure); }
+                    }
+                }
+            }
+        } catch (java.io.IOException transientFailure) {
+            return storedAny;
+        }
+        return storedAny;
+    }
+
     /** Current historical AssumeUTXO validation progress, if a snapshot is active. */
     public java.util.Optional<BackgroundValidationInfo> backgroundValidationInfo() {
         var s = assumeUtxoBackgroundValidator.state();
@@ -1307,8 +1348,9 @@ public final class NodeValidationService implements AutoCloseable {
                     if (step == AssumeUtxoBackgroundValidator.Step.INACTIVE
                             || step == AssumeUtxoBackgroundValidator.Step.VALIDATED
                             || step == AssumeUtxoBackgroundValidator.Step.INVALID) return;
-                    if (step == AssumeUtxoBackgroundValidator.Step.WAITING_FOR_BLOCK) Thread.sleep(1000L);
-                    else Thread.yield();
+                    if (step == AssumeUtxoBackgroundValidator.Step.WAITING_FOR_BLOCK) {
+                        if (!fetchMissingBackgroundBlocks()) Thread.sleep(1000L);
+                    } else Thread.yield();
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     return;
