@@ -15,27 +15,34 @@ import ru.bitcoin.node.crypto.hash.MuHash3072;
 public final class RocksDbUtxoStore
         implements UtxoStore {
 
-    private static final byte UTXO_PREFIX = 0x03;
+    private static final byte DEFAULT_UTXO_PREFIX = 0x03;
 
     /** Diagnostic full count; requires a stable chain snapshot. */
-    public long count() { return database.countPrefix(UTXO_PREFIX); }
+    public long count() { return database.countPrefix(prefix); }
 
     private static final int TXID_SIZE = 32;
     private static final int VOUT_SIZE = 4;
 
     private final RocksDbDatabase database;
+    private volatile byte prefix;
 
     public RocksDbUtxoStore(
             RocksDbDatabase database
     ) {
-        if (database == null) {
-            throw new IllegalArgumentException(
-                    "database must not be null"
-            );
-        }
-
-        this.database = database;
+        this(database, DEFAULT_UTXO_PREFIX);
     }
+
+    /** Creates the same UTXO store layout under an isolated first-byte namespace. */
+    public RocksDbUtxoStore(RocksDbDatabase database, byte prefix) {
+        if (database == null) throw new IllegalArgumentException("database must not be null");
+        this.database = database;
+        this.prefix = prefix;
+    }
+
+    public byte namespacePrefix() { return prefix; }
+
+    /** Switches this already-wired store to another isolated UTXO namespace. */
+    public void activateNamespace(byte prefix) { this.prefix = prefix; }
 
     @Override
     public void save(
@@ -103,7 +110,7 @@ public final class RocksDbUtxoStore
         );
     }
 
-    private static byte[] key(
+    private byte[] key(
             OutPoint outPoint
     ) {
         byte[] txid =
@@ -124,7 +131,7 @@ public final class RocksDbUtxoStore
                         ];
 
         key[0] =
-                UTXO_PREFIX;
+                prefix;
 
         System.arraycopy(
                 txid,
@@ -218,7 +225,7 @@ public final class RocksDbUtxoStore
         if (batch == null) {
             throw new IllegalArgumentException("batch must not be null");
         }
-        batch.deletePrefix(UTXO_PREFIX);
+        batch.deletePrefix(prefix);
     }
 
     /**
@@ -246,7 +253,7 @@ public final class RocksDbUtxoStore
         final MessageDigest first = hashType == HashType.HASH_SERIALIZED_3 ? sha256() : null;
         final MuHash3072 muhash = hashType == HashType.MUHASH ? new MuHash3072() : null;
 
-        database.forEachEntryByPrefix(UTXO_PREFIX, (key, value) -> {
+        database.forEachEntryByPrefix(prefix, (key, value) -> {
             if (key.length != 1 + TXID_SIZE + VOUT_SIZE)
                 throw new IllegalStateException("Invalid UTXO key length: " + key.length);
             byte[] txid = Arrays.copyOfRange(key, 1, 1 + TXID_SIZE);
@@ -265,7 +272,7 @@ public final class RocksDbUtxoStore
         Hash256 hashSerialized3 = first == null ? null : new Hash256(sha256().digest(first.digest()));
         Hash256 muhashDigest = muhash == null ? null : muhash.finalizeHash();
         return new Statistics(transactions[0], txouts[0], bogoSize[0],
-                database.valueBytesByPrefix(UTXO_PREFIX), totalAmount[0], hashSerialized3, muhashDigest);
+                database.valueBytesByPrefix(prefix), totalAmount[0], hashSerialized3, muhashDigest);
     }
 
     private static void applyTransaction(MessageDigest digest, MuHash3072 muhash, byte[] txid, TreeMap<Long, StoredUtxo> outputs,

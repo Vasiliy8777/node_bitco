@@ -304,4 +304,20 @@ class RocksDbUtxoStoreTest {
         return result;
     }
 
+
+    @Test
+    void isolatedNamespaceCanBecomeActiveWithoutTouchingNormalUtxos() {
+        try (RocksDbDatabase database = new RocksDbDatabase(tempDirectory.resolve("namespaces"))) {
+            var point = testOutPoint(7);
+            var normal = new RocksDbUtxoStore(database);
+            normal.save(point, testUtxo());
+            var routed = new RocksDbUtxoStore(database, ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.UTXO);
+            assertTrue(routed.find(point).isPresent());
+            routed.activateNamespace(ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.SNAPSHOT_UTXO_STAGING);
+            assertTrue(routed.find(point).isEmpty());
+            routed.save(point, testUtxo());
+            assertEquals(1, routed.count());
+            assertTrue(normal.find(point).isPresent());
+        }
+    }
 }

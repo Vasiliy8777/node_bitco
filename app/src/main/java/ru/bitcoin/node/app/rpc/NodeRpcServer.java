@@ -625,6 +625,22 @@ public final class NodeRpcServer implements AutoCloseable {
                     throw new RpcException(-1, "Unable to write UTXO snapshot: " + exception.getMessage());
                 }
             }
+            case "loadtxoutset" -> {
+                if (params.size() != 1 || !(params.getFirst() instanceof String pathText))
+                    throw new RpcException(-32602, "Expected snapshot path");
+                try {
+                    var loaded = validation.loadUtxoSnapshot(java.nio.file.Path.of(pathText));
+                    var result = new LinkedHashMap<String,Object>();
+                    result.put("coins_loaded", loaded.coinsLoaded());
+                    result.put("base_hash", loaded.baseHash().toDisplayHex());
+                    result.put("base_height", loaded.baseHeight());
+                    result.put("hash_serialized_3", loaded.hashSerialized().toDisplayHex());
+                    result.put("chain_tx_count", loaded.chainTxCount());
+                    yield result;
+                } catch (IOException exception) {
+                    throw new RpcException(-1, "Unable to load UTXO snapshot: " + exception.getMessage());
+                }
+            }
             case "getchainstates" -> {
                 if (!params.isEmpty()) throw new RpcException(-32602, "getchainstates takes no parameters");
                 var result = new LinkedHashMap<String,Object>();

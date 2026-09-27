@@ -77,6 +77,19 @@ public final class ChainState {
      * как disconnect/connect и изменение UTXO
      * завершились успешно.
      */
+    /**
+     * Switches the in-memory active tip after a trusted snapshot activation has
+     * already been committed durably. This bypasses chain-work selection only
+     * for the explicit AssumeUTXO activation path.
+     */
+    public void activateTrustedSnapshot(BlockIndex expectedOldTip, BlockIndex snapshotTip) {
+        if (expectedOldTip == null || snapshotTip == null)
+            throw new IllegalArgumentException("tips must not be null");
+        if (!activeTip.hash().equals(expectedOldTip.hash()))
+            throw new IllegalStateException("Active tip changed before snapshot activation");
+        activeTip = snapshotTip;
+    }
+
     public void commit(
             ChainUpdate update
     ) {

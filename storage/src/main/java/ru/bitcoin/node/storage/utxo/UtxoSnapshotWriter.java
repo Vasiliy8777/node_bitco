@@ -14,7 +14,7 @@ import java.util.*;
 public final class UtxoSnapshotWriter {
     public static final byte[] MAGIC = {'u', 't', 'x', 'o', (byte) 0xff};
     public static final int VERSION = 2;
-    private static final byte UTXO_PREFIX = 0x03;
+    private static final byte DEFAULT_UTXO_PREFIX = 0x03;
 
     private UtxoSnapshotWriter() {
     }
@@ -23,6 +23,11 @@ public final class UtxoSnapshotWriter {
     }
 
     public static Result write(RocksDbDatabase database, long networkMagic, Hash256 baseHash,
+                               long baseHeight, Path target) throws IOException {
+        return write(database, DEFAULT_UTXO_PREFIX, networkMagic, baseHash, baseHeight, target);
+    }
+
+    public static Result write(RocksDbDatabase database, byte utxoPrefix, long networkMagic, Hash256 baseHash,
                                long baseHeight, Path target) throws IOException {
         Objects.requireNonNull(database);
         Objects.requireNonNull(baseHash);
@@ -33,14 +38,14 @@ public final class UtxoSnapshotWriter {
         if (parent != null) Files.createDirectories(parent);
         Path temp = absolute.resolveSibling(absolute.getFileName() + ".incomplete");
         Files.deleteIfExists(temp);
-        long count = database.countPrefix(UTXO_PREFIX);
+        long count = database.countPrefix(utxoPrefix);
         try (OutputStream raw = new BufferedOutputStream(Files.newOutputStream(temp, StandardOpenOption.CREATE_NEW))) {
             raw.write(MAGIC);
             writeLE(raw, VERSION, 2);
             writeLE(raw, networkMagic, 4);
             raw.write(baseHash.bytes());
             writeLE(raw, count, 8);
-            writeBody(database, raw);
+            writeBody(database, utxoPrefix, raw);
         } catch (UncheckedIOException e) {
             Files.deleteIfExists(temp);
             throw e.getCause();
@@ -56,7 +61,7 @@ public final class UtxoSnapshotWriter {
         return new Result(count, baseHash, baseHeight, absolute);
     }
 
-    private static void writeBody(RocksDbDatabase db, OutputStream out) {
+    private static void writeBody(RocksDbDatabase db, byte utxoPrefix, OutputStream out) {
         final byte[][] current = {null};
         final List<Coin> group = new ArrayList<>();
         Runnable flush = () -> {
@@ -73,7 +78,7 @@ public final class UtxoSnapshotWriter {
                 throw new UncheckedIOException(e);
             }
         };
-        db.forEachEntryByPrefix(UTXO_PREFIX, (key, value) -> {
+        db.forEachEntryByPrefix(utxoPrefix, (key, value) -> {
             if (key.length != 37) throw new IllegalStateException("Invalid UTXO key length: " + key.length);
             byte[] txid = Arrays.copyOfRange(key, 1, 33);
             if (current[0] != null && !Arrays.equals(current[0], txid)) flush.run();

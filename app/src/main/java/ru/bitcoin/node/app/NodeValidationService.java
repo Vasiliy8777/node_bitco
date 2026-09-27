@@ -59,6 +59,7 @@ public final class NodeValidationService {
     private final NetworkParameters parameters;
     private final AdjustedTime time;
     private final RocksDbUtxoStore utxos;
+    private final ru.bitcoin.node.storage.utxo.RocksDbSnapshotChainStateStore snapshotChainStateStore;
     private final RocksDbDatabase database;
     private final BlockPruner blockPruner;
     private final RocksDbPruneStateStore pruneState;
@@ -375,7 +376,12 @@ public final class NodeValidationService {
         this.pruneTargetBytes = pruneTargetBytes;
         this.parameters = Objects.requireNonNull(parameters);
         this.time = Objects.requireNonNull(time);
-        utxos = new RocksDbUtxoStore(database);
+        snapshotChainStateStore = new ru.bitcoin.node.storage.utxo.RocksDbSnapshotChainStateStore(database);
+        boolean snapshotActiveAtStartup = snapshotChainStateStore.load().isPresent();
+        byte startupUtxoPrefix = snapshotActiveAtStartup
+                ? ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.SNAPSHOT_UTXO_STAGING
+                : ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.UTXO;
+        utxos = new RocksDbUtxoStore(database, startupUtxoPrefix);
         indexes = new RocksDbBlockIndexStore(database);
         availability = new RocksDbBlockAvailabilityStore(database);
         validationStatus = new RocksDbBlockValidationStatusStore(database);
@@ -547,15 +553,25 @@ public final class NodeValidationService {
             synchronizePool();
             BlockIndex tip = chain.activeTip();
             return ru.bitcoin.node.storage.utxo.UtxoSnapshotWriter.write(
-                    database, parameters.magic(), tip.hash(), tip.height(), path);
+                    database, utxos.namespacePrefix(), parameters.magic(), tip.hash(), tip.height(), path);
         }
     }
 
-    /** Current single-chainstate view; extended when snapshot chainstates are introduced. */
+    /** Normal and snapshot chainstates, mirroring Core's getchainstates model. */
     public java.util.List<ChainStateInfo> chainStates() {
         synchronized (chain) {
-            BlockIndex tip = chain.activeTip();
-            return java.util.List.of(new ChainStateInfo(tip.height(), tip.hash(), false, true));
+            var snapshot = snapshotChainStateStore.load();
+            if (snapshot.isEmpty()) {
+                BlockIndex tip = chain.activeTip();
+                return java.util.List.of(new ChainStateInfo(tip.height(), tip.hash(), false, true));
+            }
+            var state = snapshot.get();
+            BlockIndex normal = lookup.find(state.normalTipHash());
+            BlockIndex active = chain.activeTip();
+            long normalHeight = normal == null ? state.normalTipHeight() : normal.height();
+            return java.util.List.of(
+                    new ChainStateInfo(normalHeight, state.normalTipHash(), false, false),
+                    new ChainStateInfo(active.height(), active.hash(), true, true));
         }
     }
 
@@ -585,6 +601,37 @@ public final class NodeValidationService {
 
     public record SnapshotVerification(long baseHeight, Hash256 baseHash, long coinsLoaded,
                                        Hash256 hashSerialized, long chainTxCount) {}
+
+    /** Verifies and activates a trusted AssumeUTXO snapshot as the live chainstate. */
+    public SnapshotVerification loadUtxoSnapshot(java.nio.file.Path path) throws java.io.IOException {
+        Objects.requireNonNull(path, "path");
+        synchronized (chain) {
+            if (snapshotChainStateStore.load().isPresent())
+                throw new java.io.IOException("A snapshot chainstate is already active");
+            BlockIndex normalTip = chain.activeTip();
+            SnapshotVerification verified = verifyUtxoSnapshot(path);
+            BlockIndex snapshotTip = lookup.find(verified.baseHash());
+            if (snapshotTip == null || snapshotTip.height() != verified.baseHeight()) {
+                new ru.bitcoin.node.storage.utxo.UtxoSnapshotVerifier(database, parameters).clear();
+                throw new java.io.IOException("Verified snapshot base disappeared from block index");
+            }
+            try {
+                snapshotChainStateStore.activate(normalTip.hash(), normalTip.height(),
+                        snapshotTip.hash(), snapshotTip.height());
+                utxos.activateNamespace(ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.SNAPSHOT_UTXO_STAGING);
+                chain.activateTrustedSnapshot(normalTip, snapshotTip);
+                poolTip = snapshotTip;
+                mempool.revalidate(context(), point -> utxos.find(point).map(coin ->
+                        new UtxoEntry(coin.amount(), coin.scriptPubKey(), coin.height(), coin.coinbase())), java.util.Set.of());
+                initialBlockDownload.update(snapshotTip);
+                revision++;
+                chain.notifyAll();
+                return verified;
+            } catch (RuntimeException e) {
+                throw new java.io.IOException("Unable to activate verified snapshot", e);
+            }
+        }
+    }
 
     public Optional<MempoolEntry> mempoolEntry(Hash256 txid) {
         Objects.requireNonNull(txid, "txid");
