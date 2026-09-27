@@ -269,6 +269,31 @@ public final class RocksDbDatabase
         }
     }
 
+    /** Visits entries whose complete key starts with an arbitrary byte prefix. */
+    public void forEachEntryByKeyPrefix(byte[] keyPrefix, java.util.function.BiConsumer<byte[], byte[]> visitor) {
+        ensureOpen();
+        if (keyPrefix == null || keyPrefix.length == 0) throw new IllegalArgumentException("keyPrefix must not be empty");
+        java.util.Objects.requireNonNull(visitor, "visitor");
+        try (var iterator = database.newIterator()) {
+            iterator.seek(keyPrefix);
+            while (iterator.isValid()) {
+                byte[] key = iterator.key();
+                if (!startsWith(key, keyPrefix)) break;
+                visitor.accept(key.clone(), iterator.value().clone());
+                iterator.next();
+            }
+            iterator.status();
+        } catch (RocksDBException e) {
+            throw new IllegalStateException("Failed to visit RocksDB key prefix", e);
+        }
+    }
+
+    private static boolean startsWith(byte[] value, byte[] prefix) {
+        if (value.length < prefix.length) return false;
+        for (int i = 0; i < prefix.length; i++) if (value[i] != prefix[i]) return false;
+        return true;
+    }
+
     /**
      * Visits one namespace in byte order starting strictly after a previously visited key.
      * A null cursor starts at the first key in the namespace. This is intended for

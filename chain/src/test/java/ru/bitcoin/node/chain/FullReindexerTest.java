@@ -152,6 +152,43 @@ class FullReindexerTest {
         }
     }
 
+    @Test
+    void diskBackedPreflightRejectsOrphanBeforeDestructiveReset() {
+        try (var db = new RocksDbDatabase(directory.resolve("orphan-preflight"))) {
+            ChainState state = new ChainInitializer(db, REGTEST).initialize();
+            Hash256 originalTip = state.activeTip().hash();
+            var blocks = new RocksDbBlockStore(db);
+
+            Block template = child(state.activeTip(), 31, REWARD);
+            Hash256 missingParent = Hash256.fromDisplayHex("22".repeat(32));
+            Block orphan = withHeader(template, missingParent, template.header().merkleRoot(), true);
+            blocks.save(orphan);
+
+            assertThrows(IllegalStateException.class,
+                    () -> new FullReindexer(db, REGTEST, TIME).rebuild());
+
+            assertEquals(originalTip, new RocksDbChainStateStore(db).loadActiveTipHash().orElseThrow(),
+                    "raw-graph preflight must fail before clearing the live chainstate");
+            assertFalse(new RocksDbFullReindexStateStore(db).isInProgress(),
+                    "preflight failure must not publish the destructive reindex marker");
+        }
+    }
+
+    @Test
+    void successfulReindexRemovesEphemeralRawGraphNamespaces() {
+        try (var db = new RocksDbDatabase(directory.resolve("temporary-graph-cleanup"))) {
+            new ChainInitializer(db, REGTEST).initialize();
+
+            new FullReindexer(db, REGTEST, TIME).rebuild();
+
+            assertEquals(0L, db.countPrefix(ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.FULL_REINDEX_RAW_MEMBERSHIP));
+            assertEquals(0L, db.countPrefix(ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.FULL_REINDEX_RAW_EDGE));
+            assertEquals(0L, db.countPrefix(ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.FULL_REINDEX_RAW_QUEUE));
+            assertEquals(0L, db.countPrefix(ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.FULL_REINDEX_RAW_HEIGHT));
+            assertEquals(0L, db.countPrefix(ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.FULL_REINDEX_FAILED_BRANCH));
+        }
+    }
+
     private static Block child(BlockIndex parent, int tag, long reward) {
         int height = Math.toIntExact(parent.height() + 1);
         Transaction coinbase = new Transaction(1,

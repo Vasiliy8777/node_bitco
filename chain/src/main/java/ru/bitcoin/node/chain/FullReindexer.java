@@ -60,15 +60,13 @@ public final class FullReindexer {
             }
 
             var blocks = new RocksDbBlockStore(database);
-            var graph = scanAndValidateGraph(blocks);
             Block genesis = GenesisBlockFactory.create(parameters);
+            var graph = new RawBlockReindexGraph(database);
+            long discoveredBlockBodies = graph.build(blocks, genesis.hash());
             Block storedGenesis = blocks.find(genesis.hash()).orElseThrow(() ->
                     new IllegalStateException("Cannot reindex: selected-network genesis block body is missing"));
             if (!Arrays.equals(serialize(genesis), serialize(storedGenesis))) {
                 throw new IllegalStateException("Cannot reindex: stored genesis does not match selected network");
-            }
-            if (!graph.headers.containsKey(genesis.hash())) {
-                throw new IllegalStateException("Cannot reindex: genesis header is missing from block-body namespace");
             }
 
             var indexes = new RocksDbBlockIndexStore(database);
@@ -84,12 +82,12 @@ public final class FullReindexer {
                         new IllegalStateException("Cannot reindex: active tip metadata is missing"));
                 Hash256 expectedBestHeader = tips.loadBestHeaderTipHash().orElseThrow(() ->
                         new IllegalStateException("Cannot reindex: best-header metadata is missing"));
-                long activeHeight = heightBeforeReset(expectedActive, indexes, graph, genesis.hash());
-                long bestHeaderHeight = heightBeforeReset(expectedBestHeader, indexes, graph, genesis.hash());
+                long activeHeight = heightBeforeReset(expectedActive, indexes, graph);
+                long bestHeaderHeight = heightBeforeReset(expectedBestHeader, indexes, graph);
                 recoveryManifest = new RocksDbFullReindexStateStore.Manifest(
                         expectedActive, activeHeight, expectedBestHeader, bestHeaderHeight);
             }
-            if (recoveryManifest != null && !graph.headers.containsKey(recoveryManifest.expectedActiveTipHash())) {
+            if (recoveryManifest != null && !graph.contains(recoveryManifest.expectedActiveTipHash())) {
                 throw new IllegalStateException("Cannot reindex: expected active tip body is missing: "
                         + recoveryManifest.expectedActiveTipHash().toDisplayHex());
             }
@@ -143,62 +141,59 @@ public final class FullReindexer {
                     chainState, lookup, new KnownBlockStorage(database, blocks, indexes), executor,
                     parameters, adjustedTime, failureManager, failureResolver);
 
-            ArrayDeque<Hash256> queue = new ArrayDeque<>();
-            queue.add(genesis.hash());
-            Set<Hash256> failedBranches = new HashSet<>();
             long replayed = 0;
             long skippedFailed = 0;
 
-            while (!queue.isEmpty()) {
-                Hash256 parentHash = queue.removeFirst();
-                for (Hash256 hash : graph.children.getOrDefault(parentHash, List.of())) {
-                    if (failures.isFailed(hash) || failedBranches.contains(parentHash)) {
-                        failedBranches.add(hash);
-                        skippedFailed++;
-                        queue.addLast(hash);
-                        continue;
+            // Sequence zero is genesis, which the reset transaction already materialized.
+            // The remaining sequence is a disk-backed topological order built during preflight.
+            for (long sequence = 1; sequence < discoveredBlockBodies; sequence++) {
+                Hash256 hash = graph.hashAt(sequence);
+                Block block = blocks.find(hash).orElseThrow(() ->
+                        new IllegalStateException("Block body disappeared during full reindex: " + hash.toDisplayHex()));
+                Hash256 parentHash = block.header().previousBlockHash();
+                if (failures.isFailed(hash)) {
+                    graph.markFailedBranch(hash);
+                    skippedFailed++;
+                    continue;
+                }
+                if (graph.isFailedBranch(parentHash)) {
+                    /*
+                     * The parent is already known to descend from a consensus-invalid root.
+                     * Do not contextually validate/connect this block, but still rebuild the
+                     * deterministic BlockIndex/HAVE_DATA metadata for every persisted raw body.
+                     * The descendant itself is not a new permanent failure root.
+                     */
+                    materializeFailedDescendant(block, indexes, availability);
+                    graph.markFailedBranch(hash);
+                    skippedFailed++;
+                    continue;
+                }
+                try {
+                    BlockProcessingResult result = processor.process(block);
+                    if (result == BlockProcessingResult.UNKNOWN_PARENT) {
+                        throw new IllegalStateException("Topological full reindex produced UNKNOWN_PARENT for "
+                                + hash.toDisplayHex());
                     }
-                    Block block = blocks.find(hash).orElseThrow(() ->
-                            new IllegalStateException("Block body disappeared during full reindex: " + hash.toDisplayHex()));
-                    try {
-                        BlockProcessingResult result = processor.process(block);
-                        if (result == BlockProcessingResult.UNKNOWN_PARENT) {
-                            throw new IllegalStateException("Topological full reindex produced UNKNOWN_PARENT for "
-                                    + hash.toDisplayHex());
-                        }
-                        if (result == BlockProcessingResult.ALREADY_IN_ACTIVE_CHAIN) {
-                            throw new IllegalStateException("Unexpected duplicate active block during full reindex: "
-                                    + hash.toDisplayHex());
-                        }
-                        replayed++;
-                        queue.addLast(hash);
-                    } catch (BlockHeaderValidationException
-                             | BlockValidationException
-                             | TransactionValidationException
-                             | ScriptExecutionException invalid) {
-                        /*
-                         * A raw side-chain body is not proof that it was ever contextually valid.
-                         * Full reindex must be able to rediscover an invalid side branch without
-                         * abandoning reconstruction of an otherwise valid active chain.
-                         *
-                         * Contextual/script validation may already have called markFailed() for
-                         * the actual failing ancestor. Early header/structure/witness failures
-                         * happen before KnownBlockStorage.save(), so create the candidate index
-                         * and failure metadata here. Storage/invariant exceptions are deliberately
-                         * not caught by this block and still abort reindex.
-                         */
-                        Set<Hash256> discoveredRoots = committedFailureRoots(hash, indexes, failures);
-                        if (discoveredRoots.isEmpty()) {
-                            persistEarlyRejectedBlock(block, indexes, failures, availability);
-                            discoveredRoots = Set.of(hash);
-                        }
-                        failedBranches.addAll(discoveredRoots);
-                        // The submitted block itself belongs to that failed branch even when
-                        // the observer identified an earlier ancestor as the actual failure root.
-                        failedBranches.add(hash);
-                        skippedFailed++;
-                        queue.addLast(hash);
+                    if (result == BlockProcessingResult.ALREADY_IN_ACTIVE_CHAIN) {
+                        throw new IllegalStateException("Unexpected duplicate active block during full reindex: "
+                                + hash.toDisplayHex());
                     }
+                    replayed++;
+                } catch (BlockHeaderValidationException
+                         | BlockValidationException
+                         | TransactionValidationException
+                         | ScriptExecutionException invalid) {
+                    /*
+                     * A raw side-chain body is not proof that it was ever contextually valid.
+                     * Consensus-invalid branches are persisted as failed and replay continues;
+                     * storage/invariant failures deliberately escape and abort the rebuild.
+                     */
+                    Set<Hash256> discoveredRoots = committedFailureRoots(hash, indexes, failures);
+                    if (discoveredRoots.isEmpty()) {
+                        persistEarlyRejectedBlock(block, indexes, failures, availability);
+                    }
+                    graph.markFailedBranch(hash);
+                    skippedFailed++;
                 }
             }
 
@@ -212,11 +207,16 @@ public final class FullReindexer {
             try (RocksDbWriteBatch batch = new RocksDbWriteBatch()) {
                 tips.saveBestHeaderTipHash(batch, bestHeader.hash());
                 marker.clear(batch);
+                batch.deletePrefix(ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.FULL_REINDEX_RAW_MEMBERSHIP);
+                batch.deletePrefix(ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.FULL_REINDEX_RAW_EDGE);
+                batch.deletePrefix(ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.FULL_REINDEX_RAW_QUEUE);
+                batch.deletePrefix(ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.FULL_REINDEX_RAW_HEIGHT);
+                batch.deletePrefix(ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.FULL_REINDEX_FAILED_BRANCH);
                 database.write(batch);
             }
 
             return new Result(chainState.activeTip().hash(), chainState.activeTip().height(),
-                    bestHeader.hash(), bestHeader.height(), replayed, skippedFailed, graph.headers.size());
+                    bestHeader.hash(), bestHeader.height(), replayed, skippedFailed, discoveredBlockBodies);
         }
     }
 
@@ -249,6 +249,25 @@ public final class FullReindexer {
         return Set.copyOf(roots);
     }
 
+    private void materializeFailedDescendant(
+            Block block,
+            RocksDbBlockIndexStore indexes,
+            ru.bitcoin.node.storage.block.RocksDbBlockAvailabilityStore availability
+    ) {
+        Hash256 parentHash = block.header().previousBlockHash();
+        BlockIndex parent = indexes.find(parentHash)
+                .map(BlockIndexStorageMapper::fromStored)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Missing parent BlockIndex for failed-branch raw block: "
+                                + parentHash.toDisplayHex()));
+        BlockIndex descendant = BlockIndexFactory.createChild(parent, block.header());
+        try (RocksDbWriteBatch batch = new RocksDbWriteBatch()) {
+            indexes.save(batch, BlockIndexStorageMapper.toStored(descendant));
+            availability.markData(batch, descendant.hash());
+            database.write(batch);
+        }
+    }
+
     private void persistEarlyRejectedBlock(
             Block block,
             RocksDbBlockIndexStore indexes,
@@ -269,26 +288,9 @@ public final class FullReindexer {
         }
     }
 
-    private long heightBeforeReset(Hash256 hash, RocksDbBlockIndexStore indexes, Graph graph, Hash256 genesisHash) {
+    private long heightBeforeReset(Hash256 hash, RocksDbBlockIndexStore indexes, RawBlockReindexGraph graph) {
         return indexes.find(hash).map(ru.bitcoin.node.storage.block.StoredBlockIndex::height)
-                .orElseGet(() -> heightInRawGraph(hash, graph, genesisHash));
-    }
-
-    private long heightInRawGraph(Hash256 hash, Graph graph, Hash256 genesisHash) {
-        long height = 0;
-        Hash256 cursor = hash;
-        Set<Hash256> seen = new HashSet<>();
-        while (!cursor.equals(genesisHash)) {
-            if (!seen.add(cursor)) throw new IllegalStateException("Cannot reindex: cycle while resolving expected tip height");
-            BlockHeader header = graph.headers.get(cursor);
-            if (header == null) {
-                throw new IllegalStateException("Cannot reindex: expected tip is absent from both block index and raw bodies: "
-                        + hash.toDisplayHex());
-            }
-            cursor = header.previousBlockHash();
-            height++;
-        }
-        return height;
+                .orElseGet(() -> graph.height(hash));
     }
 
     private void verifyRecoveryTarget(RocksDbFullReindexStateStore.Manifest manifest, BlockIndex activeTip) {
@@ -304,58 +306,6 @@ public final class FullReindexer {
         // the header index from the complete persisted raw-body graph and may legitimately
         // discover a stronger header than a stale/corrupted pre-reindex best-header pointer.
         // Requiring equality here would turn index repair into a false corruption failure.
-    }
-
-    private Graph scanAndValidateGraph(RocksDbBlockStore blocks) {
-        Map<Hash256, BlockHeader> headers = new HashMap<>();
-        blocks.forEachHeader(header -> {
-            Hash256 hash = header.hash();
-            BlockHeader previous = headers.putIfAbsent(hash, header);
-            if (previous != null && !previous.equals(header)) {
-                throw new IllegalStateException("Conflicting persisted block headers for " + hash.toDisplayHex());
-            }
-        });
-        if (headers.isEmpty()) {
-            throw new IllegalStateException("Cannot reindex: no persisted block bodies");
-        }
-
-        Hash256 genesisHash = GenesisBlockFactory.create(parameters).hash();
-        Map<Hash256, List<Hash256>> children = new HashMap<>();
-        for (var entry : headers.entrySet()) {
-            if (entry.getKey().equals(genesisHash)) continue;
-            Hash256 parent = entry.getValue().previousBlockHash();
-            if (!headers.containsKey(parent)) {
-                throw new IllegalStateException("Cannot reindex: block " + entry.getKey().toDisplayHex()
-                        + " has missing raw parent " + parent.toDisplayHex());
-            }
-            children.computeIfAbsent(parent, ignored -> new ArrayList<>()).add(entry.getKey());
-        }
-        for (List<Hash256> hashes : children.values()) {
-            hashes.sort(Comparator.comparing(Hash256::toDisplayHex));
-        }
-
-        // Prove every stored body is reachable from the selected genesis before destructive reset.
-        Set<Hash256> reachable = new HashSet<>();
-        ArrayDeque<Hash256> queue = new ArrayDeque<>();
-        queue.add(genesisHash);
-        while (!queue.isEmpty()) {
-            Hash256 hash = queue.removeFirst();
-            if (!reachable.add(hash)) continue;
-            queue.addAll(children.getOrDefault(hash, List.of()));
-        }
-        if (reachable.size() != headers.size()) {
-            throw new IllegalStateException("Cannot reindex: raw block graph contains a cycle or a chain not rooted at selected genesis");
-        }
-        return new Graph(Map.copyOf(headers), immutableChildren(children));
-    }
-
-    private static Map<Hash256, List<Hash256>> immutableChildren(Map<Hash256, List<Hash256>> children) {
-        Map<Hash256, List<Hash256>> copy = new HashMap<>();
-        children.forEach((key, value) -> copy.put(key, List.copyOf(value)));
-        return Map.copyOf(copy);
-    }
-
-    private record Graph(Map<Hash256, BlockHeader> headers, Map<Hash256, List<Hash256>> children) {
     }
 
     public record Result(Hash256 activeTipHash, long activeHeight,

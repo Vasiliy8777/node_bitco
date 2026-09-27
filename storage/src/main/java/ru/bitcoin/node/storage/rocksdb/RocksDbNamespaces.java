@@ -31,6 +31,12 @@ public final class RocksDbNamespaces {
     public static final byte BLOCK_HEIGHT_INDEX_VERSION = 0x15;
     public static final byte PRUNE_USAGE_VERSION = 0x16;
     public static final byte BLOCK_VALIDATION_MIGRATION = 0x17;
+    // Ephemeral namespaces used only while bitcoin.reindex builds a disk-backed raw-block graph.
+    public static final byte FULL_REINDEX_RAW_MEMBERSHIP = 0x18;
+    public static final byte FULL_REINDEX_RAW_EDGE = 0x19;
+    public static final byte FULL_REINDEX_RAW_QUEUE = 0x1A;
+    public static final byte FULL_REINDEX_RAW_HEIGHT = 0x1B;
+    public static final byte FULL_REINDEX_FAILED_BRANCH = 0x1C;
 
     /** Legacy v1 prune-usage marker that collided with BLOCK_HEIGHT_INDEX. */
     public static final byte[] LEGACY_PRUNE_USAGE_VERSION_KEY = {BLOCK_HEIGHT_INDEX, 0x01};
