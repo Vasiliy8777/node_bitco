@@ -171,8 +171,9 @@ class MiningRpcTest {
                     assertTrue(((Number) utxoInfo.get("total_amount")).doubleValue() > 0.0);
                     var noHashUtxoInfo = (Map<?, ?>) call(client, uri, "gettxoutsetinfo", List.of("none")).get("result");
                     assertFalse(noHashUtxoInfo.containsKey("hash_serialized_3"));
-                    assertEquals(-8, ((Number) ((Map<?, ?>) call(client, uri, "gettxoutsetinfo",
-                            List.of("muhash")).get("error")).get("code")).intValue());
+                    var muhashUtxoInfo = (Map<?, ?>) call(client, uri, "gettxoutsetinfo", List.of("muhash")).get("result");
+                    assertNotNull(muhashUtxoInfo.get("muhash"));
+                    assertEquals(64, ((String) muhashUtxoInfo.get("muhash")).length());
                     assertEquals(
                             HexFormat.of().formatHex(TransactionSerializer.serialize(coinbase)),
                             call(client, uri, "getrawtransaction",

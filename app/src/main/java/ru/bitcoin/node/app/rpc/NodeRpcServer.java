@@ -250,9 +250,14 @@ public final class NodeRpcServer implements AutoCloseable {
                 if (params.size() > 1 || (!params.isEmpty() && !(params.getFirst() instanceof String)))
                     throw new RpcException(-32602, "Expected optional hash_type");
                 String hashType = params.isEmpty() ? "hash_serialized_3" : (String) params.getFirst();
-                if (!hashType.equals("hash_serialized_3") && !hashType.equals("none"))
+                if (!hashType.equals("hash_serialized_3") && !hashType.equals("muhash") && !hashType.equals("none"))
                     throw new RpcException(-8, "'" + hashType + "' is not a supported hash_type");
-                var stats = validation.utxoSetInfo(hashType.equals("hash_serialized_3"));
+                var stats = validation.utxoSetInfo(switch (hashType) {
+                    case "hash_serialized_3" -> ru.bitcoin.node.storage.utxo.RocksDbUtxoStore.HashType.HASH_SERIALIZED_3;
+                    case "muhash" -> ru.bitcoin.node.storage.utxo.RocksDbUtxoStore.HashType.MUHASH;
+                    case "none" -> ru.bitcoin.node.storage.utxo.RocksDbUtxoStore.HashType.NONE;
+                    default -> throw new IllegalStateException("unreachable hash type");
+                });
                 var result = new LinkedHashMap<String, Object>();
                 result.put("height", stats.height());
                 result.put("bestblock", stats.bestBlock().toDisplayHex());
@@ -261,6 +266,8 @@ public final class NodeRpcServer implements AutoCloseable {
                 result.put("bogosize", stats.bogoSize());
                 if (hashType.equals("hash_serialized_3"))
                     result.put("hash_serialized_3", stats.hashSerialized3().toDisplayHex());
+                if (hashType.equals("muhash"))
+                    result.put("muhash", stats.muhash().toDisplayHex());
                 result.put("disk_size", stats.diskSize());
                 result.put("total_amount", satoshisToBtc(stats.totalAmount()));
                 yield result;

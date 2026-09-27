@@ -284,6 +284,11 @@ class RocksDbUtxoStoreTest {
             assertEquals(176L, stats.bogoSize());
             assertEquals("b4c90dcaa592de506ba3fa9b1bd267be85b201e99b569217b4637429162f3686",
                     stats.hashSerialized3().toDisplayHex());
+
+            var muhashStats = store.statistics(RocksDbUtxoStore.HashType.MUHASH);
+            assertEquals("282c13404c06fcb032d5031bccc08467e7b55bf13baffae13445b8b41f8e0251",
+                    muhashStats.muhash().toDisplayHex());
+            assertNull(muhashStats.hashSerialized3());
         }
     }
 

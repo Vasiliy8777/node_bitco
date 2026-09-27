@@ -38,5 +38,11 @@
             <artifactId>protocol</artifactId>
             <version>${project.version}</version>
         </dependency>
+
+        <dependency>
+            <groupId>ru.bitcoin.mining</groupId>
+            <artifactId>crypto</artifactId>
+            <version>${project.version}</version>
+        </dependency>
     </dependencies>
 </project>
