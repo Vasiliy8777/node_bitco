@@ -247,11 +247,22 @@ public final class NodeRpcServer implements AutoCloseable {
                 yield result;
             }
             case "gettxoutsetinfo" -> {
-                if (params.size() > 1 || (!params.isEmpty() && !(params.getFirst() instanceof String)))
-                    throw new RpcException(-32602, "Expected optional hash_type");
+                if (params.size() > 3 || (!params.isEmpty() && !(params.getFirst() instanceof String)))
+                    throw new RpcException(-32602, "Expected optional hash_type, hash_or_height and use_index");
                 String hashType = params.isEmpty() ? "hash_serialized_3" : (String) params.getFirst();
                 if (!hashType.equals("hash_serialized_3") && !hashType.equals("muhash") && !hashType.equals("none"))
                     throw new RpcException(-8, "'" + hashType + "' is not a supported hash_type");
+                Object hashOrHeight = params.size() > 1 ? params.get(1) : null;
+                boolean useIndex = booleanParam(params, 2, true);
+                if (hashOrHeight != null) {
+                    if (!(hashOrHeight instanceof String) && !(hashOrHeight instanceof Number))
+                        throw new RpcException(-32602, "hash_or_height must be a block hash or height");
+                    throw new RpcException(-8,
+                            "Querying specific block heights requires coinstatsindex");
+                }
+                // Signature-compatible with Bitcoin Core. Until the persistent
+                // coinstatsindex is implemented, current-tip statistics are
+                // computed directly from the chainstate regardless of use_index.
                 var stats = validation.utxoSetInfo(switch (hashType) {
                     case "hash_serialized_3" -> ru.bitcoin.node.storage.utxo.RocksDbUtxoStore.HashType.HASH_SERIALIZED_3;
                     case "muhash" -> ru.bitcoin.node.storage.utxo.RocksDbUtxoStore.HashType.MUHASH;

@@ -9,10 +9,8 @@ import java.util.Arrays;
 import java.util.TreeMap;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import ru.bitcoin.node.common.encoding.CompactSize;
 import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.crypto.hash.MuHash3072;
-import java.io.ByteArrayOutputStream;
 
 public final class RocksDbUtxoStore
         implements UtxoStore {
@@ -281,7 +279,7 @@ public final class RocksDbUtxoStore
                 throw new IllegalStateException("UTXO height cannot be encoded by hash_serialized_3: " + coin.height());
             byte[] script = coin.scriptPubKey();
             if (digest != null || muhash != null) {
-                byte[] serialized = serializeCoin(txid, vout, coin, script);
+                byte[] serialized = CoreCoinStatsSerializer.serialize(txid, vout, coin);
                 if (digest != null) digest.update(serialized);
                 if (muhash != null) muhash.insert(serialized);
             }
@@ -291,26 +289,6 @@ public final class RocksDbUtxoStore
         }
     }
 
-
-    private static byte[] serializeCoin(byte[] txid, long vout, StoredUtxo coin, byte[] script) {
-        ByteArrayOutputStream out = new ByteArrayOutputStream(48 + script.length);
-        out.writeBytes(txid);
-        writeUInt32LittleEndian(out, vout);
-        writeUInt32LittleEndian(out, Math.addExact(Math.multiplyExact(coin.height(), 2L), coin.coinbase() ? 1L : 0L));
-        writeInt64LittleEndian(out, coin.amount());
-        out.writeBytes(CompactSize.encode(script.length));
-        out.writeBytes(script);
-        return out.toByteArray();
-    }
-
-    private static void writeUInt32LittleEndian(ByteArrayOutputStream out, long value) {
-        if (value < 0 || value > 0xffff_ffffL) throw new IllegalArgumentException("uint32 out of range");
-        for (int i = 0; i < 4; i++) out.write((byte) (value >>> (8 * i)));
-    }
-
-    private static void writeInt64LittleEndian(ByteArrayOutputStream out, long value) {
-        for (int i = 0; i < 8; i++) out.write((byte) (value >>> (8 * i)));
-    }
 
     private static MessageDigest sha256() {
         try { return MessageDigest.getInstance("SHA-256"); }

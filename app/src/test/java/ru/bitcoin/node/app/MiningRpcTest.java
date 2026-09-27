@@ -181,6 +181,13 @@ class MiningRpcTest {
                     var muhashUtxoInfo = (Map<?, ?>) call(client, uri, "gettxoutsetinfo", List.of("muhash")).get("result");
                     assertNotNull(muhashUtxoInfo.get("muhash"));
                     assertEquals(64, ((String) muhashUtxoInfo.get("muhash")).length());
+                    var noIndexCurrent = (Map<?, ?>) call(client, uri, "gettxoutsetinfo",
+                            java.util.Arrays.asList("none", null, false)).get("result");
+                    assertEquals(mined.hash().toDisplayHex(), noIndexCurrent.get("bestblock"));
+                    assertEquals(-8, error(call(client, uri, "gettxoutsetinfo",
+                            List.of("none", 0, true))));
+                    assertEquals(-8, error(call(client, uri, "gettxoutsetinfo",
+                            List.of("none", mined.hash().toDisplayHex(), true))));
                     assertEquals(
                             HexFormat.of().formatHex(TransactionSerializer.serialize(coinbase)),
                             call(client, uri, "getrawtransaction",
@@ -262,5 +269,10 @@ class MiningRpcTest {
 
     private static Map<?, ?> call(HttpClient client, URI uri, String method, List<?> params) throws Exception {
         return JSON.readValue(client.send(request(uri, method, params), HttpResponse.BodyHandlers.ofString()).body(), Map.class);
+    }
+    private static int error(Map<?, ?> response) {
+        return ((Number) ((Map<?, ?>) response.get("error"))
+                .get("code"))
+                .intValue();
     }
 }
