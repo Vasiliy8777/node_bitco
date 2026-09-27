@@ -5,6 +5,12 @@ import ru.bitcoin.node.storage.rocksdb.RocksDbDatabase;
 import ru.bitcoin.node.storage.rocksdb.RocksDbWriteBatch;
 
 import java.util.Optional;
+import java.util.Arrays;
+import java.util.TreeMap;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import ru.bitcoin.node.common.encoding.CompactSize;
+import ru.bitcoin.node.common.types.Hash256;
 
 public final class RocksDbUtxoStore
         implements UtxoStore {
@@ -215,20 +221,90 @@ public final class RocksDbUtxoStore
         batch.deletePrefix(UTXO_PREFIX);
     }
 
-    /** Computes chainstate statistics while the caller holds the chainstate lock. */
-    public Statistics statistics() {
+    /**
+     * Computes Core-compatible chainstate statistics while the caller holds the chainstate lock.
+     * hashSerialized3 commits to each outpoint, height/coinbase metadata and TxOut exactly as
+     * Bitcoin Core's kernel/coinstats.cpp TxOutSer/ApplyHash path does. The scan is streaming by
+     * txid; only one transaction's unspent outputs are retained so vout can be sorted numerically.
+     */
+    public Statistics statistics() { return statistics(true); }
+
+    public Statistics statistics(boolean includeHashSerialized3) {
+        final long[] transactions = {0L};
         final long[] txouts = {0L};
         final long[] totalAmount = {0L};
         final long[] bogoSize = {0L};
-        database.forEachValueByPrefix(UTXO_PREFIX, bytes -> {
-            StoredUtxo coin = StoredUtxoSerializer.deserialize(bytes);
-            txouts[0] = Math.incrementExact(txouts[0]);
-            totalAmount[0] = Math.addExact(totalAmount[0], coin.amount());
-            bogoSize[0] = Math.addExact(bogoSize[0], 50L + coin.scriptPubKey().length);
+        final byte[][] currentTxid = {null};
+        final TreeMap<Long, StoredUtxo> outputs = new TreeMap<>();
+        final MessageDigest first = includeHashSerialized3 ? sha256() : null;
+
+        database.forEachEntryByPrefix(UTXO_PREFIX, (key, value) -> {
+            if (key.length != 1 + TXID_SIZE + VOUT_SIZE)
+                throw new IllegalStateException("Invalid UTXO key length: " + key.length);
+            byte[] txid = Arrays.copyOfRange(key, 1, 1 + TXID_SIZE);
+            if (currentTxid[0] != null && !Arrays.equals(currentTxid[0], txid)) {
+                applyTransaction(first, currentTxid[0], outputs, transactions, txouts, totalAmount, bogoSize);
+                outputs.clear();
+            }
+            currentTxid[0] = txid;
+            long vout = readUInt32LittleEndian(key, 1 + TXID_SIZE);
+            StoredUtxo previous = outputs.put(vout, StoredUtxoSerializer.deserialize(value));
+            if (previous != null) throw new IllegalStateException("Duplicate UTXO outpoint in persistent store");
         });
-        return new Statistics(txouts[0], bogoSize[0], database.valueBytesByPrefix(UTXO_PREFIX), totalAmount[0]);
+        if (currentTxid[0] != null)
+            applyTransaction(first, currentTxid[0], outputs, transactions, txouts, totalAmount, bogoSize);
+
+        Hash256 hash = first == null ? null : new Hash256(sha256().digest(first.digest()));
+        return new Statistics(transactions[0], txouts[0], bogoSize[0],
+                database.valueBytesByPrefix(UTXO_PREFIX), totalAmount[0], hash);
     }
 
-    public record Statistics(long txouts, long bogoSize, long diskSize, long totalAmount) {}
+    private static void applyTransaction(MessageDigest digest, byte[] txid, TreeMap<Long, StoredUtxo> outputs,
+                                         long[] transactions, long[] txouts, long[] totalAmount, long[] bogoSize) {
+        if (outputs.isEmpty()) return;
+        transactions[0] = Math.incrementExact(transactions[0]);
+        for (var entry : outputs.entrySet()) {
+            long vout = entry.getKey();
+            StoredUtxo coin = entry.getValue();
+            if (coin.height() > 0x7fff_ffffL)
+                throw new IllegalStateException("UTXO height cannot be encoded by hash_serialized_3: " + coin.height());
+            byte[] script = coin.scriptPubKey();
+            if (digest != null) {
+                digest.update(txid);
+                updateUInt32LittleEndian(digest, vout);
+                updateUInt32LittleEndian(digest, Math.addExact(Math.multiplyExact(coin.height(), 2L), coin.coinbase() ? 1L : 0L));
+                updateInt64LittleEndian(digest, coin.amount());
+                digest.update(CompactSize.encode(script.length));
+                digest.update(script);
+            }
+            txouts[0] = Math.incrementExact(txouts[0]);
+            totalAmount[0] = Math.addExact(totalAmount[0], coin.amount());
+            bogoSize[0] = Math.addExact(bogoSize[0], 50L + script.length);
+        }
+    }
+
+    private static MessageDigest sha256() {
+        try { return MessageDigest.getInstance("SHA-256"); }
+        catch (NoSuchAlgorithmException impossible) { throw new IllegalStateException("SHA-256 unavailable", impossible); }
+    }
+
+    private static long readUInt32LittleEndian(byte[] bytes, int offset) {
+        return ((long) bytes[offset] & 0xffL)
+                | (((long) bytes[offset + 1] & 0xffL) << 8)
+                | (((long) bytes[offset + 2] & 0xffL) << 16)
+                | (((long) bytes[offset + 3] & 0xffL) << 24);
+    }
+
+    private static void updateUInt32LittleEndian(MessageDigest digest, long value) {
+        if (value < 0 || value > 0xffff_ffffL) throw new IllegalArgumentException("uint32 out of range");
+        for (int i = 0; i < 4; i++) digest.update((byte) (value >>> (8 * i)));
+    }
+
+    private static void updateInt64LittleEndian(MessageDigest digest, long value) {
+        for (int i = 0; i < 8; i++) digest.update((byte) (value >>> (8 * i)));
+    }
+
+    public record Statistics(long transactions, long txouts, long bogoSize, long diskSize, long totalAmount,
+                             Hash256 hashSerialized3) {}
 
 }

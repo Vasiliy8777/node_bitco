@@ -454,11 +454,14 @@ public final class NodeValidationService {
     }
 
     /** Stable UTXO-set statistics at the current active tip. */
-    public UtxoSetInfo utxoSetInfo() {
+    public UtxoSetInfo utxoSetInfo() { return utxoSetInfo(true); }
+
+    public UtxoSetInfo utxoSetInfo(boolean includeHashSerialized3) {
         synchronized (chain) {
-            var stats = utxos.statistics();
+            var stats = utxos.statistics(includeHashSerialized3);
             return new UtxoSetInfo(chain.activeTip().height(), chain.activeTip().hash(),
-                    stats.txouts(), stats.bogoSize(), stats.diskSize(), stats.totalAmount());
+                    stats.transactions(), stats.txouts(), stats.bogoSize(), stats.diskSize(),
+                    stats.totalAmount(), stats.hashSerialized3());
         }
     }
 
@@ -466,7 +469,8 @@ public final class NodeValidationService {
         public TxOutInfo { scriptPubKey = scriptPubKey.clone(); }
         @Override public byte[] scriptPubKey() { return scriptPubKey.clone(); }
     }
-    public record UtxoSetInfo(long height, Hash256 bestBlock, long txouts, long bogoSize, long diskSize, long totalAmount) {}
+    public record UtxoSetInfo(long height, Hash256 bestBlock, long transactions, long txouts, long bogoSize,
+                              long diskSize, long totalAmount, Hash256 hashSerialized3) {}
 
     public Optional<MempoolEntry> mempoolEntry(Hash256 txid) {
         Objects.requireNonNull(txid, "txid");

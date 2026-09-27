@@ -247,14 +247,20 @@ public final class NodeRpcServer implements AutoCloseable {
                 yield result;
             }
             case "gettxoutsetinfo" -> {
-                if (!params.isEmpty())
-                    throw new RpcException(-32602, "This node currently supports gettxoutsetinfo without optional arguments");
-                var stats = validation.utxoSetInfo();
+                if (params.size() > 1 || (!params.isEmpty() && !(params.getFirst() instanceof String)))
+                    throw new RpcException(-32602, "Expected optional hash_type");
+                String hashType = params.isEmpty() ? "hash_serialized_3" : (String) params.getFirst();
+                if (!hashType.equals("hash_serialized_3") && !hashType.equals("none"))
+                    throw new RpcException(-8, "'" + hashType + "' is not a supported hash_type");
+                var stats = validation.utxoSetInfo(hashType.equals("hash_serialized_3"));
                 var result = new LinkedHashMap<String, Object>();
                 result.put("height", stats.height());
                 result.put("bestblock", stats.bestBlock().toDisplayHex());
+                result.put("transactions", stats.transactions());
                 result.put("txouts", stats.txouts());
                 result.put("bogosize", stats.bogoSize());
+                if (hashType.equals("hash_serialized_3"))
+                    result.put("hash_serialized_3", stats.hashSerialized3().toDisplayHex());
                 result.put("disk_size", stats.diskSize());
                 result.put("total_amount", satoshisToBtc(stats.totalAmount()));
                 yield result;
