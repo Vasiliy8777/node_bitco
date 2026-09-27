@@ -31,6 +31,7 @@ public final class BitcoinServer
     private final long localServices;
     private final boolean relay;
     private final int maxInboundConnections;
+    private final boolean v2Transport;
 
     private final ExecutorService handshakeExecutor;
 
@@ -57,7 +58,8 @@ public final class BitcoinServer
                 VersionMessage.DEFAULT_SERVICES,
                 true,
                 DEFAULT_MAX_INBOUND_CONNECTIONS,
-                peerManager.discouragementManager()
+                peerManager.discouragementManager(),
+                false
         );
     }
 
@@ -69,7 +71,7 @@ public final class BitcoinServer
             int maxInboundConnections
     ) {
         this(networkParameters, peerManager, localServices, relay, maxInboundConnections,
-                peerManager.discouragementManager());
+                peerManager.discouragementManager(), false);
     }
 
     public BitcoinServer(
@@ -80,6 +82,12 @@ public final class BitcoinServer
             int maxInboundConnections,
             PeerDiscouragementManager discouragementManager
     ) {
+        this(networkParameters, peerManager, localServices, relay, maxInboundConnections, discouragementManager, false);
+    }
+
+    public BitcoinServer(NetworkParameters networkParameters, PeerManager peerManager, long localServices,
+                         boolean relay, int maxInboundConnections, PeerDiscouragementManager discouragementManager,
+                         boolean v2Transport) {
 
         this.networkParameters =
                 Objects.requireNonNull(
@@ -110,6 +118,7 @@ public final class BitcoinServer
 
         this.maxInboundConnections =
                 maxInboundConnections;
+        this.v2Transport = v2Transport;
 
         this.handshakeExecutor =
                 Executors.newThreadPerTaskExecutor(
@@ -369,9 +378,7 @@ public final class BitcoinServer
 
         try {
 
-            peer.accept(
-                    socket
-            );
+            peer.acceptNegotiated(socket, v2Transport);
 
             peer.handshake(false);
 

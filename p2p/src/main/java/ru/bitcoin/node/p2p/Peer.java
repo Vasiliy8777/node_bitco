@@ -236,6 +236,24 @@ public final class Peer implements AutoCloseable {
                 PeerState.CONNECTED;
     }
 
+    public void connectV2(String host, int port) throws IOException {
+        if (state != PeerState.DISCONNECTED) throw new IllegalStateException("Peer has already been started");
+        connection.connectV2(host, port);
+        inboundConnection = false;
+        state = PeerState.CONNECTED;
+    }
+
+    public boolean acceptNegotiated(java.net.Socket socket, boolean allowV2) throws IOException {
+        if (state != PeerState.DISCONNECTED) throw new IllegalStateException("Peer has already been started");
+        boolean v2 = connection.acceptNegotiated(socket, allowV2);
+        inboundConnection = true;
+        state = PeerState.CONNECTED;
+        return v2;
+    }
+
+    public boolean isV2Transport() { return connection.isV2Transport(); }
+    public byte[] transportSessionId() { return connection.transportSessionId(); }
+
     public void accept(
             java.net.Socket socket
     ) throws IOException {

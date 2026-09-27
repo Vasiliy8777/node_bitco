@@ -12,6 +12,7 @@ public final class BitcoinClient
     private final NetworkParameters networkParameters;
     private final long localServices;
     private final boolean relay;
+    private final boolean v2Transport;
 
     public BitcoinClient(
             NetworkParameters networkParameters
@@ -19,14 +20,20 @@ public final class BitcoinClient
         this(
                 networkParameters,
                 VersionMessage.DEFAULT_SERVICES,
-                true
+                true,
+                false
         );
+    }
+
+    public BitcoinClient(NetworkParameters networkParameters, long localServices, boolean relay) {
+        this(networkParameters, localServices, relay, false);
     }
 
     public BitcoinClient(
             NetworkParameters networkParameters,
             long localServices,
-            boolean relay
+            boolean relay,
+            boolean v2Transport
     ) {
         this.networkParameters =
                 Objects.requireNonNull(
@@ -39,6 +46,7 @@ public final class BitcoinClient
 
         this.relay =
                 relay;
+        this.v2Transport = v2Transport;
     }
     @Override
     public Peer connect(
@@ -85,22 +93,21 @@ public final class BitcoinClient
             );
         }
 
-        Peer peer =
-                new Peer(
-                        new PeerConnection(
-                                networkParameters
-                        ),
-                        localServices,
-                        startHeight,
-                        connectionRelay
-                );
+        Peer peer = newPeer(startHeight, connectionRelay);
 
         try {
-
-            peer.connect(
-                    host,
-                    port
-            );
+            if (v2Transport) {
+                try {
+                    peer.connectV2(host, port);
+                } catch (IOException | RuntimeException v2Failure) {
+                    try { peer.close(); } catch (IOException closeFailure) { v2Failure.addSuppressed(closeFailure); }
+                    // BIP324 recommends reconnecting with v1 after immediate v2 failure.
+                    peer = newPeer(startHeight, connectionRelay);
+                    peer.connect(host, port);
+                }
+            } else {
+                peer.connect(host, port);
+            }
 
             peer.handshake(startReader);
 
@@ -124,6 +131,10 @@ public final class BitcoinClient
 
             throw exception;
         }
+    }
+
+    private Peer newPeer(int startHeight, boolean connectionRelay) {
+        return new Peer(new PeerConnection(networkParameters), localServices, startHeight, connectionRelay);
     }
 
     public Peer connect(

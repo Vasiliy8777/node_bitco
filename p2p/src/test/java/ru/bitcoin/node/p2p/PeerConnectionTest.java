@@ -730,4 +730,51 @@ class PeerConnectionTest {
             );
         }
     }
+    @Test
+    void shouldNegotiateV2AndExchangeEncryptedBitcoinMessages() throws Exception {
+        try (ServerSocket serverSocket = new ServerSocket(0)) {
+            CompletableFuture<Void> server = CompletableFuture.runAsync(() -> {
+                try (Socket socket = serverSocket.accept();
+                     PeerConnection connection = new PeerConnection(NetworkParametersRegistry.regtest(), 5_000, 5_000)) {
+                    assertTrue(connection.acceptNegotiated(socket, true));
+                    assertTrue(connection.isV2Transport());
+                    BitcoinMessage request = connection.receive().orElseThrow();
+                    assertEquals("ping", request.command());
+                    connection.send(new BitcoinMessage("pong", request.payload()));
+                } catch (Exception e) { throw new RuntimeException(e); }
+            });
+            try (PeerConnection connection = new PeerConnection(NetworkParametersRegistry.regtest(), 5_000, 5_000)) {
+                connection.connectV2("127.0.0.1", serverSocket.getLocalPort());
+                assertTrue(connection.isV2Transport());
+                assertEquals(32, connection.transportSessionId().length);
+                connection.send(new BitcoinMessage("ping", new byte[]{9,8,7}));
+                BitcoinMessage response = connection.receive().orElseThrow();
+                assertEquals("pong", response.command());
+                assertArrayEquals(new byte[]{9,8,7}, response.payload());
+            }
+            server.get(5, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void inboundNegotiationPreservesV1Prefix() throws Exception {
+        try (ServerSocket serverSocket = new ServerSocket(0)) {
+            CompletableFuture<Void> server = CompletableFuture.runAsync(() -> {
+                try (Socket socket = serverSocket.accept();
+                     PeerConnection connection = new PeerConnection(NetworkParametersRegistry.mainnet(), 5_000, 5_000)) {
+                    assertFalse(connection.acceptNegotiated(socket, true));
+                    BitcoinMessage request = connection.receive().orElseThrow();
+                    assertEquals("version", request.command());
+                } catch (Exception e) { throw new RuntimeException(e); }
+            });
+            try (Socket socket = new Socket("127.0.0.1", serverSocket.getLocalPort())) {
+                var output = socket.getOutputStream();
+                output.write(new BitcoinMessageEncoder(NetworkParametersRegistry.mainnet())
+                        .encode(new BitcoinMessage("version", new byte[0])));
+                output.flush();
+            }
+            server.get(5, TimeUnit.SECONDS);
+        }
+    }
+
 }

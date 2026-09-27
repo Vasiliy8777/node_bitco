@@ -270,7 +270,8 @@ public class NodeConfiguration {
             NetworkParameters parameters,
             @Value("${bitcoin.prune:0}") long pruneMiB,
             @Value("${bitcoin.blockfilterindex:false}") boolean blockFilterIndex,
-            @Value("${bitcoin.p2p.peer-block-filters:false}") boolean peerBlockFilters
+            @Value("${bitcoin.p2p.peer-block-filters:false}") boolean peerBlockFilters,
+            @Value("${bitcoin.p2p.v2-transport:false}") boolean v2Transport
     ) {
         long services = pruneMiB > 0
                 ? ru.bitcoin.node.p2p.message.VersionMessage.NODE_WITNESS
@@ -279,7 +280,8 @@ public class NodeConfiguration {
         if (blockFilterIndex && peerBlockFilters) {
             services |= ru.bitcoin.node.p2p.message.VersionMessage.NODE_COMPACT_FILTERS;
         }
-        return new BitcoinClient(parameters, services, true);
+        if (v2Transport) services |= ru.bitcoin.node.p2p.message.VersionMessage.NODE_P2P_V2;
+        return new BitcoinClient(parameters, services, true, v2Transport);
     }
 
     @Bean
@@ -433,7 +435,8 @@ public class NodeConfiguration {
             @Value("${bitcoin.p2p.max-inbound-peers:32}") int maxInboundPeers,
             @Value("${bitcoin.prune:0}") long pruneMiB,
             @Value("${bitcoin.blockfilterindex:false}") boolean blockFilterIndex,
-            @Value("${bitcoin.p2p.peer-block-filters:false}") boolean peerBlockFilters
+            @Value("${bitcoin.p2p.peer-block-filters:false}") boolean peerBlockFilters,
+            @Value("${bitcoin.p2p.v2-transport:false}") boolean v2Transport
     ) {
         long services = pruneMiB > 0
                 ? ru.bitcoin.node.p2p.message.VersionMessage.NODE_WITNESS
@@ -442,7 +445,9 @@ public class NodeConfiguration {
         if (blockFilterIndex && peerBlockFilters) {
             services |= ru.bitcoin.node.p2p.message.VersionMessage.NODE_COMPACT_FILTERS;
         }
-        return new BitcoinServer(parameters, peerManager, services, true, maxInboundPeers);
+        if (v2Transport) services |= ru.bitcoin.node.p2p.message.VersionMessage.NODE_P2P_V2;
+        return new BitcoinServer(parameters, peerManager, services, true, maxInboundPeers,
+                peerManager.discouragementManager(), v2Transport);
     }
 
     @Bean(destroyMethod = "close")

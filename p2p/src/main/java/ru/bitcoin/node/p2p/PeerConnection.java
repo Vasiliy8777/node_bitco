@@ -5,6 +5,10 @@ import ru.bitcoin.node.p2p.codec.BitcoinMessageEncoder;
 import ru.bitcoin.node.p2p.codec.BitcoinMessageStreamReader;
 import ru.bitcoin.node.p2p.message.BitcoinMessage;
 import ru.bitcoin.node.protocol.network.NetworkParameters;
+import ru.bitcoin.node.p2p.transport.Bip324TransportSession;
+
+import java.security.SecureRandom;
+import java.util.Arrays;
 
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
@@ -58,6 +62,7 @@ public final class PeerConnection implements AutoCloseable {
 
     private BitcoinMessageEncoder encoder;
     private BitcoinMessageStreamReader reader;
+    private volatile Bip324TransportSession v2Transport;
 
     private final ReentrantLock sendLock = new ReentrantLock(true);
     private final Object asyncLock = new Object();
@@ -207,6 +212,48 @@ public final class PeerConnection implements AutoCloseable {
         }
     }
 
+    /** Establish a BIP324 v2 transport before the Bitcoin VERSION handshake. */
+    public void connectV2(String host, int port) throws IOException {
+        connect(host, port);
+        try {
+            v2Transport = Bip324TransportSession.initiate(input, output, networkParameters, new SecureRandom());
+        } catch (IOException | RuntimeException failure) {
+            try { close(); } catch (IOException closeFailure) { failure.addSuppressed(closeFailure); }
+            throw failure;
+        }
+    }
+
+    /**
+     * Accept either v1 or v2. Returns true for v2. The 16-byte v1 discriminator is
+     * consumed only speculatively and restored through BufferedInputStream mark/reset.
+     */
+    public boolean acceptNegotiated(Socket acceptedSocket, boolean allowV2) throws IOException {
+        accept(acceptedSocket);
+        if (!allowV2) return false;
+        input.mark(16);
+        byte[] prefix = input.readNBytes(16);
+        if (prefix.length < 16) throw new IOException("EOF while discriminating Bitcoin transport");
+        byte[] v1 = Bip324TransportSession.v1Prefix(networkParameters);
+        if (Arrays.equals(prefix, v1)) { input.reset(); return false; }
+        // A v1 VERSION header for another network is not a valid v2 initiation.
+        if (Arrays.equals(Arrays.copyOfRange(prefix, 4, 16), Arrays.copyOfRange(v1, 4, 16)))
+            throw new IOException("Bitcoin v1 VERSION uses different network magic");
+        try {
+            v2Transport = Bip324TransportSession.respond(input, output, networkParameters, new SecureRandom(), prefix);
+            return true;
+        } catch (IOException | RuntimeException failure) {
+            try { close(); } catch (IOException closeFailure) { failure.addSuppressed(closeFailure); }
+            throw failure;
+        }
+    }
+
+    public boolean isV2Transport() { return v2Transport != null; }
+
+    public byte[] transportSessionId() {
+        Bip324TransportSession transport = v2Transport;
+        return transport == null ? null : transport.sessionId();
+    }
+
     public void accept(
             Socket acceptedSocket
     ) throws IOException {
@@ -315,10 +362,10 @@ public final class PeerConnection implements AutoCloseable {
                 if (asyncWriter == null) {
                     asyncWriter = new ThreadPoolExecutor(1, 1, 5, TimeUnit.SECONDS,
                             new ArrayBlockingQueue<>(63), task -> {
-                                Thread thread = new Thread(task, "bitcoin-peer-response");
-                                thread.setDaemon(true);
-                                return thread;
-                            });
+                        Thread thread = new Thread(task, "bitcoin-peer-response");
+                        thread.setDaemon(true);
+                        return thread;
+                    });
                     asyncWriter.allowCoreThreadTimeOut(true);
                 }
                 asyncWriter.execute(new AsyncWrite(message, reservation, onFailure));
@@ -388,8 +435,13 @@ public final class PeerConnection implements AutoCloseable {
                 }
             }, remaining, TimeUnit.NANOSECONDS);
             try {
-                byte[] packet = encoder.encode(message);
-                output.write(packet);
+                Bip324TransportSession transport = v2Transport;
+                if (transport != null) {
+                    transport.send(output, message);
+                } else {
+                    byte[] packet = encoder.encode(message);
+                    output.write(packet);
+                }
                 output.flush();
                 if (!finished.compareAndSet(false, true)) {
                     throw new SocketTimeoutException("Peer socket write timeout");
@@ -408,6 +460,8 @@ public final class PeerConnection implements AutoCloseable {
 
         ensureConnected();
 
+        Bip324TransportSession transport = v2Transport;
+        if (transport != null) return Optional.of(transport.receive(input));
         return reader.read(input);
     }
 
@@ -472,6 +526,7 @@ public final class PeerConnection implements AutoCloseable {
             output = null;
             encoder = null;
             reader = null;
+            v2Transport = null;
 
             if (currentSocket != null) {
                 currentSocket.close();
