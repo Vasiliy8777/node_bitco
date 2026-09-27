@@ -784,7 +784,13 @@ public final class NodeValidationService {
         Objects.requireNonNull(block, "block");
         synchronized (chain) {
             BlockIndex known = lookup.find(block.hash());
-            if (known != null) return new ProposalResult(false, "duplicate");
+            if (known != null) {
+                if (failureManager.isFailed(known.hash()))
+                    return new ProposalResult(false, "duplicate-invalid");
+                if (validationStatus.isScriptsValid(known.hash()))
+                    return new ProposalResult(false, "duplicate");
+                return new ProposalResult(false, "duplicate-inconclusive");
+            }
 
             BlockIndex parent = chain.activeTip();
             if (!block.header().previousBlockHash().equals(parent.hash()))

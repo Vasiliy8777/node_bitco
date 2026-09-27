@@ -59,19 +59,8 @@ public final class MiningController {
         var snapshot = validation.miningSnapshot(payout, new byte[8], maximumWeight, minimumFee);
         ensureReady();
         var block = snapshot.block();
-        Map<Hash256, MempoolEntry> entries = new HashMap<>();
-        snapshot.entries().forEach(entry -> entries.put(entry.transaction().txId(), entry));
-        Map<Hash256, Integer> positions = new HashMap<>();
-        List<Map<String, Object>> transactions = new ArrayList<>();
-        for (var tx : block.transactions().subList(1, block.transactions().size())) {
-            var entry = Objects.requireNonNull(entries.get(tx.txId()));
-            var depends = tx.inputs().stream().map(input -> positions.get(input.previousOutput().transactionId()))
-                    .filter(Objects::nonNull).distinct().sorted().toList();
-            transactions.add(Map.of("data", HexFormat.of().formatHex(TransactionSerializer.serialize(tx)),
-                    "txid", tx.txId().toDisplayHex(), "hash", tx.wtxId().toDisplayHex(),
-                    "depends", depends, "fee", entry.fee(), "sigops", entry.sigOpCost(), "weight", TransactionWeight.calculate(tx)));
-            positions.put(tx.txId(), positions.size() + 1);
-        }
+        List<Map<String, Object>> transactions = MiningTemplateTransactions.build(
+                block, snapshot.entries(), snapshot.height(), parameters);
         var result = new LinkedHashMap<String, Object>();
         result.put("version", block.header().version());
         result.put("capabilities", List.of("proposal"));
@@ -128,7 +117,9 @@ public final class MiningController {
     public String submitBlock(String hex) {
         final ru.bitcoin.node.protocol.block.Block block;
         try { block = BlockParser.parse(HexFormat.of().parseHex(hex)); }
-        catch (IllegalArgumentException exception) { throw new RpcException(-22, "Block decode failed"); }
+        catch (IllegalArgumentException | java.nio.BufferUnderflowException exception) {
+            throw new RpcException(-22, "Block decode failed");
+        }
         try {
             return switch (relay.submitBlock(block)) {
                 case CONNECTED -> null;

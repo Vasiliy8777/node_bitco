@@ -113,6 +113,9 @@ class MiningRpcTest {
                     // Manual chain control uses the same persistent failure/reorg machinery.
                     assertNull(call(client, uri, "invalidateblock", List.of(mined.hash().toDisplayHex())).get("error"));
                     assertEquals(0, validation.activeTip().height());
+                    assertEquals("duplicate-invalid", call(client, uri, "getblocktemplate", List.of(Map.of(
+                            "mode", "proposal",
+                            "data", HexFormat.of().formatHex(BlockSerializer.serialize(mined))))).get("result"));
                     assertNull(call(client, uri, "reconsiderblock", List.of(mined.hash().toDisplayHex())).get("error"));
                     assertEquals(mined.hash(), validation.activeTip().hash());
 
@@ -217,6 +220,9 @@ class MiningRpcTest {
                     assertEquals("duplicate", call(client, uri, "getblocktemplate", List.of(Map.of(
                             "mode", "proposal",
                             "data", HexFormat.of().formatHex(BlockSerializer.serialize(mined))))).get("result"));
+                    var malformedBlock = (Map<?, ?>) call(client, uri, "submitblock", List.of("00")).get("error");
+                    assertNotNull(malformedBlock);
+                    assertEquals(-22, ((Number) malformedBlock.get("code")).intValue());
                     assertNotNull(call(client, uri, "submitblock", List.of("zz")).get("error"));
                     assertEquals(-32601, ((Number) ((Map<?, ?>) call(client, uri, "unknown", List.of()).get("error")).get("code")).intValue());
                 }
