@@ -79,4 +79,62 @@ class BlockPrunerTest {
         }
     }
 
+    @Test void respectsNetworkPruneAfterHeightForAutomaticAndManualPruning() {
+        var params = NetworkParametersRegistry.regtest();
+        try (var db = new RocksDbDatabase(temp.resolve("prune-after-height-db"))) {
+            var blocks = new RocksDbBlockStore(db);
+            var indexes = new RocksDbBlockIndexStore(db);
+            Block genesisBlock = GenesisBlockFactory.create(params);
+            BlockIndex parent = BlockIndexFactory.createGenesis(genesisBlock.header());
+            blocks.save(genesisBlock);
+            indexes.save(BlockIndexStorageMapper.toStored(parent));
+
+            Block[] chain = new Block[5];
+            BlockIndex[] idx = new BlockIndex[5];
+            for (int i = 0; i < 5; i++) {
+                var h = new BlockHeader(4, parent.hash(), genesisBlock.header().merkleRoot(),
+                        new UInt32(genesisBlock.header().timestamp().value() + i + 1),
+                        genesisBlock.header().bits(), new UInt32(i + 1));
+                chain[i] = new Block(h, List.of());
+                parent = BlockIndexFactory.createChild(parent, h);
+                idx[i] = parent;
+                blocks.save(chain[i]);
+                indexes.save(BlockIndexStorageMapper.toStored(parent));
+            }
+
+            // Test override: network prune threshold is height 5, safety window is 2 blocks.
+            var automatic = new BlockPruner(db, 1L, 2, 5L);
+            var beforeThreshold = automatic.prune(idx[3]); // active height 4
+            assertEquals(0L, beforeThreshold.blocksPruned());
+            assertTrue(blocks.find(chain[0].hash()).isPresent());
+
+            var atThreshold = automatic.prune(idx[4]); // active height 5
+            assertTrue(atThreshold.blocksPruned() > 0);
+            assertTrue(blocks.find(chain[0].hash()).isEmpty());
+        }
+
+        try (var db = new RocksDbDatabase(temp.resolve("manual-prune-after-height-db"))) {
+            var blocks = new RocksDbBlockStore(db);
+            var indexes = new RocksDbBlockIndexStore(db);
+            Block genesisBlock = GenesisBlockFactory.create(params);
+            BlockIndex parent = BlockIndexFactory.createGenesis(genesisBlock.header());
+            blocks.save(genesisBlock);
+            indexes.save(BlockIndexStorageMapper.toStored(parent));
+            BlockIndex[] idx = new BlockIndex[4];
+            for (int i = 0; i < 4; i++) {
+                var h = new BlockHeader(4, parent.hash(), genesisBlock.header().merkleRoot(),
+                        new UInt32(genesisBlock.header().timestamp().value() + i + 1),
+                        genesisBlock.header().bits(), new UInt32(i + 20));
+                var block = new Block(h, List.of());
+                parent = BlockIndexFactory.createChild(parent, h);
+                idx[i] = parent;
+                blocks.save(block);
+                indexes.save(BlockIndexStorageMapper.toStored(parent));
+            }
+            var manual = new BlockPruner(db, BlockPruner.MANUAL_ONLY, 2, 5L);
+            var error = assertThrows(IllegalStateException.class, () -> manual.pruneToHeight(idx[3], 1));
+            assertEquals("Blockchain is too short for pruning", error.getMessage());
+        }
+    }
+
 }

@@ -313,7 +313,7 @@ public final class NodeValidationService {
         this.persistMempool = persistMempool;
         this.txIndexEnabled = txIndexEnabled;
         this.txIndexStore = new RocksDbTxIndexStore(database);
-        this.blockPruner = new BlockPruner(database, pruneTargetBytes);
+        this.blockPruner = new BlockPruner(database, pruneTargetBytes, parameters.pruneAfterHeight());
         this.pruneState = new RocksDbPruneStateStore(database);
         this.pruneTargetBytes = pruneTargetBytes;
         this.parameters = Objects.requireNonNull(parameters);

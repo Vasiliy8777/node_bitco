@@ -104,4 +104,12 @@ public class NetworkParametersRegistryTest {
         );
         assertEquals(java.math.BigInteger.ZERO, NetworkParametersRegistry.regtest().minimumChainWork());
     }
+    @Test
+    void shouldExposeBitcoinCorePruneAfterHeights() {
+        assertEquals(100_000L, NetworkParametersRegistry.mainnet().pruneAfterHeight());
+        assertEquals(1_000L, NetworkParametersRegistry.testnet().pruneAfterHeight());
+        assertEquals(1_000L, NetworkParametersRegistry.signet().pruneAfterHeight());
+        assertEquals(1_000L, NetworkParametersRegistry.regtest().pruneAfterHeight());
+    }
+
 }

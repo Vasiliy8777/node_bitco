@@ -222,6 +222,14 @@ public final class NetworkParameters {
         return defaultAssumeValid;
     }
 
+    /** Bitcoin Core chain parameter: do not prune before the active chain reaches this height. */
+    public long pruneAfterHeight() {
+        return switch (network) {
+            case MAINNET -> 100_000L;
+            case TESTNET, SIGNET, REGTEST -> 1_000L;
+        };
+    }
+
     public long subsidyHalvingInterval() {
         return subsidyHalvingInterval;
     }

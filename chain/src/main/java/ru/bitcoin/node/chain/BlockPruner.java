@@ -19,18 +19,29 @@ public final class BlockPruner {
     private final RocksDbDatabase database;
     private final long targetBytes;
     private final int blocksToKeep;
+    private final long pruneAfterHeight;
 
     public BlockPruner(RocksDbDatabase database, long targetBytes) {
-        this(database, targetBytes, MIN_BLOCKS_TO_KEEP);
+        this(database, targetBytes, MIN_BLOCKS_TO_KEEP, 0L);
+    }
+
+    public BlockPruner(RocksDbDatabase database, long targetBytes, long pruneAfterHeight) {
+        this(database, targetBytes, MIN_BLOCKS_TO_KEEP, pruneAfterHeight);
     }
 
     BlockPruner(RocksDbDatabase database, long targetBytes, int blocksToKeep) {
+        this(database, targetBytes, blocksToKeep, 0L);
+    }
+
+    BlockPruner(RocksDbDatabase database, long targetBytes, int blocksToKeep, long pruneAfterHeight) {
         this.database = Objects.requireNonNull(database, "database");
         if (targetBytes < 0 && targetBytes != MANUAL_ONLY)
             throw new IllegalArgumentException("targetBytes must be non-negative or MANUAL_ONLY");
         if (blocksToKeep < 1) throw new IllegalArgumentException("blocksToKeep must be positive");
+        if (pruneAfterHeight < 0) throw new IllegalArgumentException("pruneAfterHeight must not be negative");
         this.targetBytes = targetBytes;
         this.blocksToKeep = blocksToKeep;
+        this.pruneAfterHeight = pruneAfterHeight;
     }
 
     public boolean enabled() { return targetBytes != 0; }
@@ -43,7 +54,8 @@ public final class BlockPruner {
         Objects.requireNonNull(activeTip, "activeTip");
         synchronized (database) {
             long before = usageBytes();
-            if (!automatic() || before <= targetBytes) return new Result(before, before, 0L, -1L);
+            if (!automatic() || before <= targetBytes || activeTip.height() < pruneAfterHeight)
+                return new Result(before, before, 0L, -1L);
             long maxPruneHeight = activeTip.height() - blocksToKeep;
             if (maxPruneHeight <= 0) return new Result(before, before, 0L, -1L);
             return pruneCandidates(maxPruneHeight, targetBytes, before);
@@ -60,6 +72,8 @@ public final class BlockPruner {
         if (requestedHeight < 0) throw new IllegalArgumentException("Prune height must not be negative");
         synchronized (database) {
             long before = usageBytes();
+            if (activeTip.height() < pruneAfterHeight)
+                throw new IllegalStateException("Blockchain is too short for pruning");
             long maxSafeHeight = activeTip.height() - blocksToKeep;
             if (maxSafeHeight <= 0)
                 throw new IllegalStateException("Blockchain is too short for pruning");
