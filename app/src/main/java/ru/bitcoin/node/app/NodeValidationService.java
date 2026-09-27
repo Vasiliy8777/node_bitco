@@ -64,14 +64,22 @@ public final class NodeValidationService {
     }
 
     public record MiningSnapshot(Block block, List<MempoolEntry> entries, long height, long medianTimePast,
-                                 long revision) {
+                                 long revision,
+                                 List<ru.bitcoin.node.mining.MiningVersionBits.DeploymentView> deployments) {
     }
 
     public MiningSnapshot miningSnapshot(byte[] payout, byte[] extraNonce, long weight, FeeRate feeRate) {
+        return miningSnapshot(payout, extraNonce, weight, feeRate, null);
+    }
+
+    /** GBT snapshot whose preferred version respects the client's declared version-bits rules. */
+    public MiningSnapshot miningSnapshot(
+            byte[] payout, byte[] extraNonce, long weight, FeeRate feeRate, Set<String> supportedRules) {
         synchronized (chain) {
-            Block block = createMiningTemplate(payout, extraNonce, weight, feeRate);
-            return new MiningSnapshot(block, mempool.entries(), chain.activeTip().height() + 1,
-                    MedianTimePast.calculate(chain.activeTip(), lookup), revision);
+            Block block = createMiningTemplate(payout, extraNonce, weight, feeRate, supportedRules);
+            BlockIndex parent = chain.activeTip();
+            return new MiningSnapshot(block, mempool.entries(), parent.height() + 1,
+                    MedianTimePast.calculate(parent, lookup), revision, miningDeployments(parent));
         }
     }
 
@@ -827,6 +835,11 @@ public final class NodeValidationService {
      * Fresh template from one coherent chain/mempool snapshot. Does not search PoW.
      */
     public Block createMiningTemplate(byte[] payout, byte[] extraNonce, long maximumWeight, FeeRate minimumRate) {
+        return createMiningTemplate(payout, extraNonce, maximumWeight, minimumRate, null);
+    }
+
+    private Block createMiningTemplate(
+            byte[] payout, byte[] extraNonce, long maximumWeight, FeeRate minimumRate, Set<String> supportedRules) {
         synchronized (chain) {
             synchronizePool();
             expirePersistent();
@@ -837,9 +850,16 @@ public final class NodeValidationService {
                 throw new IllegalStateException("Chain time too far ahead of local time");
             var blockTime = new ru.bitcoin.node.common.types.UInt32(timestamp);
             var bits = ChainHeaderValidator.nextBits(parent, lookup, parameters, blockTime);
+            int version = ru.bitcoin.node.mining.MiningVersionBits.preferredVersion(
+                    0x20000000, miningDeployments(parent), supportedRules);
             return ru.bitcoin.node.mining.BlockTemplateBuilder.fromMempool(parent, lookup, utxos, parameters,
-                    0x20000000, blockTime, bits, payout, extraNonce, mempool.entries(), maximumWeight, minimumRate);
+                    version, blockTime, bits, payout, extraNonce, mempool.entries(), maximumWeight, minimumRate);
         }
+    }
+
+    private List<ru.bitcoin.node.mining.MiningVersionBits.DeploymentView> miningDeployments(BlockIndex parent) {
+        return List.of(new ru.bitcoin.node.mining.MiningVersionBits.DeploymentView(
+                "taproot", 2, TaprootDeployment.stateForNextBlock(parent, lookup, parameters), true));
     }
 
     private MempoolValidationContext context() {

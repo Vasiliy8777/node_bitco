@@ -48,6 +48,11 @@ public final class MiningController {
     public Map<String, Object> getBlockTemplate(Map<String, Object> request) throws InterruptedException {
         if (!(request.get("rules") instanceof List<?> rules) || !rules.contains("segwit"))
             throw new RpcException(-8, "Client must support segwit (rules: [segwit])");
+        Set<String> supportedRules = new HashSet<>();
+        for (Object rule : rules) {
+            if (!(rule instanceof String name)) throw new RpcException(-8, "rules entries must be strings");
+            supportedRules.add(name);
+        }
         ensureReady();
         String previous = request.get("longpollid") instanceof String id ? id : null;
         long deadline = System.nanoTime() + java.time.Duration.ofSeconds(30).toNanos();
@@ -56,7 +61,12 @@ public final class MiningController {
             validation.awaitRevision(validation.revision(), 1_000);
         }
         ensureReady();
-        var snapshot = validation.miningSnapshot(payout, new byte[8], maximumWeight, minimumFee);
+        var snapshot = validation.miningSnapshot(
+                payout, new byte[8], maximumWeight, minimumFee, Set.copyOf(supportedRules));
+        var unsupported = ru.bitcoin.node.mining.MiningVersionBits.unsupportedActiveRules(
+                snapshot.deployments(), supportedRules);
+        if (!unsupported.isEmpty())
+            throw new RpcException(-8, "Client must support active rule: " + unsupported.getFirst());
         ensureReady();
         var block = snapshot.block();
         List<Map<String, Object>> transactions = MiningTemplateTransactions.build(
@@ -64,8 +74,12 @@ public final class MiningController {
         var result = new LinkedHashMap<String, Object>();
         result.put("version", block.header().version());
         result.put("capabilities", List.of("proposal"));
-        result.put("rules", List.of("csv", "!segwit", "taproot"));
-        result.put("vbavailable", Map.of());
+        var activeRules = new ArrayList<String>();
+        if (snapshot.height() >= parameters.csvHeight()) activeRules.add("csv");
+        if (snapshot.height() >= parameters.segwitHeight()) activeRules.add("!segwit");
+        activeRules.addAll(ru.bitcoin.node.mining.MiningVersionBits.activeRules(snapshot.deployments()));
+        result.put("rules", List.copyOf(activeRules));
+        result.put("vbavailable", ru.bitcoin.node.mining.MiningVersionBits.available(snapshot.deployments()));
         result.put("vbrequired", 0);
         result.put("previousblockhash", block.header().previousBlockHash().toDisplayHex());
         result.put("transactions", transactions);

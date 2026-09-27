@@ -66,6 +66,10 @@ class MiningRpcTest {
                     assertNull(response.get("error"));
                     var template = (Map<?, ?>) response.get("result");
                     assertEquals(List.of("proposal"), template.get("capabilities"));
+                    assertEquals(0x20000000, ((Number) template.get("version")).intValue());
+                    assertEquals(List.of("csv", "!segwit", "taproot"), template.get("rules"));
+                    assertEquals(Map.of(), template.get("vbavailable"));
+                    assertEquals(0, ((Number) template.get("vbrequired")).intValue());
                     Block mined = mineTemplate(template);
 
                     // BIP23 proposal validates the complete candidate without requiring/recording PoW.

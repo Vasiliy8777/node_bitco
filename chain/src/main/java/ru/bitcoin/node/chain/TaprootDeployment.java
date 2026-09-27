@@ -34,6 +34,19 @@ public final class TaprootDeployment {
         return manager(lookup, parameters).stateForNextBlock(parent) == DeploymentState.ACTIVE;
     }
 
+    /** Deployment state that applies to the block built on {@code parent}. */
+    public static synchronized DeploymentState stateForNextBlock(
+            BlockIndex parent,
+            BlockIndexLookup lookup,
+            NetworkParameters parameters
+    ) {
+        if (parent == null || lookup == null || parameters == null)
+            throw new IllegalArgumentException("parent, lookup and parameters must not be null");
+        if (parameters.network() == BitcoinNetwork.REGTEST || parameters.network() == BitcoinNetwork.SIGNET)
+            return DeploymentState.ACTIVE;
+        return manager(lookup, parameters).stateForNextBlock(parent);
+    }
+
     static synchronized DeploymentState stateFor(
             BlockIndex candidate,
             BlockIndexLookup lookup,

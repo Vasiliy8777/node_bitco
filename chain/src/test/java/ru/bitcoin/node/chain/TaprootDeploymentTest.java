@@ -49,6 +49,18 @@ class TaprootDeploymentTest {
                         lookup,
                         NetworkParametersRegistry.mainnet()));
     }
+    @Test void exposesNextBlockStateForMining() {
+        var chain = chain(4 * 2016, 1512, START, 0);
+        BlockIndexLookup lookup = chain.byHash::get;
+        var params = NetworkParametersRegistry.testnet();
+        assertEquals(ru.bitcoin.node.consensus.deployment.DeploymentState.STARTED,
+                TaprootDeployment.stateForNextBlock(chain.blocks.get(2016), lookup, params));
+        assertEquals(ru.bitcoin.node.consensus.deployment.DeploymentState.LOCKED_IN,
+                TaprootDeployment.stateForNextBlock(chain.blocks.get(4032), lookup, params));
+        assertEquals(ru.bitcoin.node.consensus.deployment.DeploymentState.ACTIVE,
+                TaprootDeployment.stateForNextBlock(chain.blocks.get(6048), lookup, params));
+    }
+
     @Test void signetAndRegtestAreAlwaysActive() {
         var chain = chain(1, 0, 1, 0);
         for (var params : List.of(NetworkParametersRegistry.signet(), NetworkParametersRegistry.regtest())) {
