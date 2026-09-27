@@ -107,6 +107,41 @@ class BitcoinClientTest {
 
 
     @Test
+    void explicitV1PolicyMustBypassV2EvenWhenClientPrefersV2() throws Exception {
+        try (ServerSocket serverSocket = new ServerSocket(0)) {
+            CompletableFuture<Void> server = CompletableFuture.runAsync(() -> runSuccessfulPeer(serverSocket));
+            BitcoinClient client = new BitcoinClient(PARAMETERS, VersionMessage.DEFAULT_SERVICES, true, true);
+            try (Peer peer = client.connect("127.0.0.1", serverSocket.getLocalPort(), 100, PeerTransportPolicy.V1_ONLY)) {
+                assertTrue(peer.isReady());
+                assertFalse(peer.isV2Transport());
+                assertFalse(peer.usedV2Fallback());
+            }
+            server.get(5, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void explicitV2OnlyPolicyMustNotDowngradeAfterV2Failure() throws Exception {
+        try (ServerSocket serverSocket = new ServerSocket(0)) {
+            CompletableFuture<byte[]> firstBytes = CompletableFuture.supplyAsync(() -> {
+                try (Socket socket = serverSocket.accept()) {
+                    socket.setSoTimeout(5_000);
+                    return socket.getInputStream().readNBytes(16);
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            });
+            BitcoinClient client = new BitcoinClient(PARAMETERS, VersionMessage.DEFAULT_SERVICES, true, true);
+            assertThrows(java.io.IOException.class, () ->
+                    client.connect("127.0.0.1", serverSocket.getLocalPort(), 100, PeerTransportPolicy.V2_ONLY));
+            byte[] prefix = firstBytes.get(5, TimeUnit.SECONDS);
+            assertEquals(16, prefix.length);
+            assertFalse(java.util.Arrays.equals(prefix,
+                    ru.bitcoin.node.p2p.transport.Bip324TransportSession.v1Prefix(PARAMETERS)));
+        }
+    }
+
+    @Test
     void shouldDisableTransactionRelayForBlockRelayOnlyConnection()
             throws Exception {
 

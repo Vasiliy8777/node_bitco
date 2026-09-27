@@ -75,6 +75,8 @@ class NodeLifecycleServiceTest {
                                             "bitcoin.network",
                                             "regtest",
                                             "bitcoin.p2p.listen",
+                                            "false",
+                                            "bitcoin.p2p.v2-transport",
                                             "false"
                                     )
                             )
@@ -178,6 +180,8 @@ class NodeLifecycleServiceTest {
                                             "bitcoin.network",
                                             "regtest",
                                             "bitcoin.p2p.listen",
+                                            "false",
+                                            "bitcoin.p2p.v2-transport",
                                             "false"
                                     )
                             )
@@ -266,6 +270,8 @@ class NodeLifecycleServiceTest {
                                             "bitcoin.network",
                                             "regtest",
                                             "bitcoin.p2p.listen",
+                                            "false",
+                                            "bitcoin.p2p.v2-transport",
                                             "false"
                                     )
                             )
@@ -804,6 +810,8 @@ class NodeLifecycleServiceTest {
                                             "bitcoin.network",
                                             "regtest",
                                             "bitcoin.p2p.listen",
+                                            "false",
+                                            "bitcoin.p2p.v2-transport",
                                             "false"
                                     )
                             )
@@ -1081,6 +1089,8 @@ class NodeLifecycleServiceTest {
                                             "bitcoin.p2p.header-response-timeout-millis",
                                             "150",
                                             "bitcoin.p2p.listen",
+                                            "false",
+                                            "bitcoin.p2p.v2-transport",
                                             "false"
                                     )
                             )
@@ -1295,6 +1305,8 @@ class NodeLifecycleServiceTest {
                                             "bitcoin.p2p.header-response-timeout-millis",
                                             "5000",
                                             "bitcoin.p2p.listen",
+                                            "false",
+                                            "bitcoin.p2p.v2-transport",
                                             "false"
                                     )
                             )
@@ -1437,6 +1449,8 @@ class NodeLifecycleServiceTest {
                                             "bitcoin.network",
                                             "regtest",
                                             "bitcoin.p2p.listen",
+                                            "false",
+                                            "bitcoin.p2p.v2-transport",
                                             "false"
                                     )
                             )
@@ -1596,6 +1610,8 @@ class NodeLifecycleServiceTest {
                                             "bitcoin.network",
                                             "regtest",
                                             "bitcoin.p2p.listen",
+                                            "false",
+                                            "bitcoin.p2p.v2-transport",
                                             "false"
                                     )
                             )
@@ -2742,6 +2758,8 @@ class NodeLifecycleServiceTest {
                                             "bitcoin.p2p.peers",
                                             "127.0.0.1:" + serverSocket.getLocalPort(),
                                             "bitcoin.p2p.listen",
+                                            "false",
+                                            "bitcoin.p2p.v2-transport",
                                             "false"
                                     )
                             )

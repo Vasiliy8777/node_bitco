@@ -32,7 +32,7 @@ public class MiningConfiguration {
                                        @Value("${bitcoin.prune:0}") long pruneMiB,
                                        @Value("${bitcoin.blockfilterindex:false}") boolean blockFilterIndex,
                                        @Value("${bitcoin.p2p.peer-block-filters:false}") boolean peerBlockFilters,
-                                       @Value("${bitcoin.p2p.v2-transport:false}") boolean v2Transport) throws IOException {
+                                       @Value("${bitcoin.p2p.v2-transport:true}") boolean v2Transport) throws IOException {
         var controller = new MiningController(validation, relay, parameters, lifecycle::isMiningReady,
                 HexFormat.of().parseHex(payout), maximumWeight, new FeeRate(minimumFee));
         long services = pruneMiB > 0

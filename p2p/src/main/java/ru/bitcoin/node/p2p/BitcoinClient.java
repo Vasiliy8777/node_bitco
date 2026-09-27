@@ -12,7 +12,7 @@ public final class BitcoinClient
     private final NetworkParameters networkParameters;
     private final long localServices;
     private final boolean relay;
-    private final boolean v2Transport;
+    private final PeerTransportPolicy transportPolicy;
 
     public BitcoinClient(
             NetworkParameters networkParameters
@@ -46,7 +46,7 @@ public final class BitcoinClient
 
         this.relay =
                 relay;
-        this.v2Transport = v2Transport;
+        this.transportPolicy = v2Transport ? PeerTransportPolicy.AUTO : PeerTransportPolicy.V1_ONLY;
     }
     @Override
     public Peer connect(
@@ -55,25 +55,35 @@ public final class BitcoinClient
             int startHeight
     ) throws IOException {
 
-        return connect(host, port, startHeight, true);
+        return connect(host, port, startHeight, true, relay, transportPolicy);
     }
 
     @Override public Peer connectManaged(String host, int port, int startHeight) throws IOException {
-        return connect(host, port, startHeight, false, relay);
+        return connect(host, port, startHeight, false, relay, transportPolicy);
     }
 
     @Override
     public Peer connectManaged(String host, int port, int startHeight, PeerConnectionRole role) throws IOException {
         Objects.requireNonNull(role, "role");
         boolean connectionRelay = role == PeerConnectionRole.BLOCK_RELAY_ONLY ? false : relay;
-        return connect(host, port, startHeight, false, connectionRelay);
+        return connect(host, port, startHeight, false, connectionRelay, transportPolicy);
     }
 
     private Peer connect(String host, int port, int startHeight, boolean startReader) throws IOException {
-        return connect(host, port, startHeight, startReader, relay);
+        return connect(host, port, startHeight, startReader, relay, transportPolicy);
     }
 
     private Peer connect(String host, int port, int startHeight, boolean startReader, boolean connectionRelay) throws IOException {
+        return connect(host, port, startHeight, startReader, connectionRelay, transportPolicy);
+    }
+
+    /** Connect with an explicit per-connection transport policy. */
+    public Peer connect(String host, int port, int startHeight, PeerTransportPolicy policy) throws IOException {
+        return connect(host, port, startHeight, true, relay, Objects.requireNonNull(policy, "policy"));
+    }
+
+    private Peer connect(String host, int port, int startHeight, boolean startReader, boolean connectionRelay,
+                         PeerTransportPolicy policy) throws IOException {
 
         if (host == null || host.isBlank()) {
             throw new IllegalArgumentException(
@@ -96,18 +106,19 @@ public final class BitcoinClient
         Peer peer = newPeer(startHeight, connectionRelay);
 
         try {
-            if (v2Transport) {
+            if (policy == PeerTransportPolicy.V1_ONLY) {
+                peer.connect(host, port);
+            } else {
                 try {
                     peer.connectV2(host, port);
                 } catch (IOException | RuntimeException v2Failure) {
                     try { peer.close(); } catch (IOException closeFailure) { v2Failure.addSuppressed(closeFailure); }
-                    // BIP324 recommends reconnecting with v1 after immediate v2 failure.
+                    if (policy == PeerTransportPolicy.V2_ONLY) throw v2Failure;
+                    // BIP324 AUTO mode reconnects over a fresh TCP connection before downgrading to v1.
                     peer = newPeer(startHeight, connectionRelay);
                     peer.markV2Fallback();
                     peer.connect(host, port);
                 }
-            } else {
-                peer.connect(host, port);
             }
 
             peer.handshake(startReader);

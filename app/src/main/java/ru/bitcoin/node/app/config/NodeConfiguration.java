@@ -271,7 +271,7 @@ public class NodeConfiguration {
             @Value("${bitcoin.prune:0}") long pruneMiB,
             @Value("${bitcoin.blockfilterindex:false}") boolean blockFilterIndex,
             @Value("${bitcoin.p2p.peer-block-filters:false}") boolean peerBlockFilters,
-            @Value("${bitcoin.p2p.v2-transport:false}") boolean v2Transport
+            @Value("${bitcoin.p2p.v2-transport:true}") boolean v2Transport
     ) {
         long services = pruneMiB > 0
                 ? ru.bitcoin.node.p2p.message.VersionMessage.NODE_WITNESS
@@ -436,7 +436,7 @@ public class NodeConfiguration {
             @Value("${bitcoin.prune:0}") long pruneMiB,
             @Value("${bitcoin.blockfilterindex:false}") boolean blockFilterIndex,
             @Value("${bitcoin.p2p.peer-block-filters:false}") boolean peerBlockFilters,
-            @Value("${bitcoin.p2p.v2-transport:false}") boolean v2Transport
+            @Value("${bitcoin.p2p.v2-transport:true}") boolean v2Transport
     ) {
         long services = pruneMiB > 0
                 ? ru.bitcoin.node.p2p.message.VersionMessage.NODE_WITNESS
