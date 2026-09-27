@@ -171,7 +171,7 @@ public final class StratumSession implements AutoCloseable {
 
     synchronized void publish(MiningJob job) {
         if (closed.get() || closingAfterFlush || !subscribed || worker == null) return;
-        boolean changedDifficulty = varDiff.update(System.nanoTime());
+        boolean changedDifficulty = varDiff.update(server.monotonicNanos());
         if (!changedDifficulty && lastJob != null && lastJob.id().equals(job.id())) return;
         boolean clean = lastJob == null || !lastJob.work().block().header().previousBlockHash().equals(job.work().block().header().previousBlockHash());
         if (changedDifficulty) {

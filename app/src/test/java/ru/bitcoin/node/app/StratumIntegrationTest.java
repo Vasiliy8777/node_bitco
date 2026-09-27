@@ -137,8 +137,10 @@ class StratumIntegrationTest {
                         () -> true, new byte[]{0x51}, 4_000_000, new FeeRate(0));
                 var config = new ru.bitcoin.node.stratum.share.VarDiffConfig(true, new BigDecimal("2e-10"), BigDecimal.ONE,
                         java.time.Duration.ofSeconds(1), java.time.Duration.ofSeconds(2));
+                var monotonicNanos = new java.util.concurrent.atomic.AtomicLong();
                 try (var server = new StratumServer(new InetSocketAddress("127.0.0.1", 0), backend, "miner", "secret",
-                        new BigDecimal(rising ? "2e-10" : "8e-10"), 4, config); var client = new StratumWireMiner(server.port())) {
+                        new BigDecimal(rising ? "2e-10" : "8e-10"), 4, config, monotonicNanos::get);
+                     var client = new StratumWireMiner(server.port())) {
                     assertEquals(true, ((Map<?, ?>) client.call("mining.configure", List.of(List.of("version-rolling"),
                             Map.of("version-rolling.min-bit-count", 2))).get("result")).get("version-rolling"));
                     client.subscribe();
@@ -152,6 +154,13 @@ class StratumIntegrationTest {
                             assertEquals(true, client.call("mining.submit", sample.params()).get("result"));
                         }
                     } else assertEquals(23, error(client.call("mining.submit", share.params())));
+
+                    // Advance exactly one VarDiff retarget window. Triggering any
+                    // normal request causes the session to publish the current
+                    // source job and evaluate the new difficulty immediately.
+                    monotonicNanos.addAndGet(java.time.Duration.ofSeconds(2).toNanos());
+                    client.call("mining.configure", List.of(List.of("unknown-extension"), Map.of()));
+
                     var newJob = client.job();
                     assertEquals(0, new BigDecimal(rising ? "8e-10" : "2e-10").compareTo(client.difficulty));
                     assertNotEquals(oldJob.getFirst(), newJob.getFirst());

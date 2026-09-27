@@ -95,6 +95,23 @@ public final class ClusterLinearization {
     }
 
     /**
+     * Returns the whole-mempool feerate diagram by merging every cluster's chunks
+     * in descending feerate order. Cluster chunks are independently dependency-safe,
+     * so interleaving clusters by chunk feerate preserves a valid mining order.
+     */
+    public static List<Chunk> mempoolDiagram(Map<Hash256, MempoolEntry> entries) {
+        Objects.requireNonNull(entries, "entries");
+        List<Chunk> result = new ArrayList<>();
+        for (Set<Hash256> cluster : clusters(entries)) result.addAll(chunks(entries, cluster));
+        result.sort((a, b) -> {
+            int rate = compareRate(b.fee(), b.virtualSize(), a.fee(), a.virtualSize());
+            if (rate != 0) return rate;
+            return comparePackage(a.transactions(), b.transactions());
+        });
+        return List.copyOf(result);
+    }
+
+    /**
      * Returns negative/zero/positive when left diagram is worse/equal/better than right.
      */
     public static int compareDiagrams(List<Chunk> left, List<Chunk> right) {

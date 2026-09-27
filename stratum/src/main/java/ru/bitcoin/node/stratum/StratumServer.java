@@ -21,6 +21,7 @@ public final class StratumServer implements AutoCloseable {
     private final byte[] password;
     private final BigDecimal difficulty;
     private final VarDiffConfig varDiff;
+    private final java.util.function.LongSupplier monotonicNanos;
     private final MiningJobManager jobs = new MiningJobManager();
     private final ExtraNonceManager extraNonces = new ExtraNonceManager();
     private final Set<StratumSession> sessions = ConcurrentHashMap.newKeySet();
@@ -44,6 +45,19 @@ public final class StratumServer implements AutoCloseable {
 
     public StratumServer(InetSocketAddress address, MiningBackend backend, String user, String password,
                          BigDecimal difficulty, int maximumConnections, VarDiffConfig varDiff) throws IOException {
+        this(address, backend, user, password, difficulty, maximumConnections, varDiff, System::nanoTime);
+    }
+
+    /**
+     * Constructor with an injectable monotonic clock.
+     *
+     * Production callers use {@link System#nanoTime()}; the overload exists so
+     * wire-level VarDiff tests can advance retarget windows deterministically
+     * without sleeping or depending on scheduler timing.
+     */
+    public StratumServer(InetSocketAddress address, MiningBackend backend, String user, String password,
+                         BigDecimal difficulty, int maximumConnections, VarDiffConfig varDiff,
+                         java.util.function.LongSupplier monotonicNanos) throws IOException {
         this.backend = java.util.Objects.requireNonNull(backend);
         if (user == null || user.isBlank() || user.length() > 64 || password == null || password.isBlank())
             throw new IllegalArgumentException("Stratum user and password are required");
@@ -52,6 +66,7 @@ public final class StratumServer implements AutoCloseable {
         this.password = password.getBytes(StandardCharsets.UTF_8);
         this.difficulty = difficulty;
         this.varDiff = java.util.Objects.requireNonNull(varDiff);
+        this.monotonicNanos = java.util.Objects.requireNonNull(monotonicNanos);
         new VarDiffController(varDiff, difficulty); // Validate before binding a socket.
         slots = new Semaphore(maximumConnections);
         listener = new ServerSocket();
@@ -66,6 +81,7 @@ public final class StratumServer implements AutoCloseable {
     MiningJobManager jobs() { return jobs; }
     VarDiffConfig varDiff() { return varDiff; }
     BigDecimal difficulty() { return difficulty; }
+    long monotonicNanos() { return monotonicNanos.getAsLong(); }
     MiningJob current() { return current; }
 
     boolean authorize(String name, String suppliedPassword) {

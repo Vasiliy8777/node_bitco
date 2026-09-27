@@ -43,25 +43,35 @@ final class MempoolGraphPolicy {
     static void replacement(Map<Hash256, MempoolEntry> entries, Set<Hash256> conflicts,
                             Set<Hash256> evicted, MempoolEntry replacement, MempoolLimits limits) {
         if (conflicts.isEmpty()) return;
-        if (evicted.size() > 100) fail("too-many-replacements");
+
+        // Core v31 Rule #5 limits directly conflicting *clusters*, not the number of
+        // transactions/descendants removed by the replacement.
+        int conflictingClusters = 0;
+        Set<Hash256> counted = new HashSet<>();
+        for (Hash256 conflict : conflicts) {
+            if (counted.contains(conflict)) continue;
+            Set<Hash256> cluster = ClusterLinearization.connected(entries, List.of(conflict));
+            counted.addAll(cluster);
+            conflictingClusters++;
+            if (conflictingClusters > 100) fail("too-many-conflicting-clusters");
+        }
+
         long oldFee = 0;
-        Set<Hash256> originalParents = new HashSet<>();
-        long potentialReplacements = 0;
         for (Hash256 id : evicted) oldFee = Math.addExact(oldFee, entries.get(id).fee());
-        for (Hash256 id : conflicts) {
-            var old = entries.get(id);
-            potentialReplacements += descendants(entries, Set.of(id)).size();
-            if (potentialReplacements > 100) fail("too-many-potential-replacements");
-            for (var in : old.transaction().inputs()) originalParents.add(in.previousOutput().transactionId());
-            if (compareRate(replacement.fee(), replacement.virtualSize(), old.fee(), old.virtualSize()) <= 0)
-                fail("replacement-feerate");
-        }
-        for (var in : replacement.transaction().inputs()) {
-            if (entries.containsKey(in.previousOutput().transactionId()) && !originalParents.contains(in.previousOutput().transactionId()))
-                fail("replacement-adds-unconfirmed-input");
-        }
         long delta = new FeeRate(limits.incrementalRelaySatPerKvB()).feeForVSize(replacement.virtualSize());
         if (replacement.fee() < oldFee || replacement.fee() - oldFee < delta) fail("replacement-fee");
+
+        // Core v31 removed BIP125 rules #1/#2 and the old per-direct-conflict
+        // feerate rule. The prospective mempool must instead have a strictly
+        // superior feerate diagram.
+        Map<Hash256, MempoolEntry> after = new LinkedHashMap<>(entries);
+        evicted.forEach(after::remove);
+        after.put(replacement.transaction().txId(), replacement);
+        int diagram = ClusterLinearization.compareDiagrams(
+                ClusterLinearization.mempoolDiagram(after),
+                ClusterLinearization.mempoolDiagram(entries));
+        if (diagram < 0) fail("replacement-worse-feerate-diagram");
+        if (diagram == 0) fail("replacement-unchanged-feerate-diagram");
     }
 
     static Set<Hash256> connected(Map<Hash256, MempoolEntry> entries, Hash256 root) {
