@@ -561,6 +561,31 @@ public final class NodeValidationService {
 
     public record ChainStateInfo(long blocks, Hash256 bestBlockHash, boolean snapshot, boolean validated) {}
 
+    /**
+     * Stages and verifies a snapshot against the network's trusted AssumeUTXO commitment.
+     * This deliberately does not activate it; active chainstate remains untouched.
+     */
+    public SnapshotVerification verifyUtxoSnapshot(java.nio.file.Path path) throws java.io.IOException {
+        Objects.requireNonNull(path, "path");
+        synchronized (chain) {
+            ru.bitcoin.node.storage.utxo.UtxoSnapshotMetadata metadata;
+            try (var in = new java.io.BufferedInputStream(java.nio.file.Files.newInputStream(path))) {
+                metadata = ru.bitcoin.node.storage.utxo.UtxoSnapshotMetadata.read(in, parameters.magic());
+            }
+            var trusted = parameters.assumeUtxoForBlock(metadata.baseBlockHash())
+                    .orElseThrow(() -> new java.io.IOException("Snapshot base block has no trusted AssumeUTXO commitment for " + parameters.network()));
+            BlockIndex base = lookup.find(trusted.blockHash());
+            if (base == null || base.height() != trusted.height())
+                throw new java.io.IOException("Snapshot base block is not present in the local block index at the trusted height");
+            var verified = new ru.bitcoin.node.storage.utxo.UtxoSnapshotVerifier(database, parameters).stageAndVerify(path, trusted);
+            return new SnapshotVerification(trusted.height(), trusted.blockHash(), verified.coinsLoaded(),
+                    verified.statistics().hashSerialized3(), trusted.chainTxCount());
+        }
+    }
+
+    public record SnapshotVerification(long baseHeight, Hash256 baseHash, long coinsLoaded,
+                                       Hash256 hashSerialized, long chainTxCount) {}
+
     public Optional<MempoolEntry> mempoolEntry(Hash256 txid) {
         Objects.requireNonNull(txid, "txid");
         synchronized (chain) {

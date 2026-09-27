@@ -253,5 +253,52 @@ public final class NetworkParameters {
     public long segwitHeight() {
         return segwitHeight;
     }
+    /** Trusted AssumeUTXO snapshot commitment copied from Bitcoin Core chain parameters. */
+    public record AssumeUtxoData(long height, Hash256 hashSerialized, long chainTxCount, Hash256 blockHash) {
+        public AssumeUtxoData {
+            if (height < 0) throw new IllegalArgumentException("height must not be negative");
+            Objects.requireNonNull(hashSerialized, "hashSerialized");
+            if (chainTxCount < 0) throw new IllegalArgumentException("chainTxCount must not be negative");
+            Objects.requireNonNull(blockHash, "blockHash");
+        }
+    }
+
+    /** Security-critical AssumeUTXO anchors. Keep synchronized with the supported Bitcoin Core baseline. */
+    public java.util.List<AssumeUtxoData> assumeUtxoData() {
+        return switch (network) {
+            case MAINNET -> java.util.List.of(
+                    assume(840_000L, "a2a5521b1b5ab65f67818e5e8eccabb7171a517f9e2382208f77687310768f96", 991_032_194L, "0000000000000000000320283a032748cef8227873ff4872689bf23f1cda83a5"),
+                    assume(880_000L, "dbd190983eaf433ef7c15f78a278ae42c00ef52e0fd2a54953782175fbadcea9", 1_145_604_538L, "000000000000000000010b17283c3c400507969a9c2afd1dcf2082ec5cca2880"),
+                    assume(910_000L, "4daf8a17b4902498c5787966a2b51c613acdab5df5db73f196fa59a4da2f1568", 1_226_586_151L, "0000000000000000000108970acb9522ffd516eae17acddcb1bd16469194a821"),
+                    assume(935_000L, "e4b90ef9eae834f56c4b64d2d50143cee10ad87994c614d7d04125e2a6025050", 1_305_397_408L, "0000000000000000000147034958af1652b2b91bba607beacc5e72a56f0fb5ee"),
+                    assume(965_000L, "4a8d794337118c0c615b574f817c7306c687584a537184b8d233df42bf477ec2", 1_429_611_231L, "00000000000000000001595977e6000ce56129f5c9b4073e31ccc30b90b97da9")
+            );
+            case TESTNET -> java.util.List.of(
+                    assume(2_500_000L, "f841584909f68e47897952345234e37fcd9128cd818f41ee6c3ca68db8071be7", 66_484_552L, "0000000000000093bcb68c03a9a168ae252572d348a2eaeba2cdf9231d73206f"),
+                    assume(4_840_000L, "ce6bb677bb2ee9789c4a1c9d73e6683c53fc20e8fdbedbdaaf468982a0c8db2a", 536_078_574L, "00000000000000f4971a7fb37fbdff89315b69a2e1920c467654a382f0d64786"),
+                    assume(5_125_000L, "d05430f34c9b7dd7eb98c0718cdf03782bcce8273847557d68ac2efc1365d4b8", 536_708_663L, "00000000000009ad1946e21cb4f1a6323ee99c89017b59d5166472672b868133")
+            );
+            case SIGNET -> java.util.List.of(
+                    assume(160_000L, "fe0a44309b74d6b5883d246cb419c6221bcccf0b308c9b59b7d70783dbdf928a", 2_289_496L, "0000003ca3c99aff040f2563c2ad8f8ec88bd0fd6b8f0895cfaf1ef90353a62c"),
+                    assume(290_000L, "97267e000b4b876800167e71b9123f1529d13b14308abec2888bbd2160d14545", 28_547_497L, "0000000577f2741bb30cd9d39d6d71b023afbeb9764f6260786a97969d5c9ac0"),
+                    assume(320_000L, "1aaf72ecb376cc16957fbb8d5d406bfd6e3165510e2fc83879b6d14cd20b4462", 32_079_110L, "0000000740ae66b284da84387dcfa14d7b1385b0bad482005ba4e770ea6c4b95")
+            );
+            case REGTEST -> java.util.List.of(
+                    assume(110L, "86e9a1205b418b16dde3a18a78c730e30137e28466bda5dbf6b33ab8fc05447c", 111L, "135eec25a6fb277884e5824e7aa7d052c4868161c99a5122170b5266f86c273d"),
+                    assume(200L, "17dcc016d188d16068907cdeb38b75691a118d43053b8cd6a25969419381d13a", 201L, "385901ccbd69dff6bbd00065d01fb8a9e464dede7cfe0372443884f9b1dcf6b9"),
+                    assume(299L, "106b2c56233e378a824cf0d5ff2be42ed32c72f1605c9be288d00942908a40ac", 334L, "0c552ced4721c249a389eb9b08cb8da261cd46f0e7b5f9d064d48f3113406853")
+            );
+        };
+    }
+
+    public java.util.Optional<AssumeUtxoData> assumeUtxoForBlock(Hash256 blockHash) {
+        Objects.requireNonNull(blockHash, "blockHash");
+        return assumeUtxoData().stream().filter(data -> data.blockHash().equals(blockHash)).findFirst();
+    }
+
+    private static AssumeUtxoData assume(long height, String hashSerialized, long chainTxCount, String blockHash) {
+        return new AssumeUtxoData(height, Hash256.fromDisplayHex(hashSerialized), chainTxCount, Hash256.fromDisplayHex(blockHash));
+    }
+
 }
 

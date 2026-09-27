@@ -51,4 +51,14 @@ class NetworkParametersTest {
                 parameters.allowMinDifficultyBlocks()
         );
     }
+    @Test
+    void exposesCurrentTrustedAssumeUtxoAnchors() {
+        var main = NetworkParametersRegistry.mainnet();
+        assertTrue(main.assumeUtxoData().stream().anyMatch(a -> a.height() == 965_000L
+                && a.blockHash().toDisplayHex().equals("00000000000000000001595977e6000ce56129f5c9b4073e31ccc30b90b97da9")));
+        var regtest = NetworkParametersRegistry.regtest();
+        assertTrue(regtest.assumeUtxoData().stream().anyMatch(a -> a.height() == 299L
+                && a.chainTxCount() == 334L));
+    }
+
 }
