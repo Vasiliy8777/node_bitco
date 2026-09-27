@@ -26,17 +26,28 @@ class TaprootDeploymentTest {
         var chain = chain(4 * 2016, 1511, START, 0);
         assertFalse(TaprootDeployment.activeFor(chain.blocks.getLast(), chain.byHash::get, NetworkParametersRegistry.testnet()));
     }
-    @Test void timeoutWinsOverSignals() {
+    @Test void speedyTrialThresholdWinsOverTimeoutOnceStarted() {
         var chain = chain(4 * 2016, 2016, TIMEOUT, 0);
-        assertFalse(TaprootDeployment.activeFor(chain.blocks.getLast(), chain.byHash::get, NetworkParametersRegistry.testnet()));
+        assertTrue(TaprootDeployment.activeFor(chain.blocks.getLast(), chain.byHash::get, NetworkParametersRegistry.testnet()));
     }
-    @Test void mainnetWaitsForMinimumHeight() {
-        // An artificial but linked branch near the activation height; no PoW is needed to test state transitions.
+    @Test void incompleteArtificialMainnetHistoryIsRejected() {
+        /*
+         * A deployment state at mainnet activation heights cannot be derived from a branch
+         * that starts hundreds of periods above genesis. The generic VersionBits engine must
+         * walk the actual period history; silently treating the missing prefix as DEFINED
+         * would make activation branch-history dependent in the wrong way.
+         *
+         * min_activation_height itself is covered by DeploymentManagerTest with a complete,
+         * compact synthetic chain.
+         */
         int offset = 346 * 2016;
         var chain = chain(7 * 2016, 1815, START, offset);
         BlockIndexLookup lookup = chain.byHash::get;
-        assertFalse(TaprootDeployment.activeFor(chain.blocks.get(5 * 2016), lookup, NetworkParametersRegistry.mainnet()));
-        assertTrue(TaprootDeployment.activeFor(chain.blocks.get(6 * 2016), lookup, NetworkParametersRegistry.mainnet()));
+        assertThrows(IllegalStateException.class,
+                () -> TaprootDeployment.activeFor(
+                        chain.blocks.get(5 * 2016),
+                        lookup,
+                        NetworkParametersRegistry.mainnet()));
     }
     @Test void signetAndRegtestAreAlwaysActive() {
         var chain = chain(1, 0, 1, 0);
