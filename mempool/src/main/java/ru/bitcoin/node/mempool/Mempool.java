@@ -90,7 +90,7 @@ public final class Mempool {
         Map<Hash256, MempoolEntry> candidate = new LinkedHashMap<>(entries);
         evicted.forEach(candidate::remove);
         candidate.put(txId, entry);
-        if (!bypassLimits) MempoolGraphPolicy.checkLimits(candidate, txId, limits, !packageMode);
+        if (!bypassLimits) MempoolGraphPolicy.checkLimits(candidate, txId, limits);
         long removedRate = packageMode ? 0 : MempoolGraphPolicy.trim(candidate, limits.maxPoolVirtualBytes(), txId);
         entries.clear();
         entries.putAll(candidate);
@@ -142,7 +142,7 @@ public final class Mempool {
         if (size > 0 && fee < new FeeRate(floor).feeForVSize(size)) throw new MempoolAdmissionException("package-feerate");
         PackagePolicy.replacement(fresh, entries, staged.entries, conflicts, removed, limits);
         // Check limits again with the complete package; no carve-outs or sibling eviction.
-        for (var tx : fresh) MempoolGraphPolicy.checkLimits(staged.entries, tx.txId(), limits, false);
+        for (var tx : fresh) MempoolGraphPolicy.checkLimits(staged.entries, tx.txId(), limits);
         long removedRate = MempoolGraphPolicy.trim(staged.entries, limits.maxPoolVirtualBytes(), txs.getLast().txId());
         List<MempoolEntry> result = txs.stream().map(tx -> staged.entries.get(tx.txId())).toList();
         if (result.stream().anyMatch(Objects::isNull)) throw new MempoolAdmissionException("package-evicted");

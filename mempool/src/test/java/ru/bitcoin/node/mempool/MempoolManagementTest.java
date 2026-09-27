@@ -50,7 +50,7 @@ class MempoolManagementTest {
 
     @Test
     void dependencyLimitRejectsGrandchildWithoutChangingPool() {
-        var limits = new MempoolLimits(2, 2, 101_000, 1_000_000, 1000, 100);
+        var limits = new MempoolLimits(2, 101_000, 1_000_000, 1000, 100);
         var pool = new Mempool(new MempoolPolicy(), limits, Clock.systemUTC());
         var parent = tx(FUND, 90_000, 2);
         var child = tx(point(parent), 80_000, 2);
@@ -89,7 +89,7 @@ class MempoolManagementTest {
             }
         }
         var clock = new MutableClock();
-        var pool = new Mempool(new MempoolPolicy(), new MempoolLimits(25, 25, 101_000, 1_000_000, 100, 100), clock);
+        var pool = new Mempool(new MempoolPolicy(), new MempoolLimits(64, 101_000, 1_000_000, 100, 100), clock);
         var parent = tx(FUND, 90_000, 2);
         pool.admit(parent, CONTEXT, COINS);
         clock.now = Instant.ofEpochSecond(1050);
@@ -103,7 +103,7 @@ class MempoolManagementTest {
     void restoredArrivalTimeControlsExpiryAfterRestart() {
         Clock clock = Clock.fixed(Instant.ofEpochSecond(2_000), ZoneOffset.UTC);
         var pool = new Mempool(new MempoolPolicy(),
-                new MempoolLimits(25, 25, 101_000, 1_000_000, 100, 100), clock);
+                new MempoolLimits(64, 101_000, 1_000_000, 100, 100), clock);
         var transaction = tx(FUND, 90_000, 2);
         var restored = pool.admitRestored(transaction, 1_899L, CONTEXT, COINS);
         assertEquals(1_899L, restored.arrivalTime());
@@ -115,7 +115,7 @@ class MempoolManagementTest {
     void capacityEvictsLowerFeePackageAndRejectsLowFeeArrival() {
         var first = tx(FUND, 90_000, 2);
         long size = TransactionWeight.virtualSize(TransactionWeight.calculate(first));
-        var pool = new Mempool(new MempoolPolicy(), new MempoolLimits(25, 25, 101_000, size, 1000, 100), Clock.systemUTC());
+        var pool = new Mempool(new MempoolPolicy(), new MempoolLimits(64, 101_000, size, 1000, 100), Clock.systemUTC());
         OutPoint other = new OutPoint(Hash256.fromDisplayHex("22".repeat(32)), new UInt32(0));
         UtxoView coins = out -> Optional.of(new UtxoEntry(100_000, SCRIPT, 100, false));
         pool.admit(first, CONTEXT, coins);

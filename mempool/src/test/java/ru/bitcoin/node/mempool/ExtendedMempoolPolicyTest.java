@@ -9,7 +9,7 @@ import static ru.bitcoin.node.mempool.PackageAdmissionTest.*;
 class ExtendedMempoolPolicyTest {
     @Test void reconciliationTrimsResurrectedTransactionsToCapacity() {
         var pool = new Mempool(new MempoolPolicy(),
-                new MempoolLimits(25,25,101_000,1,1000,100),Clock.systemUTC());
+                new MempoolLimits(64,101_000,1,1000,100),Clock.systemUTC());
         var transaction = tx(List.of(FUND),2,90_000);
         pool.reconcile(CONTEXT,COINS,Set.of(),List.of(transaction));
         assertTrue(pool.isEmpty());
@@ -22,8 +22,16 @@ class ExtendedMempoolPolicyTest {
         pool.admit(sibling,CONTEXT,COINS);
         assertFalse(pool.contains(first.txId())); assertTrue(pool.contains(sibling.txId())); assertEquals(2,pool.size());
     }
-    @Test void cpfpCarveoutAllowsOneExtraChildButNotTwo() {
-        var pool=new Mempool(new MempoolPolicy(),new MempoolLimits(25,2,101_000,1_000_000,1000,100),Clock.systemUTC());
+    @Test void clusterLimitHasNoLegacyCpfpCarveout() {
+        var pool=new Mempool(new MempoolPolicy(),new MempoolLimits(2,101_000,1_000_000,1000,100),Clock.systemUTC());
+        var parent=tx(List.of(FUND),2,30_000,30_000,30_000);
+        pool.admit(parent,CONTEXT,COINS);
+        pool.admit(tx(List.of(point(parent,0)),2,20_000),CONTEXT,COINS);
+        assertThrows(MempoolAdmissionException.class,()->pool.admit(tx(List.of(point(parent,1)),2,20_000),CONTEXT,COINS));
+        assertEquals(2,pool.size());
+    }
+    @Test void fanoutChildrenShareOneClusterLimit() {
+        var pool=new Mempool(new MempoolPolicy(),new MempoolLimits(3,101_000,1_000_000,1000,100),Clock.systemUTC());
         var parent=tx(List.of(FUND),2,30_000,30_000,30_000);
         pool.admit(parent,CONTEXT,COINS);
         pool.admit(tx(List.of(point(parent,0)),2,20_000),CONTEXT,COINS);

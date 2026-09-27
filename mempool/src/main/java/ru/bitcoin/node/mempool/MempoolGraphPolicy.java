@@ -53,28 +53,37 @@ final class MempoolGraphPolicy {
         long delta = new FeeRate(limits.incrementalRelaySatPerKvB()).feeForVSize(replacement.virtualSize());
         if (replacement.fee() < oldFee || replacement.fee() - oldFee < delta) fail("replacement-fee");
     }
-    static void checkLimits(Map<Hash256, MempoolEntry> entries, Hash256 added, MempoolLimits limits) {
-        checkLimits(entries, added, limits, true);
-    }
-    static void checkLimits(Map<Hash256, MempoolEntry> entries, Hash256 added, MempoolLimits limits, boolean carveOut) {
-        Set<Hash256> ancestors = ancestors(entries, added);
-        if (ancestors.size() > limits.ancestors() || size(entries, ancestors) > limits.familyVirtualBytes()) fail("ancestor-limit");
-        for (Hash256 id : ancestors) {
-            Set<Hash256> descendants = descendants(entries, Set.of(id));
-            if (descendants.size() > limits.descendants() || size(entries, descendants) > limits.familyVirtualBytes()) {
-                boolean allowed = carveOut && ancestors.size() <= 2 && entries.get(added).virtualSize() <= 10_000
-                        && entries.get(added).transaction().version() != 3
-                        && descendants.size() <= (long) limits.descendants() + 1
-                        && size(entries, descendants) <= limits.familyVirtualBytes() + 10_000;
-                if (!allowed) fail("descendant-limit");
+    static Set<Hash256> connected(Map<Hash256, MempoolEntry> entries, Hash256 root) {
+        if (!entries.containsKey(root)) return Set.of();
+        Set<Hash256> component = new HashSet<>();
+        Deque<Hash256> queue = new ArrayDeque<>();
+        queue.add(root);
+        while (!queue.isEmpty()) {
+            Hash256 current = queue.removeFirst();
+            if (!entries.containsKey(current) || !component.add(current)) continue;
+            for (var input : entries.get(current).transaction().inputs()) {
+                Hash256 parent = input.previousOutput().transactionId();
+                if (entries.containsKey(parent)) queue.addLast(parent);
+            }
+            for (var entry : entries.entrySet()) {
+                if (!component.contains(entry.getKey()) && entry.getValue().transaction().inputs().stream()
+                        .anyMatch(input -> input.previousOutput().transactionId().equals(current)))
+                    queue.addLast(entry.getKey());
             }
         }
-        // TRUC version inheritance, two-generation topology and size limits.
-        for (var e : entries.entrySet()) {
-            // Reorgs may leave unrelated TRUC violations in the pool (Core v30).
-            // Admission must inspect the new transaction's ancestry, not reject globally.
-            if (!ancestors.contains(e.getKey())) continue;
-            Transaction tx = e.getValue().transaction();
+        return Set.copyOf(component);
+    }
+
+    /** Core v31 cluster limits replace the legacy ancestor/descendant limits and CPFP carve-out. */
+    static void checkLimits(Map<Hash256, MempoolEntry> entries, Hash256 added, MempoolLimits limits) {
+        Set<Hash256> cluster = connected(entries, added);
+        if (cluster.size() > limits.clusterCount()) fail("cluster-count-limit");
+        if (size(entries, cluster) > limits.clusterVirtualBytes()) fail("cluster-size-limit");
+
+        // TRUC version inheritance, two-generation topology and size limits remain separate policy.
+        Set<Hash256> ancestors = ancestors(entries, added);
+        for (Hash256 id : ancestors) {
+            Transaction tx = entries.get(id).transaction();
             Set<Hash256> parents = new HashSet<>();
             for (var in : tx.inputs()) {
                 var parent = entries.get(in.previousOutput().transactionId());
@@ -83,9 +92,9 @@ final class MempoolGraphPolicy {
                 parents.add(parent.transaction().txId());
             }
             if (tx.version() == 3) {
-                if (e.getValue().virtualSize() > 10_000 || ancestors(entries, e.getKey()).size() > 2
-                        || descendants(entries, Set.of(e.getKey())).size() > 2) fail("truc-topology");
-                if (!parents.isEmpty() && e.getValue().virtualSize() > 1000) fail("truc-child-size");
+                if (entries.get(id).virtualSize() > 10_000 || ancestors(entries, id).size() > 2
+                        || descendants(entries, Set.of(id)).size() > 2) fail("truc-topology");
+                if (!parents.isEmpty() && entries.get(id).virtualSize() > 1000) fail("truc-child-size");
             }
         }
     }
