@@ -88,16 +88,7 @@ public final class UtxoSnapshotWriter {
     }
 
     private static void writeCoin(OutputStream out, StoredUtxo coin) throws IOException {
-        writeVarInt(out, Math.addExact(
-                Math.multiplyExact(coin.height(), 2),
-                coin.coinbase() ? 1 : 0
-        ));
-
-        writeVarInt(out, compressAmount(coin.amount()));
-
-        byte[] script = coin.scriptPubKey();
-        writeVarInt(out, Math.addExact(script.length, 6L));
-        out.write(script);
+        UtxoSnapshotCoinCodec.write(out, coin);
     }
 
     static long compressAmount(long n) {
