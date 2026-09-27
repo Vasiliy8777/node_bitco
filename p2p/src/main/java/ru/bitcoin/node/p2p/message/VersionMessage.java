@@ -12,6 +12,8 @@ public final class VersionMessage {
     /** BIP157: node serves BIP158 basic compact block filters. */
     public static final long NODE_COMPACT_FILTERS = 1L << 6;
     public static final long NODE_NETWORK_LIMITED = 1L << 10;
+    /** BIP324: endpoint supports the v2 encrypted P2P transport. */
+    public static final long NODE_P2P_V2 = 1L << 11;
 
     public static final long DEFAULT_SERVICES =
             NODE_NETWORK | NODE_WITNESS;
