@@ -52,6 +52,12 @@ public final class RocksDbSnapshotChainStateStore {
         }
     }
 
+
+    public void clear(RocksDbWriteBatch batch) {
+        java.util.Objects.requireNonNull(batch, "batch");
+        batch.deletePrefix(RocksDbNamespaces.SNAPSHOT_CHAINSTATE);
+    }
+
     private static long readLong(byte[] v, int off) {
         long n=0; for(int i=0;i<8;i++) n |= ((long)v[off+i]&255L) << (8*i); return n;
     }

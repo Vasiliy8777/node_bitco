@@ -379,6 +379,7 @@ public final class NodeValidationService implements AutoCloseable {
         this.pruneTargetBytes = pruneTargetBytes;
         this.parameters = Objects.requireNonNull(parameters);
         this.time = Objects.requireNonNull(time);
+        new ru.bitcoin.node.storage.utxo.RocksDbAssumeUtxoFinalizer(database).finalizeOnStartup();
         snapshotChainStateStore = new ru.bitcoin.node.storage.utxo.RocksDbSnapshotChainStateStore(database);
         boolean snapshotActiveAtStartup = snapshotChainStateStore.load().isPresent();
         byte startupUtxoPrefix = snapshotActiveAtStartup
