@@ -3,12 +3,17 @@ package ru.bitcoin.node.mempool;
 import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.protocol.transaction.OutPoint;
 import ru.bitcoin.node.protocol.transaction.Transaction;
+
 import java.math.BigInteger;
 import java.util.*;
 
-/** Dependency, replacement and eviction checks on an isolated prospective pool. */
+/**
+ * Dependency, replacement and eviction checks on an isolated prospective pool.
+ */
 final class MempoolGraphPolicy {
-    private MempoolGraphPolicy() { }
+    private MempoolGraphPolicy() {
+    }
+
     static Set<Hash256> descendants(Map<Hash256, MempoolEntry> entries, Set<Hash256> roots) {
         Set<Hash256> result = new HashSet<>(roots);
         boolean changed;
@@ -16,11 +21,13 @@ final class MempoolGraphPolicy {
             changed = false;
             for (var e : entries.entrySet()) {
                 if (!result.contains(e.getKey()) && e.getValue().transaction().inputs().stream()
-                        .anyMatch(in -> result.contains(in.previousOutput().transactionId()))) changed |= result.add(e.getKey());
+                        .anyMatch(in -> result.contains(in.previousOutput().transactionId())))
+                    changed |= result.add(e.getKey());
             }
         } while (changed);
         return result;
     }
+
     static Set<Hash256> ancestors(Map<Hash256, MempoolEntry> entries, Hash256 id) {
         Set<Hash256> result = new HashSet<>();
         Deque<Hash256> queue = new ArrayDeque<>();
@@ -32,6 +39,7 @@ final class MempoolGraphPolicy {
         }
         return result;
     }
+
     static void replacement(Map<Hash256, MempoolEntry> entries, Set<Hash256> conflicts,
                             Set<Hash256> evicted, MempoolEntry replacement, MempoolLimits limits) {
         if (conflicts.isEmpty()) return;
@@ -45,36 +53,25 @@ final class MempoolGraphPolicy {
             potentialReplacements += descendants(entries, Set.of(id)).size();
             if (potentialReplacements > 100) fail("too-many-potential-replacements");
             for (var in : old.transaction().inputs()) originalParents.add(in.previousOutput().transactionId());
-            if (compareRate(replacement.fee(), replacement.virtualSize(), old.fee(), old.virtualSize()) <= 0) fail("replacement-feerate");
+            if (compareRate(replacement.fee(), replacement.virtualSize(), old.fee(), old.virtualSize()) <= 0)
+                fail("replacement-feerate");
         }
         for (var in : replacement.transaction().inputs()) {
-            if (entries.containsKey(in.previousOutput().transactionId()) && !originalParents.contains(in.previousOutput().transactionId())) fail("replacement-adds-unconfirmed-input");
+            if (entries.containsKey(in.previousOutput().transactionId()) && !originalParents.contains(in.previousOutput().transactionId()))
+                fail("replacement-adds-unconfirmed-input");
         }
         long delta = new FeeRate(limits.incrementalRelaySatPerKvB()).feeForVSize(replacement.virtualSize());
         if (replacement.fee() < oldFee || replacement.fee() - oldFee < delta) fail("replacement-fee");
     }
+
     static Set<Hash256> connected(Map<Hash256, MempoolEntry> entries, Hash256 root) {
-        if (!entries.containsKey(root)) return Set.of();
-        Set<Hash256> component = new HashSet<>();
-        Deque<Hash256> queue = new ArrayDeque<>();
-        queue.add(root);
-        while (!queue.isEmpty()) {
-            Hash256 current = queue.removeFirst();
-            if (!entries.containsKey(current) || !component.add(current)) continue;
-            for (var input : entries.get(current).transaction().inputs()) {
-                Hash256 parent = input.previousOutput().transactionId();
-                if (entries.containsKey(parent)) queue.addLast(parent);
-            }
-            for (var entry : entries.entrySet()) {
-                if (!component.contains(entry.getKey()) && entry.getValue().transaction().inputs().stream()
-                        .anyMatch(input -> input.previousOutput().transactionId().equals(current)))
-                    queue.addLast(entry.getKey());
-            }
-        }
-        return Set.copyOf(component);
+        return ClusterLinearization.connected(entries, List.of(root));
     }
 
-    /** Core v31 cluster limits replace the legacy ancestor/descendant limits and CPFP carve-out. */
+
+    /**
+     * Core v31 cluster limits replace the legacy ancestor/descendant limits and CPFP carve-out.
+     */
     static void checkLimits(Map<Hash256, MempoolEntry> entries, Hash256 added, MempoolLimits limits) {
         Set<Hash256> cluster = connected(entries, added);
         if (cluster.size() > limits.clusterCount()) fail("cluster-count-limit");
@@ -98,29 +95,38 @@ final class MempoolGraphPolicy {
             }
         }
     }
+
     static long trim(Map<Hash256, MempoolEntry> entries, long maximumSize, Hash256 added) {
         long removedRate = 0;
         while (size(entries, entries.keySet()) > maximumSize) {
             Set<Hash256> worst = null;
             long worstFee = 0, worstSize = 1;
-            for (Hash256 id : entries.keySet()) {
-                var family = descendants(entries, Set.of(id));
-                long fee = family.stream().mapToLong(key -> entries.get(key).fee()).sum();
-                long bytes = size(entries, family);
-                if (worst == null || compareRate(fee, bytes, worstFee, worstSize) < 0) {
-                    worst = family; worstFee = fee; worstSize = bytes;
+            for (Set<Hash256> cluster : ClusterLinearization.clusters(entries)) {
+                List<ClusterLinearization.Chunk> chunks = ClusterLinearization.chunks(entries, cluster);
+                ClusterLinearization.Chunk tail = chunks.getLast();
+                Set<Hash256> candidate = descendants(entries, new HashSet<>(tail.transactions()));
+                long fee = candidate.stream().mapToLong(id -> entries.get(id).fee()).sum();
+                long bytes = size(entries, candidate);
+                if (worst == null || ClusterLinearization.compareRate(fee, bytes, worstFee, worstSize) < 0) {
+                    worst = candidate;
+                    worstFee = fee;
+                    worstSize = bytes;
                 }
             }
-            if (worst.contains(added)) fail("mempool-full");
+            if (worst == null) throw new IllegalStateException("Unable to select mempool eviction candidate");
+            if (added != null && worst.contains(added)) fail("mempool-full");
             removedRate = Math.max(removedRate, worstFee * 1000 / worstSize);
             worst.forEach(entries::remove);
         }
         return removedRate;
     }
+
     static void addSiblingConflict(Map<Hash256, MempoolEntry> entries, Transaction transaction, Set<Hash256> conflicts) {
         if (transaction.version() != 3) return;
         Set<Hash256> parents = new HashSet<>();
-        for (var input : transaction.inputs()) if (entries.containsKey(input.previousOutput().transactionId())) parents.add(input.previousOutput().transactionId());
+        for (var input : transaction.inputs())
+            if (entries.containsKey(input.previousOutput().transactionId()))
+                parents.add(input.previousOutput().transactionId());
         if (parents.size() != 1) return;
         Hash256 parent = parents.iterator().next();
         if (entries.get(parent).transaction().version() != 3) return;
@@ -130,12 +136,17 @@ final class MempoolGraphPolicy {
         Hash256 sibling = family.iterator().next();
         if (ancestors(entries, sibling).size() == 2) conflicts.add(sibling);
     }
+
     private static long size(Map<Hash256, MempoolEntry> entries, Set<Hash256> ids) {
         return ids.stream().mapToLong(id -> entries.get(id).virtualSize()).sum();
     }
+
     private static int compareRate(long feeA, long sizeA, long feeB, long sizeB) {
         return BigInteger.valueOf(feeA).multiply(BigInteger.valueOf(sizeB)).compareTo(
                 BigInteger.valueOf(feeB).multiply(BigInteger.valueOf(sizeA)));
     }
-    private static void fail(String reason) { throw new MempoolAdmissionException(reason); }
+
+    private static void fail(String reason) {
+        throw new MempoolAdmissionException(reason);
+    }
 }
