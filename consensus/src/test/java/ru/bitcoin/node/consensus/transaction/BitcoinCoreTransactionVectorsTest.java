@@ -22,7 +22,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * and the vector-declared excluded/required flags must be maximal/minimal.
  */
 class BitcoinCoreTransactionVectorsTest {
-    private static final int RANDOM_FLAG_COMBINATIONS = 16;
+    private static final int RANDOM_FLAG_COMBINATIONS = 64;
     private static final List<Integer> FLAGS = declaredFlags();
     private static final int ALL_FLAGS = FLAGS.stream().reduce(0, (a, b) -> a | b);
 

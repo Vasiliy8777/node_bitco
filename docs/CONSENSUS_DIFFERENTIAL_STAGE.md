@@ -1,44 +1,23 @@
-# Consensus differential/testing stage
+# Consensus Differential / Testing stage completion
 
-This stage turns the existing Bitcoin Core/BIP fixtures into a reproducible conformance gate.
+This stage has two mandatory gates. It is not CLOSED until both pass.
 
-## Always-on Maven gate
+1. `./mvnw.cmd clean test` — fixed Bitcoin Core/BIP corpus plus deterministic flag mutations.
+2. `tools/consensus-certify-core31.ps1` — live Java-node vs Bitcoin Core 31.x differential on an already synchronized regtest chain.
 
-`./mvnw clean test` executes:
+The live gate compares chain tip/chainwork, raw headers, raw blocks and `gettxoutsetinfo hash_serialized_3`; submits 64 deterministic malformed block mutations; checks unknown-parent rejection; then performs an invalidate/reconsider disconnect round-trip and compares the full exposed chain/UTXO state after both transitions. A `finally` block restores an invalidated reference chain if certification aborts.
 
-- all 1212 projected Bitcoin Core script vectors, including witness/Taproot rows;
-- all 120 Core tx_valid and 93 tx_invalid rows;
-- Core-style flag monotonicity/minimality/maximality checks for every transaction vector;
-- 16 deterministic mixed flag combinations per transaction vector;
-- all 500 legacy sighash vectors;
-- official BIP340 verification vectors;
-- BIP341 key-path sighash/spend vectors;
-- existing block, contextual transaction, locktime, sequence-lock, PoW, difficulty,
-  deployment, witness-commitment, BIP30/BIP34 and Taproot/Tapscript regression tests.
+## Preconditions
 
-External corpora are SHA-256 pinned. Updating a fixture requires an explicit re-pin, so an
-upstream data change cannot silently reduce or alter coverage.
+- Java node and Bitcoin Core 31.x must both be running on regtest and synchronized to the same tip.
+- Both RPC endpoints must be reachable with the credentials supplied to the script.
+- The chain must contain at least `ReorgDepth + 1` blocks.
+- Run on disposable/regtest data only: certification intentionally calls `invalidateblock` and `reconsiderblock`.
 
-The Core transaction corpus is intentionally kept under its truthful `bitcoin-core-v30`
-resource name until v31 upstream bytes are imported and verified. The conformance harness
-itself mirrors current Core transaction_tests.cpp flag invariants and is not version-specific.
-
-## Live Core-vs-Java state differential
-
-Start Bitcoin Core and the Java node on the same network/chain state, then run on Windows:
+## Full gate
 
 ```powershell
-.\tools\consensus-differential.ps1 `
-  -JavaRpc http://127.0.0.1:8332 `
-  -CoreRpc http://127.0.0.1:18332 `
-  -JavaUser bitcoin -JavaPassword bitcoin `
-  -CoreUser bitcoin -CorePassword bitcoin
+.\tools\consensus-stage-gate.ps1 -JavaRpc http://127.0.0.1:<JAVA_RPC_PORT> -CoreRpc http://127.0.0.1:18443 -JavaUser <JAVA_USER> -JavaPassword <JAVA_PASSWORD> -CoreUser <CORE_USER> -CorePassword <CORE_PASSWORD>
 ```
 
-Use the actual RPC endpoints/credentials. The script fails immediately on a difference in
-chain identity, height, best block, chainwork, selected block hashes, or UTXO
-`hash_serialized_3`/count/amount checkpoint.
-
-For regtest differential scenarios, feed the same accepted block/transaction sequence to
-both nodes, then run this checkpoint after every scenario boundary (mining, RBF/package,
-reorg, invalidate/reconsider, restart, snapshot/pruning). A mismatch is a hard failure.
+A green Maven suite alone does not close the stage. The final `CONSENSUS DIFFERENTIAL/TESTING STAGE: CLOSED` line is the completion criterion.
