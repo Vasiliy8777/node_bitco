@@ -21,6 +21,7 @@ public final class Mempool {
     private final Map<Hash256, MempoolEntry> entries = new LinkedHashMap<>();
     private final Map<OutPoint, Hash256> spent = new HashMap<>();
     private final Map<Hash256, Long> feeDeltas = new LinkedHashMap<>();
+    private final Set<Hash256> unbroadcast = new LinkedHashSet<>();
     /** Monotonic transaction-set mutation sequence used by getrawmempool. */
     private long sequence;
 
@@ -33,23 +34,30 @@ public final class Mempool {
     }
 
     public synchronized MempoolEntry admit(Transaction transaction, MempoolValidationContext context, UtxoView chainUtxos) {
-        return admitInternal(transaction, context, chainUtxos, false, false, null);
+        return admitInternal(transaction, context, chainUtxos, false, false, null, null);
     }
 
     /** Revalidates a persisted transaction while preserving its original local admission time. */
     public synchronized MempoolEntry admitRestored(Transaction transaction, long arrivalTime,
                                                    MempoolValidationContext context, UtxoView chainUtxos) {
-        if (arrivalTime < 0) throw new IllegalArgumentException("arrivalTime must not be negative");
-        return admitInternal(transaction, context, chainUtxos, false, false, arrivalTime);
+        return admitRestored(transaction, arrivalTime, Math.max(0L, context.nextBlockHeight() - 1L), false, context, chainUtxos);
+    }
+
+    public synchronized MempoolEntry admitRestored(Transaction transaction, long arrivalTime, long admissionHeight,
+                                                   boolean wasUnbroadcast, MempoolValidationContext context, UtxoView chainUtxos) {
+        if (arrivalTime < 0 || admissionHeight < 0) throw new IllegalArgumentException("negative persisted mempool metadata");
+        MempoolEntry entry = admitInternal(transaction, context, chainUtxos, false, false, arrivalTime, admissionHeight);
+        if (wasUnbroadcast) unbroadcast.add(transaction.txId());
+        return entry;
     }
     private MempoolEntry admitInternal(Transaction transaction, MempoolValidationContext context, UtxoView chainUtxos, boolean packageMode) {
-        return admitInternal(transaction, context, chainUtxos, packageMode, false, null);
+        return admitInternal(transaction, context, chainUtxos, packageMode, false, null, null);
     }
     private MempoolEntry admitInternal(Transaction transaction, MempoolValidationContext context, UtxoView chainUtxos, boolean packageMode, boolean bypassLimits) {
-        return admitInternal(transaction, context, chainUtxos, packageMode, bypassLimits, null);
+        return admitInternal(transaction, context, chainUtxos, packageMode, bypassLimits, null, null);
     }
     private MempoolEntry admitInternal(Transaction transaction, MempoolValidationContext context, UtxoView chainUtxos,
-                                       boolean packageMode, boolean bypassLimits, Long restoredArrivalTime) {
+                                       boolean packageMode, boolean bypassLimits, Long restoredArrivalTime, Long restoredAdmissionHeight) {
         Objects.requireNonNull(transaction, "transaction");
         Objects.requireNonNull(context, "context");
         Objects.requireNonNull(chainUtxos, "chainUtxos");
@@ -89,7 +97,8 @@ public final class Mempool {
         ru.bitcoin.node.mempool.policy.StandardTransactionPolicy.validateDustFee(transaction, modifiedFee, policy.dustRelaySatPerKvB());
         PackagePolicy.ephemeralSpends(transaction, entries, policy.dustRelaySatPerKvB());
         long arrivalTime = restoredArrivalTime != null ? restoredArrivalTime : clock.instant().getEpochSecond();
-        var entry = new MempoolEntry(transaction, fee, weight, arrivalTime, sigops, feeDelta);
+        long admissionHeight = restoredAdmissionHeight != null ? restoredAdmissionHeight : Math.max(0L, context.nextBlockHeight() - 1L);
+        var entry = new MempoolEntry(transaction, fee, weight, arrivalTime, sigops, feeDelta, admissionHeight);
         if (!packageMode && entry.modifiedFee() < new FeeRate(minimumFeeRate()).feeForVSize(entry.virtualSize())) throw new MempoolAdmissionException("mempool-min-fee");
         MempoolGraphPolicy.replacement(entries, conflicts, evicted, entry, limits);
         Map<Hash256, MempoolEntry> candidate = new LinkedHashMap<>(entries);
@@ -99,6 +108,7 @@ public final class Mempool {
         long removedRate = packageMode ? 0 : MempoolGraphPolicy.trim(candidate, limits.maxPoolVirtualBytes(), txId);
         entries.clear();
         entries.putAll(candidate);
+        unbroadcast.retainAll(entries.keySet());
         rebuildSpent();
         if (removedRate > 0) rollingFee.bump(removedRate, limits.incrementalRelaySatPerKvB(), clock.instant().getEpochSecond());
         sequence++;
@@ -135,6 +145,7 @@ public final class Mempool {
         Mempool staged = new Mempool(policy, limits, clock);
         staged.entries.putAll(entries);
         staged.feeDeltas.putAll(feeDeltas);
+        staged.unbroadcast.addAll(unbroadcast);
         removed.forEach(staged.entries::remove);
         staged.rebuildSpent();
         long fee = 0, size = 0;
@@ -153,13 +164,31 @@ public final class Mempool {
         long removedRate = MempoolGraphPolicy.trim(staged.entries, limits.maxPoolVirtualBytes(), txs.getLast().txId());
         List<MempoolEntry> result = txs.stream().map(tx -> staged.entries.get(tx.txId())).toList();
         if (result.stream().anyMatch(Objects::isNull)) throw new MempoolAdmissionException("package-evicted");
-        entries.clear(); entries.putAll(staged.entries); rebuildSpent();
+        entries.clear(); entries.putAll(staged.entries); unbroadcast.retainAll(entries.keySet()); rebuildSpent();
         if (removedRate > 0) rollingFee.bump(removedRate, limits.incrementalRelaySatPerKvB(), clock.instant().getEpochSecond());
         if (!fresh.isEmpty() || !removed.isEmpty()) sequence++;
         return result;
     }
 
     /** Result of a non-mutating mempool/package acceptance probe. */
+    public synchronized void markUnbroadcast(Hash256 txid) {
+        Objects.requireNonNull(txid, "txid");
+        if (entries.containsKey(txid)) unbroadcast.add(txid);
+    }
+
+    public synchronized boolean acknowledgeBroadcast(Hash256 hash) {
+        Objects.requireNonNull(hash, "hash");
+        Hash256 txid = null;
+        if (entries.containsKey(hash)) txid = hash;
+        else for (MempoolEntry entry : entries.values()) {
+            if (entry.transaction().wtxId().equals(hash)) { txid = entry.transaction().txId(); break; }
+        }
+        return txid != null && unbroadcast.remove(txid);
+    }
+
+    public synchronized boolean isUnbroadcast(Hash256 txid) { return unbroadcast.contains(txid); }
+    public synchronized Set<Hash256> unbroadcastTransactions() { return Set.copyOf(unbroadcast); }
+
     public record TestAcceptResult(List<MempoolEntry> entries, String rejectReason) {
         public TestAcceptResult { entries = List.copyOf(entries); }
         public boolean allowed() { return rejectReason == null; }
@@ -233,6 +262,7 @@ public final class Mempool {
             MempoolEntry entry = entries.remove(id);
             for (var input : entry.transaction().inputs()) spent.remove(input.previousOutput(), id);
         }
+        unbroadcast.retainAll(entries.keySet());
         sequence++;
         return Optional.of(root);
     }
@@ -250,6 +280,7 @@ public final class Mempool {
         Objects.requireNonNull(confirmed);
         Mempool replacement = new Mempool(policy, limits, clock);
         replacement.feeDeltas.putAll(feeDeltas);
+        replacement.unbroadcast.addAll(unbroadcast);
         List<Hash256> removed = new ArrayList<>();
         for (var entry : entries.values()) {
             Hash256 id = entry.transaction().txId();
@@ -269,6 +300,7 @@ public final class Mempool {
         }
         entries.clear();
         entries.putAll(replacement.entries);
+        unbroadcast.retainAll(entries.keySet());
         spent.clear();
         spent.putAll(replacement.spent);
         rollingFee.blockConnected(clock.instant().getEpochSecond());
@@ -282,6 +314,7 @@ public final class Mempool {
         Mempool staged = new Mempool(policy, limits, clock);
         staged.entries.putAll(entries);
         staged.feeDeltas.putAll(feeDeltas);
+        staged.unbroadcast.addAll(unbroadcast);
         confirmed.forEach(staged.entries::remove);
         staged.rebuildSpent();
         for (var tx : disconnected) {
@@ -320,7 +353,9 @@ public final class Mempool {
         staged.revalidate(context, chainUtxos, confirmed);        staged.expire();
         int beforeTrim = staged.size();
         long removedRate = MempoolGraphPolicy.trim(staged.entries, limits.maxPoolVirtualBytes(), null);
-        entries.clear(); entries.putAll(staged.entries); rebuildSpent();
+        entries.clear(); entries.putAll(staged.entries);
+        unbroadcast.clear(); unbroadcast.addAll(staged.unbroadcast); unbroadcast.retainAll(entries.keySet());
+        rebuildSpent();
         rollingFee.blockConnected(clock.instant().getEpochSecond());
         if (staged.size() < beforeTrim) rollingFee.bump(removedRate, limits.incrementalRelaySatPerKvB(), clock.instant().getEpochSecond());
         if (!beforeIds.equals(entries.keySet())) sequence++;

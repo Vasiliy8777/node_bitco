@@ -40,10 +40,12 @@ class RocksDbMempoolStoreTest {
         var transaction = tx((byte) 3, true);
         try (var db = new RocksDbDatabase(temp.resolve("metadata"))) {
             var store = new RocksDbMempoolStore(db);
-            store.replace(List.of(new PersistedMempoolEntry(transaction, 123_456L)));
+            store.replace(List.of(new PersistedMempoolEntry(transaction, 123_456L, 777L, true)));
             var loaded = store.load();
             assertEquals(1, loaded.size());
             assertEquals(123_456L, loaded.getFirst().arrivalTime());
+            assertEquals(777L, loaded.getFirst().admissionHeight());
+            assertTrue(loaded.getFirst().unbroadcast());
             assertEquals(transaction.wtxId(), loaded.getFirst().transaction().wtxId());
         }
     }

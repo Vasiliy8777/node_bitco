@@ -559,4 +559,19 @@ class MempoolTest {
         assertTrue(mempool.descendants(new Hash256(new byte[32])).isEmpty());
     }
 
+    @Test
+    void admissionHeightAndUnbroadcastAcknowledgementAreTracked() {
+        Fixture fixture = createFixture();
+        Mempool mempool = new Mempool();
+        MempoolEntry entry = mempool.admit(fixture.transaction(),
+                new MempoolValidationContext(SPENDING_HEIGHT, 1_700_000_000L, height -> 1_600_000_000L),
+                fixture.utxoView());
+        assertEquals(SPENDING_HEIGHT - 1L, entry.admissionHeight());
+        assertFalse(mempool.isUnbroadcast(fixture.transaction().txId()));
+        mempool.markUnbroadcast(fixture.transaction().txId());
+        assertTrue(mempool.isUnbroadcast(fixture.transaction().txId()));
+        assertTrue(mempool.acknowledgeBroadcast(fixture.transaction().wtxId()));
+        assertFalse(mempool.isUnbroadcast(fixture.transaction().txId()));
+    }
+
 }

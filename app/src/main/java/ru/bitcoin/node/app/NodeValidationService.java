@@ -509,6 +509,29 @@ public final class NodeValidationService implements AutoCloseable {
         }
     }
 
+    public void markMempoolUnbroadcast(Hash256 txid) {
+        synchronized (chain) {
+            synchronizePool();
+            mempool.markUnbroadcast(txid);
+            if (persistMempool) mempoolPersistenceDirty = true;
+        }
+    }
+
+    public void acknowledgeMempoolBroadcast(Hash256 txidOrWtxid) {
+        synchronized (chain) {
+            synchronizePool();
+            if (mempool.acknowledgeBroadcast(txidOrWtxid) && persistMempool) mempoolPersistenceDirty = true;
+        }
+    }
+
+    public int unbroadcastMempoolCount() {
+        synchronized (chain) { synchronizePool(); return mempool.unbroadcastTransactions().size(); }
+    }
+
+    public boolean isMempoolUnbroadcast(Hash256 txid) {
+        synchronized (chain) { synchronizePool(); return mempool.isUnbroadcast(txid); }
+    }
+
     /** Current spendable output, optionally with the mempool overlaid on chainstate. */
     public Optional<TxOutInfo> txOut(Hash256 txid, long outputIndex, boolean includeMempool) {
         Objects.requireNonNull(txid, "txid");
@@ -1270,9 +1293,9 @@ public final class NodeValidationService implements AutoCloseable {
         return persistedEntries(mempool.entries());
     }
 
-    private static List<PersistedMempoolEntry> persistedEntries(List<MempoolEntry> entries) {
+    private List<PersistedMempoolEntry> persistedEntries(List<MempoolEntry> entries) {
         return entries.stream()
-                .map(entry -> new PersistedMempoolEntry(entry.transaction(), entry.arrivalTime()))
+                .map(entry -> new PersistedMempoolEntry(entry.transaction(), entry.arrivalTime(), entry.admissionHeight(), mempool.isUnbroadcast(entry.transaction().txId())))
                 .toList();
     }
 
@@ -1343,7 +1366,10 @@ public final class NodeValidationService implements AutoCloseable {
                     if (persisted.arrivalTime() == 0L) {
                         mempool.admit(tx, context(), coins);
                     } else {
-                        mempool.admitRestored(tx, persisted.arrivalTime(), context(), coins);
+                        long height = persisted.admissionHeight() == Long.MAX_VALUE
+                                ? Math.max(0L, context().nextBlockHeight() - 1L)
+                                : persisted.admissionHeight();
+                        mempool.admitRestored(tx, persisted.arrivalTime(), height, persisted.unbroadcast(), context(), coins);
                     }
                 } catch (MempoolAdmissionException | IllegalArgumentException ignored) {
                     // Stale, expired-by-policy, conflicting, or otherwise invalid after restart.

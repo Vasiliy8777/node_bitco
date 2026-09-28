@@ -794,7 +794,7 @@ public final class NodeRpcServer implements AutoCloseable {
                 info.put("mempoolminfee", satoshisPerKvBToBtcPerKvB(validation.feeFilterRate()));
                 info.put("minrelaytxfee", satoshisPerKvBToBtcPerKvB(validation.minimumRelayFeeRate()));
                 info.put("incrementalrelayfee", satoshisPerKvBToBtcPerKvB(MempoolLimits.DEFAULT.incrementalRelaySatPerKvB()));
-                info.put("unbroadcastcount", 0);
+                info.put("unbroadcastcount", validation.unbroadcastMempoolCount());
                 info.put("limitclustercount", MempoolLimits.DEFAULT.clusterCount());
                 info.put("limitclustersize", MempoolLimits.DEFAULT.clusterVirtualBytes());
                 info.put("optimal", true);
@@ -863,7 +863,7 @@ public final class NodeRpcServer implements AutoCloseable {
         };
     }
 
-    private static Map<String, Object> mempoolEntryJson(ru.bitcoin.node.mempool.Mempool.EntryGraphView view) {
+    private Map<String, Object> mempoolEntryJson(ru.bitcoin.node.mempool.Mempool.EntryGraphView view) {
         var entry = view.entry();
         var result = new LinkedHashMap<String, Object>();
         result.put("vsize", entry.virtualSize());
@@ -871,6 +871,7 @@ public final class NodeRpcServer implements AutoCloseable {
         result.put("vsize_bip141", TransactionWeight.virtualSize(entry.weight()));
         result.put("weight", entry.weight());
         result.put("time", entry.arrivalTime());
+        result.put("height", entry.admissionHeight());
         result.put("ancestorcount", view.ancestors().size());
         result.put("ancestorsize", view.ancestorVirtualSize());
         result.put("descendantcount", view.descendants().size());
@@ -885,6 +886,7 @@ public final class NodeRpcServer implements AutoCloseable {
                 "chunk", satoshisToBtc(view.chunk().fee())));
         result.put("depends", view.parents().stream().map(Hash256::toDisplayHex).sorted().toList());
         result.put("spentby", view.children().stream().map(Hash256::toDisplayHex).sorted().toList());
+        result.put("unbroadcast", validation.isMempoolUnbroadcast(entry.transaction().txId()));
         return result;
     }
 

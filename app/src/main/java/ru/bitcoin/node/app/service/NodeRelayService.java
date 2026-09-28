@@ -212,6 +212,7 @@ public final class NodeRelayService implements AutoCloseable {
                                     || vector.type() == InventoryVector.MSG_WITNESS_TX
                                     || vector.type() == MSG_WTX) {
                                 relayState.markKnown(vector.hash());
+                                validation.acknowledgeMempoolBroadcast(vector.hash());
                             }
                         }
                     }
@@ -815,6 +816,7 @@ public final class NodeRelayService implements AutoCloseable {
 
     public Hash256 submitTransaction(Transaction transaction) {
         validation.admit(transaction);
+        validation.markMempoolUnbroadcast(transaction.txId());
         announceTransaction(transaction, null);
         reconsiderOrphanDescendants(transaction);
         return transaction.txId();
@@ -837,6 +839,7 @@ public final class NodeRelayService implements AutoCloseable {
                 .map(entry -> entry.transaction().txId()).collect(java.util.stream.Collectors.toSet());
         List<Hash256> replaced = before.stream().filter(id -> !after.contains(id)).toList();
         for (Transaction transaction : packageTransactions) {
+            validation.markMempoolUnbroadcast(transaction.txId());
             orphanage.remove(transaction);
             orphanage.removeConflicts(transaction);
             announceTransaction(transaction, null);

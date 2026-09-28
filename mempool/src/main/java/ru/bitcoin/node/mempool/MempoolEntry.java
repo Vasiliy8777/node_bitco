@@ -10,14 +10,19 @@ public record MempoolEntry(
         long weight,
         long arrivalTime,
         long sigOpCost,
-        long feeDelta
+        long feeDelta,
+        long admissionHeight
 ) {
     public MempoolEntry(Transaction transaction, long fee, long weight, long arrivalTime) {
-        this(transaction, fee, weight, arrivalTime, 0, 0);
+        this(transaction, fee, weight, arrivalTime, 0, 0, 0);
     }
 
     public MempoolEntry(Transaction transaction, long fee, long weight, long arrivalTime, long sigOpCost) {
-        this(transaction, fee, weight, arrivalTime, sigOpCost, 0);
+        this(transaction, fee, weight, arrivalTime, sigOpCost, 0, 0);
+    }
+
+    public MempoolEntry(Transaction transaction, long fee, long weight, long arrivalTime, long sigOpCost, long feeDelta) {
+        this(transaction, fee, weight, arrivalTime, sigOpCost, feeDelta, 0);
     }
 
     /** Fee used only by mempool policy and mining. Consensus/base accounting keeps fee(). */
@@ -26,7 +31,7 @@ public record MempoolEntry(
     }
 
     public MempoolEntry withFeeDelta(long delta) {
-        return new MempoolEntry(transaction, fee, weight, arrivalTime, sigOpCost, delta);
+        return new MempoolEntry(transaction, fee, weight, arrivalTime, sigOpCost, delta, admissionHeight);
     }
 
     /** Bitcoin Core-style sigops-adjusted weight used by cluster feerate calculations. */

@@ -13,7 +13,8 @@ import java.util.*;
 /** Durable local mempool snapshot. Entries are keyed by txid and revalidated on startup. */
 public final class RocksDbMempoolStore {
     public static final byte PREFIX = 0x0d;
-    private static final byte[] FORMAT_MAGIC = new byte[]{'M', 'P', 'V', '2'};
+    private static final byte[] FORMAT_MAGIC = new byte[]{'M', 'P', 'V', '3'};
+    private static final byte[] FORMAT_MAGIC_V2 = new byte[]{'M', 'P', 'V', '2'};
     private final RocksDbDatabase database;
 
     public RocksDbMempoolStore(RocksDbDatabase database) {
@@ -40,6 +41,8 @@ public final class RocksDbMempoolStore {
             for (var entry : newEntries.entrySet()) {
                 PersistedMempoolEntry old = oldEntries.get(entry.getKey());
                 if (old == null || old.arrivalTime() != entry.getValue().arrivalTime()
+                        || old.admissionHeight() != entry.getValue().admissionHeight()
+                        || old.unbroadcast() != entry.getValue().unbroadcast()
                         || !old.transaction().wtxId().equals(entry.getValue().transaction().wtxId())) {
                     batch.put(key(entry.getKey()), encode(entry.getValue()));
                 }
@@ -61,32 +64,38 @@ public final class RocksDbMempoolStore {
 
     private static byte[] encode(PersistedMempoolEntry entry) {
         byte[] tx = TransactionSerializer.serialize(entry.transaction());
-        ByteBuffer buffer = ByteBuffer.allocate(FORMAT_MAGIC.length + Long.BYTES + tx.length);
+        ByteBuffer buffer = ByteBuffer.allocate(FORMAT_MAGIC.length + Long.BYTES * 2 + 1 + tx.length);
         buffer.put(FORMAT_MAGIC);
         buffer.putLong(entry.arrivalTime());
+        buffer.putLong(entry.admissionHeight());
+        buffer.put((byte) (entry.unbroadcast() ? 1 : 0));
         buffer.put(tx);
         return buffer.array();
     }
 
     private static PersistedMempoolEntry decode(byte[] value) {
         Objects.requireNonNull(value, "value");
-        if (hasMagic(value)) {
-            if (value.length <= FORMAT_MAGIC.length + Long.BYTES) throw new IllegalArgumentException("Truncated mempool entry");
-            ByteBuffer buffer = ByteBuffer.wrap(value);
-            buffer.position(FORMAT_MAGIC.length);
-            long arrivalTime = buffer.getLong();
-            if (arrivalTime < 0) throw new IllegalArgumentException("Negative mempool arrival time");
-            byte[] tx = new byte[buffer.remaining()];
-            buffer.get(tx);
-            return new PersistedMempoolEntry(TransactionParser.parse(tx), arrivalTime);
+        if (hasMagic(value, FORMAT_MAGIC)) {
+            if (value.length <= FORMAT_MAGIC.length + Long.BYTES * 2 + 1) throw new IllegalArgumentException("Truncated mempool entry");
+            ByteBuffer buffer = ByteBuffer.wrap(value); buffer.position(FORMAT_MAGIC.length);
+            long arrivalTime = buffer.getLong(), admissionHeight = buffer.getLong();
+            boolean unbroadcast = buffer.get() != 0;
+            if (arrivalTime < 0 || admissionHeight < 0) throw new IllegalArgumentException("Negative mempool metadata");
+            byte[] tx = new byte[buffer.remaining()]; buffer.get(tx);
+            return new PersistedMempoolEntry(TransactionParser.parse(tx), arrivalTime, admissionHeight, unbroadcast);
         }
-        // Backward compatibility with the original transaction-only RocksDB format.
-        return new PersistedMempoolEntry(TransactionParser.parse(value), 0L);
+        if (hasMagic(value, FORMAT_MAGIC_V2)) {
+            if (value.length <= FORMAT_MAGIC_V2.length + Long.BYTES) throw new IllegalArgumentException("Truncated mempool entry");
+            ByteBuffer buffer = ByteBuffer.wrap(value); buffer.position(FORMAT_MAGIC_V2.length);
+            long arrivalTime = buffer.getLong(); byte[] tx = new byte[buffer.remaining()]; buffer.get(tx);
+            return new PersistedMempoolEntry(TransactionParser.parse(tx), arrivalTime, Long.MAX_VALUE, false);
+        }
+        return new PersistedMempoolEntry(TransactionParser.parse(value), 0L, Long.MAX_VALUE, false);
     }
 
-    private static boolean hasMagic(byte[] value) {
-        if (value.length < FORMAT_MAGIC.length) return false;
-        for (int i = 0; i < FORMAT_MAGIC.length; i++) if (value[i] != FORMAT_MAGIC[i]) return false;
+    private static boolean hasMagic(byte[] value, byte[] magic) {
+        if (value.length < magic.length) return false;
+        for (int i = 0; i < magic.length; i++) if (value[i] != magic[i]) return false;
         return true;
     }
 
