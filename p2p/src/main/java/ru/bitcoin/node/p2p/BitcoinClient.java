@@ -9,6 +9,9 @@ import java.util.Objects;
 public final class BitcoinClient
         implements PeerConnector {
 
+    private static final System.Logger log =
+            System.getLogger(BitcoinClient.class.getName());
+
     private final NetworkParameters networkParameters;
     private final long localServices;
     private final boolean relay;
@@ -114,6 +117,13 @@ public final class BitcoinClient
                 } catch (IOException | RuntimeException v2Failure) {
                     try { peer.close(); } catch (IOException closeFailure) { v2Failure.addSuppressed(closeFailure); }
                     if (policy == PeerTransportPolicy.V2_ONLY) throw v2Failure;
+
+                    log.log(
+                            System.Logger.Level.DEBUG,
+                            "BIP324 v2 connection to {0}:{1} failed; reconnecting with v1: {2}",
+                            host, port, v2Failure.toString()
+                    );
+
                     // BIP324 AUTO mode reconnects over a fresh TCP connection before downgrading to v1.
                     peer = newPeer(startHeight, connectionRelay);
                     peer.markV2Fallback();

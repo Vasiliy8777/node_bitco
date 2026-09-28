@@ -474,34 +474,52 @@ public final class NodeLifecycleService
                 return connection;
 
             } catch (IOException syncFailure) {
-
-                if (isStoppingOrStopped()) {
-                    throw syncFailure;
+                handleHeaderSyncPeerFailure(connection, peer, failedAddresses, failure, syncFailure);
+            } catch (IllegalStateException stalePeerFailure) {
+                /*
+                 * PeerManager/background reader may observe a disconnect between
+                 * connectOneWithAddress() and the first synchronous GETHEADERS.
+                 * Treat that network race exactly like an IOException, but do not
+                 * hide unrelated lifecycle/programming IllegalStateExceptions.
+                 */
+                if (peer.state() != PeerState.CLOSED) {
+                    throw stalePeerFailure;
                 }
-
-                failure.addSuppressed(
-                        syncFailure
+                IOException syncFailure = new IOException(
+                        "Peer closed before or during header synchronization",
+                        stalePeerFailure
                 );
-
-                failedAddresses.add(
-                        connection.address()
-                );
-
-                peerManager.remove(
-                        peer
-                );
-
-                try {
-
-                    peer.close();
-
-                } catch (IOException closeFailure) {
-
-                    syncFailure.addSuppressed(
-                            closeFailure
-                    );
-                }
+                handleHeaderSyncPeerFailure(connection, peer, failedAddresses, failure, syncFailure);
             }
+        }
+    }
+
+
+    private void handleHeaderSyncPeerFailure(
+            OutboundPeerConnection connection,
+            Peer peer,
+            List<PeerAddress> failedAddresses,
+            IOException aggregateFailure,
+            IOException syncFailure
+    ) throws IOException {
+        if (isStoppingOrStopped()) {
+            throw syncFailure;
+        }
+
+        aggregateFailure.addSuppressed(syncFailure);
+        failedAddresses.add(connection.address());
+        peerManager.remove(peer);
+
+        log.debug(
+                "Header-sync peer {} failed; trying another peer: {}",
+                connection.address(),
+                syncFailure.toString()
+        );
+
+        try {
+            peer.close();
+        } catch (IOException closeFailure) {
+            syncFailure.addSuppressed(closeFailure);
         }
     }
 
