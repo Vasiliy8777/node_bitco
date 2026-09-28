@@ -50,6 +50,7 @@ public final class NodeRpcServer implements AutoCloseable {
     private final PeerManager peerManager;
     private final long localServices;
     private final long startedNanos = System.nanoTime();
+    private final ConcurrentHashMap<Long, ActiveCommand> activeCommands = new ConcurrentHashMap<>();
 
     public NodeRpcServer(InetSocketAddress address, String user, String password, MiningController mining,
                          NodeValidationService validation, NodeRelayService relay, NodeSyncInfrastructure sync,
@@ -106,56 +107,142 @@ public final class NodeRpcServer implements AutoCloseable {
                 respond(exchange, 413, Map.of("error", "Request too large"));
                 return;
             }
-            Object id = null;
-            Object result = null;
-            Object error = null;
-            boolean acquired = false;
+
+            final Object root;
             try {
-                Map<?, ?> request;
-                try {
-                    request = mapper.readValue(body, Map.class);
-                } catch (RuntimeException exception) {
-                    throw new RpcException(-32700, "Parse error");
-                }
-                if (request == null || !(request.get("method") instanceof String method))
-                    throw new RpcException(-32600, "Invalid request");
-                id = request.get("id");
-                if (id != null && !(id instanceof String) && !(id instanceof Number))
-                    throw new RpcException(-32600, "Invalid request id");
-                Object rawParams = request.get("params");
-                if (rawParams != null && !(rawParams instanceof List<?>))
-                    throw new RpcException(-32602, "Expected positional parameters");
-                List<?> params = rawParams == null ? List.of() : (List<?>) rawParams;
-                if (method.equals("getblocktemplate") && !params.isEmpty() && params.getFirst() instanceof Map<?, ?> options
-                        && options.containsKey("longpollid")) {
-                    acquired = longPolls.tryAcquire();
-                    if (!acquired) throw new RpcException(-8, "Too many long-poll requests");
-                }
-                result = dispatch(method, params);
-            } catch (RpcException exception) {
-                error = Map.of("code", exception.code(), "message", exception.getMessage());
-            } catch (IllegalArgumentException exception) {
-                error = Map.of("code", -32602, "message", "Invalid parameters");
-            } catch (InterruptedException exception) {
-                Thread.currentThread().interrupt();
-                error = Map.of("code", -32603, "message", "Server stopping");
+                root = mapper.readValue(body, Object.class);
             } catch (RuntimeException exception) {
-                org.slf4j.LoggerFactory.getLogger(NodeRpcServer.class).error("RPC failed", exception);
-                error = Map.of("code", -32603, "message", "Internal error");
-            } finally {
-                if (acquired) longPolls.release();
+                respond(exchange, 200, rpcError(null, null, -32700, "Parse error"));
+                return;
             }
-            Map<String, Object> response = new LinkedHashMap<>();
-            response.put("result", result);
-            response.put("error", error);
-            response.put("id", id);
-            respond(exchange, 200, response);
+
+            if (root instanceof Map<?, ?> request) {
+                RpcReply reply = executeRequest(request);
+                if (reply.notification()) {
+                    respondNoContent(exchange);
+                } else {
+                    respond(exchange, 200, reply.body());
+                }
+                return;
+            }
+            if (root instanceof List<?> batch) {
+                if (batch.isEmpty()) {
+                    // Bitcoin Core preserves the historical empty-batch response.
+                    respond(exchange, 200, List.of());
+                    return;
+                }
+                List<Object> replies = new ArrayList<>();
+                for (Object item : batch) {
+                    if (!(item instanceof Map<?, ?> request)) {
+                        replies.add(rpcError(null, "2.0", -32600, "Invalid Request object"));
+                        continue;
+                    }
+                    RpcReply reply = executeRequest(request);
+                    if (!reply.notification()) replies.add(reply.body());
+                }
+                if (replies.isEmpty()) respondNoContent(exchange);
+                else respond(exchange, 200, replies);
+                return;
+            }
+            respond(exchange, 200, rpcError(null, null, -32700, "Top-level object parse error"));
         }
     }
+
+    private RpcReply executeRequest(Map<?, ?> request) {
+        Object id = request.get("id");
+        String jsonVersion = request.get("jsonrpc") instanceof String value ? value : null;
+        boolean v2 = "2.0".equals(jsonVersion);
+        boolean notification = v2 && !request.containsKey("id");
+        Object result = null;
+        Object error = null;
+        boolean acquired = false;
+        String method = null;
+        long started = System.nanoTime();
+        try {
+            if (request.containsKey("jsonrpc") && !v2)
+                throw new RpcException(-32600, "Invalid JSON-RPC version");
+            if (!(request.get("method") instanceof String value))
+                throw new RpcException(-32600, "Invalid request");
+            method = value;
+            if (id != null && !(id instanceof String) && !(id instanceof Number))
+                throw new RpcException(-32600, "Invalid request id");
+            Object rawParams = request.get("params");
+            if (rawParams != null && !(rawParams instanceof List<?>))
+                throw new RpcException(-32602, "Expected positional parameters");
+            List<?> params = rawParams == null ? List.of() : (List<?>) rawParams;
+            if (method.equals("getblocktemplate") && !params.isEmpty() && params.getFirst() instanceof Map<?, ?> options
+                    && options.containsKey("longpollid")) {
+                acquired = longPolls.tryAcquire();
+                if (!acquired) throw new RpcException(-8, "Too many long-poll requests");
+            }
+            activeCommands.put(Thread.currentThread().threadId(), new ActiveCommand(method, started));
+            result = dispatch(method, params);
+        } catch (RpcException exception) {
+            error = Map.of("code", exception.code(), "message", exception.getMessage());
+        } catch (IllegalArgumentException exception) {
+            error = Map.of("code", -32602, "message", "Invalid parameters");
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            error = Map.of("code", -32603, "message", "Server stopping");
+        } catch (RuntimeException exception) {
+            org.slf4j.LoggerFactory.getLogger(NodeRpcServer.class).error("RPC failed", exception);
+            error = Map.of("code", -32603, "message", "Internal error");
+        } finally {
+            activeCommands.remove(Thread.currentThread().threadId());
+            if (acquired) longPolls.release();
+        }
+        if (notification) return new RpcReply(null, true);
+        return new RpcReply(rpcResponse(id, jsonVersion, result, error), false);
+    }
+
+    private static Map<String, Object> rpcResponse(Object id, String jsonVersion, Object result, Object error) {
+        var response = new LinkedHashMap<String, Object>();
+        if ("2.0".equals(jsonVersion)) {
+            response.put("jsonrpc", "2.0");
+            if (error == null) response.put("result", result);
+            else response.put("error", error);
+        } else {
+            response.put("result", result);
+            response.put("error", error);
+        }
+        response.put("id", id);
+        return response;
+    }
+
+    private static Map<String, Object> rpcError(Object id, String jsonVersion, int code, String message) {
+        return rpcResponse(id, jsonVersion, null, Map.of("code", code, "message", message));
+    }
+
+    private record RpcReply(Object body, boolean notification) { }
+    private record ActiveCommand(String method, long startedNanos) { }
 
     @SuppressWarnings("unchecked")
     private Object dispatch(String method, List<?> params) throws InterruptedException {
         return switch (method) {
+            case "help" -> {
+                if (params.size() > 1 || (!params.isEmpty() && !(params.getFirst() instanceof String)))
+                    throw new RpcException(-32602, "help takes an optional command name");
+                String command = params.isEmpty() ? null : (String) params.getFirst();
+                yield rpcHelp(command);
+            }
+            case "getrpcinfo" -> {
+                requireNoParams(method, params);
+                long now = System.nanoTime();
+                yield Map.of("active_commands", activeCommands.values().stream()
+                        .map(command -> Map.of("method", command.method(),
+                                "duration", Math.max(0L, (now - command.startedNanos()) / 1_000L)))
+                        .toList());
+            }
+            case "ping" -> {
+                requireNoParams(method, params);
+                requirePeerManager().requestPings();
+                yield null;
+            }
+            case "savemempool" -> {
+                requireNoParams(method, params);
+                validation.flushPersistentMempool();
+                yield Map.of("filename", "rocksdb:mempool");
+            }
             case "getblocktemplate" -> {
                 if (params.size() != 1 || !(params.getFirst() instanceof Map<?, ?>))
                     throw new RpcException(-32602, "Expected one template request object");
@@ -1186,6 +1273,25 @@ public final class NodeRpcServer implements AutoCloseable {
     private PeerManager requirePeerManager() {
         if (peerManager == null) throw new RpcException(-32601, "Network RPC unavailable");
         return peerManager;
+    }
+
+    private String rpcHelp(String command) {
+        List<String> methods = List.of(
+                "clearbanned", "decoderawtransaction", "disconnectnode", "dumptxoutset", "getbestblockhash",
+                "getblock", "getblockchaininfo", "getblockcount", "getblockfilter", "getblockhash", "getblockheader",
+                "getblocktemplate", "getchainstates", "getchaintips", "getconnectioncount", "getdifficulty", "getindexinfo",
+                "getmempoolancestors", "getmempoolcluster", "getmempooldescendants", "getmempoolentry", "getmempoolfeeratediagram",
+                "getmempoolinfo", "getmininginfo", "getnetworkhashps", "getnetworkinfo", "getpeerinfo", "getprioritisedtransactions",
+                "getrawmempool", "getrawtransaction", "getrpcinfo", "gettxout", "gettxoutsetinfo", "gettxspendingprevout", "help",
+                "invalidateblock", "listbanned", "loadtxoutset", "ping", "prioritisetransaction", "pruneblockchain", "reconsiderblock",
+                "savemempool", "sendrawtransaction", "setban", "submitblock", "submitpackage", "testmempoolaccept", "uptime");
+        if (command == null) return String.join("\n", methods);
+        if (!methods.contains(command)) throw new RpcException(-32601, "Method not found");
+        return command + " - supported by java-bitcoin-node RPC";
+    }
+
+    private void respondNoContent(HttpExchange exchange) throws IOException {
+        exchange.sendResponseHeaders(204, -1);
     }
 
     private void respond(HttpExchange exchange, int status, Object value) throws IOException {

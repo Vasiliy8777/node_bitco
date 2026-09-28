@@ -175,6 +175,20 @@ public final class PeerManager
                 .toList();
     }
 
+    public void requestPings() {
+        for (Peer peer : readyPeers()) {
+            long nonce;
+            do {
+                nonce = java.util.concurrent.ThreadLocalRandom.current().nextLong();
+            } while (nonce == 0L);
+            try {
+                peer.requestPing(nonce);
+            } catch (IOException | IllegalStateException failure) {
+                peer.handleReaderFailure(new IOException("RPC ping failed", failure));
+            }
+        }
+    }
+
     public synchronized int size() {
         return peers.size();
     }

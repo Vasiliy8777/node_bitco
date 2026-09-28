@@ -44,6 +44,33 @@ class MiningRpcTest {
                 try (var rpc = new NodeRpcServer(new InetSocketAddress("127.0.0.1", 0), "test", "test-password",
                         mining, validation, relay, sync, ready::get, peers); var client = HttpClient.newHttpClient()) {
                     URI uri = URI.create("http://127.0.0.1:" + rpc.port());
+
+                    // Operational JSON-RPC transport: Core-compatible batch and JSON-RPC 2.0 notifications.
+                    var batchRequest = HttpRequest.newBuilder(uri)
+                            .header("Authorization", "Basic " + Base64.getEncoder().encodeToString("test:test-password".getBytes(java.nio.charset.StandardCharsets.UTF_8)))
+                            .POST(HttpRequest.BodyPublishers.ofString(JSON.writeValueAsString(List.of(
+                                    Map.of("id", 11, "method", "getblockcount", "params", List.of()),
+                                    Map.of("jsonrpc", "2.0", "id", 12, "method", "uptime", "params", List.of())))))
+                            .build();
+                    var batchResponse = client.send(batchRequest, HttpResponse.BodyHandlers.ofString());
+                    assertEquals(200, batchResponse.statusCode());
+                    var batch = (List<?>) JSON.readValue(batchResponse.body(), List.class);
+                    assertEquals(2, batch.size());
+                    assertEquals(0, ((Number) ((Map<?, ?>) batch.get(0)).get("result")).intValue());
+                    assertEquals("2.0", ((Map<?, ?>) batch.get(1)).get("jsonrpc"));
+
+                    var notificationRequest = HttpRequest.newBuilder(uri)
+                            .header("Authorization", "Basic " + Base64.getEncoder().encodeToString("test:test-password".getBytes(java.nio.charset.StandardCharsets.UTF_8)))
+                            .POST(HttpRequest.BodyPublishers.ofString(JSON.writeValueAsString(
+                                    Map.of("jsonrpc", "2.0", "method", "uptime", "params", List.of()))))
+                            .build();
+                    assertEquals(204, client.send(notificationRequest, HttpResponse.BodyHandlers.ofString()).statusCode());
+                    assertTrue(((String) call(client, uri, "help", List.of()).get("result")).contains("getrpcinfo"));
+                    var rpcInfo = (Map<?, ?>) call(client, uri, "getrpcinfo", List.of()).get("result");
+                    assertTrue(rpcInfo.containsKey("active_commands"));
+                    assertNull(call(client, uri, "ping", List.of()).get("error"));
+                    assertEquals("rocksdb:mempool", ((Map<?, ?>) call(client, uri, "savemempool", List.of()).get("result")).get("filename"));
+
                     String body = JSON.writeValueAsString(Map.of("id", 1, "method", "getblocktemplate", "params", List.of(Map.of("rules", List.of("segwit")))));
                     assertEquals(401, client.send(HttpRequest.newBuilder(uri).POST(HttpRequest.BodyPublishers.ofString(body)).build(), HttpResponse.BodyHandlers.ofString()).statusCode());
                     assertEquals(-10, ((Number) ((Map<?, ?>) call(client, uri, "getblocktemplate", List.of(Map.of("rules", List.of("segwit")))).get("error")).get("code")).intValue());

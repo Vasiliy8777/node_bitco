@@ -772,6 +772,10 @@ public final class Peer implements AutoCloseable {
         }
     }
 
+    public boolean requestPing(long nonce) throws IOException {
+        return sendPingIfDue(System.nanoTime(), 0L, nonce);
+    }
+
     public Optional<Duration> lastPingRoundTrip() {
         synchronized (pingLock) {
             return lastPingRoundTripNanos < 0L
