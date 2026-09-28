@@ -22,6 +22,7 @@ public final class NetworkDnsSeeds {
             List.of(
                     "testnet-seed.bitcoin.jonasschnelli.ch",
                     "seed.tbtc.petertodd.net",
+                    "seed.testnet.bitcoin.sprovoost.nl",
                     "testnet-seed.bluematt.me",
                     "seed.testnet.achownodes.xyz"
             );

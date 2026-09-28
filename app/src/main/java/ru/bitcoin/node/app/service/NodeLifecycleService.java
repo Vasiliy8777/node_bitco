@@ -385,14 +385,25 @@ public final class NodeLifecycleService
 
     private void bootstrapAddresses() {
 
-        if (!addressManager.isEmpty()) {
+        /*
+         * During IBD, a non-empty AddrMan is not proof that we have a usable
+         * synchronization peer. It may contain only stale/unreachable entries
+         * (or an explicitly configured peer that is itself still in early IBD).
+         *
+         * Refresh DNS seeds while the active chain is still below the network's
+         * minimum chain work. Once minimum work has been reached, preserve the
+         * normal AddrMan-first startup path and avoid unnecessary DNS lookups.
+         * Regtest has no DNS seeds, so this remains a no-op there.
+         */
+        if (!addressManager.isEmpty()
+                && validationService.activeTip().chainWork().compareTo(minimumChainWork) >= 0) {
             return;
         }
 
         peerDiscovery.discover();
     }
 
-    private void synchronizeHeaders(
+    private long synchronizeHeaders(
             Peer peer
     ) throws IOException {
 
@@ -419,7 +430,7 @@ public final class NodeLifecycleService
                         syncInfrastructure.blockLocatorBuilder()
                 );
 
-        coordinator.synchronize(
+        return coordinator.synchronize(
                 HEADER_SYNC_STOP_HASH,
                 batch -> { /* Headers are already persisted by HeaderSyncService. */ }
         );
@@ -465,9 +476,30 @@ public final class NodeLifecycleService
 
             try {
 
-                synchronizeHeaders(
+                long processedHeaders = synchronizeHeaders(
                         peer
                 );
+
+                /*
+                 * An empty HEADERS response is a valid end-of-chain signal only
+                 * after the local best-header chain has reached the network's
+                 * minimum chain work. Before that point it is not sufficient to
+                 * declare header IBD complete: the peer may itself be in early
+                 * IBD, stale, or otherwise unable to serve the required chain.
+                 * Treat it as a peer-local synchronization failure and fail over
+                 * without weakening the minimum-chain-work safety boundary.
+                 */
+                BlockIndex bestHeader = syncInfrastructure.headerChainState().bestHeaderTip();
+                if (processedHeaders == 0
+                        && bestHeader.chainWork().compareTo(minimumChainWork) < 0) {
+                    throw new IOException(
+                            "Header peer returned no progress below minimum chain work: "
+                                    + "bestHeaderHeight=" + bestHeader.height()
+                                    + ", bestHeaderChainWork=" + bestHeader.chainWork().toString(16)
+                                    + ", minimumChainWork=" + minimumChainWork.toString(16)
+                                    + ", remoteStartHeight=" + peer.remoteVersion().startHeight()
+                    );
+                }
 
                 /*
                  * Return the exact connection that successfully

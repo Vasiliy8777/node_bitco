@@ -30,7 +30,7 @@ class NetworkDnsSeedsTest {
     void shouldProvideTestnetSeeds() {
 
         assertEquals(
-                4,
+                5,
                 NetworkDnsSeeds.forNetwork(
                         BitcoinNetwork.TESTNET
                 ).size()
@@ -41,6 +41,14 @@ class NetworkDnsSeedsTest {
                         BitcoinNetwork.TESTNET
                 ).contains(
                         "testnet-seed.bitcoin.jonasschnelli.ch"
+                )
+        );
+
+        assertTrue(
+                NetworkDnsSeeds.forNetwork(
+                        BitcoinNetwork.TESTNET
+                ).contains(
+                        "seed.testnet.bitcoin.sprovoost.nl"
                 )
         );
     }
