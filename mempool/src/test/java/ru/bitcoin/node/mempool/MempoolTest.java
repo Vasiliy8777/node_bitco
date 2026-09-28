@@ -524,4 +524,39 @@ class MempoolTest {
         assertEquals(1_010_000L, entry.modifiedFee());
         assertEquals(1_000_000L, mempool.prioritisedTransactions().get(txid));
     }
+    @Test
+    void mempoolSequenceTracksTransactionSetMutationsOnly() {
+        Fixture fixture = createFixture();
+        Mempool mempool = new Mempool();
+        assertEquals(0L, mempool.snapshot().sequence());
+
+        Hash256 txid = fixture.transaction().txId();
+        mempool.prioritise(txid, 1_000L);
+        assertEquals(0L, mempool.snapshot().sequence());
+
+        mempool.admit(fixture.transaction(),
+                new MempoolValidationContext(SPENDING_HEIGHT, 1_700_000_000L, height -> 1_600_000_000L),
+                fixture.utxoView());
+        assertEquals(1L, mempool.snapshot().sequence());
+        assertEquals(1L, mempool.snapshot().sequence()); // Reads do not mutate sequence.
+
+        mempool.remove(txid);
+        assertEquals(2L, mempool.snapshot().sequence());
+    }
+
+    @Test
+    void ancestorAndDescendantQueriesExcludeTheTransactionItself() {
+        Fixture fixture = createFixture();
+        Mempool mempool = new Mempool();
+        Hash256 txid = fixture.transaction().txId();
+        mempool.admit(fixture.transaction(),
+                new MempoolValidationContext(SPENDING_HEIGHT, 1_700_000_000L, height -> 1_600_000_000L),
+                fixture.utxoView());
+
+        assertEquals(List.of(), mempool.ancestors(txid).orElseThrow());
+        assertEquals(List.of(), mempool.descendants(txid).orElseThrow());
+        assertTrue(mempool.ancestors(new Hash256(new byte[32])).isEmpty());
+        assertTrue(mempool.descendants(new Hash256(new byte[32])).isEmpty());
+    }
+
 }

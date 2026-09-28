@@ -878,6 +878,49 @@ public final class NodeValidationService implements AutoCloseable {
         }
     }
 
+    public Mempool.Snapshot mempoolSnapshot() {
+        synchronized (chain) {
+            synchronizePool();
+            expirePersistent();
+            return mempool.snapshot();
+        }
+    }
+
+    public Mempool.DetailedSnapshot detailedMempoolSnapshot() {
+        synchronized (chain) {
+            synchronizePool();
+            expirePersistent();
+            return mempool.detailedSnapshot();
+        }
+    }
+
+    public Optional<Mempool.GraphQuery> mempoolAncestorQuery(Hash256 txid) {
+        Objects.requireNonNull(txid, "txid");
+        synchronized (chain) {
+            synchronizePool();
+            expirePersistent();
+            return mempool.ancestorQuery(txid);
+        }
+    }
+
+    public Optional<Mempool.GraphQuery> mempoolDescendantQuery(Hash256 txid) {
+        Objects.requireNonNull(txid, "txid");
+        synchronized (chain) {
+            synchronizePool();
+            expirePersistent();
+            return mempool.descendantQuery(txid);
+        }
+    }
+
+    public Map<Hash256, Mempool.EntryGraphView> mempoolGraphEntries(Collection<Hash256> txids) {
+        Objects.requireNonNull(txids, "txids");
+        synchronized (chain) {
+            synchronizePool();
+            expirePersistent();
+            return mempool.graphViews(txids);
+        }
+    }
+
     public Optional<Mempool.ClusterView> mempoolCluster(Hash256 txid) {
         Objects.requireNonNull(txid, "txid");
         synchronized (chain) {

@@ -21,6 +21,8 @@ public final class Mempool {
     private final Map<Hash256, MempoolEntry> entries = new LinkedHashMap<>();
     private final Map<OutPoint, Hash256> spent = new HashMap<>();
     private final Map<Hash256, Long> feeDeltas = new LinkedHashMap<>();
+    /** Monotonic transaction-set mutation sequence used by getrawmempool. */
+    private long sequence;
 
     public Mempool() { this(new MempoolPolicy()); }
     public Mempool(MempoolPolicy policy) { this(policy, MempoolLimits.DEFAULT, java.time.Clock.systemUTC()); }
@@ -99,6 +101,7 @@ public final class Mempool {
         entries.putAll(candidate);
         rebuildSpent();
         if (removedRate > 0) rollingFee.bump(removedRate, limits.incrementalRelaySatPerKvB(), clock.instant().getEpochSecond());
+        sequence++;
         return entry;
     }
 
@@ -152,6 +155,7 @@ public final class Mempool {
         if (result.stream().anyMatch(Objects::isNull)) throw new MempoolAdmissionException("package-evicted");
         entries.clear(); entries.putAll(staged.entries); rebuildSpent();
         if (removedRate > 0) rollingFee.bump(removedRate, limits.incrementalRelaySatPerKvB(), clock.instant().getEpochSecond());
+        if (!fresh.isEmpty() || !removed.isEmpty()) sequence++;
         return result;
     }
 
@@ -229,6 +233,7 @@ public final class Mempool {
             MempoolEntry entry = entries.remove(id);
             for (var input : entry.transaction().inputs()) spent.remove(input.previousOutput(), id);
         }
+        sequence++;
         return Optional.of(root);
     }
 
@@ -267,11 +272,13 @@ public final class Mempool {
         spent.clear();
         spent.putAll(replacement.spent);
         rollingFee.blockConnected(clock.instant().getEpochSecond());
+        if (!removed.isEmpty()) sequence++;
         return List.copyOf(removed);
     }
     /** Chain reconciliation, including disconnected transactions, commits as one operation. */
     public synchronized void reconcile(MempoolValidationContext context, UtxoView chainUtxos,
                                        Set<Hash256> confirmed, List<Transaction> disconnected) {
+        Set<Hash256> beforeIds = Set.copyOf(entries.keySet());
         Mempool staged = new Mempool(policy, limits, clock);
         staged.entries.putAll(entries);
         staged.feeDeltas.putAll(feeDeltas);
@@ -316,9 +323,78 @@ public final class Mempool {
         entries.clear(); entries.putAll(staged.entries); rebuildSpent();
         rollingFee.blockConnected(clock.instant().getEpochSecond());
         if (staged.size() < beforeTrim) rollingFee.bump(removedRate, limits.incrementalRelaySatPerKvB(), clock.instant().getEpochSecond());
+        if (!beforeIds.equals(entries.keySet())) sequence++;
     }
     public synchronized boolean isEmpty() { return entries.isEmpty(); }
     public synchronized List<MempoolEntry> entries() { return List.copyOf(entries.values()); }
+
+    /** Atomic transaction-set snapshot paired with the mutation sequence. */
+    public synchronized Snapshot snapshot() {
+        return new Snapshot(List.copyOf(entries.values()), sequence);
+    }
+
+    /** Atomic full graph snapshot for verbose getrawmempool. */
+    public synchronized DetailedSnapshot detailedSnapshot() {
+        List<MempoolEntry> values = List.copyOf(entries.values());
+        return new DetailedSnapshot(values, sequence, graphViews(entries.keySet()));
+    }
+
+    /** In-mempool ancestors excluding the transaction itself. */
+    public synchronized Optional<List<Hash256>> ancestors(Hash256 txId) {
+        Objects.requireNonNull(txId, "txId");
+        if (!entries.containsKey(txId)) return Optional.empty();
+        Set<Hash256> ids = new LinkedHashSet<>(MempoolGraphPolicy.ancestors(entries, txId));
+        ids.remove(txId);
+        return Optional.of(List.copyOf(ids));
+    }
+
+    /** In-mempool descendants excluding the transaction itself. */
+    public synchronized Optional<List<Hash256>> descendants(Hash256 txId) {
+        Objects.requireNonNull(txId, "txId");
+        if (!entries.containsKey(txId)) return Optional.empty();
+        Set<Hash256> ids = new LinkedHashSet<>(MempoolGraphPolicy.descendants(entries, Set.of(txId)));
+        ids.remove(txId);
+        return Optional.of(List.copyOf(ids));
+    }
+
+    public synchronized Optional<GraphQuery> ancestorQuery(Hash256 txId) {
+        Optional<List<Hash256>> ids = ancestors(txId);
+        return ids.map(value -> new GraphQuery(value, graphViews(value)));
+    }
+
+    public synchronized Optional<GraphQuery> descendantQuery(Hash256 txId) {
+        Optional<List<Hash256>> ids = descendants(txId);
+        return ids.map(value -> new GraphQuery(value, graphViews(value)));
+    }
+
+    public record Snapshot(List<MempoolEntry> entries, long sequence) {
+        public Snapshot { entries = List.copyOf(entries); }
+    }
+
+    public record DetailedSnapshot(List<MempoolEntry> entries, long sequence, Map<Hash256, EntryGraphView> graphViews) {
+        public DetailedSnapshot {
+            entries = List.copyOf(entries);
+            graphViews = Map.copyOf(graphViews);
+        }
+    }
+
+    public record GraphQuery(List<Hash256> txIds, Map<Hash256, EntryGraphView> graphViews) {
+        public GraphQuery {
+            txIds = List.copyOf(txIds);
+            graphViews = Map.copyOf(graphViews);
+        }
+    }
+
+    /** Atomic graph views for a selected set of current mempool transactions. */
+    public synchronized Map<Hash256, EntryGraphView> graphViews(Collection<Hash256> txIds) {
+        Objects.requireNonNull(txIds, "txIds");
+        Map<Hash256, EntryGraphView> result = new LinkedHashMap<>();
+        for (Hash256 txId : txIds) {
+            EntryGraphView view = graphView(txId).orElse(null);
+            if (view != null) result.put(txId, view);
+        }
+        return Map.copyOf(result);
+    }
 
     /** Atomic Core-v31-style view of one connected mempool cluster. */
     public synchronized Optional<ClusterView> cluster(Hash256 txId) {

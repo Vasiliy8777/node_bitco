@@ -346,27 +346,36 @@ public final class NodeRpcServer implements AutoCloseable {
                 Hash256 txid = parseHash(txidText);
                 var view = validation.mempoolGraphEntry(txid)
                         .orElseThrow(() -> new RpcException(-5, "Transaction not in mempool"));
-                var entry = view.entry();
+                yield mempoolEntryJson(view);
+            }
+            case "getmempoolancestors" -> {
+                if (params.isEmpty() || params.size() > 2 || !(params.getFirst() instanceof String txidText))
+                    throw new RpcException(-32602, "Expected txid and optional verbose boolean");
+                boolean verbose = booleanParam(params, 1, false);
+                Hash256 txid = parseHash(txidText);
+                var query = validation.mempoolAncestorQuery(txid)
+                        .orElseThrow(() -> new RpcException(-5, "Transaction not in mempool"));
+                if (!verbose) yield query.txIds().stream().map(Hash256::toDisplayHex).toList();
                 var result = new LinkedHashMap<String, Object>();
-                result.put("vsize", entry.virtualSize());
-                result.put("vsize_adjusted", entry.virtualSize());
-                result.put("vsize_bip141", ru.bitcoin.node.consensus.transaction.TransactionWeight.virtualSize(entry.weight()));
-                result.put("weight", entry.weight());
-                result.put("time", entry.arrivalTime());
-                result.put("ancestorcount", view.ancestors().size());
-                result.put("ancestorsize", view.ancestorVirtualSize());
-                result.put("descendantcount", view.descendants().size());
-                result.put("descendantsize", view.descendantVirtualSize());
-                result.put("chunkweight", view.chunk().adjustedWeight());
-                result.put("wtxid", entry.transaction().wtxId().toDisplayHex());
-                result.put("fees", Map.of(
-                        "base", satoshisToBtc(entry.fee()),
-                        "modified", satoshisToBtc(entry.modifiedFee()),
-                        "ancestor", satoshisToBtc(view.ancestorFee()),
-                        "descendant", satoshisToBtc(view.descendantFee()),
-                        "chunk", satoshisToBtc(view.chunk().fee())));
-                result.put("depends", view.parents().stream().map(Hash256::toDisplayHex).sorted().toList());
-                result.put("spentby", view.children().stream().map(Hash256::toDisplayHex).sorted().toList());
+                for (Hash256 id : query.txIds()) {
+                    var view = query.graphViews().get(id);
+                    if (view != null) result.put(id.toDisplayHex(), mempoolEntryJson(view));
+                }
+                yield result;
+            }
+            case "getmempooldescendants" -> {
+                if (params.isEmpty() || params.size() > 2 || !(params.getFirst() instanceof String txidText))
+                    throw new RpcException(-32602, "Expected txid and optional verbose boolean");
+                boolean verbose = booleanParam(params, 1, false);
+                Hash256 txid = parseHash(txidText);
+                var query = validation.mempoolDescendantQuery(txid)
+                        .orElseThrow(() -> new RpcException(-5, "Transaction not in mempool"));
+                if (!verbose) yield query.txIds().stream().map(Hash256::toDisplayHex).toList();
+                var result = new LinkedHashMap<String, Object>();
+                for (Hash256 id : query.txIds()) {
+                    var view = query.graphViews().get(id);
+                    if (view != null) result.put(id.toDisplayHex(), mempoolEntryJson(view));
+                }
                 yield result;
             }
             case "getmempoolcluster" -> {
@@ -828,10 +837,55 @@ public final class NodeRpcServer implements AutoCloseable {
             case "getmininginfo" ->
                     Map.of("blocks", validation.activeTip().height(), "pooledtx", validation.mempoolEntries().size(),
                             "miningready", ready.getAsBoolean());
-            case "getrawmempool" ->
-                    validation.mempoolEntries().stream().map(entry -> entry.transaction().txId().toDisplayHex()).toList();
+            case "getrawmempool" -> {
+                if (params.size() > 2) throw new RpcException(-32602, "getrawmempool takes at most two parameters");
+                boolean verbose = booleanParam(params, 0, false);
+                boolean includeSequence = booleanParam(params, 1, false);
+                if (verbose && includeSequence)
+                    throw new RpcException(-8, "Verbose results cannot contain mempool sequence");
+                if (verbose) {
+                    var snapshot = validation.detailedMempoolSnapshot();
+                    var result = new LinkedHashMap<String, Object>();
+                    for (var entry : snapshot.entries()) {
+                        Hash256 id = entry.transaction().txId();
+                        var view = snapshot.graphViews().get(id);
+                        if (view != null) result.put(id.toDisplayHex(), mempoolEntryJson(view));
+                    }
+                    yield result;
+                }
+                var snapshot = validation.mempoolSnapshot();
+                List<String> txids = snapshot.entries().stream()
+                        .map(entry -> entry.transaction().txId().toDisplayHex()).toList();
+                if (!includeSequence) yield txids;
+                yield Map.of("txids", txids, "mempool_sequence", snapshot.sequence());
+            }
             default -> throw new RpcException(-32601, "Method not found");
         };
+    }
+
+    private static Map<String, Object> mempoolEntryJson(ru.bitcoin.node.mempool.Mempool.EntryGraphView view) {
+        var entry = view.entry();
+        var result = new LinkedHashMap<String, Object>();
+        result.put("vsize", entry.virtualSize());
+        result.put("vsize_adjusted", entry.virtualSize());
+        result.put("vsize_bip141", TransactionWeight.virtualSize(entry.weight()));
+        result.put("weight", entry.weight());
+        result.put("time", entry.arrivalTime());
+        result.put("ancestorcount", view.ancestors().size());
+        result.put("ancestorsize", view.ancestorVirtualSize());
+        result.put("descendantcount", view.descendants().size());
+        result.put("descendantsize", view.descendantVirtualSize());
+        result.put("chunkweight", view.chunk().adjustedWeight());
+        result.put("wtxid", entry.transaction().wtxId().toDisplayHex());
+        result.put("fees", Map.of(
+                "base", satoshisToBtc(entry.fee()),
+                "modified", satoshisToBtc(entry.modifiedFee()),
+                "ancestor", satoshisToBtc(view.ancestorFee()),
+                "descendant", satoshisToBtc(view.descendantFee()),
+                "chunk", satoshisToBtc(view.chunk().fee())));
+        result.put("depends", view.parents().stream().map(Hash256::toDisplayHex).sorted().toList());
+        result.put("spentby", view.children().stream().map(Hash256::toDisplayHex).sorted().toList());
+        return result;
     }
 
     private static void requireNoParams(String method, List<?> params) {
