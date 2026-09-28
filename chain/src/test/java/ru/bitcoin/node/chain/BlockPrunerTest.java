@@ -137,4 +137,52 @@ class BlockPrunerTest {
         }
     }
 
+    @Test void assumeUtxoCeilingProtectsUnvalidatedHistoryForAutomaticAndManualPruning() {
+        var params = NetworkParametersRegistry.regtest();
+        try (var db = new RocksDbDatabase(temp.resolve("assumeutxo-prune-ceiling-auto"))) {
+            var blocks = new RocksDbBlockStore(db);
+            var indexes = new RocksDbBlockIndexStore(db);
+            Block genesis = GenesisBlockFactory.create(params);
+            BlockIndex parent = BlockIndexFactory.createGenesis(genesis.header());
+            blocks.save(genesis); indexes.save(BlockIndexStorageMapper.toStored(parent));
+            Block[] chain = new Block[5];
+            BlockIndex[] idx = new BlockIndex[5];
+            for (int i = 0; i < chain.length; i++) {
+                var header = new BlockHeader(4, parent.hash(), genesis.header().merkleRoot(),
+                        new UInt32(genesis.header().timestamp().value() + i + 1),
+                        genesis.header().bits(), new UInt32(100 + i));
+                chain[i] = new Block(header, List.of());
+                parent = BlockIndexFactory.createChild(parent, header); idx[i] = parent;
+                blocks.save(chain[i]); indexes.save(BlockIndexStorageMapper.toStored(parent));
+            }
+            var result = new BlockPruner(db, 1L, 2).prune(idx[4], 2L);
+            assertEquals(2L, result.highestPrunedHeight());
+            assertTrue(blocks.find(chain[0].hash()).isEmpty());
+            assertTrue(blocks.find(chain[1].hash()).isEmpty());
+            assertTrue(blocks.find(chain[2].hash()).isPresent(), "height 3 is above the background-validation ceiling");
+        }
+
+        try (var db = new RocksDbDatabase(temp.resolve("assumeutxo-prune-ceiling-manual"))) {
+            var blocks = new RocksDbBlockStore(db);
+            var indexes = new RocksDbBlockIndexStore(db);
+            Block genesis = GenesisBlockFactory.create(params);
+            BlockIndex parent = BlockIndexFactory.createGenesis(genesis.header());
+            blocks.save(genesis); indexes.save(BlockIndexStorageMapper.toStored(parent));
+            Block[] chain = new Block[5];
+            BlockIndex[] idx = new BlockIndex[5];
+            for (int i = 0; i < chain.length; i++) {
+                var header = new BlockHeader(4, parent.hash(), genesis.header().merkleRoot(),
+                        new UInt32(genesis.header().timestamp().value() + i + 1),
+                        genesis.header().bits(), new UInt32(200 + i));
+                chain[i] = new Block(header, List.of());
+                parent = BlockIndexFactory.createChild(parent, header); idx[i] = parent;
+                blocks.save(chain[i]); indexes.save(BlockIndexStorageMapper.toStored(parent));
+            }
+            var result = new BlockPruner(db, BlockPruner.MANUAL_ONLY, 2).pruneToHeight(idx[4], 99L, 1L);
+            assertEquals(1L, result.highestPrunedHeight());
+            assertTrue(blocks.find(chain[0].hash()).isEmpty());
+            assertTrue(blocks.find(chain[1].hash()).isPresent(), "manual pruning must also honor the AssumeUTXO ceiling");
+        }
+    }
+
 }

@@ -51,12 +51,21 @@ public final class BlockPruner {
 
     /** Automatic target-based pruning. Manual-only mode never prunes from this path. */
     public Result prune(BlockIndex activeTip) {
+        return prune(activeTip, Long.MAX_VALUE);
+    }
+
+    /**
+     * Automatic pruning with an additional inclusive ceiling. The ceiling is used by
+     * AssumeUTXO background validation so unvalidated historical block bodies are never removed.
+     */
+    public Result prune(BlockIndex activeTip, long pruneCeilingHeight) {
         Objects.requireNonNull(activeTip, "activeTip");
+        if (pruneCeilingHeight < 0) throw new IllegalArgumentException("pruneCeilingHeight must not be negative");
         synchronized (database) {
             long before = usageBytes();
             if (!automatic() || before <= targetBytes || activeTip.height() < pruneAfterHeight)
                 return new Result(before, before, 0L, -1L);
-            long maxPruneHeight = activeTip.height() - blocksToKeep;
+            long maxPruneHeight = Math.min(activeTip.height() - blocksToKeep, pruneCeilingHeight);
             if (maxPruneHeight <= 0) return new Result(before, before, 0L, -1L);
             return pruneCandidates(maxPruneHeight, targetBytes, before);
         }
@@ -67,16 +76,25 @@ public final class BlockPruner {
      * so a request close to the tip is clamped to tip - MIN_BLOCKS_TO_KEEP.
      */
     public Result pruneToHeight(BlockIndex activeTip, long requestedHeight) {
+        return pruneToHeight(activeTip, requestedHeight, Long.MAX_VALUE);
+    }
+
+    /** Manual pruning with the same additional safety ceiling used by automatic pruning. */
+    public Result pruneToHeight(BlockIndex activeTip, long requestedHeight, long pruneCeilingHeight) {
         Objects.requireNonNull(activeTip, "activeTip");
         if (!enabled()) throw new IllegalStateException("Node is not in prune mode");
         if (requestedHeight < 0) throw new IllegalArgumentException("Prune height must not be negative");
+        if (pruneCeilingHeight < 0) throw new IllegalArgumentException("pruneCeilingHeight must not be negative");
         synchronized (database) {
             long before = usageBytes();
             if (activeTip.height() < pruneAfterHeight)
                 throw new IllegalStateException("Blockchain is too short for pruning");
-            long maxSafeHeight = activeTip.height() - blocksToKeep;
-            if (maxSafeHeight <= 0)
+            long ordinaryMaxSafeHeight = activeTip.height() - blocksToKeep;
+            if (ordinaryMaxSafeHeight <= 0)
                 throw new IllegalStateException("Blockchain is too short for pruning");
+            long maxSafeHeight = Math.min(ordinaryMaxSafeHeight, pruneCeilingHeight);
+            if (maxSafeHeight <= 0)
+                return new Result(before, before, 0L, -1L);
             long cutoff = Math.min(requestedHeight, maxSafeHeight);
             return pruneCandidates(cutoff, 0L, before);
         }

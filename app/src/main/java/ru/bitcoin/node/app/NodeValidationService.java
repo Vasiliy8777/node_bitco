@@ -160,10 +160,26 @@ public final class NodeValidationService implements AutoCloseable {
             long targetBytes
     ) {}
 
+    /**
+     * Highest historical height that may currently be pruned. While an AssumeUTXO
+     * background chainstate is still being validated, blocks above its durable tip
+     * must remain available for validation. A full trailing prune/reorg window is
+     * also retained behind the background tip for undo/index consumers. Once validation
+     * is complete the normal active-chain reorg-window rule is sufficient again.
+     */
+    private long assumeUtxoPruneCeiling() {
+        if (snapshotChainStateStore.load().isEmpty()) return Long.MAX_VALUE;
+        var background = assumeUtxoBackgroundValidator.state();
+        if (background == null) return 0L;
+        if (background.status() == ru.bitcoin.node.storage.utxo.RocksDbAssumeUtxoBackgroundStore.Status.VALIDATED)
+            return Long.MAX_VALUE;
+        return Math.max(0L, background.tipHeight() - BlockPruner.MIN_BLOCKS_TO_KEEP);
+    }
+
     /** Manual pruning entry point used by pruneblockchain RPC. */
     public long pruneToHeight(long requestedHeight) {
         synchronized (chain) {
-            BlockPruner.Result result = blockPruner.pruneToHeight(chain.activeTip(), requestedHeight);
+            BlockPruner.Result result = blockPruner.pruneToHeight(chain.activeTip(), requestedHeight, assumeUtxoPruneCeiling());
             if (result.highestPrunedHeight() >= 0) return result.highestPrunedHeight();
             return pruneState.highestPrunedHeight().orElse(0L);
         }
@@ -468,7 +484,7 @@ public final class NodeValidationService implements AutoCloseable {
             if (txOutSpenderIndexEnabled) synchronizeTxOutSpenderIndex();
             if (coinStatsIndexEnabled) synchronizeCoinStatsIndex();
             if (blockFilterIndexEnabled) synchronizeBlockFilterIndex();
-            blockPruner.prune(chain.activeTip());
+            blockPruner.prune(chain.activeTip(), assumeUtxoPruneCeiling());
             initialBlockDownload.update(chain.activeTip());
         }
         ensureBackgroundValidationWorker();
@@ -486,7 +502,7 @@ public final class NodeValidationService implements AutoCloseable {
                 if (txOutSpenderIndexEnabled) synchronizeTxOutSpenderIndex();
                 if (coinStatsIndexEnabled) synchronizeCoinStatsIndex();
                 if (blockFilterIndexEnabled) synchronizeBlockFilterIndex();
-                blockPruner.prune(chain.activeTip());
+                blockPruner.prune(chain.activeTip(), assumeUtxoPruneCeiling());
                 initialBlockDownload.update(chain.activeTip());
             }
             return result;
@@ -1442,7 +1458,12 @@ public final class NodeValidationService implements AutoCloseable {
             while (!backgroundValidationStop) {
                 try {
                     AssumeUtxoBackgroundValidator.Step step;
-                    synchronized (chain) { step = assumeUtxoBackgroundValidator.step(); }
+                    synchronized (chain) {
+                        step = assumeUtxoBackgroundValidator.step();
+                        if (step == AssumeUtxoBackgroundValidator.Step.ADVANCED
+                                || step == AssumeUtxoBackgroundValidator.Step.VALIDATED)
+                            blockPruner.prune(chain.activeTip(), assumeUtxoPruneCeiling());
+                    }
                     if (step == AssumeUtxoBackgroundValidator.Step.INACTIVE
                             || step == AssumeUtxoBackgroundValidator.Step.VALIDATED
                             || step == AssumeUtxoBackgroundValidator.Step.INVALID) return;
