@@ -31,6 +31,21 @@ class MempoolTestAcceptTest {
         assertEquals(0, pool.size());
     }
 
+    @Test
+    void dryRunUsesLiveRollingMinimumFeeFloor() {
+        Mempool pool = new Mempool(new MempoolPolicy(),
+                new MempoolLimits(64, 101_000, 1, 1000, 100), java.time.Clock.systemUTC());
+        Transaction evicted = tx(FUND, 90_000);
+        pool.reconcile(CONTEXT, COINS, Set.of(), List.of(evicted));
+        assertTrue(pool.minimumFeeRate() > pool.minimumRelayFeeRate());
+
+        Transaction lowFee = tx(FUND, 99_900);
+        var rejected = pool.testAccept(List.of(lowFee), CONTEXT, COINS);
+        assertFalse(rejected.allowed());
+        assertEquals("mempool-min-fee", rejected.rejectReason());
+        assertEquals(0, pool.size());
+    }
+
     private static Transaction tx(OutPoint point, long value) {
         return new Transaction(2, List.of(new TxIn(point, new byte[0], TxIn.FINAL_SEQUENCE,
                 new Witness(List.of(new byte[]{0x51})))), List.of(new TxOut(value, SCRIPT)), new UInt32(0));

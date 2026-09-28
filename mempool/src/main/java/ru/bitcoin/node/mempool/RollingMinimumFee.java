@@ -5,6 +5,11 @@ final class RollingMinimumFee {
     private double rate;
     private long updated;
     private boolean blockSinceBump;
+    void restoreFrom(RollingMinimumFee source) {
+        rate = source.rate;
+        updated = source.updated;
+        blockSinceBump = source.blockSinceBump;
+    }
     void bump(long removedRate, long incremental, long now) {
         long next = Math.addExact(removedRate, incremental);
         if (next > rate) { rate = next; blockSinceBump = false; updated = now; }

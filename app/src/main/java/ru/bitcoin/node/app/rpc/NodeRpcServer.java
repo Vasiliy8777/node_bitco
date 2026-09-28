@@ -18,6 +18,7 @@ import ru.bitcoin.node.protocol.transaction.OutPoint;
 import ru.bitcoin.node.p2p.PeerManager;
 import ru.bitcoin.node.p2p.message.VersionMessage;
 import ru.bitcoin.node.mempool.MempoolLimits;
+import ru.bitcoin.node.script.UnspendableScript;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -32,6 +33,9 @@ import java.util.function.BooleanSupplier;
  */
 public final class NodeRpcServer implements AutoCloseable {
     private static final int MAX_REQUEST = 8_100_000;
+    private static final long DEFAULT_MAX_RAW_TX_FEE_RATE = 10_000_000L; // 0.10 BTC/kvB
+    private static final long MAX_RAW_TX_FEE_RATE = 100_000_000L; // 1 BTC/kvB
+    private static final long DEFAULT_MAX_BURN_AMOUNT = 0L;
     private final HttpServer server;
     private final ThreadPoolExecutor executor = new ThreadPoolExecutor(8, 8, 0, TimeUnit.SECONDS,
             new ArrayBlockingQueue<>(16), Thread.ofPlatform().daemon().name("bitcoin-rpc-", 0).factory());
@@ -159,8 +163,21 @@ public final class NodeRpcServer implements AutoCloseable {
             }
             case "submitblock" -> mining.submitBlock(stringParam(params));
             case "sendrawtransaction" -> {
+                if (params.isEmpty() || params.size() > 3 || !(params.getFirst() instanceof String raw))
+                    throw new RpcException(-32602, "Expected raw transaction and optional maxfeerate/maxburnamount");
+                long maxFeeRate = parseMaxFeeRate(params, 1);
+                long maxBurnAmount = parseMoneyParam(params, 2, DEFAULT_MAX_BURN_AMOUNT, "maxburnamount");
                 try {
-                    yield relay.submitTransaction(TransactionParser.parse(HexFormat.of().parseHex(stringParam(params)))).toDisplayHex();
+                    Transaction transaction = TransactionParser.parse(HexFormat.of().parseHex(raw));
+                    var probe = validation.testMempoolAccept(List.of(transaction));
+                    if (probe.allowed()) {
+                        var entry = probe.entries().getFirst();
+                        if (maxFeeRate != 0 && entry.modifiedFee() * 1000L > maxFeeRate * entry.virtualSize())
+                            throw new RpcException(-25, "Fee exceeds maximum configured by user (e.g. -maxtxfee, maxfeerate)");
+                        if (burnAmount(transaction) > maxBurnAmount)
+                            throw new RpcException(-25, "Unspendable output exceeds maximum configured by user (maxburnamount)");
+                    }
+                    yield relay.submitTransaction(transaction).toDisplayHex();
                 } catch (ru.bitcoin.node.mempool.MempoolAdmissionException
                          | ru.bitcoin.node.consensus.transaction.TransactionValidationException
                          | ru.bitcoin.node.script.ScriptExecutionException |
@@ -169,8 +186,10 @@ public final class NodeRpcServer implements AutoCloseable {
                 }
             }
             case "testmempoolaccept" -> {
-                if (params.isEmpty() || params.size() > 2 || !(params.getFirst() instanceof List<?> rawTransactions))
-                    throw new RpcException(-32602, "Expected rawtxs array and optional maxfeerate");
+                if (params.isEmpty() || params.size() > 3 || !(params.getFirst() instanceof List<?> rawTransactions))
+                    throw new RpcException(-32602, "Expected rawtxs array and optional maxfeerate/maxburnamount");
+                long maxFeeRate = parseMaxFeeRate(params, 1);
+                long maxBurnAmount = parseMoneyParam(params, 2, DEFAULT_MAX_BURN_AMOUNT, "maxburnamount");
                 if (rawTransactions.isEmpty() || rawTransactions.size() > 25)
                     throw new RpcException(-8, "Array must contain between 1 and 25 transactions");
                 List<Transaction> transactions = new ArrayList<>(rawTransactions.size());
@@ -183,6 +202,15 @@ public final class NodeRpcServer implements AutoCloseable {
                     throw new RpcException(-22, "TX decode failed");
                 }
                 var probe = validation.testMempoolAccept(transactions);
+                if (probe.allowed()) {
+                    for (int i = 0; i < transactions.size(); i++) {
+                        var entry = probe.entries().get(i);
+                        if (maxFeeRate != 0 && entry.modifiedFee() * 1000L > maxFeeRate * entry.virtualSize())
+                            yield rejectedTestMempoolAccept(transactions, "max-fee-exceeded");
+                        if (burnAmount(transactions.get(i)) > maxBurnAmount)
+                            yield rejectedTestMempoolAccept(transactions, "max-burn-exceeded");
+                    }
+                }
                 List<Map<String, Object>> results = new ArrayList<>(transactions.size());
                 if (!probe.allowed()) {
                     for (Transaction tx : transactions) {
@@ -222,6 +250,8 @@ public final class NodeRpcServer implements AutoCloseable {
             case "submitpackage" -> {
                 if (params.isEmpty() || params.size() > 3 || !(params.getFirst() instanceof List<?> rawPackage))
                     throw new RpcException(-32602, "Expected package array and optional maxfeerate/maxburnamount");
+                long maxFeeRate = parseMaxFeeRate(params, 1);
+                long maxBurnAmount = parseMoneyParam(params, 2, DEFAULT_MAX_BURN_AMOUNT, "maxburnamount");
                 if (rawPackage.isEmpty() || rawPackage.size() > 25)
                     throw new RpcException(-8, "Array must contain between 1 and 25 transactions");
                 List<Transaction> transactions = new ArrayList<>(rawPackage.size());
@@ -234,6 +264,15 @@ public final class NodeRpcServer implements AutoCloseable {
                     throw new RpcException(-22, "TX decode failed");
                 }
                 try {
+                    var probe = validation.testMempoolAccept(transactions);
+                    if (!probe.allowed()) throw new ru.bitcoin.node.mempool.MempoolAdmissionException(probe.rejectReason());
+                    for (int i = 0; i < transactions.size(); i++) {
+                        var entry = probe.entries().get(i);
+                        if (maxFeeRate != 0 && entry.modifiedFee() * 1000L > maxFeeRate * entry.virtualSize())
+                            throw new RpcException(-25, "Fee exceeds maximum configured by user (e.g. -maxtxfee, maxfeerate)");
+                        if (burnAmount(transactions.get(i)) > maxBurnAmount)
+                            throw new RpcException(-25, "Unspendable output exceeds maximum configured by user (maxburnamount)");
+                    }
                     var submission = relay.submitPackage(transactions);
                     var accepted = submission.entries();
                     var txResults = new LinkedHashMap<String, Object>();
@@ -1029,6 +1068,53 @@ public final class NodeRpcServer implements AutoCloseable {
             result.put("blocktime", blockInfo.index().header().timestamp().value());
         }
         return result;
+    }
+
+    private static long parseMaxFeeRate(List<?> params, int index) {
+        long rate = parseMoneyParam(params, index, DEFAULT_MAX_RAW_TX_FEE_RATE, "maxfeerate");
+        if (rate > MAX_RAW_TX_FEE_RATE) throw new RpcException(-3, "Fee rate (" + satoshisToBtc(rate) + ") is greater than the maximum allowed (1.00 BTC/kvB)");
+        return rate;
+    }
+
+    private static long parseMoneyParam(List<?> params, int index, long defaultValue, String name) {
+        if (params.size() <= index || params.get(index) == null) return defaultValue;
+        Object value = params.get(index);
+        final java.math.BigDecimal decimal;
+        try {
+            decimal = value instanceof Number || value instanceof String
+                    ? new java.math.BigDecimal(value.toString()) : null;
+        } catch (NumberFormatException e) {
+            throw new RpcException(-3, name + " must be numeric");
+        }
+        if (decimal == null) throw new RpcException(-3, name + " must be numeric");
+        if (decimal.signum() < 0) throw new RpcException(-3, name + " must be non-negative");
+        try {
+            return decimal.movePointRight(8).setScale(0, java.math.RoundingMode.UNNECESSARY).longValueExact();
+        } catch (ArithmeticException e) {
+            throw new RpcException(-3, "Invalid amount for " + name);
+        }
+    }
+
+    private static long burnAmount(Transaction transaction) {
+        long burn = 0;
+        for (var output : transaction.outputs()) {
+            if (UnspendableScript.isUnspendable(output.scriptPubKey())) burn = Math.addExact(burn, output.value());
+        }
+        return burn;
+    }
+
+    private static List<Map<String, Object>> rejectedTestMempoolAccept(List<Transaction> transactions, String reason) {
+        List<Map<String, Object>> results = new ArrayList<>(transactions.size());
+        for (Transaction tx : transactions) {
+            var result = new LinkedHashMap<String, Object>();
+            result.put("txid", tx.txId().toDisplayHex());
+            result.put("wtxid", tx.wtxId().toDisplayHex());
+            result.put("allowed", false);
+            if (transactions.size() > 1) result.put("package-error", reason);
+            else result.put("reject-reason", reason);
+            results.add(result);
+        }
+        return results;
     }
 
     private static java.math.BigDecimal satoshisToBtc(long satoshis) {

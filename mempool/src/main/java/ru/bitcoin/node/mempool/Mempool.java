@@ -205,6 +205,7 @@ public final class Mempool {
         Mempool staged = new Mempool(policy, limits, clock);
         staged.entries.putAll(entries);
         staged.feeDeltas.putAll(feeDeltas);
+        staged.rollingFee.restoreFrom(rollingFee);
         staged.rebuildSpent();
         try {
             List<MempoolEntry> accepted = transactions.size() == 1
