@@ -30,3 +30,7 @@ build/
 
 ### VS Code ###
 .vscode/
+# Bitcoin node runtime databases / chainstate
+# These are reproducible node state, not source code.
+/app/data/
+/data/

@@ -93,9 +93,19 @@ public final class LiveChainSynchronizer implements AutoCloseable {
                                  | ru.bitcoin.node.consensus.block.BlockHeaderValidationException
                                  | ru.bitcoin.node.consensus.block.BlockValidationException
                                  | ru.bitcoin.node.consensus.transaction.TransactionValidationException exception) {
-                            lastSuccess = 0;
-                            log.warn("Live chain synchronization failed; replacing peer", exception);
-                            try { peer.close(); } catch (IOException closeFailure) { exception.addSuppressed(closeFailure); }
+                            replaceFailedPeer(peer, exception);
+                        } catch (IllegalStateException exception) {
+                            /*
+                             * The background reader can close a peer between the READY
+                             * snapshot above and a synchronous GETHEADERS/GETDATA send.
+                             * That is a normal network race, not a fatal lifecycle error.
+                             * Preserve programming/state IllegalStateExceptions for a
+                             * still-open peer instead of hiding them as reconnect noise.
+                             */
+                            if (peer.state() != PeerState.CLOSED) {
+                                throw exception;
+                            }
+                            replaceFailedPeer(peer, exception);
                         }
                     }
                 }
@@ -110,6 +120,17 @@ public final class LiveChainSynchronizer implements AutoCloseable {
             observed.forEach(this::detach);
             observed.clear();
             lastSuccess = 0;
+        }
+    }
+
+
+    private void replaceFailedPeer(Peer peer, Exception exception) {
+        lastSuccess = 0;
+        log.warn("Live chain synchronization failed; replacing peer", exception);
+        try {
+            peer.close();
+        } catch (IOException closeFailure) {
+            exception.addSuppressed(closeFailure);
         }
     }
 

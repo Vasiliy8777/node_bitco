@@ -64,7 +64,9 @@ public final class NodeLifecycleService
     private final ru.bitcoin.node.app.sync.LiveChainSynchronizer liveSync;
 
     public boolean isMiningReady() {
-        return isRunning() && liveSync.isCurrent();
+        return isRunning()
+                && !validationService.isInitialBlockDownload()
+                && liveSync.isCurrent();
     }
 
     public NodeLifecycleService(
