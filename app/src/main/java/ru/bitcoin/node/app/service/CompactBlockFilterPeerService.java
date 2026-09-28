@@ -38,7 +38,9 @@ public final class CompactBlockFilterPeerService implements AutoCloseable {
             Thread t = new Thread(r, "bip157-filter-server");
             t.setDaemon(true);
             return t;
-        }, new ThreadPoolExecutor.DiscardPolicy());
+        }, (task, rejectedExecutor) -> {
+            throw new java.util.concurrent.RejectedExecutionException("BIP157 work queue saturated");
+        });
         if (enabled) peers.addPeerListener(connections);
     }
 
@@ -50,8 +52,15 @@ public final class CompactBlockFilterPeerService implements AutoCloseable {
     private void onMessage(Peer peer, BitcoinMessage message) {
         if (!enabled) return;
         switch (message.command()) {
-            case "getcfilters", "getcfheaders", "getcfcheckpt" ->
+            case "getcfilters", "getcfheaders", "getcfcheckpt" -> {
+                try {
                     executor.execute(() -> serve(peer, message));
+                } catch (java.util.concurrent.RejectedExecutionException exception) {
+                    if (!executor.isShutdown()) {
+                        peer.disconnectForProtocolViolation("BIP157 request queue saturated", exception);
+                    }
+                }
+            }
             default -> { }
         }
     }

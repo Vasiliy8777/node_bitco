@@ -846,6 +846,25 @@ class NodeRelayServiceTest {
         }
     }
 
+    @Test
+    void disconnectsPeerThatExhaustsPerPeerInboundRelayBudget() throws Exception {
+        var validation = mock(NodeValidationService.class);
+        var sync = mock(NodeSyncInfrastructure.class);
+        var peer = mock(Peer.class);
+        when(peer.isReady()).thenReturn(true);
+        var incoming = new AtomicReference<PeerMessageListener>();
+        doAnswer(call -> { incoming.set(call.getArgument(0)); return null; })
+                .when(peer).addMessageListener(any());
+        try (var peers = new PeerManager()) {
+            peers.add(peer);
+            try (var relay = new NodeRelayService(validation, sync, peers)) {
+                incoming.get().onMessage(peer, new BitcoinMessage("tx", new byte[2_000_001]));
+                verify(peer, timeout(2_000)).disconnectForProtocolViolation(
+                        eq("Inbound relay queue budget exhausted"), isNull());
+            }
+        }
+    }
+
     private static Transaction spend(OutPoint point, long value, byte[] script) {
         return new Transaction(
                 2,

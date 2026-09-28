@@ -31,6 +31,7 @@ public final class NodeRelayService implements AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(NodeRelayService.class);
     private static final long MSG_WTX = 5;
     private static final long MAX_QUEUED_INBOUND_BYTES = 16_000_000L;
+    private static final long MAX_QUEUED_INBOUND_BYTES_PER_PEER = 2_000_000L;
     private static final int MAX_OUTBOUND_TASKS_PER_PEER = 64;
     private static final long MAX_OUTBOUND_BYTES_PER_PEER = 16_000_000L;
     private static final long MAX_OUTBOUND_BYTES = 64_000_000L;
@@ -70,6 +71,7 @@ public final class NodeRelayService implements AutoCloseable {
     private static final int MAX_COMPACT_FALLBACKS_PER_PEER = 16;
     private final Deque<Peer> highBandwidthCompactPeers = new ArrayDeque<>();
     private final AtomicLong queuedBytes = new AtomicLong();
+    private final Map<Peer, AtomicLong> queuedBytesByPeer = new ConcurrentHashMap<>();
     private final ScheduledExecutorService sendTimeouts = Executors.newSingleThreadScheduledExecutor(
             Thread.ofPlatform().daemon().name("bitcoin-relay-send-timeout").factory());
     private final ScheduledExecutorService requestTimer = Executors.newSingleThreadScheduledExecutor(
@@ -161,6 +163,7 @@ public final class NodeRelayService implements AutoCloseable {
                 synchronized (compactFallbacks) { compactFallbacks.remove(source); }
                 removeHighBandwidthCompactPeer(source);
                 orphanage.removePeer(source);
+                queuedBytesByPeer.remove(source);
                 if (sender != null) sender.shutdownNow();
             });
         }
@@ -175,8 +178,13 @@ public final class NodeRelayService implements AutoCloseable {
         if (closed || !Set.of("inv", "tx", "getdata", "getheaders", "notfound", "sendheaders", "sendcmpct", "feefilter", "cmpctblock", "getblocktxn", "blocktxn", "block").contains(message.command()))
             return;
         long bytes = message.payloadLength();
-        if (queuedBytes.addAndGet(bytes) > MAX_QUEUED_INBOUND_BYTES) {
+        AtomicLong peerQueued = queuedBytesByPeer.computeIfAbsent(peer, ignored -> new AtomicLong());
+        long peerTotal = peerQueued.addAndGet(bytes);
+        long globalTotal = queuedBytes.addAndGet(bytes);
+        if (peerTotal > MAX_QUEUED_INBOUND_BYTES_PER_PEER || globalTotal > MAX_QUEUED_INBOUND_BYTES) {
+            peerQueued.addAndGet(-bytes);
             queuedBytes.addAndGet(-bytes);
+            peer.disconnectForProtocolViolation("Inbound relay queue budget exhausted", null);
             return;
         }
         try {
@@ -190,12 +198,19 @@ public final class NodeRelayService implements AutoCloseable {
                 } catch (RuntimeException exception) {
                     log.error("Unable to process peer message {}", message.command(), exception);
                 } finally {
-                    queuedBytes.addAndGet(-bytes);
+                    releaseQueuedBytes(peer, peerQueued, bytes);
                 }
             });
         } catch (RejectedExecutionException exception) {
-            queuedBytes.addAndGet(-bytes);
+            releaseQueuedBytes(peer, peerQueued, bytes);
+            if (!closed) peer.disconnectForProtocolViolation("Inbound relay work queue saturated", exception);
         }
+    }
+
+    private void releaseQueuedBytes(Peer peer, AtomicLong peerQueued, long bytes) {
+        queuedBytes.addAndGet(-bytes);
+        long remaining = peerQueued.addAndGet(-bytes);
+        if (remaining == 0L) queuedBytesByPeer.remove(peer, peerQueued);
     }
 
     private void handle(Peer peer, BitcoinMessage message) throws IOException {
