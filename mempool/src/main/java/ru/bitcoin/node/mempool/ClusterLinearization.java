@@ -21,7 +21,7 @@ public final class ClusterLinearization {
         public Chunk {
             transactions = List.copyOf(transactions);
             if (transactions.isEmpty()) throw new IllegalArgumentException("chunk must not be empty");
-            if (fee < 0 || virtualSize <= 0 || adjustedWeight <= 0) throw new IllegalArgumentException("invalid chunk totals");
+            if (virtualSize <= 0 || adjustedWeight <= 0) throw new IllegalArgumentException("invalid chunk totals");
         }
     }
 

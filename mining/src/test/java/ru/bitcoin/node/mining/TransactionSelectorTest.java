@@ -67,4 +67,14 @@ class TransactionSelectorTest {
         assertEquals(10_100, lowBasePrioritised.modifiedFee());
         assertEquals(List.of(first), TransactionSelector.select(List.of(highBase, lowBasePrioritised), budget, 100, new FeeRate(0)));
     }
+    @Test
+    void negativeModifiedFeeIsValidButExcludedByNonNegativeMiningFloor() {
+        var penalized = tx(Hash256.fromDisplayHex("51".repeat(32)), 1);
+        long weight = TransactionWeight.calculate(penalized);
+        var entry = new MempoolEntry(penalized, 1_000, weight, 0, 0, -2_000);
+        assertEquals(-1_000, entry.modifiedFee());
+        assertDoesNotThrow(() -> ClusterLinearization.mempoolDiagram(Map.of(penalized.txId(), entry)));
+        assertTrue(TransactionSelector.select(List.of(entry), weight, 100, new FeeRate(0)).isEmpty());
+    }
+
 }
