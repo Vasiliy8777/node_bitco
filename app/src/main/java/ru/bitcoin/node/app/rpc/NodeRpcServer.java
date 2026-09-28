@@ -168,6 +168,57 @@ public final class NodeRpcServer implements AutoCloseable {
                     throw new RpcException(-26, exception.getMessage());
                 }
             }
+            case "testmempoolaccept" -> {
+                if (params.isEmpty() || params.size() > 2 || !(params.getFirst() instanceof List<?> rawTransactions))
+                    throw new RpcException(-32602, "Expected rawtxs array and optional maxfeerate");
+                if (rawTransactions.isEmpty() || rawTransactions.size() > 25)
+                    throw new RpcException(-8, "Array must contain between 1 and 25 transactions");
+                List<Transaction> transactions = new ArrayList<>(rawTransactions.size());
+                try {
+                    for (Object raw : rawTransactions) {
+                        if (!(raw instanceof String hex)) throw new RpcException(-32602, "Transactions must be hex strings");
+                        transactions.add(TransactionParser.parse(HexFormat.of().parseHex(hex)));
+                    }
+                } catch (IllegalArgumentException | java.nio.BufferUnderflowException exception) {
+                    throw new RpcException(-22, "TX decode failed");
+                }
+                var probe = validation.testMempoolAccept(transactions);
+                List<Map<String, Object>> results = new ArrayList<>(transactions.size());
+                if (!probe.allowed()) {
+                    for (Transaction tx : transactions) {
+                        var result = new LinkedHashMap<String, Object>();
+                        result.put("txid", tx.txId().toDisplayHex());
+                        result.put("wtxid", tx.wtxId().toDisplayHex());
+                        result.put("allowed", false);
+                        if (transactions.size() > 1) result.put("package-error", probe.rejectReason());
+                        else result.put("reject-reason", probe.rejectReason());
+                        results.add(result);
+                    }
+                    yield results;
+                }
+                long packageFee = probe.entries().stream().mapToLong(ru.bitcoin.node.mempool.MempoolEntry::fee).sum();
+                long packageVsize = probe.entries().stream().mapToLong(ru.bitcoin.node.mempool.MempoolEntry::virtualSize).sum();
+                double effectiveRate = packageVsize == 0 ? 0.0 : ((double) packageFee * 1000.0 / packageVsize) / 100_000_000.0;
+                List<String> includes = transactions.stream().map(tx -> tx.wtxId().toDisplayHex()).toList();
+                for (int i = 0; i < transactions.size(); i++) {
+                    Transaction tx = transactions.get(i);
+                    var entry = probe.entries().get(i);
+                    var result = new LinkedHashMap<String, Object>();
+                    result.put("txid", tx.txId().toDisplayHex());
+                    result.put("wtxid", tx.wtxId().toDisplayHex());
+                    result.put("allowed", true);
+                    result.put("vsize", entry.virtualSize());
+                    result.put("vsize_adjusted", entry.virtualSize());
+                    result.put("vsize_bip141", ru.bitcoin.node.consensus.transaction.TransactionWeight.virtualSize(entry.weight()));
+                    var fees = new LinkedHashMap<String, Object>();
+                    fees.put("base", satoshisToBtc(entry.fee()));
+                    fees.put("effective-feerate", effectiveRate);
+                    fees.put("effective-includes", includes);
+                    result.put("fees", fees);
+                    results.add(result);
+                }
+                yield results;
+            }
             case "submitpackage" -> {
                 if (params.isEmpty() || params.size() > 3 || !(params.getFirst() instanceof List<?> rawPackage))
                     throw new RpcException(-32602, "Expected package array and optional maxfeerate/maxburnamount");

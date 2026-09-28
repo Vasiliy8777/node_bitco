@@ -151,6 +151,33 @@ public final class Mempool {
         return result;
     }
 
+    /** Result of a non-mutating mempool/package acceptance probe. */
+    public record TestAcceptResult(List<MempoolEntry> entries, String rejectReason) {
+        public TestAcceptResult { entries = List.copyOf(entries); }
+        public boolean allowed() { return rejectReason == null; }
+    }
+
+    /**
+     * Runs the normal admission path against an isolated clone. No entries, spent map or
+     * rolling fee state of this mempool are modified. This is the backing primitive for
+     * Core-style testmempoolaccept.
+     */
+    public synchronized TestAcceptResult testAccept(List<Transaction> transactions,
+                                                    MempoolValidationContext context, UtxoView chainUtxos) {
+        Objects.requireNonNull(transactions); Objects.requireNonNull(context); Objects.requireNonNull(chainUtxos);
+        Mempool staged = new Mempool(policy, limits, clock);
+        staged.entries.putAll(entries);
+        staged.rebuildSpent();
+        try {
+            List<MempoolEntry> accepted = transactions.size() == 1
+                    ? List.of(staged.admit(transactions.getFirst(), context, chainUtxos))
+                    : staged.admitPackage(transactions, context, chainUtxos);
+            return new TestAcceptResult(accepted, null);
+        } catch (MempoolAdmissionException e) {
+            return new TestAcceptResult(List.of(), e.getMessage());
+        }
+    }
+
     public synchronized boolean contains(Hash256 txId) { return entries.containsKey(Objects.requireNonNull(txId)); }
     public synchronized Optional<MempoolEntry> find(Hash256 txId) { return Optional.ofNullable(entries.get(Objects.requireNonNull(txId))); }
 

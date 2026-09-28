@@ -918,6 +918,14 @@ public final class NodeValidationService implements AutoCloseable {
         }
     }
 
+    /** Non-mutating mempool/package acceptance probe used by testmempoolaccept. */
+    public Mempool.TestAcceptResult testMempoolAccept(List<Transaction> transactions) {
+        synchronized (chain) {
+            synchronizePool();
+            return mempool.testAccept(List.copyOf(transactions), context(), coins);
+        }
+    }
+
     /** Bitcoin Core-style latched Initial Block Download state. */
     public boolean isInitialBlockDownload() {
         synchronized (chain) {
