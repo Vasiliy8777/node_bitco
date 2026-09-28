@@ -56,6 +56,47 @@ class RocksDbAssumeUtxoFinalizerTest {
         }
     }
 
+    @Test
+    void validatedSnapshotPromotionPreservesActiveTipAdvancedBeyondSnapshotBase() {
+        try (var db = new RocksDbDatabase(dir.resolve("advanced-tip"))) {
+            Hash256 normal = hash(10), base = hash(11), advanced = hash(12);
+            var tips = new RocksDbChainStateStore(db);
+            tips.saveActiveTipHash(normal);
+            new RocksDbSnapshotChainStateStore(db).activate(normal, 10, base, 20);
+            // Live snapshot chainstate continued syncing after activation.
+            tips.saveActiveTipHash(advanced);
+            put(db, RocksDbNamespaces.SNAPSHOT_UTXO_STAGING, (byte) 9, (byte) 90);
+            var bg = new RocksDbAssumeUtxoBackgroundStore(db);
+            bg.initialize(normal, 10);
+            bg.mark(RocksDbAssumeUtxoBackgroundStore.Status.VALIDATED, base, 20);
+
+            assertTrue(new RocksDbAssumeUtxoFinalizer(db).finalizeOnStartup());
+
+            assertEquals(advanced, tips.loadActiveTipHash().orElseThrow(),
+                    "finalization must preserve the live snapshot chainstate tip");
+            assertArrayEquals(new byte[]{90}, db.get(new byte[]{RocksDbNamespaces.UTXO, 9}));
+            assertTrue(new RocksDbSnapshotChainStateStore(db).load().isEmpty());
+        }
+    }
+
+    @Test
+    void refusesValidatedMarkerWhoseTipDoesNotEqualSnapshotBase() {
+        try (var db = new RocksDbDatabase(dir.resolve("bad-validated-marker"))) {
+            Hash256 normal = hash(20), base = hash(21), wrong = hash(22);
+            var tips = new RocksDbChainStateStore(db);
+            tips.saveActiveTipHash(normal);
+            new RocksDbSnapshotChainStateStore(db).activate(normal, 10, base, 20);
+            var bg = new RocksDbAssumeUtxoBackgroundStore(db);
+            bg.initialize(normal, 10);
+            bg.mark(RocksDbAssumeUtxoBackgroundStore.Status.VALIDATED, wrong, 19);
+
+            assertThrows(IllegalStateException.class,
+                    () -> new RocksDbAssumeUtxoFinalizer(db).finalizeOnStartup());
+            assertEquals(base, tips.loadActiveTipHash().orElseThrow());
+            assertTrue(new RocksDbSnapshotChainStateStore(db).load().isPresent());
+        }
+    }
+
     private static void put(RocksDbDatabase db, byte prefix, byte suffix, byte value) {
         db.put(new byte[]{prefix, suffix}, new byte[]{value});
     }

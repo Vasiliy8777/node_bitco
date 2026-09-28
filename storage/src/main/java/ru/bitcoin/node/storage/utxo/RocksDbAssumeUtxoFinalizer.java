@@ -30,14 +30,17 @@ public final class RocksDbAssumeUtxoFinalizer {
         var snap = snapshot.load().orElse(null);
         var bg = background.load().orElse(null);
         if (snap == null) {
-            clearOrphanFinalizationMarker();
-            return false;
+            boolean changed = clearOrphanState();
+            new UtxoSnapshotStager(db).recoverIncomplete();
+            return changed;
         }
         if (bg == null || bg.status() == RocksDbAssumeUtxoBackgroundStore.Status.RUNNING) return false;
         if (bg.status() == RocksDbAssumeUtxoBackgroundStore.Status.INVALID) {
             revertInvalid(snap, bg);
             return true;
         }
+        if (bg.tipHeight() != snap.snapshotBaseHeight() || !bg.tipHash().equals(snap.snapshotBaseHash()))
+            throw new IllegalStateException("Validated AssumeUTXO background tip does not match snapshot base");
         promoteValidated(snap);
         return true;
     }
@@ -57,7 +60,9 @@ public final class RocksDbAssumeUtxoFinalizer {
             snapshot.clear(batch);
             background.clear(batch);
             batch.deletePrefix(RocksDbNamespaces.ASSUMEUTXO_FINALIZATION_STATE);
-            tips.saveActiveTipHash(batch, snap.snapshotBaseHash());
+            // Do not rewrite CHAIN_STATE here. The snapshot chainstate may have advanced well
+            // beyond the AssumeUTXO base while historical validation was running. The staging
+            // namespace being promoted already represents that persisted active tip.
             db.write(batch);
         }
     }
@@ -95,11 +100,15 @@ public final class RocksDbAssumeUtxoFinalizer {
         }
     }
 
-    private void clearOrphanFinalizationMarker() {
-        if (db.get(STATE_KEY) == null) return;
+    private boolean clearOrphanState() {
+        boolean finalization = db.get(STATE_KEY) != null;
+        boolean backgroundState = background.load().isPresent();
+        if (!finalization && !backgroundState) return false;
         try (var batch = new RocksDbWriteBatch()) {
             batch.deletePrefix(RocksDbNamespaces.ASSUMEUTXO_FINALIZATION_STATE);
+            background.clear(batch);
             db.write(batch);
         }
+        return true;
     }
 }
