@@ -243,17 +243,26 @@ public final class PeerConnection implements AutoCloseable {
         if (handshakeTimeoutMillis <= 0) throw new IllegalArgumentException("handshakeTimeoutMillis must be positive");
         accept(acceptedSocket);
         if (!allowV2) return false;
-        socket.setSoTimeout(handshakeTimeoutMillis);
-        input.mark(16);
-        byte[] prefix = input.readNBytes(16);
-        if (prefix.length < 16) throw new IOException("EOF while discriminating Bitcoin transport");
-        byte[] v1 = Bip324TransportSession.v1Prefix(networkParameters);
-        if (Arrays.equals(prefix, v1)) { input.reset(); socket.setSoTimeout(readTimeoutMillis); return false; }
-        // A v1 VERSION header for another network is not a valid v2 initiation.
-        if (Arrays.equals(Arrays.copyOfRange(prefix, 4, 16), Arrays.copyOfRange(v1, 4, 16)))
-            throw new IOException("Bitcoin v1 VERSION uses different network magic");
         try {
-            v2Transport = Bip324TransportSession.respond(input, output, networkParameters, new SecureRandom(), prefix);
+            socket.setSoTimeout(handshakeTimeoutMillis);
+            input.mark(16);
+            byte[] v1 = Bip324TransportSession.v1Prefix(networkParameters);
+            byte[] prefix = new byte[16];
+            int prefixLength = 0;
+            while (prefixLength < v1.length) {
+                int value = input.read();
+                if (value < 0) throw new IOException("EOF while discriminating Bitcoin transport");
+                prefix[prefixLength] = (byte) value;
+                prefixLength++;
+                if (prefix[prefixLength - 1] != v1[prefixLength - 1]) break;
+            }
+            if (prefixLength == v1.length) {
+                input.reset();
+                socket.setSoTimeout(readTimeoutMillis);
+                return false;
+            }
+            v2Transport = Bip324TransportSession.respond(input, output, networkParameters, new SecureRandom(),
+                    Arrays.copyOf(prefix, prefixLength));
             socket.setSoTimeout(readTimeoutMillis);
             return true;
         } catch (IOException | RuntimeException failure) {

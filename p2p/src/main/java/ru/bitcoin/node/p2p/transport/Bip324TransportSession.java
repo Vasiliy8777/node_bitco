@@ -27,6 +27,8 @@ public final class Bip324TransportSession {
     private final byte[] sessionId;
     private byte[] sendAad;
     private byte[] receiveAad;
+    private final Object sendLock = new Object();
+    private final Object receiveLock = new Object();
 
     private Bip324TransportSession(Bip324KeyMaterial keys, byte[] sentGarbage, byte[] receivedGarbage) {
         this.cipher = new Bip324PacketCipher(keys);
@@ -68,17 +70,25 @@ public final class Bip324TransportSession {
         Objects.requireNonNull(prefix, "prefix");
         if (prefix.length < 1 || prefix.length > ELLSWIFT_LENGTH)
             throw new IllegalArgumentException("Invalid BIP324 prefix length");
+        byte[] magic = magic(network.magic());
+        Bip324KeyExchange exchange = new Bip324KeyExchange(false, magic, random);
+        byte[] garbage = randomGarbage(random);
+
+        // BIP324 progress rule: once the v1 prefix mismatches, the responder starts
+        // transmitting immediately instead of waiting for the complete remote key.
+        out.write(exchange.publicKey());
+        out.write(garbage);
+        out.flush();
+
         byte[] remote = new byte[ELLSWIFT_LENGTH];
         System.arraycopy(prefix, 0, remote, 0, prefix.length);
         byte[] tail = readExactly(in, ELLSWIFT_LENGTH - prefix.length);
         System.arraycopy(tail, 0, remote, prefix.length, tail.length);
+        byte[] v1 = v1Prefix(network);
+        if (Arrays.equals(Arrays.copyOfRange(remote, 4, 16), Arrays.copyOfRange(v1, 4, 16)))
+            throw new IOException("Bitcoin v1 VERSION uses different network magic");
 
-        byte[] magic = magic(network.magic());
-        Bip324KeyExchange exchange = new Bip324KeyExchange(false, magic, random);
         var result = exchange.complete(remote);
-        byte[] garbage = randomGarbage(random);
-        out.write(exchange.publicKey());
-        out.write(garbage);
         out.write(result.keyMaterial().sendGarbageTerminator());
         out.flush();
 
@@ -90,15 +100,21 @@ public final class Bip324TransportSession {
         return session;
     }
 
-    public synchronized void send(OutputStream out, BitcoinMessage message) throws IOException {
+    public void send(OutputStream out, BitcoinMessage message) throws IOException {
+        Objects.requireNonNull(out, "out");
         byte[] contents = Bip324ApplicationCodec.encode(Objects.requireNonNull(message, "message"));
-        writePacket(out, contents, false);
+        synchronized (sendLock) {
+            writePacket(out, contents, false);
+        }
     }
 
-    public synchronized BitcoinMessage receive(InputStream in) throws IOException {
-        while (true) {
-            Bip324PacketCipher.DecodedPacket packet = readPacket(in);
-            if (!packet.ignore()) return Bip324ApplicationCodec.decode(packet.contents());
+    public BitcoinMessage receive(InputStream in) throws IOException {
+        Objects.requireNonNull(in, "in");
+        synchronized (receiveLock) {
+            while (true) {
+                Bip324PacketCipher.DecodedPacket packet = readPacket(in);
+                if (!packet.ignore()) return Bip324ApplicationCodec.decode(packet.contents());
+            }
         }
     }
 

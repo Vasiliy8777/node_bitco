@@ -957,6 +957,7 @@ public final class NodeRpcServer implements AutoCloseable {
         if ((services & VersionMessage.NODE_WITNESS) != 0) result.add("WITNESS");
         if ((services & VersionMessage.NODE_COMPACT_FILTERS) != 0) result.add("COMPACT_FILTERS");
         if ((services & VersionMessage.NODE_NETWORK_LIMITED) != 0) result.add("NETWORK_LIMITED");
+        if ((services & VersionMessage.NODE_P2P_V2) != 0) result.add("P2P_V2");
         return List.copyOf(result);
     }
 

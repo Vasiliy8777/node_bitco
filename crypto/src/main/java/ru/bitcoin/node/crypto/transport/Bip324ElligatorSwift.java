@@ -59,8 +59,8 @@ public final class Bip324ElligatorSwift {
             do {
                 byte[] bytes = new byte[32];
                 random.nextBytes(bytes);
-                u = new BigInteger(1, bytes).mod(P);
-            } while (u.signum() == 0);
+                u = new BigInteger(1, bytes);
+            } while (u.signum() == 0 || u.compareTo(P) >= 0);
             int start = random.nextInt(8);
             for (int i = 0; i < 8; i++) {
                 BigInteger t = xSwiftEcInv(x, u, (start + i) & 7);

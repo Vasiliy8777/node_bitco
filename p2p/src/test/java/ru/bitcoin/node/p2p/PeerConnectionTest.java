@@ -765,6 +765,57 @@ class PeerConnectionTest {
     }
 
     @Test
+    void v2ReceiveMustNotBlockConcurrentSend() throws Exception {
+        try (ServerSocket serverSocket = new ServerSocket(0)) {
+            CountDownLatch serverReady = new CountDownLatch(1);
+            CompletableFuture<Void> server = CompletableFuture.runAsync(() -> {
+                try (Socket socket = serverSocket.accept();
+                     PeerConnection connection = new PeerConnection(
+                             NetworkParametersRegistry.regtest(), 5_000, 5_000)) {
+                    assertTrue(connection.acceptNegotiated(socket, true));
+                    serverReady.countDown();
+
+                    BitcoinMessage request = connection.receive().orElseThrow();
+                    assertEquals("ping", request.command());
+                    connection.send(new BitcoinMessage("pong", request.payload()));
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            });
+
+            try (PeerConnection connection = new PeerConnection(
+                    NetworkParametersRegistry.regtest(), 5_000, 5_000)) {
+                connection.connectV2("127.0.0.1", serverSocket.getLocalPort());
+                assertTrue(serverReady.await(2, TimeUnit.SECONDS));
+
+                CompletableFuture<BitcoinMessage> reader = CompletableFuture.supplyAsync(() -> {
+                    try {
+                        return connection.receive().orElseThrow();
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                });
+
+                Thread.sleep(100);
+                CompletableFuture<Void> writer = CompletableFuture.runAsync(() -> {
+                    try {
+                        connection.send(new BitcoinMessage("ping", new byte[]{1, 2, 3, 4}));
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                });
+
+                writer.get(1, TimeUnit.SECONDS);
+                BitcoinMessage response = reader.get(2, TimeUnit.SECONDS);
+                assertEquals("pong", response.command());
+                assertArrayEquals(new byte[]{1, 2, 3, 4}, response.payload());
+            }
+
+            server.get(3, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
     void inboundNegotiationPreservesV1Prefix() throws Exception {
         try (ServerSocket serverSocket = new ServerSocket(0)) {
             CompletableFuture<Void> server = CompletableFuture.runAsync(() -> {
@@ -808,6 +859,31 @@ class PeerConnectionTest {
             }
             long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
             assertTrue(elapsedMillis < 2_000, "v2 handshake must not inherit the 5 second normal read timeout");
+            server.get(3, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void wrongNetworkV1DiscriminatorClosesAcceptedConnection() throws Exception {
+        try (ServerSocket serverSocket = new ServerSocket(0)) {
+            CompletableFuture<Void> server = CompletableFuture.runAsync(() -> {
+                try (Socket socket = serverSocket.accept();
+                     PeerConnection connection = new PeerConnection(
+                             NetworkParametersRegistry.mainnet(), 5_000, 2_000)) {
+                    assertThrows(java.io.IOException.class, () -> connection.acceptNegotiated(socket, true, 500));
+                    assertFalse(connection.isConnected());
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            });
+            try (Socket socket = new Socket("127.0.0.1", serverSocket.getLocalPort())) {
+                byte[] wrong = new BitcoinMessageEncoder(NetworkParametersRegistry.regtest())
+                        .encode(new BitcoinMessage("version", new byte[0]));
+                byte[] candidate = new byte[64];
+                System.arraycopy(wrong, 0, candidate, 0, 16);
+                socket.getOutputStream().write(candidate);
+                socket.getOutputStream().flush();
+            }
             server.get(3, TimeUnit.SECONDS);
         }
     }
