@@ -186,10 +186,9 @@ public final class NodeRpcServer implements AutoCloseable {
                 }
             }
             case "testmempoolaccept" -> {
-                if (params.isEmpty() || params.size() > 3 || !(params.getFirst() instanceof List<?> rawTransactions))
-                    throw new RpcException(-32602, "Expected rawtxs array and optional maxfeerate/maxburnamount");
+                if (params.isEmpty() || params.size() > 2 || !(params.getFirst() instanceof List<?> rawTransactions))
+                    throw new RpcException(-32602, "Expected rawtxs array and optional maxfeerate");
                 long maxFeeRate = parseMaxFeeRate(params, 1);
-                long maxBurnAmount = parseMoneyParam(params, 2, DEFAULT_MAX_BURN_AMOUNT, "maxburnamount");
                 if (rawTransactions.isEmpty() || rawTransactions.size() > 25)
                     throw new RpcException(-8, "Array must contain between 1 and 25 transactions");
                 List<Transaction> transactions = new ArrayList<>(rawTransactions.size());
@@ -207,8 +206,6 @@ public final class NodeRpcServer implements AutoCloseable {
                         var entry = probe.entries().get(i);
                         if (maxFeeRate != 0 && entry.modifiedFee() * 1000L > maxFeeRate * entry.virtualSize())
                             yield rejectedTestMempoolAccept(transactions, "max-fee-exceeded");
-                        if (burnAmount(transactions.get(i)) > maxBurnAmount)
-                            yield rejectedTestMempoolAccept(transactions, "max-burn-exceeded");
                     }
                 }
                 List<Map<String, Object>> results = new ArrayList<>(transactions.size());
@@ -224,7 +221,7 @@ public final class NodeRpcServer implements AutoCloseable {
                     }
                     yield results;
                 }
-                long packageFee = probe.entries().stream().mapToLong(ru.bitcoin.node.mempool.MempoolEntry::fee).sum();
+                long packageFee = probe.entries().stream().mapToLong(ru.bitcoin.node.mempool.MempoolEntry::modifiedFee).sum();
                 long packageVsize = probe.entries().stream().mapToLong(ru.bitcoin.node.mempool.MempoolEntry::virtualSize).sum();
                 double effectiveRate = packageVsize == 0 ? 0.0 : ((double) packageFee * 1000.0 / packageVsize) / 100_000_000.0;
                 List<String> includes = transactions.stream().map(tx -> tx.wtxId().toDisplayHex()).toList();

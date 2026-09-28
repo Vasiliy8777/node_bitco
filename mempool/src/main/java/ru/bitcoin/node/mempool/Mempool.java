@@ -119,6 +119,18 @@ public final class Mempool {
      * deduplicated by txid/wtxid and cannot subsidize a new child a second time.
      */
     public synchronized List<MempoolEntry> admitPackage(List<Transaction> transactions, MempoolValidationContext context, UtxoView chainUtxos) {
+        return admitPackageInternal(transactions, context, chainUtxos, true);
+    }
+
+    /**
+     * Package admission with an explicit replacement policy. Bitcoin Core v31 deliberately
+     * disables replacement for multi-transaction testmempoolaccept probes, while submitpackage
+     * may enter the constrained 1-parent-1-child package-RBF path.
+     */
+    private List<MempoolEntry> admitPackageInternal(List<Transaction> transactions,
+                                                    MempoolValidationContext context,
+                                                    UtxoView chainUtxos,
+                                                    boolean allowReplacement) {
         List<Transaction> txs = List.copyOf(transactions);
         Objects.requireNonNull(context); Objects.requireNonNull(chainUtxos);
         PackagePolicy.validate(txs);
@@ -137,6 +149,8 @@ public final class Mempool {
                 if (conflict != null) conflicts.add(conflict);
             }
         }
+        if (!allowReplacement && !conflicts.isEmpty())
+            throw new MempoolAdmissionException("txn-mempool-conflict");
         Set<Hash256> removed = MempoolGraphPolicy.descendants(entries, conflicts);
         for (var tx : txs) {
             if (removed.contains(tx.txId())) throw new MempoolAdmissionException("package-replaces-own-parent");
@@ -158,7 +172,8 @@ public final class Mempool {
             }
         }
         if (size > 0 && fee < new FeeRate(floor).feeForVSize(size)) throw new MempoolAdmissionException("package-feerate");
-        PackagePolicy.replacement(fresh, entries, staged.entries, conflicts, removed, limits);
+        if (allowReplacement)
+            PackagePolicy.replacement(fresh, entries, staged.entries, conflicts, removed, limits);
         // Check limits again with the complete package; no carve-outs or sibling eviction.
         for (var tx : fresh) MempoolGraphPolicy.checkLimits(staged.entries, tx.txId(), limits);
         long removedRate = MempoolGraphPolicy.trim(staged.entries, limits.maxPoolVirtualBytes(), txs.getLast().txId());
@@ -210,7 +225,7 @@ public final class Mempool {
         try {
             List<MempoolEntry> accepted = transactions.size() == 1
                     ? List.of(staged.admit(transactions.getFirst(), context, chainUtxos))
-                    : staged.admitPackage(transactions, context, chainUtxos);
+                    : staged.admitPackageInternal(transactions, context, chainUtxos, false);
             return new TestAcceptResult(accepted, null);
         } catch (MempoolAdmissionException e) {
             return new TestAcceptResult(List.of(), e.getMessage());
