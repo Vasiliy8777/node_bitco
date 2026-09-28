@@ -316,6 +316,30 @@ public final class NodeRpcServer implements AutoCloseable {
                     yield HexFormat.of().formatHex(TransactionSerializer.serialize(transaction));
                 yield transactionJson(transaction, blockInfo, null);
             }
+            case "prioritisetransaction" -> {
+                if (params.size() != 3 || !(params.getFirst() instanceof String txidText))
+                    throw new RpcException(-32602, "Expected txid, dummy and fee_delta");
+                if (params.get(1) != null && (!(params.get(1) instanceof Number n) || n.longValue() != 0L))
+                    throw new RpcException(-8, "Priority is no longer supported, dummy argument must be 0 or null");
+                if (!(params.get(2) instanceof Number deltaNumber)) throw new RpcException(-32602, "fee_delta must be numeric");
+                long delta = deltaNumber.longValue();
+                try { validation.prioritiseTransaction(parseHash(txidText), delta); }
+                catch (ru.bitcoin.node.mempool.MempoolAdmissionException e) { throw new RpcException(-8, e.getMessage()); }
+                yield true;
+            }
+            case "getprioritisedtransactions" -> {
+                requireNoParams(method, params);
+                var result = new LinkedHashMap<String, Object>();
+                for (var e : validation.prioritisedTransactions().entrySet()) {
+                    var item = new LinkedHashMap<String, Object>();
+                    item.put("fee_delta", e.getValue());
+                    var mempoolView = validation.mempoolGraphEntry(e.getKey());
+                    item.put("in_mempool", mempoolView.isPresent());
+                    mempoolView.ifPresent(view -> item.put("modified_fee", view.entry().modifiedFee()));
+                    result.put(e.getKey().toDisplayHex(), item);
+                }
+                yield result;
+            }
             case "getmempoolentry" -> {
                 if (params.size() != 1 || !(params.getFirst() instanceof String txidText))
                     throw new RpcException(-32602, "Expected one transaction id");
@@ -337,7 +361,7 @@ public final class NodeRpcServer implements AutoCloseable {
                 result.put("wtxid", entry.transaction().wtxId().toDisplayHex());
                 result.put("fees", Map.of(
                         "base", satoshisToBtc(entry.fee()),
-                        "modified", satoshisToBtc(entry.fee()),
+                        "modified", satoshisToBtc(entry.modifiedFee()),
                         "ancestor", satoshisToBtc(view.ancestorFee()),
                         "descendant", satoshisToBtc(view.descendantFee()),
                         "chunk", satoshisToBtc(view.chunk().fee())));
@@ -756,6 +780,7 @@ public final class NodeRpcServer implements AutoCloseable {
                 info.put("size", entries.size());
                 info.put("bytes", bytes);
                 info.put("usage", bytes);
+                info.put("total_fee", satoshisToBtc(entries.stream().mapToLong(ru.bitcoin.node.mempool.MempoolEntry::fee).sum()));
                 info.put("maxmempool", MempoolLimits.DEFAULT.maxPoolVirtualBytes());
                 info.put("mempoolminfee", satoshisPerKvBToBtcPerKvB(validation.feeFilterRate()));
                 info.put("minrelaytxfee", satoshisPerKvBToBtcPerKvB(validation.minimumRelayFeeRate()));

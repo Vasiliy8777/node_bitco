@@ -20,6 +20,7 @@ public final class Mempool {
     private final RollingMinimumFee rollingFee = new RollingMinimumFee();
     private final Map<Hash256, MempoolEntry> entries = new LinkedHashMap<>();
     private final Map<OutPoint, Hash256> spent = new HashMap<>();
+    private final Map<Hash256, Long> feeDeltas = new LinkedHashMap<>();
 
     public Mempool() { this(new MempoolPolicy()); }
     public Mempool(MempoolPolicy policy) { this(policy, MempoolLimits.DEFAULT, java.time.Clock.systemUTC()); }
@@ -80,12 +81,14 @@ public final class Mempool {
         long fee = MempoolValidator.validate(transaction, context, view);
         long sigops = ru.bitcoin.node.consensus.transaction.TransactionSigOpCost.calculate(transaction, view,
                 ru.bitcoin.node.mempool.policy.StandardScriptVerifyFlags.STANDARD);
-        if (!packageMode) policy.validateFee(fee, Math.max(weight, Math.multiplyExact(sigops, 80)));
-        ru.bitcoin.node.mempool.policy.StandardTransactionPolicy.validateDustFee(transaction, fee, policy.dustRelaySatPerKvB());
+        long feeDelta = feeDeltas.getOrDefault(txId, 0L);
+        long modifiedFee = Math.addExact(fee, feeDelta);
+        if (!packageMode) policy.validateFee(modifiedFee, Math.max(weight, Math.multiplyExact(sigops, 80)));
+        ru.bitcoin.node.mempool.policy.StandardTransactionPolicy.validateDustFee(transaction, modifiedFee, policy.dustRelaySatPerKvB());
         PackagePolicy.ephemeralSpends(transaction, entries, policy.dustRelaySatPerKvB());
         long arrivalTime = restoredArrivalTime != null ? restoredArrivalTime : clock.instant().getEpochSecond();
-        var entry = new MempoolEntry(transaction, fee, weight, arrivalTime, sigops);
-        if (!packageMode && fee < new FeeRate(minimumFeeRate()).feeForVSize(entry.virtualSize())) throw new MempoolAdmissionException("mempool-min-fee");
+        var entry = new MempoolEntry(transaction, fee, weight, arrivalTime, sigops, feeDelta);
+        if (!packageMode && entry.modifiedFee() < new FeeRate(minimumFeeRate()).feeForVSize(entry.virtualSize())) throw new MempoolAdmissionException("mempool-min-fee");
         MempoolGraphPolicy.replacement(entries, conflicts, evicted, entry, limits);
         Map<Hash256, MempoolEntry> candidate = new LinkedHashMap<>(entries);
         evicted.forEach(candidate::remove);
@@ -128,6 +131,7 @@ public final class Mempool {
         }
         Mempool staged = new Mempool(policy, limits, clock);
         staged.entries.putAll(entries);
+        staged.feeDeltas.putAll(feeDeltas);
         removed.forEach(staged.entries::remove);
         staged.rebuildSpent();
         long fee = 0, size = 0;
@@ -135,8 +139,8 @@ public final class Mempool {
         for (var tx : fresh) {
             var entry = staged.admitInternal(tx, context, chainUtxos, true);
             // Parents that pass individual admission do not contribute fees to a low-fee child.
-            if (tx == txs.getLast() || entry.fee() < new FeeRate(floor).feeForVSize(entry.virtualSize())) {
-                fee = Math.addExact(fee, entry.fee()); size = Math.addExact(size, entry.virtualSize());
+            if (tx == txs.getLast() || entry.modifiedFee() < new FeeRate(floor).feeForVSize(entry.virtualSize())) {
+                fee = Math.addExact(fee, entry.modifiedFee()); size = Math.addExact(size, entry.virtualSize());
             }
         }
         if (size > 0 && fee < new FeeRate(floor).feeForVSize(size)) throw new MempoolAdmissionException("package-feerate");
@@ -167,6 +171,7 @@ public final class Mempool {
         Objects.requireNonNull(transactions); Objects.requireNonNull(context); Objects.requireNonNull(chainUtxos);
         Mempool staged = new Mempool(policy, limits, clock);
         staged.entries.putAll(entries);
+        staged.feeDeltas.putAll(feeDeltas);
         staged.rebuildSpent();
         try {
             List<MempoolEntry> accepted = transactions.size() == 1
@@ -176,6 +181,32 @@ public final class Mempool {
         } catch (MempoolAdmissionException e) {
             return new TestAcceptResult(List.of(), e.getMessage());
         }
+    }
+
+    /** Apply a local policy/mining fee delta. The delta is retained even when txid is not yet in mempool. */
+    public synchronized long prioritise(Hash256 txId, long feeDelta) {
+        Objects.requireNonNull(txId, "txId");
+        MempoolEntry existing = entries.get(txId);
+        if (feeDelta != 0 && existing != null && existing.transaction().outputs().stream().anyMatch(out ->
+                out.value() < ru.bitcoin.node.mempool.policy.StandardTransactionPolicy.dustThreshold(out, policy.dustRelaySatPerKvB())))
+            throw new MempoolAdmissionException("Priority is not supported for transactions with dust outputs");
+        long updated = Math.addExact(feeDeltas.getOrDefault(txId, 0L), feeDelta);
+        if (updated == 0) feeDeltas.remove(txId); else feeDeltas.put(txId, updated);
+        MempoolEntry current = entries.get(txId);
+        if (current != null) entries.put(txId, current.withFeeDelta(updated));
+        return updated;
+    }
+
+    public synchronized Map<Hash256, Long> prioritisedTransactions() {
+        return Map.copyOf(feeDeltas);
+    }
+
+    /** Restore an absolute persisted delta without compounding it. */
+    public synchronized void restoreFeeDelta(Hash256 txId, long feeDelta) {
+        Objects.requireNonNull(txId, "txId");
+        if (feeDelta == 0) feeDeltas.remove(txId); else feeDeltas.put(txId, feeDelta);
+        MempoolEntry current = entries.get(txId);
+        if (current != null) entries.put(txId, current.withFeeDelta(feeDelta));
     }
 
     public synchronized boolean contains(Hash256 txId) { return entries.containsKey(Objects.requireNonNull(txId)); }
@@ -213,6 +244,7 @@ public final class Mempool {
         Objects.requireNonNull(chainUtxos);
         Objects.requireNonNull(confirmed);
         Mempool replacement = new Mempool(policy, limits, clock);
+        replacement.feeDeltas.putAll(feeDeltas);
         List<Hash256> removed = new ArrayList<>();
         for (var entry : entries.values()) {
             Hash256 id = entry.transaction().txId();
@@ -242,6 +274,7 @@ public final class Mempool {
                                        Set<Hash256> confirmed, List<Transaction> disconnected) {
         Mempool staged = new Mempool(policy, limits, clock);
         staged.entries.putAll(entries);
+        staged.feeDeltas.putAll(feeDeltas);
         confirmed.forEach(staged.entries::remove);
         staged.rebuildSpent();
         for (var tx : disconnected) {
@@ -324,8 +357,8 @@ public final class Mempool {
                 .filter(value -> value.transactions().contains(txId)).findFirst().orElseThrow();
         long ancestorVsize = ancestors.stream().mapToLong(id -> entries.get(id).virtualSize()).sum();
         long descendantVsize = descendants.stream().mapToLong(id -> entries.get(id).virtualSize()).sum();
-        long ancestorFee = ancestors.stream().mapToLong(id -> entries.get(id).fee()).sum();
-        long descendantFee = descendants.stream().mapToLong(id -> entries.get(id).fee()).sum();
+        long ancestorFee = ancestors.stream().mapToLong(id -> entries.get(id).modifiedFee()).sum();
+        long descendantFee = descendants.stream().mapToLong(id -> entries.get(id).modifiedFee()).sum();
         return Optional.of(new EntryGraphView(entry, ancestors, descendants, Set.copyOf(parents), Set.copyOf(children), chunk,
                 ancestorVsize, descendantVsize, ancestorFee, descendantFee));
     }

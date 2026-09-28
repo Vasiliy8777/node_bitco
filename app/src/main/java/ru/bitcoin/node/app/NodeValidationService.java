@@ -44,6 +44,7 @@ public final class NodeValidationService implements AutoCloseable {
     private final ChainReorganizationExecutor reorganizationExecutor;
     private final Mempool mempool;
     private final RocksDbMempoolStore mempoolStore;
+    private final ru.bitcoin.node.storage.mempool.RocksDbMempoolFeeDeltaStore mempoolFeeDeltaStore;
     private final boolean persistMempool;
     private final boolean txIndexEnabled;
     private final RocksDbTxIndexStore txIndexStore;
@@ -366,6 +367,7 @@ public final class NodeValidationService implements AutoCloseable {
         this.database = Objects.requireNonNull(database);
         this.mempool = Objects.requireNonNull(mempool);
         this.mempoolStore = new RocksDbMempoolStore(database);
+        this.mempoolFeeDeltaStore = new ru.bitcoin.node.storage.mempool.RocksDbMempoolFeeDeltaStore(database);
         this.persistMempool = persistMempool;
         this.txIndexEnabled = txIndexEnabled;
         this.txIndexStore = new RocksDbTxIndexStore(database);
@@ -452,7 +454,10 @@ public final class NodeValidationService implements AutoCloseable {
         coins = point -> utxos.find(point).map(coin -> new UtxoEntry(coin.amount(), coin.scriptPubKey(), coin.height(), coin.coinbase()));
         poolTip = chain.activeTip();
         synchronized (chain) {
-            if (persistMempool) restorePersistentMempool();
+            if (persistMempool) {
+                mempoolFeeDeltaStore.load().forEach(mempool::restoreFeeDelta);
+                restorePersistentMempool();
+            }
             mempool.revalidate(context(), coins, Set.of());
             mempool.expire();
             if (persistMempool) {
@@ -850,6 +855,21 @@ public final class NodeValidationService implements AutoCloseable {
                         + " instead of active tip " + activeTip.hash().toDisplayHex());
     }
 
+    public long prioritiseTransaction(Hash256 txid, long feeDelta) {
+        Objects.requireNonNull(txid, "txid");
+        synchronized (chain) {
+            synchronizePool();
+            long result = mempool.prioritise(txid, feeDelta);
+            if (persistMempool) mempoolFeeDeltaStore.replace(mempool.prioritisedTransactions());
+            revision++; chain.notifyAll();
+            return result;
+        }
+    }
+
+    public Map<Hash256, Long> prioritisedTransactions() {
+        synchronized (chain) { return mempool.prioritisedTransactions(); }
+    }
+
     public List<MempoolEntry> mempoolEntries() {
         synchronized (chain) {
             synchronizePool();
@@ -1231,6 +1251,7 @@ public final class NodeValidationService implements AutoCloseable {
             var beforeExpiry = mempool.entries();
             mempool.expire();
             markMempoolPersistenceDirty(beforeExpiry);
+            mempoolFeeDeltaStore.replace(mempool.prioritisedTransactions());
             if (!mempoolPersistenceDirty) return;
             mempoolStore.replace(persistedMempoolEntries());
             mempoolPersistenceDirty = false;

@@ -57,9 +57,9 @@ final class MempoolGraphPolicy {
         }
 
         long oldFee = 0;
-        for (Hash256 id : evicted) oldFee = Math.addExact(oldFee, entries.get(id).fee());
+        for (Hash256 id : evicted) oldFee = Math.addExact(oldFee, entries.get(id).modifiedFee());
         long delta = new FeeRate(limits.incrementalRelaySatPerKvB()).feeForVSize(replacement.virtualSize());
-        if (replacement.fee() < oldFee || replacement.fee() - oldFee < delta) fail("replacement-fee");
+        if (replacement.modifiedFee() < oldFee || replacement.modifiedFee() - oldFee < delta) fail("replacement-fee");
 
         // Core v31 removed BIP125 rules #1/#2 and the old per-direct-conflict
         // feerate rule. The prospective mempool must instead have a strictly
@@ -115,7 +115,7 @@ final class MempoolGraphPolicy {
                 List<ClusterLinearization.Chunk> chunks = ClusterLinearization.chunks(entries, cluster);
                 ClusterLinearization.Chunk tail = chunks.getLast();
                 Set<Hash256> candidate = descendants(entries, new HashSet<>(tail.transactions()));
-                long fee = candidate.stream().mapToLong(id -> entries.get(id).fee()).sum();
+                long fee = candidate.stream().mapToLong(id -> entries.get(id).modifiedFee()).sum();
                 long bytes = candidate.stream().mapToLong(id -> entries.get(id).adjustedWeight()).sum();
                 if (worst == null || ClusterLinearization.compareRate(fee, bytes, worstFee, worstSize) < 0) {
                     worst = candidate;

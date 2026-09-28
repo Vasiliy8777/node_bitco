@@ -70,13 +70,13 @@ final class PackagePolicy {
                 Hash256 id = input.previousOutput().transactionId();
                 if (before.containsKey(id) && !proposed.contains(id)) fail("package-rbf-mempool-ancestor");
             }
-        long oldFee = removed.stream().mapToLong(id -> before.get(id).fee()).sum();
-        long newFee = proposed.stream().mapToLong(id -> after.get(id).fee()).sum();
+        long oldFee = removed.stream().mapToLong(id -> before.get(id).modifiedFee()).sum();
+        long newFee = proposed.stream().mapToLong(id -> after.get(id).modifiedFee()).sum();
         long newSize = proposed.stream().mapToLong(id -> after.get(id).virtualSize()).sum();
         if (newFee < oldFee || newFee - oldFee < new FeeRate(limits.incrementalRelaySatPerKvB()).feeForVSize(newSize))
             fail("package-rbf-fees");
         var parent = after.get(txs.getFirst().txId());
-        if (ClusterLinearization.compareRate(newFee, newSize, parent.fee(), parent.virtualSize()) <= 0)
+        if (ClusterLinearization.compareRate(newFee, newSize, parent.modifiedFee(), parent.virtualSize()) <= 0)
             fail("package-rbf-child-must-improve-parent-rate");
         Set<Hash256> oldAffected = ClusterLinearization.connected(before, conflicts);
         List<ClusterLinearization.Chunk> oldCurve = ClusterLinearization.chunks(before, oldAffected);

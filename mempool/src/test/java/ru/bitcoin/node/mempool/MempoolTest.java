@@ -510,4 +510,18 @@ class MempoolTest {
         assertEquals(800, entry.virtualSize());
     }
 
+
+    @Test
+    void priorityDeltaSetBeforeAdmissionAffectsPolicyWithoutChangingBaseFee() {
+        Fixture fixture = createFixture();
+        Mempool mempool = new Mempool(new MempoolPolicy(new FeeRate(1_000_000L)));
+        Hash256 txid = fixture.transaction().txId();
+        mempool.prioritise(txid, 1_000_000L);
+        MempoolEntry entry = mempool.admit(fixture.transaction(),
+                new MempoolValidationContext(SPENDING_HEIGHT, 1_700_000_000L, height -> 1_600_000_000L),
+                fixture.utxoView());
+        assertEquals(10_000L, entry.fee());
+        assertEquals(1_010_000L, entry.modifiedFee());
+        assertEquals(1_000_000L, mempool.prioritisedTransactions().get(txid));
+    }
 }

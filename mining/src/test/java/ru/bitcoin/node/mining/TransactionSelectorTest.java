@@ -55,4 +55,16 @@ class TransactionSelectorTest {
         assertEquals(List.of(lowParent, highChild), selected);
     }
 
+
+    @Test
+    void modifiedFeeChangesMiningOrderWithoutChangingBaseFee() {
+        var first = tx(Hash256.fromDisplayHex("41".repeat(32)), 1);
+        var second = tx(Hash256.fromDisplayHex("42".repeat(32)), 2);
+        var lowBasePrioritised = new MempoolEntry(first, 100, TransactionWeight.calculate(first), 0, 0, 10_000);
+        var highBase = new MempoolEntry(second, 1_000, TransactionWeight.calculate(second), 0, 0, 0);
+        long budget = lowBasePrioritised.weight();
+        assertEquals(100, lowBasePrioritised.fee());
+        assertEquals(10_100, lowBasePrioritised.modifiedFee());
+        assertEquals(List.of(first), TransactionSelector.select(List.of(highBase, lowBasePrioritised), budget, 100, new FeeRate(0)));
+    }
 }

@@ -80,7 +80,7 @@ public final class ClusterLinearization {
             int bestEnd = -1;
             for (int i = start; i < linearization.size(); i++) {
                 MempoolEntry entry = require(entries, linearization.get(i));
-                fee = Math.addExact(fee, entry.fee());
+                fee = Math.addExact(fee, entry.modifiedFee());
                 size = Math.addExact(size, entry.adjustedWeight());
                 vsize = Math.addExact(vsize, entry.virtualSize());
                 if (bestEnd < 0 || compareRate(fee, size, bestFee, bestSize) > 0) {
@@ -184,7 +184,7 @@ public final class ClusterLinearization {
 
     private static long fee(Map<Hash256, MempoolEntry> entries, Collection<Hash256> ids) {
         long v = 0;
-        for (Hash256 id : ids) v = Math.addExact(v, require(entries, id).fee());
+        for (Hash256 id : ids) v = Math.addExact(v, require(entries, id).modifiedFee());
         return v;
     }
 
