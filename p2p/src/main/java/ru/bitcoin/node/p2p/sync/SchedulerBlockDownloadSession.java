@@ -40,7 +40,7 @@ public final class SchedulerBlockDownloadSession
             > activeDownloads =
             new IdentityHashMap<>();
 
-    private ExecutorService executor;
+    private ThreadPoolExecutor executor;
 
     private CompletionService<DownloadResult>
             completionService;
@@ -848,8 +848,10 @@ public final class SchedulerBlockDownloadSession
             int readyPeerCount
     ) {
 
-        if (executor != null) {
-            return;
+        if (readyPeerCount <= 0) {
+            throw new IllegalArgumentException(
+                    "readyPeerCount must be positive"
+            );
         }
 
         int threadCount =
@@ -859,15 +861,45 @@ public final class SchedulerBlockDownloadSession
                                 .DEFAULT_MAX_BLOCKS_PER_PEER
                 );
 
-        executor =
-                Executors.newFixedThreadPool(
-                        threadCount
-                );
+        if (executor == null) {
+            /*
+             * One worker may block in BlockSynchronizer for every in-flight
+             * block. The pool therefore has to cover the complete per-peer
+             * in-flight budget, not merely the peer count.
+             */
+            executor =
+                    new ThreadPoolExecutor(
+                            threadCount,
+                            threadCount,
+                            0L,
+                            TimeUnit.MILLISECONDS,
+                            new LinkedBlockingQueue<>()
+                    );
 
-        completionService =
-                new ExecutorCompletionService<>(
-                        executor
-                );
+            completionService =
+                    new ExecutorCompletionService<>(
+                            executor
+                    );
+            return;
+        }
+
+        /*
+         * READY peers can be added after a session has started (notably while
+         * OutboundPeerSupervisor fills the remaining outbound slots during
+         * IBD). A fixed pool sized from the first peer snapshot deadlocks that
+         * expansion: sixteen blocked downloads to the initial peer occupy all
+         * workers, while work assigned to newly connected peers sits forever in
+         * the executor queue. Grow the pool with the READY peer set so those
+         * peers can actually perform their assigned downloads immediately.
+         *
+         * Never shrink a live pool here. Shrinking is unnecessary for the
+         * bounded session and could strand already submitted work.
+         */
+        if (threadCount > executor.getMaximumPoolSize()) {
+            executor.setMaximumPoolSize(threadCount);
+            executor.setCorePoolSize(threadCount);
+            executor.prestartAllCoreThreads();
+        }
     }
 
     private void assignAvailable(

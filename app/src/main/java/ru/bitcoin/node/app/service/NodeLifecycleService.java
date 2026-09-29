@@ -446,6 +446,18 @@ public final class NodeLifecycleService
         );
 
         long finalHeight = syncInfrastructure.headerChainState().bestHeaderTip().height();
+
+        /*
+         * The progress renderer uses a carriage return and may otherwise leave
+         * the penultimate per-header update visible when the following log line
+         * is emitted concurrently. Publish the authoritative final chain-state
+         * height once more before logging completion.
+         */
+        SyncProgressConsole.headers(
+                finalHeight,
+                Math.max(remoteTargetHeight, finalHeight)
+        );
+
         log.info(
                 "Header sync completed at height {} (peer advertised target {})",
                 finalHeight,

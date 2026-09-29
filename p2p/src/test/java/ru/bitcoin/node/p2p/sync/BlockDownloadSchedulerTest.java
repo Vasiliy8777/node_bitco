@@ -285,6 +285,94 @@ class BlockDownloadSchedulerTest {
     }
 
     @Test
+    void sessionShouldGrowWorkersWhenReadyPeerSetExpands()
+            throws Exception {
+
+        List<Block> blocks =
+                blocks(
+                        BlockDownloadScheduler.MAX_BLOCKS_IN_FLIGHT_PER_PEER + 1
+                );
+
+        try (ServerSocket firstServerSocket = new ServerSocket(0);
+             ServerSocket secondServerSocket = new ServerSocket(0);
+             PeerManager peerManager = new PeerManager()) {
+
+            CountDownLatch firstWindowReceived = new CountDownLatch(1);
+            CountDownLatch secondPeerReceivedRequest = new CountDownLatch(1);
+            CountDownLatch releaseServers = new CountDownLatch(1);
+
+            CompletableFuture<Void> firstServer = CompletableFuture.runAsync(() -> {
+                try (Socket socket = firstServerSocket.accept()) {
+                    PeerIo io = peerIo(socket);
+                    completeHandshake(io);
+                    for (int i = 0;
+                         i < BlockDownloadScheduler.MAX_BLOCKS_IN_FLIGHT_PER_PEER;
+                         i++) {
+                        readRequestedBlockHash(io);
+                    }
+                    firstWindowReceived.countDown();
+                    assertTrue(releaseServers.await(5, TimeUnit.SECONDS));
+                } catch (Exception exception) {
+                    throw new RuntimeException(exception);
+                }
+            });
+
+            Hash256 seventeenthHash =
+                    blocks.get(BlockDownloadScheduler.MAX_BLOCKS_IN_FLIGHT_PER_PEER).hash();
+
+            CompletableFuture<Void> secondServer = CompletableFuture.runAsync(() -> {
+                try (Socket socket = secondServerSocket.accept()) {
+                    PeerIo io = peerIo(socket);
+                    completeHandshake(io);
+                    assertEquals(seventeenthHash, readRequestedBlockHash(io));
+                    secondPeerReceivedRequest.countDown();
+                    assertTrue(releaseServers.await(5, TimeUnit.SECONDS));
+                } catch (Exception exception) {
+                    throw new RuntimeException(exception);
+                }
+            });
+
+            Peer firstPeer = connectPeer(firstServerSocket.getLocalPort());
+            peerManager.add(firstPeer);
+
+            try (SchedulerBlockDownloadSession session =
+                         new SchedulerBlockDownloadSession(
+                                 peerManager,
+                                 new BlockDownloadService(peerManager),
+                                 new BlockDownloadTimeoutPolicy(Duration.ofMinutes(10))
+                         )) {
+
+                session.submit(blocks.stream().map(Block::hash).toList());
+
+                assertTrue(
+                        firstWindowReceived.await(5, TimeUnit.SECONDS),
+                        "Initial peer did not fill its sixteen in-flight slots"
+                );
+
+                Peer secondPeer = connectPeer(secondServerSocket.getLocalPort());
+                peerManager.add(secondPeer);
+
+                /*
+                 * pollCompleted() refreshes the READY peer snapshot. The new peer
+                 * must get an actual worker immediately even though all workers
+                 * created for the initial peer are blocked in network reads.
+                 */
+                assertTrue(session.pollCompleted(Duration.ofMillis(50)).isEmpty());
+
+                assertTrue(
+                        secondPeerReceivedRequest.await(2, TimeUnit.SECONDS),
+                        "New READY peer was starved behind workers blocked on the initial peer"
+                );
+            } finally {
+                releaseServers.countDown();
+            }
+
+            firstServer.get(5, TimeUnit.SECONDS);
+            secondServer.get(5, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
     void shouldUseFiniteCompletionCheckInterval() {
 
         assertTrue(
