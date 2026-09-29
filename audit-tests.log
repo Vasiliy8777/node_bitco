@@ -1,0 +1,458 @@
+Java version: 21.0.7
+Java home: C:\Program Files\Java\jdk-21
+OS: Windows 11
+Architecture: amd64
+Loading RocksDB...
+RocksDB loaded successfully
+����. 29, 2026 6:56:48 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor start
+INFO: Outbound peer supervisor started with target=1; initial peer=127.0.0.1:54586
+����. 29, 2026 6:56:48 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor onPeerClosed
+WARNING: Outbound peer disconnected from slot 0: 127.0.0.1:54586; cause: java.io.IOException: Peer disconnected
+����. 29, 2026 6:56:48 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor connectForSlot
+INFO: Outbound reconnect attempt #1 for slot 0, startHeight=101, excludedAddresses=0, excludedNetGroups=0
+����. 29, 2026 6:56:48 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor reconnectUntilSuccessful
+INFO: Outbound peer reconnected successfully for slot 0 on attempt #1: 127.0.0.1:54586
+����. 29, 2026 6:56:48 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor close
+INFO: Stopping outbound peer supervisor
+����. 29, 2026 6:56:48 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor close
+INFO: Outbound peer supervisor stopped
+����. 29, 2026 6:56:48 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor start
+INFO: Outbound peer supervisor started with target=2; initial peer=127.0.0.1:54590
+����. 29, 2026 6:56:48 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor connectForSlot
+INFO: Outbound reconnect attempt #1 for slot 1, startHeight=101, excludedAddresses=1, excludedNetGroups=0
+����. 29, 2026 6:56:48 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor reconnectUntilSuccessful
+INFO: Outbound peer reconnected successfully for slot 1 on attempt #1: 127.0.0.1:54589
+����. 29, 2026 6:56:48 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor close
+INFO: Stopping outbound peer supervisor
+����. 29, 2026 6:56:48 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor close
+INFO: Outbound peer supervisor stopped
+����. 29, 2026 6:56:48 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor connectForSlot
+INFO: Outbound reconnect attempt #1 for slot 1, startHeight=101, excludedAddresses=1, excludedNetGroups=0
+����. 29, 2026 6:56:48 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor start
+INFO: Outbound peer supervisor started with target=1; initial peer=127.0.0.1:54595
+����. 29, 2026 6:56:48 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor reconnectUntilSuccessful
+INFO: Outbound peer reconnected successfully for slot 1 on attempt #1: 127.0.0.1:54594
+����. 29, 2026 6:56:48 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor connectForSlot
+INFO: Outbound reconnect attempt #1 for slot 2, startHeight=101, excludedAddresses=2, excludedNetGroups=0
+����. 29, 2026 6:56:48 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor reconnectUntilSuccessful
+INFO: Outbound peer reconnected successfully for slot 2 on attempt #1: 127.0.0.1:54593
+����. 29, 2026 6:56:48 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor close
+INFO: Stopping outbound peer supervisor
+����. 29, 2026 6:56:48 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor close
+INFO: Outbound peer supervisor stopped
+����. 29, 2026 6:56:48 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor start
+INFO: Outbound peer supervisor started with target=1; initial peer=127.0.0.1:54600
+����. 29, 2026 6:56:48 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor onPeerClosed
+WARNING: Outbound peer disconnected from slot 0: 127.0.0.1:54600; cause: java.io.IOException: Peer disconnected
+����. 29, 2026 6:56:48 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor connectForSlot
+INFO: Outbound reconnect attempt #1 for slot 0, startHeight=100, excludedAddresses=0, excludedNetGroups=0
+����. 29, 2026 6:56:48 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor reconnectUntilSuccessful
+WARNING: Outbound reconnect attempt #1 for slot 0 failed: java.io.IOException: Unable to connect to any known peer address
+����. 29, 2026 6:56:48 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor reconnectUntilSuccessful
+INFO: Next outbound reconnect attempt for slot 0 in 200 ms
+����. 29, 2026 6:56:48 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor close
+INFO: Stopping outbound peer supervisor
+����. 29, 2026 6:56:48 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor close
+INFO: Outbound peer supervisor stopped
+18:57:07.620 [main] INFO org.springframework.test.context.support.AnnotationConfigContextLoaderUtils -- Could not detect default configuration classes for test class [ru.bitcoin.node.app.BitcoinNodeApplicationTests]: BitcoinNodeApplicationTests does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+18:57:07.701 [main] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration ru.bitcoin.node.app.BitcoinNodeApplication for test class ru.bitcoin.node.app.BitcoinNodeApplicationTests
+18:57:07.766 [main] INFO org.springframework.test.context.support.AnnotationConfigContextLoaderUtils -- Could not detect default configuration classes for test class [ru.bitcoin.node.app.BitcoinNodeApplicationTests]: BitcoinNodeApplicationTests does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+18:57:07.768 [main] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration ru.bitcoin.node.app.BitcoinNodeApplication for test class ru.bitcoin.node.app.BitcoinNodeApplicationTests
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v4.1.1)
+
+2026-09-29T18:57:08.001+07:00  INFO 204704 --- [           main] r.b.n.app.BitcoinNodeApplicationTests    : Starting BitcoinNodeApplicationTests using Java 21.0.7 with PID 204704 (started by Vasiliy in C:\Users\Vasiliy\IdeaProjects\bitcoin-node\app)
+2026-09-29T18:57:08.002+07:00  INFO 204704 --- [           main] r.b.n.app.BitcoinNodeApplicationTests    : No active profile set, falling back to 1 default profile: "testnet"
+2026-09-29T18:57:20.967+07:00  INFO 204704 --- [-node-lifecycle] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: NEW -> STARTING
+2026-09-29T18:57:20.969+07:00  INFO 204704 --- [           main] r.b.n.app.BitcoinNodeApplicationTests    : Started BitcoinNodeApplicationTests in 13.167 seconds (process running for 14.897)
+Mockito is currently self-attaching to enable the inline-mock-maker. This will no longer work in future releases of the JDK. Please add Mockito as an agent to your build as described in Mockito's documentation: https://javadoc.io/doc/org.mockito/mockito-core/latest/org.mockito/org/mockito/Mockito.html#0.3
+2026-09-29T18:57:22.519+07:00  INFO 204704 --- [-node-lifecycle] r.b.n.app.service.NodeLifecycleService   : Bitcoin P2P server listening on port 18335
+Java HotSpot(TM) 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+WARNING: A Java agent has been loaded dynamically (C:\Users\Vasiliy\.m2\repository\net\bytebuddy\byte-buddy-agent\1.18.11\byte-buddy-agent-1.18.11.jar)
+WARNING: If a serviceability tool is in use, please run with -XX:+EnableDynamicAgentLoading to hide this warning
+WARNING: If a serviceability tool is not in use, please run with -Djdk.instrument.traceUsage for more information
+WARNING: Dynamic loading of agents will be disallowed by default in a future release
+2026-09-29T18:57:24.201+07:00  INFO 204704 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: NEW -> STOPPING
+2026-09-29T18:57:24.202+07:00  INFO 204704 --- [           main] r.b.node.p2p.OutboundPeerSupervisor      : Stopping outbound peer supervisor
+2026-09-29T18:57:24.202+07:00  INFO 204704 --- [           main] r.b.node.p2p.OutboundPeerSupervisor      : Outbound peer supervisor stopped
+2026-09-29T18:57:24.206+07:00  INFO 204704 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STOPPING -> STOPPED
+2026-09-29T18:57:24.243+07:00  INFO 204704 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: NEW -> STOPPING
+2026-09-29T18:57:24.243+07:00  INFO 204704 --- [           main] r.b.node.p2p.OutboundPeerSupervisor      : Stopping outbound peer supervisor
+2026-09-29T18:57:24.243+07:00  INFO 204704 --- [           main] r.b.node.p2p.OutboundPeerSupervisor      : Outbound peer supervisor stopped
+2026-09-29T18:57:24.247+07:00  INFO 204704 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STOPPING -> STOPPED
+2026-09-29T18:57:24.282+07:00  INFO 204704 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: NEW -> STOPPING
+2026-09-29T18:57:24.282+07:00  INFO 204704 --- [           main] r.b.node.p2p.OutboundPeerSupervisor      : Stopping outbound peer supervisor
+2026-09-29T18:57:24.282+07:00  INFO 204704 --- [           main] r.b.node.p2p.OutboundPeerSupervisor      : Outbound peer supervisor stopped
+2026-09-29T18:57:24.284+07:00  INFO 204704 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STOPPING -> STOPPED
+2026-09-29T18:57:24.314+07:00  WARN 204704 --- [           main] s.c.a.AnnotationConfigApplicationContext : Exception encountered during context initialization - cancelling refresh attempt: org.springframework.beans.factory.BeanCreationException: Error creating bean with name 'outboundPeerSupervisor' defined in ru.bitcoin.node.app.config.NodeConfiguration: Failed to instantiate [ru.bitcoin.node.p2p.OutboundPeerSupervisor]: Factory method 'outboundPeerSupervisor' threw exception with message: targetOutboundPeers must be positive
+2026-09-29T18:57:24.347+07:00  INFO 204704 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: NEW -> STOPPING
+2026-09-29T18:57:24.348+07:00  INFO 204704 --- [           main] r.b.node.p2p.OutboundPeerSupervisor      : Stopping outbound peer supervisor
+2026-09-29T18:57:24.348+07:00  INFO 204704 --- [           main] r.b.node.p2p.OutboundPeerSupervisor      : Outbound peer supervisor stopped
+2026-09-29T18:57:24.350+07:00  INFO 204704 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STOPPING -> STOPPED
+2026-09-29T18:57:33.311+07:00  WARN 204704 --- [pool-checkpoint] r.b.n.a.s.MempoolCheckpointService       : Failed to checkpoint persistent mempool; will retry
+
+java.lang.IllegalStateException: simulated write failure
+	at ru.bitcoin.node.app.service.MempoolCheckpointServiceTest.lambda$retriesAfterCheckpointFailure$2(MempoolCheckpointServiceTest.java:42) ~[test-classes/:na]
+	at ru.bitcoin.node.app.service.MempoolCheckpointService.checkpoint(MempoolCheckpointService.java:51) ~[classes/:na]
+	at java.base/java.util.concurrent.Executors$RunnableAdapter.call(Executors.java:572) ~[na:na]
+	at java.base/java.util.concurrent.FutureTask.runAndReset(FutureTask.java:358) ~[na:na]
+	at java.base/java.util.concurrent.ScheduledThreadPoolExecutor$ScheduledFutureTask.run(ScheduledThreadPoolExecutor.java:305) ~[na:na]
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1144) ~[na:na]
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:642) ~[na:na]
+	at java.base/java.lang.Thread.run(Thread.java:1583) ~[na:na]
+
+2026-09-29T18:57:33.507+07:00  INFO 204704 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: NEW -> STARTING
+2026-09-29T18:57:33.520+07:00  INFO 204704 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STARTING -> SYNCHRONIZING_HEADERS
+
+HDR 0.0% 0/1 0/s2026-09-29T18:57:33.524+07:00  INFO 204704 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Header sync completed at height 1 (peer advertised target 1)
+2026-09-29T18:57:33.526+07:00  INFO 204704 --- [-lifecycle-test] r.b.node.p2p.OutboundPeerSupervisor      : Outbound peer supervisor started with target=1; initial peer=127.0.0.1:65129
+2026-09-29T18:57:33.526+07:00  INFO 204704 --- [er-supervisor-2] r.b.node.p2p.OutboundPeerSupervisor      : Outbound reconnect attempt #1 for slot 2, startHeight=0, excludedAddresses=1, excludedNetGroups=0
+2026-09-29T18:57:33.526+07:00  INFO 204704 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: SYNCHRONIZING_HEADERS -> SYNCHRONIZING_BLOCKS
+2026-09-29T18:57:33.526+07:00  WARN 204704 --- [er-supervisor-2] r.b.node.p2p.OutboundPeerSupervisor      : Outbound reconnect attempt #1 for slot 2 failed: java.io.IOException: No known peer addresses available
+2026-09-29T18:57:33.526+07:00  INFO 204704 --- [er-supervisor-1] r.b.node.p2p.OutboundPeerSupervisor      : Outbound reconnect attempt #1 for slot 1, startHeight=0, excludedAddresses=1, excludedNetGroups=0
+2026-09-29T18:57:33.526+07:00  INFO 204704 --- [er-supervisor-2] r.b.node.p2p.OutboundPeerSupervisor      : Next outbound reconnect attempt for slot 2 in 1�000 ms
+2026-09-29T18:57:33.527+07:00  WARN 204704 --- [er-supervisor-1] r.b.node.p2p.OutboundPeerSupervisor      : Outbound reconnect attempt #1 for slot 1 failed: java.io.IOException: No known peer addresses available
+2026-09-29T18:57:33.527+07:00  INFO 204704 --- [er-supervisor-1] r.b.node.p2p.OutboundPeerSupervisor      : Next outbound reconnect attempt for slot 1 in 1�000 ms
+2026-09-29T18:57:33.538+07:00  INFO 204704 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: SYNCHRONIZING_BLOCKS -> RUNNING
+2026-09-29T18:57:33.550+07:00  INFO 204704 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: RUNNING -> STOPPING
+2026-09-29T18:57:33.550+07:00  INFO 204704 --- [           main] r.b.node.p2p.OutboundPeerSupervisor      : Stopping outbound peer supervisor
+2026-09-29T18:57:33.551+07:00  INFO 204704 --- [           main] r.b.node.p2p.OutboundPeerSupervisor      : Outbound peer supervisor stopped
+2026-09-29T18:57:33.555+07:00  INFO 204704 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STOPPING -> STOPPED
+2026-09-29T18:57:33.605+07:00  INFO 204704 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: NEW -> STARTING
+2026-09-29T18:57:33.609+07:00  INFO 204704 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STARTING -> SYNCHRONIZING_HEADERS
+2026-09-29T18:57:33.610+07:00  WARN 204704 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : HEADER SYNC PEER FAILED peer=127.0.0.1:65132 state=CLOSED bestHeaderHeight=0 cause=java.io.IOException: Peer disconnected
+2026-09-29T18:57:33.613+07:00  INFO 204704 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: SYNCHRONIZING_HEADERS -> SYNCHRONIZING_HEADERS
+2026-09-29T18:57:33.615+07:00  INFO 204704 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Header sync completed at height 1 (peer advertised target 1)
+2026-09-29T18:57:33.616+07:00  INFO 204704 --- [er-supervisor-1] r.b.node.p2p.OutboundPeerSupervisor      : Outbound reconnect attempt #1 for slot 1, startHeight=0, excludedAddresses=1, excludedNetGroups=0
+2026-09-29T18:57:33.616+07:00  INFO 204704 --- [-lifecycle-test] r.b.node.p2p.OutboundPeerSupervisor      : Outbound peer supervisor started with target=1; initial peer=127.0.0.1:65133
+2026-09-29T18:57:33.616+07:00  INFO 204704 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: SYNCHRONIZING_HEADERS -> SYNCHRONIZING_BLOCKS
+2026-09-29T18:57:33.618+07:00  INFO 204704 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: SYNCHRONIZING_BLOCKS -> RUNNING
+2026-09-29T18:57:33.622+07:00  INFO 204704 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: RUNNING -> STOPPING
+2026-09-29T18:57:33.622+07:00  INFO 204704 --- [           main] r.b.node.p2p.OutboundPeerSupervisor      : Stopping outbound peer supervisor
+
+BLK 100.0% 1/1 1/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 20112026-09-29T18:57:39.607+07:00  WARN 204704 --- [oin-peer-reader] r.b.node.p2p.OutboundPeerSupervisor      : Outbound peer disconnected from slot 0: 127.0.0.1:65133; cause: java.io.IOException: Peer disconnected
+
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 20112026-09-29T18:57:45.760+07:00  INFO 204704 --- [           main] r.b.node.p2p.OutboundPeerSupervisor      : Outbound peer supervisor stopped
+
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 20112026-09-29T18:57:45.765+07:00  INFO 204704 --- [-node-lifecycle] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STARTING -> SYNCHRONIZING_HEADERS
+2026-09-29T18:57:45.768+07:00  INFO 204704 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STOPPING -> STOPPED
+2026-09-29T18:57:45.826+07:00  INFO 204704 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: NEW -> STARTING
+2026-09-29T18:57:45.826+07:00 ERROR 204704 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STARTING -> FAILED
+
+java.io.IOException: Unable to synchronize headers with any known peer
+	at ru.bitcoin.node.app.service.NodeLifecycleService.synchronizeHeadersWithFailover(NodeLifecycleService.java:464) ~[classes/:na]
+	at ru.bitcoin.node.app.service.NodeLifecycleService.start(NodeLifecycleService.java:306) ~[classes/:na]
+	at org.junit.jupiter.api.AssertThrows.assertThrows(AssertThrows.java:54) ~[junit-jupiter-api-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.api.AssertThrows.assertThrows(AssertThrows.java:35) ~[junit-jupiter-api-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.api.Assertions.assertThrows(Assertions.java:3223) ~[junit-jupiter-api-6.0.3.jar:6.0.3]
+	at ru.bitcoin.node.app.service.NodeLifecycleServiceTest.shouldFailStartupWhenNoOutboundPeerCanBeDiscovered(NodeLifecycleServiceTest.java:108) ~[test-classes/:na]
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103) ~[na:na]
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580) ~[na:na]
+	at org.junit.platform.commons.util.ReflectionUtils.invokeMethod(ReflectionUtils.java:701) ~[junit-platform-commons-6.0.3.jar:6.0.3]
+	at org.junit.platform.commons.support.ReflectionSupport.invokeMethod(ReflectionSupport.java:502) ~[junit-platform-commons-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.support.MethodReflectionUtils.invoke(MethodReflectionUtils.java:45) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.MethodInvocation.proceed(MethodInvocation.java:61) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain$ValidatingInvocation.proceed(InvocationInterceptorChain.java:124) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.extension.TimeoutExtension.intercept(TimeoutExtension.java:163) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.extension.TimeoutExtension.interceptTestableMethod(TimeoutExtension.java:148) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.extension.TimeoutExtension.interceptTestMethod(TimeoutExtension.java:86) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker$ReflectiveInterceptorCall.lambda$ofVoidMethod$0(InterceptingExecutableInvoker.java:123) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.lambda$invoke$0(InterceptingExecutableInvoker.java:105) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain$InterceptedInvocation.proceed(InvocationInterceptorChain.java:99) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.proceed(InvocationInterceptorChain.java:66) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.chainAndInvoke(InvocationInterceptorChain.java:47) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.invoke(InvocationInterceptorChain.java:39) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invoke(InterceptingExecutableInvoker.java:104) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invoke(InterceptingExecutableInvoker.java:98) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invokeVoid(InterceptingExecutableInvoker.java:71) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.lambda$invokeTestMethod$0(TestMethodTestDescriptor.java:219) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.invokeTestMethod(TestMethodTestDescriptor.java:215) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.execute(TestMethodTestDescriptor.java:157) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.execute(TestMethodTestDescriptor.java:70) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$2(NodeTestTask.java:176) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$1(NodeTestTask.java:166) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:138) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$0(NodeTestTask.java:164) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:163) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:116) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596) ~[na:na]
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:42) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$2(NodeTestTask.java:180) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$1(NodeTestTask.java:166) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:138) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$0(NodeTestTask.java:164) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:163) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:116) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596) ~[na:na]
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:42) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$2(NodeTestTask.java:180) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$1(NodeTestTask.java:166) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:138) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$0(NodeTestTask.java:164) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:163) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:116) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.submit(SameThreadHierarchicalTestExecutorService.java:36) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.HierarchicalTestExecutor.execute(HierarchicalTestExecutor.java:52) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.HierarchicalTestEngine.execute(HierarchicalTestEngine.java:58) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.executeEngine(EngineExecutionOrchestrator.java:246) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.failOrExecuteEngine(EngineExecutionOrchestrator.java:218) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:179) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:108) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.lambda$execute$0(EngineExecutionOrchestrator.java:66) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.withInterceptedStreams(EngineExecutionOrchestrator.java:157) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:65) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.DefaultLauncher.execute(DefaultLauncher.java:125) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.DefaultLauncher.execute(DefaultLauncher.java:114) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.DelegatingLauncher.execute(DelegatingLauncher.java:58) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.InterceptingLauncher.lambda$execute$2(InterceptingLauncher.java:57) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.ClasspathAlignmentCheckingLauncherInterceptor.intercept(ClasspathAlignmentCheckingLauncherInterceptor.java:25) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.InterceptingLauncher.execute(InterceptingLauncher.java:56) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.DelegatingLauncher.execute(DelegatingLauncher.java:58) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103) ~[na:na]
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580) ~[na:na]
+	at org.apache.maven.surefire.api.util.ReflectionUtils.invokeMethodWithArray(ReflectionUtils.java:125) ~[surefire-api-3.5.4.jar:3.5.4]
+	at org.apache.maven.surefire.junitplatform.LauncherAdapter.executeWithCancellationToken(LauncherAdapter.java:68) ~[surefire-junit-platform-3.5.4.jar:3.5.4]
+	at org.apache.maven.surefire.junitplatform.LauncherAdapter.execute(LauncherAdapter.java:54) ~[surefire-junit-platform-3.5.4.jar:3.5.4]
+	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.execute(JUnitPlatformProvider.java:203) ~[surefire-junit-platform-3.5.4.jar:3.5.4]
+	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.invokeAllTests(JUnitPlatformProvider.java:168) ~[surefire-junit-platform-3.5.4.jar:3.5.4]
+	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.invoke(JUnitPlatformProvider.java:136) ~[surefire-junit-platform-3.5.4.jar:3.5.4]
+	at org.apache.maven.surefire.booter.ForkedBooter.runSuitesInProcess(ForkedBooter.java:385) ~[surefire-booter-3.5.4.jar:3.5.4]
+	at org.apache.maven.surefire.booter.ForkedBooter.execute(ForkedBooter.java:162) ~[surefire-booter-3.5.4.jar:3.5.4]
+	at org.apache.maven.surefire.booter.ForkedBooter.run(ForkedBooter.java:507) ~[surefire-booter-3.5.4.jar:3.5.4]
+	at org.apache.maven.surefire.booter.ForkedBooter.main(ForkedBooter.java:495) ~[surefire-booter-3.5.4.jar:3.5.4]
+	Suppressed: java.io.IOException: No known peer addresses available
+		at ru.bitcoin.node.p2p.OutboundPeerManager.connectOneWithAddress(OutboundPeerManager.java:222) ~[classes/:na]
+		at ru.bitcoin.node.p2p.OutboundPeerManager.connectOneWithAddress(OutboundPeerManager.java:166) ~[classes/:na]
+		at ru.bitcoin.node.p2p.OutboundPeerManager.connectOneWithAddress(OutboundPeerManager.java:158) ~[classes/:na]
+		at ru.bitcoin.node.app.service.NodeLifecycleService.synchronizeHeadersWithFailover(NodeLifecycleService.java:478) ~[classes/:na]
+		... 86 common frames omitted
+
+2026-09-29T18:57:45.827+07:00  INFO 204704 --- [           main] r.b.node.p2p.OutboundPeerSupervisor      : Stopping outbound peer supervisor
+2026-09-29T18:57:45.827+07:00  INFO 204704 --- [           main] r.b.node.p2p.OutboundPeerSupervisor      : Outbound peer supervisor stopped
+2026-09-29T18:57:45.828+07:00  INFO 204704 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: FAILED -> STOPPING
+2026-09-29T18:57:45.830+07:00  INFO 204704 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STOPPING -> STOPPED
+2026-09-29T18:57:45.872+07:00  INFO 204704 --- [onPool-worker-3] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: NEW -> STARTING
+2026-09-29T18:57:45.874+07:00  INFO 204704 --- [onPool-worker-3] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STARTING -> SYNCHRONIZING_HEADERS
+2026-09-29T18:57:45.875+07:00  INFO 204704 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: SYNCHRONIZING_HEADERS -> STOPPING
+2026-09-29T18:57:45.875+07:00  INFO 204704 --- [           main] r.b.node.p2p.OutboundPeerSupervisor      : Stopping outbound peer supervisor
+2026-09-29T18:57:45.875+07:00  INFO 204704 --- [           main] r.b.node.p2p.OutboundPeerSupervisor      : Outbound peer supervisor stopped
+2026-09-29T18:57:45.877+07:00  INFO 204704 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STOPPING -> STOPPED
+2026-09-29T18:57:45.916+07:00  INFO 204704 --- [onPool-worker-3] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: NEW -> STARTING
+2026-09-29T18:57:45.918+07:00  INFO 204704 --- [onPool-worker-3] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STARTING -> SYNCHRONIZING_HEADERS
+2026-09-29T18:57:45.919+07:00  INFO 204704 --- [onPool-worker-3] r.b.n.app.service.NodeLifecycleService   : Header sync completed at height 1 (peer advertised target 1)
+2026-09-29T18:57:45.920+07:00  INFO 204704 --- [onPool-worker-3] r.b.node.p2p.OutboundPeerSupervisor      : Outbound peer supervisor started with target=1; initial peer=127.0.0.1:65181
+2026-09-29T18:57:45.920+07:00  INFO 204704 --- [onPool-worker-3] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: SYNCHRONIZING_HEADERS -> SYNCHRONIZING_BLOCKS
+2026-09-29T18:57:45.920+07:00  INFO 204704 --- [er-supervisor-1] r.b.node.p2p.OutboundPeerSupervisor      : Outbound reconnect attempt #1 for slot 1, startHeight=0, excludedAddresses=1, excludedNetGroups=0
+2026-09-29T18:57:45.920+07:00  WARN 204704 --- [er-supervisor-1] r.b.node.p2p.OutboundPeerSupervisor      : Outbound reconnect attempt #1 for slot 1 failed: java.io.IOException: No known peer addresses available
+2026-09-29T18:57:45.920+07:00  INFO 204704 --- [er-supervisor-2] r.b.node.p2p.OutboundPeerSupervisor      : Outbound reconnect attempt #1 for slot 2, startHeight=0, excludedAddresses=1, excludedNetGroups=0
+2026-09-29T18:57:45.920+07:00  INFO 204704 --- [er-supervisor-1] r.b.node.p2p.OutboundPeerSupervisor      : Next outbound reconnect attempt for slot 1 in 1�000 ms
+2026-09-29T18:57:45.920+07:00  WARN 204704 --- [er-supervisor-2] r.b.node.p2p.OutboundPeerSupervisor      : Outbound reconnect attempt #1 for slot 2 failed: java.io.IOException: No known peer addresses available
+2026-09-29T18:57:45.920+07:00  INFO 204704 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: SYNCHRONIZING_BLOCKS -> STOPPING
+2026-09-29T18:57:45.920+07:00  INFO 204704 --- [           main] r.b.node.p2p.OutboundPeerSupervisor      : Stopping outbound peer supervisor
+2026-09-29T18:57:45.920+07:00  INFO 204704 --- [er-supervisor-2] r.b.node.p2p.OutboundPeerSupervisor      : Next outbound reconnect attempt for slot 2 in 1�000 ms
+2026-09-29T18:57:45.920+07:00  INFO 204704 --- [           main] r.b.node.p2p.OutboundPeerSupervisor      : Outbound peer supervisor stopped
+2026-09-29T18:57:45.923+07:00  INFO 204704 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STOPPING -> STOPPED
+2026-09-29T18:57:45.960+07:00  INFO 204704 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: NEW -> STARTING
+2026-09-29T18:57:45.962+07:00  INFO 204704 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STARTING -> SYNCHRONIZING_HEADERS
+2026-09-29T18:57:45.962+07:00  INFO 204704 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Header sync completed at height 0 (peer advertised target 1)
+2026-09-29T18:57:45.963+07:00  INFO 204704 --- [-lifecycle-test] r.b.node.p2p.OutboundPeerSupervisor      : Outbound peer supervisor started with target=1; initial peer=127.0.0.1:51802
+2026-09-29T18:57:45.963+07:00  INFO 204704 --- [er-supervisor-1] r.b.node.p2p.OutboundPeerSupervisor      : Outbound reconnect attempt #1 for slot 1, startHeight=0, excludedAddresses=1, excludedNetGroups=0
+2026-09-29T18:57:45.963+07:00  INFO 204704 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: SYNCHRONIZING_HEADERS -> SYNCHRONIZING_BLOCKS
+2026-09-29T18:57:45.963+07:00  INFO 204704 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: SYNCHRONIZING_BLOCKS -> RUNNING
+2026-09-29T18:57:45.963+07:00  WARN 204704 --- [er-supervisor-1] r.b.node.p2p.OutboundPeerSupervisor      : Outbound reconnect attempt #1 for slot 1 failed: java.io.IOException: No known peer addresses available
+2026-09-29T18:57:45.963+07:00  INFO 204704 --- [er-supervisor-2] r.b.node.p2p.OutboundPeerSupervisor      : Outbound reconnect attempt #1 for slot 2, startHeight=0, excludedAddresses=1, excludedNetGroups=0
+2026-09-29T18:57:45.963+07:00  INFO 204704 --- [er-supervisor-1] r.b.node.p2p.OutboundPeerSupervisor      : Next outbound reconnect attempt for slot 1 in 1�000 ms
+2026-09-29T18:57:45.964+07:00  WARN 204704 --- [er-supervisor-2] r.b.node.p2p.OutboundPeerSupervisor      : Outbound reconnect attempt #1 for slot 2 failed: java.io.IOException: No known peer addresses available
+2026-09-29T18:57:45.964+07:00  INFO 204704 --- [er-supervisor-2] r.b.node.p2p.OutboundPeerSupervisor      : Next outbound reconnect attempt for slot 2 in 1�000 ms
+2026-09-29T18:57:45.994+07:00  INFO 204704 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: RUNNING -> STOPPING
+2026-09-29T18:57:45.994+07:00  INFO 204704 --- [           main] r.b.node.p2p.OutboundPeerSupervisor      : Stopping outbound peer supervisor
+2026-09-29T18:57:45.994+07:00  INFO 204704 --- [           main] r.b.node.p2p.OutboundPeerSupervisor      : Outbound peer supervisor stopped
+2026-09-29T18:57:45.997+07:00  INFO 204704 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STOPPING -> STOPPED
+2026-09-29T18:57:46.040+07:00  INFO 204704 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: NEW -> STARTING
+2026-09-29T18:57:46.042+07:00  INFO 204704 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STARTING -> SYNCHRONIZING_HEADERS
+2026-09-29T18:57:46.044+07:00  INFO 204704 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Header sync completed at height 1 (peer advertised target 1)
+2026-09-29T18:57:46.045+07:00  INFO 204704 --- [-lifecycle-test] r.b.node.p2p.OutboundPeerSupervisor      : Outbound peer supervisor started with target=1; initial peer=127.0.0.1:51804
+2026-09-29T18:57:46.045+07:00  INFO 204704 --- [er-supervisor-1] r.b.node.p2p.OutboundPeerSupervisor      : Outbound reconnect attempt #1 for slot 1, startHeight=0, excludedAddresses=1, excludedNetGroups=0
+2026-09-29T18:57:46.045+07:00  INFO 204704 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: SYNCHRONIZING_HEADERS -> SYNCHRONIZING_BLOCKS
+2026-09-29T18:57:46.045+07:00  WARN 204704 --- [er-supervisor-1] r.b.node.p2p.OutboundPeerSupervisor      : Outbound reconnect attempt #1 for slot 1 failed: java.io.IOException: No known peer addresses available
+2026-09-29T18:57:46.045+07:00  INFO 204704 --- [er-supervisor-1] r.b.node.p2p.OutboundPeerSupervisor      : Next outbound reconnect attempt for slot 1 in 1�000 ms
+2026-09-29T18:57:46.045+07:00  INFO 204704 --- [er-supervisor-2] r.b.node.p2p.OutboundPeerSupervisor      : Outbound reconnect attempt #1 for slot 2, startHeight=0, excludedAddresses=1, excludedNetGroups=0
+2026-09-29T18:57:46.045+07:00  WARN 204704 --- [er-supervisor-2] r.b.node.p2p.OutboundPeerSupervisor      : Outbound reconnect attempt #1 for slot 2 failed: java.io.IOException: No known peer addresses available
+2026-09-29T18:57:46.046+07:00  INFO 204704 --- [er-supervisor-2] r.b.node.p2p.OutboundPeerSupervisor      : Next outbound reconnect attempt for slot 2 in 1�000 ms
+2026-09-29T18:57:46.046+07:00  WARN 204704 --- [oin-peer-reader] r.b.node.p2p.OutboundPeerSupervisor      : Outbound peer disconnected from slot 0: 127.0.0.1:51804; cause: java.io.IOException: Peer disconnected
+2026-09-29T18:57:46.046+07:00  INFO 204704 --- [er-supervisor-0] r.b.node.p2p.OutboundPeerSupervisor      : Outbound reconnect attempt #1 for slot 0, startHeight=0, excludedAddresses=0, excludedNetGroups=0
+2026-09-29T18:57:46.049+07:00  INFO 204704 --- [er-supervisor-0] r.b.node.p2p.OutboundPeerSupervisor      : Outbound peer reconnected successfully for slot 0 on attempt #1: 127.0.0.1:51804
+2026-09-29T18:57:46.297+07:00  INFO 204704 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: SYNCHRONIZING_BLOCKS -> RUNNING
+2026-09-29T18:57:46.307+07:00  INFO 204704 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: RUNNING -> STOPPING
+2026-09-29T18:57:46.307+07:00  INFO 204704 --- [           main] r.b.node.p2p.OutboundPeerSupervisor      : Stopping outbound peer supervisor
+2026-09-29T18:57:46.307+07:00  INFO 204704 --- [           main] r.b.node.p2p.OutboundPeerSupervisor      : Outbound peer supervisor stopped
+2026-09-29T18:57:46.309+07:00  INFO 204704 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STOPPING -> STOPPED
+2026-09-29T18:57:46.353+07:00  INFO 204704 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: NEW -> STARTING
+2026-09-29T18:57:46.353+07:00 ERROR 204704 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STARTING -> FAILED
+
+java.io.IOException: Unable to synchronize headers with any known peer
+	at ru.bitcoin.node.app.service.NodeLifecycleService.synchronizeHeadersWithFailover(NodeLifecycleService.java:464) ~[classes/:na]
+	at ru.bitcoin.node.app.service.NodeLifecycleService.start(NodeLifecycleService.java:306) ~[classes/:na]
+	at org.junit.jupiter.api.AssertThrows.assertThrows(AssertThrows.java:54) ~[junit-jupiter-api-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.api.AssertThrows.assertThrows(AssertThrows.java:35) ~[junit-jupiter-api-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.api.Assertions.assertThrows(Assertions.java:3223) ~[junit-jupiter-api-6.0.3.jar:6.0.3]
+	at ru.bitcoin.node.app.service.NodeLifecycleServiceTest.shouldRejectSecondStartAttemptAfterFailure(NodeLifecycleServiceTest.java:202) ~[test-classes/:na]
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103) ~[na:na]
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580) ~[na:na]
+	at org.junit.platform.commons.util.ReflectionUtils.invokeMethod(ReflectionUtils.java:701) ~[junit-platform-commons-6.0.3.jar:6.0.3]
+	at org.junit.platform.commons.support.ReflectionSupport.invokeMethod(ReflectionSupport.java:502) ~[junit-platform-commons-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.support.MethodReflectionUtils.invoke(MethodReflectionUtils.java:45) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.MethodInvocation.proceed(MethodInvocation.java:61) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain$ValidatingInvocation.proceed(InvocationInterceptorChain.java:124) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.extension.TimeoutExtension.intercept(TimeoutExtension.java:163) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.extension.TimeoutExtension.interceptTestableMethod(TimeoutExtension.java:148) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.extension.TimeoutExtension.interceptTestMethod(TimeoutExtension.java:86) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker$ReflectiveInterceptorCall.lambda$ofVoidMethod$0(InterceptingExecutableInvoker.java:123) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.lambda$invoke$0(InterceptingExecutableInvoker.java:105) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain$InterceptedInvocation.proceed(InvocationInterceptorChain.java:99) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.proceed(InvocationInterceptorChain.java:66) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.chainAndInvoke(InvocationInterceptorChain.java:47) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.invoke(InvocationInterceptorChain.java:39) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invoke(InterceptingExecutableInvoker.java:104) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invoke(InterceptingExecutableInvoker.java:98) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invokeVoid(InterceptingExecutableInvoker.java:71) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.lambda$invokeTestMethod$0(TestMethodTestDescriptor.java:219) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.invokeTestMethod(TestMethodTestDescriptor.java:215) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.execute(TestMethodTestDescriptor.java:157) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.execute(TestMethodTestDescriptor.java:70) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$2(NodeTestTask.java:176) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$1(NodeTestTask.java:166) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:138) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$0(NodeTestTask.java:164) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:163) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:116) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596) ~[na:na]
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:42) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$2(NodeTestTask.java:180) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$1(NodeTestTask.java:166) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:138) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$0(NodeTestTask.java:164) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:163) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:116) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596) ~[na:na]
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:42) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$2(NodeTestTask.java:180) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$1(NodeTestTask.java:166) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:138) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$0(NodeTestTask.java:164) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:163) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:116) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.submit(SameThreadHierarchicalTestExecutorService.java:36) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.HierarchicalTestExecutor.execute(HierarchicalTestExecutor.java:52) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.HierarchicalTestEngine.execute(HierarchicalTestEngine.java:58) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.executeEngine(EngineExecutionOrchestrator.java:246) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.failOrExecuteEngine(EngineExecutionOrchestrator.java:218) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:179) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:108) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.lambda$execute$0(EngineExecutionOrchestrator.java:66) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.withInterceptedStreams(EngineExecutionOrchestrator.java:157) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:65) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.DefaultLauncher.execute(DefaultLauncher.java:125) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.DefaultLauncher.execute(DefaultLauncher.java:114) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.DelegatingLauncher.execute(DelegatingLauncher.java:58) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.InterceptingLauncher.lambda$execute$2(InterceptingLauncher.java:57) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.ClasspathAlignmentCheckingLauncherInterceptor.intercept(ClasspathAlignmentCheckingLauncherInterceptor.java:25) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.InterceptingLauncher.execute(InterceptingLauncher.java:56) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.DelegatingLauncher.execute(DelegatingLauncher.java:58) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103) ~[na:na]
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580) ~[na:na]
+	at org.apache.maven.surefire.api.util.ReflectionUtils.invokeMethodWithArray(ReflectionUtils.java:125) ~[surefire-api-3.5.4.jar:3.5.4]
+	at org.apache.maven.surefire.junitplatform.LauncherAdapter.executeWithCancellationToken(LauncherAdapter.java:68) ~[surefire-junit-platform-3.5.4.jar:3.5.4]
+	at org.apache.maven.surefire.junitplatform.LauncherAdapter.execute(LauncherAdapter.java:54) ~[surefire-junit-platform-3.5.4.jar:3.5.4]
+	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.execute(JUnitPlatformProvider.java:203) ~[surefire-junit-platform-3.5.4.jar:3.5.4]
+	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.invokeAllTests(JUnitPlatformProvider.java:168) ~[surefire-junit-platform-3.5.4.jar:3.5.4]
+	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.invoke(JUnitPlatformProvider.java:136) ~[surefire-junit-platform-3.5.4.jar:3.5.4]
+	at org.apache.maven.surefire.booter.ForkedBooter.runSuitesInProcess(ForkedBooter.java:385) ~[surefire-booter-3.5.4.jar:3.5.4]
+	at org.apache.maven.surefire.booter.ForkedBooter.execute(ForkedBooter.java:162) ~[surefire-booter-3.5.4.jar:3.5.4]
+	at org.apache.maven.surefire.booter.ForkedBooter.run(ForkedBooter.java:507) ~[surefire-booter-3.5.4.jar:3.5.4]
+	at org.apache.maven.surefire.booter.ForkedBooter.main(ForkedBooter.java:495) ~[surefire-booter-3.5.4.jar:3.5.4]
+	Suppressed: java.io.IOException: No known peer addresses available
+		at ru.bitcoin.node.p2p.OutboundPeerManager.connectOneWithAddress(OutboundPeerManager.java:222) ~[classes/:na]
+		at ru.bitcoin.node.p2p.OutboundPeerManager.connectOneWithAddress(OutboundPeerManager.java:166) ~[classes/:na]
+		at ru.bitcoin.node.p2p.OutboundPeerManager.connectOneWithAddress(OutboundPeerManager.java:158) ~[classes/:na]
+		at ru.bitcoin.node.app.service.NodeLifecycleService.synchronizeHeadersWithFailover(NodeLifecycleService.java:478) ~[classes/:na]
+		... 86 common frames omitted
+
+2026-09-29T18:57:46.354+07:00  INFO 204704 --- [           main] r.b.node.p2p.OutboundPeerSupervisor      : Stopping outbound peer supervisor
+2026-09-29T18:57:46.354+07:00  INFO 204704 --- [           main] r.b.node.p2p.OutboundPeerSupervisor      : Outbound peer supervisor stopped
+2026-09-29T18:57:46.355+07:00  INFO 204704 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: FAILED -> STOPPING
+2026-09-29T18:57:46.357+07:00  INFO 204704 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STOPPING -> STOPPED
+2026-09-29T18:57:46.389+07:00  INFO 204704 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: NEW -> STARTING
+2026-09-29T18:57:46.390+07:00  INFO 204704 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STARTING -> SYNCHRONIZING_HEADERS
+
+HDR 0.0% 0/1 0/s       2026-09-29T18:57:46.555+07:00  WARN 204704 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : HEADER SYNC PEER FAILED peer=127.0.0.1:51809 state=READY bestHeaderHeight=0 cause=ru.bitcoin.node.p2p.sync.HeaderSynchronizationTimeoutException: Peer did not respond to getheaders within PT0.15S
+2026-09-29T18:57:46.557+07:00  INFO 204704 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: SYNCHRONIZING_HEADERS -> SYNCHRONIZING_HEADERS
+2026-09-29T18:57:46.558+07:00  INFO 204704 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Header sync completed at height 1 (peer advertised target 1)
+2026-09-29T18:57:46.559+07:00  INFO 204704 --- [-lifecycle-test] r.b.node.p2p.OutboundPeerSupervisor      : Outbound peer supervisor started with target=1; initial peer=127.0.0.1:51810
+2026-09-29T18:57:46.559+07:00  INFO 204704 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: SYNCHRONIZING_HEADERS -> SYNCHRONIZING_BLOCKS
+2026-09-29T18:57:46.559+07:00  INFO 204704 --- [er-supervisor-2] r.b.node.p2p.OutboundPeerSupervisor      : Outbound reconnect attempt #1 for slot 2, startHeight=0, excludedAddresses=1, excludedNetGroups=0
+2026-09-29T18:57:46.561+07:00  INFO 204704 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: SYNCHRONIZING_BLOCKS -> RUNNING
+2026-09-29T18:57:46.901+07:00  INFO 204704 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: RUNNING -> STOPPING
+2026-09-29T18:57:46.901+07:00  INFO 204704 --- [           main] r.b.node.p2p.OutboundPeerSupervisor      : Stopping outbound peer supervisor
+
+BLK 100.0% 1/1 1/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 20112026-09-29T18:57:52.398+07:00  WARN 204704 --- [oin-peer-reader] r.b.node.p2p.OutboundPeerSupervisor      : Outbound peer disconnected from slot 0: 127.0.0.1:51810; cause: java.io.IOException: Peer disconnected
+
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 20112026-09-29T18:57:56.909+07:00  INFO 204704 --- [           main] r.b.node.p2p.OutboundPeerSupervisor      : Outbound peer supervisor stopped
+2026-09-29T18:57:56.911+07:00  INFO 204704 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STOPPING -> STOPPED
+2026-09-29T18:57:57.258+07:00  INFO 204704 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: NEW -> STOPPING
+2026-09-29T18:57:57.258+07:00  INFO 204704 --- [           main] r.b.node.p2p.OutboundPeerSupervisor      : Stopping outbound peer supervisor
+2026-09-29T18:57:57.258+07:00  INFO 204704 --- [           main] r.b.node.p2p.OutboundPeerSupervisor      : Outbound peer supervisor stopped
+2026-09-29T18:57:57.261+07:00  INFO 204704 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STOPPING -> STOPPED
+
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 0.0% 0/2 0/s 2011  
+BLK 75.0% 3/4 3/s 2011
+BLK 75.0% 3/4 0/s 2011
+BLK 75.0% 3/4 0/s 2011
+BLK 75.0% 3/4 0/s 2011
+BLK 75.0% 3/4 0/s 2011
+HDR 14.6% 752000/5151607 751868/s
+HDR 14.6% 754000/5151607 2002/s  
+HDR 14.7% 759270/5151607 5264/s
+HDR 14.8% 764000/5151607 4727/s
+HDR 14.9% 770000/5151607 6005/s
+BLK 100.0% 4/4 0/s 2011        

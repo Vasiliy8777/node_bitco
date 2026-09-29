@@ -23,6 +23,8 @@ public final class StratumSession implements AutoCloseable {
     private final byte[] extraNonceBytes;
     private final BlockingQueue<String> outgoing = new ArrayBlockingQueue<>(32);
     private final AtomicBoolean closed = new AtomicBoolean();
+    private final AtomicBoolean refreshRequested = new AtomicBoolean();
+    private final AtomicBoolean refreshScheduled = new AtomicBoolean();
     private final Set<Hash256> seenShares = new HashSet<>();
     private record IssuedJob(String sourceId, ShareValidator validator, long difficultyEpoch) { }
     private final Map<String, IssuedJob> issuedJobs = new LinkedHashMap<>();
@@ -167,6 +169,42 @@ public final class StratumSession implements AutoCloseable {
         server.accepted(isBlock);
         if (issued.difficultyEpoch() == difficultyEpoch) varDiff.accepted();
         return true;
+    }
+
+    /** Coalesce updates into at most one delivery worker per connection. Never await its monitor. */
+    void requestRefresh(ExecutorService workers) {
+        if (closed.get()) return;
+        refreshRequested.set(true);
+        scheduleRefresh(workers);
+    }
+
+    private void scheduleRefresh(ExecutorService workers) {
+        if (closed.get() || !refreshScheduled.compareAndSet(false, true)) return;
+        try {
+            workers.execute(() -> {
+                try {
+                    while (!closed.get() && refreshRequested.getAndSet(false)) {
+                        synchronized (this) {
+                            // Resolve current work after acquiring the monitor. A queued task
+                            // must not resurrect a job invalidated while submit was in progress.
+                            var job = server.current();
+                            if (job == null) invalidate();
+                            else publish(job);
+                        }
+                    }
+                } catch (RuntimeException exception) {
+                    System.getLogger(StratumSession.class.getName()).log(
+                            System.Logger.Level.ERROR, "Stratum work delivery failed", exception);
+                    close();
+                } finally {
+                    refreshScheduled.set(false);
+                    if (refreshRequested.get()) scheduleRefresh(workers);
+                }
+            });
+        } catch (RejectedExecutionException exception) {
+            refreshScheduled.set(false);
+            close();
+        }
     }
 
     synchronized void publish(MiningJob job) {

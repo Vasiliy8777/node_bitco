@@ -9,7 +9,14 @@ import ru.bitcoin.node.storage.rocksdb.RocksDbDatabase;
 import ru.bitcoin.node.storage.rocksdb.RocksDbWriteBatch;
 
 import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
 
+/**
+ * Trusted persistence boundary for validated headers. All stores must belong to the
+ * supplied database. The caller serializes validation and persistence with every
+ * other chain writer; this class does not select or validate the best chain.
+ */
 public final class KnownHeaderStorage {
 
     private final RocksDbDatabase database;
@@ -46,7 +53,8 @@ public final class KnownHeaderStorage {
 
     /**
      * Atomically persists one validated HEADERS batch. All indexes in {@code newIndexes}
-     * must have been proven absent by the validation lookup.
+     * must have been proven absent by the validation lookup and ordered parents first.
+     * A non-null bestHeaderTip must refer to an index in this batch or already stored.
      */
     public void saveBatch(
             List<BlockIndex> newIndexes,
@@ -59,11 +67,13 @@ public final class KnownHeaderStorage {
      * Persists a validated batch using skip ancestors already resolved by the validation
      * overlay. This removes the second ancestry walk (and its RocksDB reads) from header IBD.
      * A null map retains the compatibility path used by standalone callers.
+     * Non-null maps must supply the validated, same-branch skip ancestor for every
+     * non-genesis index; these trusted results are not revalidated against the database.
      */
     public void saveBatch(
             List<BlockIndex> newIndexes,
             BlockIndex bestHeaderTip,
-            java.util.Map<Hash256, Hash256> resolvedSkipHashes
+            Map<Hash256, Hash256> resolvedSkipHashes
     ) {
         if (newIndexes == null) {
             throw new IllegalArgumentException("newIndexes must not be null");
@@ -73,10 +83,10 @@ public final class KnownHeaderStorage {
         }
 
         try (RocksDbWriteBatch batch = new RocksDbWriteBatch()) {
-            java.util.Map<Hash256, BlockIndex> local =
-                    resolvedSkipHashes == null ? new java.util.HashMap<>() : null;
-            java.util.Map<Hash256, Hash256> localSkips =
-                    resolvedSkipHashes == null ? new java.util.HashMap<>() : null;
+            Map<Hash256, BlockIndex> local =
+                    resolvedSkipHashes == null ? new HashMap<>() : null;
+            Map<Hash256, Hash256> localSkips =
+                    resolvedSkipHashes == null ? new HashMap<>() : null;
             for (BlockIndex index : newIndexes) {
                 blockIndexStore.saveNew(batch, BlockIndexStorageMapper.toStored(index));
                 if (index.height() > 0) {
@@ -88,24 +98,7 @@ public final class KnownHeaderStorage {
                                     "Missing pre-resolved skip hash for " + index.hash().toDisplayHex());
                         }
                     } else {
-                        long target = RocksDbBlockIndexStore.getSkipHeight(index.height());
-                        BlockIndex current = index;
-                        while (current.height() > target) {
-                            long skipHeight = RocksDbBlockIndexStore.getSkipHeight(current.height());
-                            long skipPrev = RocksDbBlockIndexStore.getSkipHeight(current.height() - 1);
-                            Hash256 skip = localSkips.get(current.hash());
-                            if (skip == null) skip = blockIndexStore.findSkipHash(current.hash()).orElse(null);
-                            boolean useSkip = skip != null && (skipHeight == target
-                                    || (skipHeight > target && !(skipPrev < skipHeight - 2 && skipPrev >= target)));
-                            Hash256 nextHash = useSkip ? skip : current.previousBlockHash();
-                            BlockIndex next = local.get(nextHash);
-                            if (next == null) {
-                                next = blockIndexStore.find(nextHash).map(BlockIndexStorageMapper::fromStored).orElse(null);
-                            }
-                            if (next == null) throw new IllegalStateException("Missing ancestor while creating skip index");
-                            current = next;
-                        }
-                        skipHash = current.hash();
+                        skipHash = resolveSkipHash(index, local, localSkips);
                         localSkips.put(index.hash(), skipHash);
                     }
                     blockIndexStore.saveSkipNew(batch, BlockIndexStorageMapper.toStored(index), skipHash);
@@ -124,6 +117,36 @@ public final class KnownHeaderStorage {
         }
     }
 
+    private Hash256 resolveSkipHash(BlockIndex index, Map<Hash256, BlockIndex> local,
+                                    Map<Hash256, Hash256> localSkips) {
+        long target = RocksDbBlockIndexStore.getSkipHeight(index.height());
+        BlockIndex current = index;
+        while (current.height() > target) {
+            long skipHeight = RocksDbBlockIndexStore.getSkipHeight(current.height());
+            long skipPrev = RocksDbBlockIndexStore.getSkipHeight(current.height() - 1);
+            // Start with the parent: a new/replaced record has no trusted skip of its own.
+            Hash256 skip = current == index ? null : localSkips.get(current.hash());
+            if (skip == null && current != index) {
+                skip = blockIndexStore.findSkipHash(current.hash()).orElse(null);
+            }
+            boolean useSkip = skip != null && (skipHeight == target
+                    || (skipHeight > target && !(skipPrev < skipHeight - 2 && skipPrev >= target)));
+            Hash256 nextHash = useSkip ? skip : current.previousBlockHash();
+            BlockIndex next = local.get(nextHash);
+            if (next == null) {
+                next = blockIndexStore.find(nextHash).map(BlockIndexStorageMapper::fromStored).orElse(null);
+            }
+            if (next == null) throw new IllegalStateException("Missing ancestor while creating skip index");
+            long expectedHeight = useSkip ? skipHeight : current.height() - 1;
+            if (next.height() != expectedHeight) {
+                throw new IllegalStateException("Invalid ancestor height while creating skip index: expected "
+                        + expectedHeight + " but found " + next.height());
+            }
+            current = next;
+        }
+        return current.hash();
+    }
+
     public void save(
             BlockIndex blockIndex,
             boolean updateBestHeaderTip
@@ -135,6 +158,8 @@ public final class KnownHeaderStorage {
      * Persists one validated header. Intermediate headers of a received HEADERS
      * message may be committed with {@code durable=false}; the final header is
      * committed synchronously, which flushes the WAL for the complete message.
+     * Ancestors must already be stored. Prefer saveBatch for network HEADERS:
+     * separate save calls do not provide whole-message atomicity.
      */
     public void save(
             BlockIndex blockIndex,
@@ -156,6 +181,11 @@ public final class KnownHeaderStorage {
                             blockIndex
                     )
             );
+
+            if (blockIndex.height() > 0) {
+                blockIndexStore.saveSkipNew(batch, BlockIndexStorageMapper.toStored(blockIndex),
+                        resolveSkipHash(blockIndex, Map.of(), Map.of()));
+            }
 
             if (updateBestHeaderTip) {
                 chainStateStore.saveBestHeaderTipHash(

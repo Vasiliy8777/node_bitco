@@ -7,6 +7,7 @@ try {
     $required = @(
       'storage/src/test/java/ru/bitcoin/node/storage/rocksdb/RocksDbWriteBatchTest.java',
       'chain/src/test/java/ru/bitcoin/node/chain/BlockFailureRecoveryTest.java',
+      'app/src/test/java/ru/bitcoin/node/app/NodeProcessCrashTest.java',
       'storage/src/test/java/ru/bitcoin/node/storage/utxo/RocksDbAssumeUtxoFinalizerTest.java',
       'p2p/src/test/java/ru/bitcoin/node/p2p/PeerWriteBudgetTest.java',
       'p2p/src/test/java/ru/bitcoin/node/p2p/BitcoinServerTest.java',
@@ -18,7 +19,17 @@ try {
     if ($relay -notmatch 'MAX_QUEUED_INBOUND_BYTES_PER_PEER') { throw 'missing per-peer relay byte budget' }
     $filters = Get-Content 'app/src/main/java/ru/bitcoin/node/app/service/CompactBlockFilterPeerService.java' -Raw
     if ($filters -notmatch 'BIP157 request queue saturated') { throw 'missing BIP157 overload handling' }
+    $crashReport = 'app/target/surefire-reports/TEST-ru.bitcoin.node.app.NodeProcessCrashTest.xml'
+    if (-not (Test-Path -LiteralPath $crashReport)) { throw 'missing executed process-crash test report' }
+    [xml]$crashResults = Get-Content -LiteralPath $crashReport -Raw
+    $suite = $crashResults.testsuite
+    if ([int]$suite.tests -lt 3 -or [int]$suite.failures -ne 0 -or
+        [int]$suite.errors -ne 0 -or [int]$suite.skipped -ne 0) {
+        throw 'process-crash recovery tests must execute without failures or skips'
+    }
     Write-Host '[OK] full reactor test suite'
-    Write-Host '[OK] crash recovery, durable atomic state, pruning, parser/P2P/RPC bounds, per-peer relay budgets and BIP157 overload contracts present'
-    Write-Host 'CRASH / RECOVERY / RESOURCE / DOS HARDENING STAGE: CLOSED'
+    Write-Host '[OK] forced process termination before/after/racing block submission and recovered chain/UTXO/undo checks'
+    Write-Host '[OK] pruning, parser/P2P/RPC bounds, per-peer relay budgets and BIP157 overload contracts present'
+    Write-Host 'AUTOMATED RECOVERY / RESOURCE CHECKS: PASSED'
+    Write-Host 'STAGE REMAINS OPEN: power-loss, disk I/O fault injection and sustained resource-load evidence are still required'
 } finally { Pop-Location }

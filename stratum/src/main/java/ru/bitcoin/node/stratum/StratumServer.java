@@ -132,7 +132,7 @@ public final class StratumServer implements AutoCloseable {
             if (work.isEmpty()) { unavailable(); return; }
             MiningJob next = jobs.update(work.get());
             current = next;
-            for (var session : sessions) session.publish(next);
+            for (var session : sessions) session.requestRefresh(workers);
         } catch (RuntimeException exception) {
             unavailable();
             LOG.log(System.Logger.Level.ERROR, "Unable to build Stratum work", exception);
@@ -142,7 +142,7 @@ public final class StratumServer implements AutoCloseable {
     private void unavailable() {
         current = null;
         jobs.clear();
-        for (var session : sessions) session.invalidate();
+        for (var session : sessions) session.requestRefresh(workers);
     }
 
     @Override public void close() throws IOException {

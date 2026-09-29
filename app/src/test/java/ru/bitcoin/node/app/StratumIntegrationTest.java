@@ -20,6 +20,55 @@ import static org.junit.jupiter.api.Assertions.*;
 class StratumIntegrationTest {
     @TempDir Path directory;
 
+    @Test void blockedBlockSubmissionDoesNotStopOtherMinersReceivingWork() throws Exception {
+        var entered = new java.util.concurrent.CountDownLatch(1);
+        var release = new java.util.concurrent.CountDownLatch(1);
+        var revision = new java.util.concurrent.atomic.AtomicLong();
+        var parameters = NetworkParametersRegistry.regtest();
+        try (var db = new RocksDbDatabase(directory);
+             var validation = new NodeValidationService(db, parameters, () -> 1_800_000_000L, new Mempool());
+             var executor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+            var snapshot = validation.miningSnapshot(new byte[]{0x51}, new byte[16], 4_000_000, new FeeRate(0));
+            var backend = new ru.bitcoin.node.stratum.job.MiningBackend() {
+                public Optional<ru.bitcoin.node.stratum.job.MiningWork> work() {
+                    return Optional.of(new ru.bitcoin.node.stratum.job.MiningWork(
+                            snapshot.block(), snapshot.medianTimePast() + 1, revision.get(), true));
+                }
+                public boolean isCurrent(ru.bitcoin.node.common.types.Hash256 parent) { return true; }
+                public boolean submit(ru.bitcoin.node.protocol.block.Block block) {
+                    entered.countDown();
+                    try { return release.await(20, java.util.concurrent.TimeUnit.SECONDS); }
+                    catch (InterruptedException exception) { Thread.currentThread().interrupt(); return false; }
+                }
+                public long currentTimeSeconds() { return 1_800_000_000L; }
+            };
+            try (var server = new StratumServer(new InetSocketAddress("127.0.0.1", 0), backend,
+                    "miner", "secret", new BigDecimal("0.0000000001"), 4);
+                 var blocked = new StratumWireMiner(server.port());
+                 var healthy = new StratumWireMiner(server.port())) {
+                blocked.subscribe();
+                blocked.call("mining.authorize", List.of("miner.test", "secret"));
+                var blockedJob = blocked.job();
+                healthy.subscribe();
+                healthy.call("mining.authorize", List.of("miner.test", "secret"));
+                var initialJob = healthy.job();
+                var solution = blocked.solve(blockedJob, true);
+                var submitted = executor.submit(() -> blocked.call("mining.submit", solution.params()));
+                try {
+                    assertTrue(entered.await(5, java.util.concurrent.TimeUnit.SECONDS));
+                    revision.incrementAndGet();
+                    var next = healthy.job();
+                    assertNotEquals(initialJob.getFirst(), next.getFirst());
+                    // Two refreshes make the assertion independent of session iteration order.
+                    revision.incrementAndGet();
+                    assertNotEquals(next.getFirst(), healthy.job().getFirst());
+                    assertFalse(submitted.isDone());
+                } finally { release.countDown(); }
+                assertEquals(true, submitted.get(5, java.util.concurrent.TimeUnit.SECONDS).get("result"));
+            } finally { release.countDown(); }
+        }
+    }
+
     @Test void authenticatesChecksSharesPublishesBlockAndReplacesStaleJobs() throws Exception {
         var parameters = NetworkParametersRegistry.regtest();
         try (var db = new RocksDbDatabase(directory); var peers = new PeerManager()) {
