@@ -29,6 +29,15 @@ public final class BlockFailureResolver {
     }
 
     public synchronized boolean isFailed(BlockIndex index, Hash256 additionallyFailed) {
+        return isFailed(index, additionallyFailed, lookup);
+    }
+
+    synchronized boolean isFailed(
+            BlockIndex index,
+            Hash256 additionallyFailed,
+            BlockIndexLookup effectiveLookup
+    ) {
+        Objects.requireNonNull(effectiveLookup, "effectiveLookup");
         Objects.requireNonNull(index, "index");
         while (true) {
             long revision = failureStore.revision();
@@ -38,14 +47,18 @@ public final class BlockFailureResolver {
                 cachedRevision = revision;
                 cachedAdditionalFailure = additionallyFailed;
             }
-            boolean failed = resolve(index, additionallyFailed);
+            boolean failed = resolve(index, additionallyFailed, effectiveLookup);
             // A concurrent committed invalidation must not leave a stale result in the cache.
             if (revision < 0 || failureStore.revision() == revision) return failed;
             cache.clear();
         }
     }
 
-    private boolean resolve(BlockIndex index, Hash256 additionallyFailed) {
+    private boolean resolve(
+            BlockIndex index,
+            Hash256 additionallyFailed,
+            BlockIndexLookup effectiveLookup
+    ) {
         BlockIndex current = index;
         Set<Hash256> visited = new HashSet<>();
         List<Hash256> path = new ArrayList<>();
@@ -69,7 +82,7 @@ public final class BlockFailureResolver {
                 failed = false;
                 break;
             }
-            BlockIndex parent = lookup.find(current.previousBlockHash());
+            BlockIndex parent = effectiveLookup.find(current.previousBlockHash());
             if (parent == null) {
                 throw new IllegalStateException("Missing BlockIndex ancestor while resolving failure state: "
                         + current.previousBlockHash().toDisplayHex());

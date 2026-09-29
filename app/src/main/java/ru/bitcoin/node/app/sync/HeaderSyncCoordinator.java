@@ -62,6 +62,14 @@ public final class HeaderSyncCoordinator {
     /** Streams validated batches. Memory stays bounded if the consumer does not retain batches. */
     public long synchronize(Hash256 stopHash, java.util.function.Consumer<List<BlockIndex>> onBatch)
             throws IOException {
+        return synchronize(stopHash, onBatch, ignored -> { });
+    }
+
+    public long synchronize(
+            Hash256 stopHash,
+            java.util.function.Consumer<List<BlockIndex>> onBatch,
+            java.util.function.Consumer<BlockIndex> onValidatedHeader
+    ) throws IOException {
 
         Objects.requireNonNull(
                 stopHash,
@@ -69,6 +77,7 @@ public final class HeaderSyncCoordinator {
         );
 
         Objects.requireNonNull(onBatch, "onBatch");
+        Objects.requireNonNull(onValidatedHeader, "onValidatedHeader");
         long processedCount = 0;
 
         BlockIndex cursor =
@@ -96,7 +105,8 @@ public final class HeaderSyncCoordinator {
 
             List<BlockIndex> processed =
                     headerSyncService.process(
-                            headers
+                            headers,
+                            onValidatedHeader
                     );
 
             if (processed.isEmpty()) {

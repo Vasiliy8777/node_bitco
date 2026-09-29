@@ -5,6 +5,7 @@ import ru.bitcoin.node.chain.HeaderBatchProcessor;
 import ru.bitcoin.node.p2p.message.HeadersMessage;
 
 import java.util.List;
+import java.util.function.Consumer;
 
 public final class HeaderSyncService {
 
@@ -32,8 +33,22 @@ public final class HeaderSyncService {
             );
         }
 
+        return process(message, ignored -> { });
+    }
+
+    public synchronized List<BlockIndex> process(
+            HeadersMessage message,
+            Consumer<BlockIndex> onValidatedHeader
+    ) {
+        if (message == null) {
+            throw new IllegalArgumentException("message must not be null");
+        }
+        if (onValidatedHeader == null) {
+            throw new IllegalArgumentException("onValidatedHeader must not be null");
+        }
         return headerBatchProcessor.process(
-                message.headers()
+                message.headers(),
+                onValidatedHeader
         );
     }
 }

@@ -40,7 +40,7 @@ class HeaderSyncStreamingTest {
             assertEquals(List.of(second.hash()), current);
             return new HeadersMessage(List.of());
         });
-        when(processor.process(message)).thenReturn(List.of(first), List.of(second));
+        when(processor.process(eq(message), any())).thenReturn(List.of(first), List.of(second));
         var coordinator = new HeaderSyncCoordinator(downloader, processor, state, locator);
         assertEquals(2, coordinator.synchronize(start.hash(), batch -> {
             assertThrows(UnsupportedOperationException.class, () -> batch.add(start));
@@ -61,7 +61,7 @@ class HeaderSyncStreamingTest {
         when(locator.build(start)).thenReturn(startLocator);
         var message = new HeadersMessage(List.of(GenesisBlockFactory.create(NetworkParametersRegistry.regtest()).header()));
         when(downloader.download(anyList(), any())).thenReturn(message);
-        when(processor.process(message)).thenReturn(List.of(start));
+        when(processor.process(eq(message), any())).thenReturn(List.of(start));
         var coordinator = new HeaderSyncCoordinator(downloader, processor, state, locator);
         assertThrows(IllegalStateException.class, () -> coordinator.synchronize(start.hash(),
                 batch -> fail("Non-progressing batch must not be published")));

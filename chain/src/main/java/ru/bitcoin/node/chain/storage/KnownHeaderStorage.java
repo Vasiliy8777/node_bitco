@@ -7,6 +7,8 @@ import ru.bitcoin.node.storage.chain.RocksDbChainStateStore;
 import ru.bitcoin.node.storage.rocksdb.RocksDbDatabase;
 import ru.bitcoin.node.storage.rocksdb.RocksDbWriteBatch;
 
+import java.util.List;
+
 public final class KnownHeaderStorage {
 
     private final RocksDbDatabase database;
@@ -39,6 +41,40 @@ public final class KnownHeaderStorage {
         this.database = database;
         this.blockIndexStore = blockIndexStore;
         this.chainStateStore = chainStateStore;
+    }
+
+    /**
+     * Atomically persists one validated HEADERS batch. All indexes in {@code newIndexes}
+     * must have been proven absent by the validation lookup.
+     */
+    public void saveBatch(
+            List<BlockIndex> newIndexes,
+            BlockIndex bestHeaderTip
+    ) {
+        if (newIndexes == null) {
+            throw new IllegalArgumentException("newIndexes must not be null");
+        }
+        if (newIndexes.stream().anyMatch(index -> index == null)) {
+            throw new IllegalArgumentException("newIndexes must not contain null");
+        }
+
+        try (RocksDbWriteBatch batch = new RocksDbWriteBatch()) {
+            for (BlockIndex index : newIndexes) {
+                blockIndexStore.saveNew(
+                        batch,
+                        BlockIndexStorageMapper.toStored(index)
+                );
+            }
+            if (bestHeaderTip != null) {
+                chainStateStore.saveBestHeaderTipHash(
+                        batch,
+                        bestHeaderTip.hash()
+                );
+            }
+            if (!newIndexes.isEmpty() || bestHeaderTip != null) {
+                database.write(batch, true);
+            }
+        }
     }
 
     public void save(

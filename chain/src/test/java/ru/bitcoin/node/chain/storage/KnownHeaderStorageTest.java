@@ -158,6 +158,24 @@ class KnownHeaderStorageTest {
         }
     }
 
+    @Test
+    void shouldPersistValidatedHeaderBatchAndBestTipAtomically() {
+        try (RocksDbDatabase database = new RocksDbDatabase(tempDirectory.resolve("header-batch"))) {
+            RocksDbBlockIndexStore blockIndexStore = new RocksDbBlockIndexStore(database);
+            RocksDbChainStateStore chainStateStore = new RocksDbChainStateStore(database);
+            KnownHeaderStorage storage = new KnownHeaderStorage(database, blockIndexStore, chainStateStore);
+
+            BlockIndex first = blockIndex(10L, BigInteger.valueOf(1_000));
+            BlockIndex second = blockIndex(11L, BigInteger.valueOf(2_000));
+
+            storage.saveBatch(java.util.List.of(first, second), second);
+
+            assertTrue(blockIndexStore.find(first.hash()).isPresent());
+            assertTrue(blockIndexStore.find(second.hash()).isPresent());
+            assertEquals(second.hash(), chainStateStore.loadBestHeaderTipHash().orElseThrow());
+        }
+    }
+
     private static BlockIndex blockIndex(
             long height,
             BigInteger chainWork

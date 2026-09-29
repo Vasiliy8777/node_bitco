@@ -305,6 +305,28 @@ public final class RocksDbBlockIndexStore
         );
     }
 
+    /**
+     * Adds a block-index record that the caller has already established is new.
+     * This avoids a redundant RocksDB read on the hot header-IBD path.
+     */
+    public void saveNew(
+            RocksDbWriteBatch batch,
+            StoredBlockIndex blockIndex
+    ) {
+        if (batch == null) {
+            throw new IllegalArgumentException("batch must not be null");
+        }
+        if (blockIndex == null) {
+            throw new IllegalArgumentException("blockIndex must not be null");
+        }
+        batch.put(workKey(blockIndex), blockIndex.hash().bytes());
+        batch.put(heightKey(blockIndex), blockIndex.hash().bytes());
+        batch.put(
+                key(blockIndex.hash()),
+                StoredBlockIndexSerializer.serialize(blockIndex)
+        );
+    }
+
     /** Clears primary and secondary block-index namespaces atomically with the caller's batch. */
     public void clear(RocksDbWriteBatch batch) {
         if (batch == null) {

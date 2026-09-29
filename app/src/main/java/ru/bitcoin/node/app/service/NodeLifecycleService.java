@@ -438,14 +438,11 @@ public final class NodeLifecycleService
 
         long processed = coordinator.synchronize(
                 HEADER_SYNC_STOP_HASH,
-                batch -> {
-                    if (!batch.isEmpty()) {
-                        SyncProgressConsole.headers(
-                                batch.get(batch.size() - 1).height(),
-                                remoteTargetHeight
-                        );
-                    }
-                }
+                batch -> { },
+                index -> SyncProgressConsole.headers(
+                        index.height(),
+                        remoteTargetHeight
+                )
         );
 
         long finalHeight = syncInfrastructure.headerChainState().bestHeaderTip().height();
@@ -565,9 +562,11 @@ public final class NodeLifecycleService
         failedAddresses.add(connection.address());
         peerManager.remove(peer);
 
-        log.debug(
-                "Header-sync peer {} failed; trying another peer: {}",
+        log.warn(
+                "HEADER SYNC PEER FAILED peer={} state={} bestHeaderHeight={} cause={}",
                 connection.address(),
+                peer.state(),
+                syncInfrastructure.headerChainState().bestHeaderTip().height(),
                 syncFailure.toString()
         );
 

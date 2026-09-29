@@ -1,10 +1,14 @@
 package ru.bitcoin.node.chain;
 
 import ru.bitcoin.node.chain.storage.KnownHeaderStorage;
+import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.protocol.block.BlockHeader;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.function.Consumer;
 
 public final class HeaderBatchProcessor {
 
@@ -18,12 +22,7 @@ public final class HeaderBatchProcessor {
             HeaderChainState headerChainState,
             KnownHeaderStorage headerStorage
     ) {
-        this(
-                headerProcessor,
-                headerChainState,
-                headerStorage,
-                null
-        );
+        this(headerProcessor, headerChainState, headerStorage, null);
     }
 
     public HeaderBatchProcessor(
@@ -32,126 +31,76 @@ public final class HeaderBatchProcessor {
             KnownHeaderStorage headerStorage,
             BlockFailureResolver failureResolver
     ) {
-        if (headerProcessor == null) {
-            throw new IllegalArgumentException(
-                    "headerProcessor must not be null"
-            );
-        }
-
-        if (headerChainState == null) {
-            throw new IllegalArgumentException(
-                    "headerChainState must not be null"
-            );
-        }
-
-        if (headerStorage == null) {
-            throw new IllegalArgumentException(
-                    "headerStorage must not be null"
-            );
-        }
-
-        this.headerProcessor =
-                headerProcessor;
-
-        this.headerChainState =
-                headerChainState;
-
-        this.headerStorage =
-                headerStorage;
-
-        this.failureResolver =
-                failureResolver;
+        if (headerProcessor == null) throw new IllegalArgumentException("headerProcessor must not be null");
+        if (headerChainState == null) throw new IllegalArgumentException("headerChainState must not be null");
+        if (headerStorage == null) throw new IllegalArgumentException("headerStorage must not be null");
+        this.headerProcessor = headerProcessor;
+        this.headerChainState = headerChainState;
+        this.headerStorage = headerStorage;
+        this.failureResolver = failureResolver;
     }
 
+    public List<BlockIndex> process(List<BlockHeader> headers) {
+        return process(headers, ignored -> { });
+    }
+
+    /**
+     * Validates one network HEADERS message against a batch-local overlay and commits
+     * all newly discovered indexes with one durable RocksDB WriteBatch.
+     */
     public List<BlockIndex> process(
-            List<BlockHeader> headers
+            List<BlockHeader> headers,
+            Consumer<BlockIndex> onValidatedHeader
     ) {
-        if (headers == null) {
-            throw new IllegalArgumentException(
-                    "headers must not be null"
-            );
+        if (headers == null) throw new IllegalArgumentException("headers must not be null");
+        if (headers.stream().anyMatch(header -> header == null)) {
+            throw new IllegalArgumentException("headers must not contain null");
         }
+        if (onValidatedHeader == null) throw new IllegalArgumentException("onValidatedHeader must not be null");
+        if (headers.isEmpty()) return List.of();
 
-        if (headers.stream().anyMatch(
-                header -> header == null
-        )) {
-            throw new IllegalArgumentException(
-                    "headers must not contain null"
-            );
-        }
+        Map<Hash256, BlockIndex> overlay = new HashMap<>(Math.max(16, headers.size() * 2));
+        BlockIndexLookup baseLookup = headerProcessor.baseLookup();
+        BlockIndexLookup effectiveLookup = hash -> {
+            BlockIndex local = overlay.get(hash);
+            return local != null ? local : baseLookup.find(hash);
+        };
 
-        List<BlockIndex> processed =
-                new ArrayList<>(
-                        headers.size()
-                );
+        List<BlockIndex> processed = new ArrayList<>(headers.size());
+        List<BlockIndex> newlyCreated = new ArrayList<>(headers.size());
+        BlockIndex initialBest = headerChainState.bestHeaderTip();
+        BlockIndex candidateBest = initialBest;
 
-        for (int headerIndex = 0; headerIndex < headers.size(); headerIndex++) {
+        for (BlockHeader header : headers) {
+            HeaderProcessor.ProcessResult result =
+                    headerProcessor.processDetailed(header, effectiveLookup);
+            BlockIndex index = result.index();
 
-            BlockHeader header = headers.get(headerIndex);
-
-            BlockIndex index =
-                    headerProcessor.process(
-                            header
-                    );
-
-            boolean failed =
-                    failureResolver != null
-                            && failureResolver.isFailed(index);
-
-            boolean better =
-                    !failed
-                            && headerChainState.isBetterThanBest(
-                            index
-                    );
-
-            /*
-             * Persist first.
-             *
-             * If the candidate is the new best header,
-             * the BlockIndex and best-header pointer
-             * are committed in one RocksDB batch.
-             */
-            /*
-             * A HEADERS message may contain up to 2,000 entries. Performing a
-             * synchronous WAL flush for every individual header makes real-network
-             * IBD disk-latency bound. Preserve the existing per-header visibility
-             * (the next header must be able to resolve its parent), but defer the
-             * expensive durable flush until the final header in this validated
-             * network batch. The final sync=true RocksDB write flushes the WAL
-             * containing all preceding sync=false writes.
-             */
-            boolean durable = headerIndex == headers.size() - 1;
-
-            headerStorage.save(
-                    index,
-                    better,
-                    durable
-            );
-
-            /*
-             * Runtime state may move only after
-             * persistent storage committed successfully.
-             */
-            if (better) {
-                boolean changed =
-                        headerChainState.consider(
-                                index
-                        );
-
-                if (!changed) {
-                    throw new IllegalStateException(
-                            "Best header state changed unexpectedly"
-                    );
-                }
+            if (result.newlyCreated()) {
+                overlay.put(index.hash(), index);
+                newlyCreated.add(index);
             }
 
-            processed.add(
-                    index
-            );
+            boolean failed = failureResolver != null
+                    && failureResolver.isFailed(index, null, effectiveLookup);
+            if (!failed && index.chainWork().compareTo(candidateBest.chainWork()) > 0) {
+                candidateBest = index;
+            }
+
+            processed.add(index);
+            onValidatedHeader.accept(index);
         }
 
-        return List.copyOf(
-                processed
-        );
+        boolean bestChanged = !candidateBest.hash().equals(initialBest.hash());
+        headerStorage.saveBatch(newlyCreated, bestChanged ? candidateBest : null);
+
+        if (bestChanged) {
+            boolean changed = headerChainState.consider(candidateBest);
+            if (!changed) {
+                throw new IllegalStateException("Best header state changed unexpectedly");
+            }
+        }
+
+        return List.copyOf(processed);
     }
 }
