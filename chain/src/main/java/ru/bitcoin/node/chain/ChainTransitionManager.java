@@ -45,6 +45,23 @@ public final class ChainTransitionManager {
             BlockReorganizationChanges changes,
             java.util.function.Consumer<ru.bitcoin.node.storage.rocksdb.RocksDbWriteBatch> extraWrites
     ) {
+        commitInternal(update, changes, extraWrites, false);
+    }
+
+    public void commitWithStagedNewTipIndex(
+            ChainUpdate update,
+            BlockReorganizationChanges changes,
+            java.util.function.Consumer<ru.bitcoin.node.storage.rocksdb.RocksDbWriteBatch> extraWrites
+    ) {
+        commitInternal(update, changes, extraWrites, true);
+    }
+
+    private void commitInternal(
+            ChainUpdate update,
+            BlockReorganizationChanges changes,
+            java.util.function.Consumer<ru.bitcoin.node.storage.rocksdb.RocksDbWriteBatch> extraWrites,
+            boolean newTipIndexStaged
+    ) {
         if (update == null) {
             throw new IllegalArgumentException(
                     "update must not be null"
@@ -88,12 +105,13 @@ public final class ChainTransitionManager {
         /*
          * Сначала atomic durable commit на диск.
          */
-        transitionStorage.commit(
-                expectedOldTip,
-                newTip,
-                changes,
-                extraWrites
-        );
+        if (newTipIndexStaged) {
+            transitionStorage.commitWithStagedNewTipIndex(
+                    expectedOldTip, newTip, changes, extraWrites);
+        } else {
+            transitionStorage.commit(
+                    expectedOldTip, newTip, changes, extraWrites);
+        }
 
         /*
          * И только после успешного RocksDB commit

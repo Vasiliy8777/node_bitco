@@ -60,10 +60,39 @@ public final class HeaderBatchProcessor {
         if (headers.isEmpty()) return List.of();
 
         Map<Hash256, BlockIndex> overlay = new HashMap<>(Math.max(16, headers.size() * 2));
+        Map<Hash256, BlockIndex> readCache = new HashMap<>(64);
         BlockIndexLookup baseLookup = headerProcessor.baseLookup();
-        BlockIndexLookup effectiveLookup = hash -> {
-            BlockIndex local = overlay.get(hash);
-            return local != null ? local : baseLookup.find(hash);
+        BlockIndexLookup effectiveLookup = new BlockIndexAncestorLookup() {
+            @Override
+            public BlockIndex find(Hash256 hash) {
+                BlockIndex local = overlay.get(hash);
+                if (local != null) return local;
+                if (readCache.containsKey(hash)) return readCache.get(hash);
+                BlockIndex loaded = baseLookup.find(hash);
+                readCache.put(hash, loaded);
+                return loaded;
+            }
+
+            @Override
+            public BlockIndex ancestor(BlockIndex index, long targetHeight) {
+                if (targetHeight < 0 || targetHeight > index.height()) {
+                    throw new IllegalArgumentException("Invalid ancestor height: " + targetHeight);
+                }
+                BlockIndex current = index;
+                while (current.height() > targetHeight && overlay.containsKey(current.hash())) {
+                    current = find(current.previousBlockHash());
+                    if (current == null) throw new IllegalStateException("Missing batch ancestor");
+                }
+                if (current.height() == targetHeight) return current;
+                if (baseLookup instanceof BlockIndexAncestorLookup ancestorLookup) {
+                    return ancestorLookup.ancestor(current, targetHeight);
+                }
+                while (current.height() > targetHeight) {
+                    current = find(current.previousBlockHash());
+                    if (current == null) throw new IllegalStateException("Missing ancestor");
+                }
+                return current;
+            }
         };
 
         List<BlockIndex> processed = new ArrayList<>(headers.size());

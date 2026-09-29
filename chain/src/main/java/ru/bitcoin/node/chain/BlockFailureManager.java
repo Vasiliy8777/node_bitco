@@ -38,6 +38,17 @@ public final class BlockFailureManager {
                 .map(BlockIndexStorageMapper::fromStored)
                 .orElseThrow(() -> new IllegalStateException(
                         "Cannot mark missing BlockIndex as failed: " + hash.toDisplayHex()));
+        markFailed(failed);
+    }
+
+    /**
+     * Marks an already-resolved invalid block. This overload is required by prepare-time
+     * validation, where a reindex/connect candidate may exist only in the reorganization
+     * overlay and intentionally is not durable yet.
+     */
+    public synchronized void markFailed(BlockIndex failed) {
+        Objects.requireNonNull(failed, "failed");
+        Hash256 hash = failed.hash();
 
         if (failed.height() == 0) {
             throw new IllegalStateException("Genesis block cannot be marked failed");

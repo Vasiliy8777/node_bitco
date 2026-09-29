@@ -120,15 +120,40 @@ public final class ChainReorganizationExecutor {
         commit(prepared);
     }
 
+    public PreparedChainReorganization prepare(ChainUpdate update, Block suppliedConnectBlock) {
+        return prepare(update, suppliedConnectBlock, invalidBlockObserver);
+    }
+
+    public PreparedChainReorganization prepare(
+            ChainUpdate update,
+            Block suppliedConnectBlock,
+            InvalidBlockObserver preparationInvalidBlockObserver
+    ) {
+        if (update == null) throw new IllegalArgumentException("update must not be null");
+        if (suppliedConnectBlock == null) return prepare(update);
+        if (preparationInvalidBlockObserver == null) {
+            throw new IllegalArgumentException("preparationInvalidBlockObserver must not be null");
+        }
+        ReorganizationPlan plan = update.reorganizationPlan();
+        List<BlockToDisconnect> disconnectBlocks = loadDisconnectBlocks(plan.blocksToDisconnect());
+        List<BlockToConnect> connectBlocks = loadConnectBlocks(plan.blocksToConnect(), suppliedConnectBlock);
+        BlockIndexLookup preparationLookup = preparationLookup(plan);
+        BlockReorganizationChanges changes = BlockReorganizationChangesBuilder.build(
+                disconnectBlocks, connectBlocks, utxoStore, networkParameters,
+                preparationLookup, preparationInvalidBlockObserver, assumeValidPolicy);
+        return new PreparedChainReorganization(update, changes);
+    }
+
     /** Fully loads and validates a reorganization without mutating persistent chain state. */
     public PreparedChainReorganization prepare(ChainUpdate update) {
         if (update == null) throw new IllegalArgumentException("update must not be null");
         ReorganizationPlan plan = update.reorganizationPlan();
         List<BlockToDisconnect> disconnectBlocks = loadDisconnectBlocks(plan.blocksToDisconnect());
         List<BlockToConnect> connectBlocks = loadConnectBlocks(plan.blocksToConnect());
+        BlockIndexLookup preparationLookup = preparationLookup(plan);
         BlockReorganizationChanges changes = BlockReorganizationChangesBuilder.build(
                 disconnectBlocks, connectBlocks, utxoStore, networkParameters,
-                blockIndexLookup, invalidBlockObserver, assumeValidPolicy);
+                preparationLookup, invalidBlockObserver, assumeValidPolicy);
         return new PreparedChainReorganization(update, changes);
     }
 
@@ -141,6 +166,70 @@ public final class ChainReorganizationExecutor {
                        java.util.function.Consumer<ru.bitcoin.node.storage.rocksdb.RocksDbWriteBatch> extraWrites) {
         if (prepared == null) throw new IllegalArgumentException("prepared must not be null");
         transitionManager.commit(prepared.update(), prepared.changes(), extraWrites);
+    }
+
+    /**
+     * Creates a read-only lookup for the prepare phase.  A freshly received block index
+     * deliberately is not durable until ChainTransitionManager commits the whole transition,
+     * but contextual validation still needs to resolve that index and its in-plan ancestors.
+     */
+    private BlockIndexLookup preparationLookup(ReorganizationPlan plan) {
+        java.util.Map<ru.bitcoin.node.common.types.Hash256, BlockIndex> overlay =
+                new java.util.HashMap<>(Math.max(16, plan.blocksToConnect().size() * 2));
+        for (BlockIndex index : plan.blocksToConnect()) {
+            if (index == null) {
+                throw new IllegalStateException("Connect BlockIndex must not be null");
+            }
+            overlay.put(index.hash(), index);
+        }
+
+        return new BlockIndexAncestorLookup() {
+            @Override
+            public BlockIndex find(ru.bitcoin.node.common.types.Hash256 hash) {
+                BlockIndex local = overlay.get(hash);
+                return local != null ? local : blockIndexLookup.find(hash);
+            }
+
+            @Override
+            public BlockIndex ancestor(BlockIndex index, long targetHeight) {
+                if (index == null) throw new IllegalArgumentException("index must not be null");
+                if (targetHeight < 0 || targetHeight > index.height()) {
+                    throw new IllegalArgumentException("Invalid ancestor height: " + targetHeight);
+                }
+
+                BlockIndex current = index;
+                while (current.height() > targetHeight && overlay.containsKey(current.hash())) {
+                    current = find(current.previousBlockHash());
+                    if (current == null) {
+                        throw new IllegalStateException("Missing prepare-phase ancestor");
+                    }
+                }
+                if (current.height() == targetHeight) return current;
+
+                if (blockIndexLookup instanceof BlockIndexAncestorLookup ancestorLookup) {
+                    return ancestorLookup.ancestor(current, targetHeight);
+                }
+
+                while (current.height() > targetHeight) {
+                    current = find(current.previousBlockHash());
+                    if (current == null) {
+                        throw new IllegalStateException("Missing ancestor while preparing reorganization");
+                    }
+                }
+                return current;
+            }
+        };
+    }
+
+
+    public void commitWithStagedNewTipIndex(
+            PreparedChainReorganization prepared,
+            java.util.function.Consumer<ru.bitcoin.node.storage.rocksdb.RocksDbWriteBatch> extraWrites
+    ) {
+        if (prepared == null) throw new IllegalArgumentException("prepared must not be null");
+        if (extraWrites == null) throw new IllegalArgumentException("extraWrites must not be null");
+        transitionManager.commitWithStagedNewTipIndex(
+                prepared.update(), prepared.changes(), extraWrites);
     }
 
     private List<BlockToDisconnect> loadDisconnectBlocks(
@@ -205,6 +294,13 @@ public final class ChainReorganizationExecutor {
     private List<BlockToConnect> loadConnectBlocks(
             List<BlockIndex> indexes
     ) {
+        return loadConnectBlocks(indexes, null);
+    }
+
+    private List<BlockToConnect> loadConnectBlocks(
+            List<BlockIndex> indexes,
+            Block suppliedConnectBlock
+    ) {
         List<BlockToConnect> result =
                 new ArrayList<>(
                         indexes.size()
@@ -218,17 +314,15 @@ public final class ChainReorganizationExecutor {
                 );
             }
 
-            Block block =
-                    blockStore
-                            .find(index.hash())
-                            .orElseThrow(
-                                    () ->
-                                            new IllegalStateException(
-                                                    "Block body not found for connect: "
-                                                            + index.hash()
-                                                            .toDisplayHex()
-                                            )
-                            );
+            Block block;
+            if (suppliedConnectBlock != null && suppliedConnectBlock.hash().equals(index.hash())) {
+                block = suppliedConnectBlock;
+            } else {
+                block = blockStore
+                        .find(index.hash())
+                        .orElseThrow(() -> new IllegalStateException(
+                                "Block body not found for connect: " + index.hash().toDisplayHex()));
+            }
 
             verifyBlockMatchesIndex(
                     block,

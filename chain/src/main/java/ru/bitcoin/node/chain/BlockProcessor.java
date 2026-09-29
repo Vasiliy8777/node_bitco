@@ -135,17 +135,42 @@ public final class BlockProcessor {
                     block, candidate.height() >= parameters.segwitHeight());
             ru.bitcoin.node.consensus.block.SignetBlockValidator.validate(block, parameters);
 
-            // A stored body is not proof of contextual validity. Re-save the
-            // supplied body and retry activation, including after a prior failure.
-            storage.save(block, candidate);
             ChainUpdate update = chainState.prepareUpdate(candidate, lookup);
             if (update == null) {
+                // Side-chain/context-pending bodies still need their own durable storage commit.
+                storage.save(block, candidate);
                 return BlockProcessingResult.STORED_SIDE_CHAIN_CONTEXT_PENDING;
             }
 
-            executor.execute(
-                    update
-            );
+            // Prepare directly from the in-memory network block. This avoids immediately
+            // reading the body back from RocksDB after saving it. The body/index/availability
+            // writes are then committed atomically with the chain transition in one batch.
+            PreparedChainReorganization prepared;
+            try {
+                prepared = executor.prepare(update, block, invalidIndex -> {
+                    // The observer receives the exact BlockIndex resolved by the prepare-phase
+                    // overlay. It may not be durable yet during reindex or first connection.
+                    if (invalidIndex.hash().equals(candidate.hash())
+                            && !storage.hasBody(candidate.hash())) {
+                        storage.save(block, candidate);
+                    }
+                    if (failureManager != null) {
+                        failureManager.markFailed(invalidIndex);
+                    }
+                });
+            } catch (ru.bitcoin.node.consensus.block.BlockValidationException
+                     | ru.bitcoin.node.consensus.transaction.TransactionValidationException
+                     | ru.bitcoin.node.script.ScriptExecutionException exception) {
+                // Keep invalid/raw block data available for restart-safe diagnostics/reindex.
+                // If an older side-chain ancestor was the invalid root, the incoming descendant
+                // still needs its own durable BlockIndex/body even though it is not activated.
+                if (!storage.hasBody(candidate.hash())) {
+                    storage.save(block, candidate);
+                }
+                throw exception;
+            }
+            executor.commitWithStagedNewTipIndex(
+                    prepared, batch -> storage.save(batch, block, candidate));
 
             return BlockProcessingResult.CONNECTED;
         }

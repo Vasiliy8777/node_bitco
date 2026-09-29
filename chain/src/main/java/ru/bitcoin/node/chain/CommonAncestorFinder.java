@@ -35,12 +35,12 @@ public final class CommonAncestorFinder {
          * Сначала поднимаем более высокую ветку
          * до одинаковой высоты.
          */
-        while (a.height() > b.height()) {
-            a = parentOf(a, lookup);
+        if (a.height() > b.height()) {
+            a = ancestorAtHeight(a, b.height(), lookup);
         }
 
-        while (b.height() > a.height()) {
-            b = parentOf(b, lookup);
+        if (b.height() > a.height()) {
+            b = ancestorAtHeight(b, a.height(), lookup);
         }
 
         /*
@@ -82,5 +82,20 @@ public final class CommonAncestorFinder {
         }
 
         return parent;
+    }
+
+    private static BlockIndex ancestorAtHeight(
+            BlockIndex index,
+            long targetHeight,
+            BlockIndexLookup lookup
+    ) {
+        if (lookup instanceof BlockIndexAncestorLookup ancestorLookup) {
+            return ancestorLookup.ancestor(index, targetHeight);
+        }
+        BlockIndex current = index;
+        while (current.height() > targetHeight) {
+            current = parentOf(current, lookup);
+        }
+        return current;
     }
 }

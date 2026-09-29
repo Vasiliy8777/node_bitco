@@ -76,7 +76,7 @@ public final class RocksDbChainTransitionStorage {
             Hash256 newTip,
             BlockReorganizationChanges changes
     ) {
-        commit(expectedOldTip, newTip, changes, batch -> {});
+        commit(expectedOldTip, newTip, changes, batch -> {}, false);
     }
 
     public void commit(
@@ -84,6 +84,30 @@ public final class RocksDbChainTransitionStorage {
             Hash256 newTip,
             BlockReorganizationChanges changes,
             java.util.function.Consumer<RocksDbWriteBatch> extraWrites
+    ) {
+        commit(expectedOldTip, newTip, changes, extraWrites, false);
+    }
+
+    /**
+     * Commits a transition whose new-tip BlockIndex may be appended by {@code extraWrites}
+     * to this exact RocksDB batch.  The normal public overload deliberately keeps the
+     * stronger rule that the new tip must already be durable.
+     */
+    public void commitWithStagedNewTipIndex(
+            Hash256 expectedOldTip,
+            Hash256 newTip,
+            BlockReorganizationChanges changes,
+            java.util.function.Consumer<RocksDbWriteBatch> extraWrites
+    ) {
+        commit(expectedOldTip, newTip, changes, extraWrites, true);
+    }
+
+    private void commit(
+            Hash256 expectedOldTip,
+            Hash256 newTip,
+            BlockReorganizationChanges changes,
+            java.util.function.Consumer<RocksDbWriteBatch> extraWrites,
+            boolean newTipIndexStaged
     ) {
         if (expectedOldTip == null) {
             throw new IllegalArgumentException(
@@ -140,7 +164,7 @@ public final class RocksDbChainTransitionStorage {
          * нодой. Reorg не должен создавать BlockIndex
          * из воздуха.
          */
-        if (blockIndexStore.find(newTip)
+        if (!newTipIndexStaged && blockIndexStore.find(newTip)
                 .isEmpty()) {
 
             throw new IllegalStateException(

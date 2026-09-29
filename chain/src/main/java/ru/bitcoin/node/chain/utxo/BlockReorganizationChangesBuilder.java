@@ -205,7 +205,7 @@ public final class BlockReorganizationChangesBuilder {
             } catch (BlockValidationException
                      | TransactionValidationException
                      | ScriptExecutionException exception) {
-                invalidBlockObserver.onInvalidBlock(blockHash);
+                invalidBlockObserver.onInvalidBlock(candidateIndex);
                 throw exception;
             }
 

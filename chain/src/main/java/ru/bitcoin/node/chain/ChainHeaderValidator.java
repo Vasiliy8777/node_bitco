@@ -362,27 +362,22 @@ public final class ChainHeaderValidator {
             );
         }
 
-        BlockIndex current =
-                start;
-
-        while (current.height()
-                > targetHeight) {
-
-            BlockIndex parent =
-                    lookup.find(
-                            current.previousBlockHash()
+        BlockIndex current;
+        if (lookup instanceof BlockIndexAncestorLookup ancestorLookup) {
+            current = ancestorLookup.ancestor(start, targetHeight);
+        } else {
+            current = start;
+            while (current.height() > targetHeight) {
+                BlockIndex parent = lookup.find(current.previousBlockHash());
+                if (parent == null) {
+                    throw new IllegalStateException(
+                            "Missing ancestor at height "
+                                    + (current.height() - 1)
+                                    + " while calculating difficulty"
                     );
-
-            if (parent == null) {
-                throw new IllegalStateException(
-                        "Missing ancestor at height "
-                                + (current.height() - 1)
-                                + " while calculating "
-                                + "difficulty"
-                );
+                }
+                current = parent;
             }
-
-            current = parent;
         }
 
         if (current.height()

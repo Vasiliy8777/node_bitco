@@ -81,23 +81,29 @@ public final class KnownBlockStorage {
             );
         }
 
-        try (RocksDbWriteBatch batch =
-                     new RocksDbWriteBatch()) {
-
-            blockStore.save(
-                    batch,
-                    block
-            );
-            availability.markData(batch, block.hash());
-
-            blockIndexStore.save(
-                    batch,
-                    BlockIndexStorageMapper.toStored(
-                            blockIndex
-                    )
-            );
-
+        try (RocksDbWriteBatch batch = new RocksDbWriteBatch()) {
+            save(batch, block, blockIndex);
             database.write(batch);
         }
+    }
+
+    /** Adds block body, availability and BlockIndex writes to an existing atomic batch. */
+    public void save(
+            RocksDbWriteBatch batch,
+            Block block,
+            BlockIndex blockIndex
+    ) {
+        if (batch == null) throw new IllegalArgumentException("batch must not be null");
+        if (block == null) throw new IllegalArgumentException("block must not be null");
+        if (blockIndex == null) throw new IllegalArgumentException("blockIndex must not be null");
+        if (!block.hash().equals(blockIndex.hash())) {
+            throw new IllegalArgumentException("Block hash does not match BlockIndex hash");
+        }
+        if (!block.header().equals(blockIndex.header())) {
+            throw new IllegalArgumentException("Block header does not match BlockIndex header");
+        }
+        blockStore.save(batch, block);
+        availability.markData(batch, block.hash());
+        blockIndexStore.save(batch, BlockIndexStorageMapper.toStored(blockIndex));
     }
 }
