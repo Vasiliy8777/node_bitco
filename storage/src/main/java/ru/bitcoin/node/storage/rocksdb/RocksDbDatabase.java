@@ -145,8 +145,26 @@ public final class RocksDbDatabase
      * When this method returns successfully, RocksDB has requested
      * that the write be synchronously flushed to durable storage.
      */
-    public synchronized void write(
+    public void write(
             RocksDbWriteBatch batch
+    ) {
+        write(batch, true);
+    }
+
+    /**
+     * Atomically applies all operations contained in the batch.
+     *
+     * <p>{@code sync=true} is the default for consensus/chain-state commits.
+     * Header IBD may use {@code sync=false} for intermediate records inside a
+     * validated network batch and finish the batch with one synchronous write.
+     * RocksDB still writes those intermediate records through the WAL; the final
+     * synchronous write flushes the WAL before the network batch is acknowledged
+     * as processed. This avoids one fsync per header without changing visibility
+     * or validation ordering.</p>
+     */
+    public synchronized void write(
+            RocksDbWriteBatch batch,
+            boolean sync
     ) {
         ensureOpen();
 
@@ -158,7 +176,7 @@ public final class RocksDbDatabase
 
         try (WriteOptions writeOptions =
                      new WriteOptions()
-                             .setSync(true)) {
+                             .setSync(sync)) {
 
             database.write(
                     writeOptions,

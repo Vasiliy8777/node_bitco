@@ -1,0 +1,10 @@
+bitcoin:
+  network: signet
+  data-directory: ${BITCOIN_DATA_DIRECTORY:C:/bitcoin-java-node/signet}
+
+  p2p:
+    port: 38333
+    peers: ""
+
+  rpc:
+    port: 38332

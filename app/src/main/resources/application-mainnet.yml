@@ -1,0 +1,10 @@
+bitcoin:
+  network: mainnet
+  data-directory: ${BITCOIN_DATA_DIRECTORY:C:/bitcoin-java-node/mainnet}
+
+  p2p:
+    port: 8333
+    peers: ""
+
+  rpc:
+    port: 8332

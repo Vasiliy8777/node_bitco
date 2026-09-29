@@ -1,0 +1,10 @@
+bitcoin:
+  network: testnet
+  data-directory: ${BITCOIN_DATA_DIRECTORY:./data/testnet-certification}
+
+  p2p:
+    port: 18335
+    peers: ""
+
+  rpc:
+    port: 18336

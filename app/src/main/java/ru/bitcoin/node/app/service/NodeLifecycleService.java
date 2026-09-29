@@ -6,6 +6,7 @@ import ru.bitcoin.node.app.NodeValidationService;
 import ru.bitcoin.node.app.sync.BlockSyncCoordinator;
 import ru.bitcoin.node.app.sync.HeaderSyncCoordinator;
 import ru.bitcoin.node.app.sync.NodeSyncInfrastructure;
+import ru.bitcoin.node.app.sync.SyncProgressConsole;
 import ru.bitcoin.node.chain.BlockIndex;
 import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.p2p.*;
@@ -430,10 +431,30 @@ public final class NodeLifecycleService
                         syncInfrastructure.blockLocatorBuilder()
                 );
 
-        return coordinator.synchronize(
+        final long initialHeight = syncInfrastructure.headerChainState().bestHeaderTip().height();
+        final long remoteTargetHeight = Math.max(initialHeight, peer.remoteVersion().startHeight());
+
+        SyncProgressConsole.headers(initialHeight, remoteTargetHeight);
+
+        long processed = coordinator.synchronize(
                 HEADER_SYNC_STOP_HASH,
-                batch -> { /* Headers are already persisted by HeaderSyncService. */ }
+                batch -> {
+                    if (!batch.isEmpty()) {
+                        SyncProgressConsole.headers(
+                                batch.get(batch.size() - 1).height(),
+                                remoteTargetHeight
+                        );
+                    }
+                }
         );
+
+        long finalHeight = syncInfrastructure.headerChainState().bestHeaderTip().height();
+        log.info(
+                "Header sync completed at height {} (peer advertised target {})",
+                finalHeight,
+                remoteTargetHeight
+        );
+        return processed;
     }
 
     private OutboundPeerConnection synchronizeHeadersWithFailover(

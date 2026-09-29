@@ -85,7 +85,9 @@ public final class HeaderBatchProcessor {
                         headers.size()
                 );
 
-        for (BlockHeader header : headers) {
+        for (int headerIndex = 0; headerIndex < headers.size(); headerIndex++) {
+
+            BlockHeader header = headers.get(headerIndex);
 
             BlockIndex index =
                     headerProcessor.process(
@@ -109,9 +111,21 @@ public final class HeaderBatchProcessor {
              * the BlockIndex and best-header pointer
              * are committed in one RocksDB batch.
              */
+            /*
+             * A HEADERS message may contain up to 2,000 entries. Performing a
+             * synchronous WAL flush for every individual header makes real-network
+             * IBD disk-latency bound. Preserve the existing per-header visibility
+             * (the next header must be able to resolve its parent), but defer the
+             * expensive durable flush until the final header in this validated
+             * network batch. The final sync=true RocksDB write flushes the WAL
+             * containing all preceding sync=false writes.
+             */
+            boolean durable = headerIndex == headers.size() - 1;
+
             headerStorage.save(
                     index,
-                    better
+                    better,
+                    durable
             );
 
             /*

@@ -1,0 +1,10 @@
+bitcoin:
+  network: regtest
+  data-directory: ${BITCOIN_DATA_DIRECTORY:C:/bitcoin-java-node/regtest}
+
+  p2p:
+    port: 18455
+    peers: 127.0.0.1:18444,127.0.0.1:18454,127.0.0.1:18464
+
+  rpc:
+    port: 18446

@@ -12,12 +12,16 @@ import ru.bitcoin.node.p2p.Peer;
 import ru.bitcoin.node.p2p.sync.*;
 import ru.bitcoin.node.protocol.block.Block;
 import ru.bitcoin.node.storage.block.BlockStore;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.time.Duration;
 import java.util.*;
 
 public final class BlockSyncCoordinator {
+
+    private static final Logger log = LoggerFactory.getLogger(BlockSyncCoordinator.class);
 
     private final Object lifecycleLock = new Object();
     private boolean cancelled;
@@ -321,6 +325,13 @@ public final class BlockSyncCoordinator {
         int nextToExpose = 0;
         int nextToProcess = 0;
 
+        final long targetHeight = bestHeaderTip.height();
+        SyncProgressConsole.blocks(
+                activeTip.height(),
+                targetHeight,
+                activeTip.header().timestamp().value()
+        );
+
         BlockDownloadSession session = openActiveSession();
 
         try (session) {
@@ -467,6 +478,12 @@ public final class BlockSyncCoordinator {
                             Math.incrementExact(
                                     nextToProcess
                             );
+
+                    SyncProgressConsole.blocks(
+                            index.height(),
+                            targetHeight,
+                            index.header().timestamp().value()
+                    );
 
                     processedAny =
                             true;

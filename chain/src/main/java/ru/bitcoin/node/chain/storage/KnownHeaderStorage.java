@@ -45,6 +45,19 @@ public final class KnownHeaderStorage {
             BlockIndex blockIndex,
             boolean updateBestHeaderTip
     ) {
+        save(blockIndex, updateBestHeaderTip, true);
+    }
+
+    /**
+     * Persists one validated header. Intermediate headers of a received HEADERS
+     * message may be committed with {@code durable=false}; the final header is
+     * committed synchronously, which flushes the WAL for the complete message.
+     */
+    public void save(
+            BlockIndex blockIndex,
+            boolean updateBestHeaderTip,
+            boolean durable
+    ) {
         if (blockIndex == null) {
             throw new IllegalArgumentException(
                     "blockIndex must not be null"
@@ -69,7 +82,8 @@ public final class KnownHeaderStorage {
             }
 
             database.write(
-                    batch
+                    batch,
+                    durable
             );
         }
     }
