@@ -23,12 +23,26 @@ try {
     if (-not (Test-Path -LiteralPath $crashReport)) { throw 'missing executed process-crash test report' }
     [xml]$crashResults = Get-Content -LiteralPath $crashReport -Raw
     $suite = $crashResults.testsuite
-    if ([int]$suite.tests -lt 3 -or [int]$suite.failures -ne 0 -or
+    if ([int]$suite.tests -lt 15 -or [int]$suite.failures -ne 0 -or
         [int]$suite.errors -ne 0 -or [int]$suite.skipped -ne 0) {
         throw 'process-crash recovery tests must execute without failures or skips'
     }
+    $requiredCrashCases = @(
+        'killBeforeSubmissionPreservesCommittedState', 'killAfterSubmissionPreservesAcknowledgedState',
+        'killRacingSubmissionRecoversACompleteState', 'killBeforeSpendPreservesCoins',
+        'killAfterSpendPreservesCoins', 'killRacingSpendRecoversCompleteCoins',
+        'killBeforeDisconnectPreservesSpentChain', 'killAfterDisconnectRestoresSpentCoins',
+        'killRacingDisconnectRecoversCompleteChain', 'killBeforeReconnectPreservesRestoredCoins',
+        'killAfterReconnectPreservesSpentCoins', 'killRacingReconnectRecoversCompleteChain',
+        'killBeforeForkSwitchPreservesOriginalBranch', 'killAfterForkSwitchPreservesWinningBranch',
+        'killRacingForkSwitchRecoversOneCompleteBranch'
+    )
+    $executedCrashCases = @($suite.testcase | ForEach-Object { $_.name })
+    foreach ($case in $requiredCrashCases) {
+        if ($case -notin $executedCrashCases) { throw "missing executed crash scenario: $case" }
+    }
     Write-Host '[OK] full reactor test suite'
-    Write-Host '[OK] forced process termination before/after/racing block submission and recovered chain/UTXO/undo checks'
+    Write-Host '[OK] forced termination before/after/racing coinbase, dependent spends, disconnect/reconnect and competing-fork activation; chain/UTXO/undo checks'
     Write-Host '[OK] pruning, parser/P2P/RPC bounds, per-peer relay budgets and BIP157 overload contracts present'
     Write-Host 'AUTOMATED RECOVERY / RESOURCE CHECKS: PASSED'
     Write-Host 'STAGE REMAINS OPEN: power-loss, disk I/O fault injection and sustained resource-load evidence are still required'

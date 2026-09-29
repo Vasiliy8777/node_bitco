@@ -29,11 +29,11 @@ class BlockDownloadWindowStallDetectorTest {
             new BlockDownloadWindowStallDetector();
 
     @Test
-    void shouldNotReportStallWhenMissingWorkInsideWindowIsStillAssignable()
+    void shouldKeepFirstBlockingPeerWhenLaterWindowPositionIsUnassigned()
             throws Exception {
 
         List<BlockIndex> path =
-                path(3);
+                path(4);
 
         try (Peer peer =
                      peer()) {
@@ -42,11 +42,11 @@ class BlockDownloadWindowStallDetectorTest {
                     new HashMap<>();
 
             /*
-             * B1 is already in-flight, but B2 is still missing
-             * and unassigned inside the same window.
-             *
-             * Therefore the window itself is not blocking
-             * additional useful work.
+             * Production IBD has a much larger logical download window than
+             * the per-peer in-flight budget. B1 may therefore be in-flight
+             * while B2 is still unassigned simply because all peer slots are
+             * occupied. B1 must keep its stall attribution; otherwise a 1024
+             * block window can suppress the stall timer forever.
              */
             owners.put(
                     path.get(0),
@@ -57,7 +57,7 @@ class BlockDownloadWindowStallDetectorTest {
                     detector.findStallingPeer(
                             path,
                             0,
-                            2,
+                            3,
                             index -> false,
                             index -> Optional.ofNullable(
                                     owners.get(index)
@@ -65,7 +65,12 @@ class BlockDownloadWindowStallDetectorTest {
                     );
 
             assertTrue(
-                    stallingPeer.isEmpty()
+                    stallingPeer.isPresent()
+            );
+
+            assertSame(
+                    peer,
+                    stallingPeer.orElseThrow()
             );
         }
     }

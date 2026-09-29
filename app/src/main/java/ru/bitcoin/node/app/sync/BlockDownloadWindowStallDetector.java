@@ -94,13 +94,22 @@ public final class BlockDownloadWindowStallDetector {
                     );
 
             /*
-             * There is still an unassigned missing block inside
-             * the current window.
+             * assignAvailable() has already run before stall detection.
+             * Therefore an unassigned position here does not mean that useful
+             * work is freely assignable: during real IBD the logical window is
+             * 1024 blocks while each peer owns only a bounded in-flight budget.
+             * Once that budget is full, hundreds of later positions are
+             * intentionally unassigned.
              *
-             * The window itself is therefore not what prevents
-             * more useful work from being scheduled.
+             * Do not let those later capacity holes erase an already identified
+             * first blocking in-flight peer. Otherwise the production-sized
+             * window can never accumulate the Core-style stalling timeout even
+             * though the processing frontier is pinned by that peer.
              */
             if (owner.isEmpty()) {
+                if (firstBlockingPeer != null) {
+                    break;
+                }
                 return Optional.empty();
             }
 

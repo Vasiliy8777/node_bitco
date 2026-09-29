@@ -42,6 +42,11 @@ public final class SyncProgressConsole {
         INSTANCE.publish(Phase.HEADERS, current, target, 0);
     }
 
+    /** Publishes and immediately renders the authoritative final header height. */
+    public static void headersComplete(long current, long target) {
+        INSTANCE.completeHeaders(current, target);
+    }
+
     public static void blocks(long current, long target, long timestampSeconds) {
         INSTANCE.publish(Phase.BLOCKS, current, target, timestampSeconds);
     }
@@ -74,7 +79,20 @@ public final class SyncProgressConsole {
         }
     }
 
-    private void render() {
+    private synchronized void completeHeaders(long finalCurrent, long finalTarget) {
+        phase = Phase.HEADERS;
+        current = Math.max(0L, finalCurrent);
+        target = Math.max(0L, finalTarget);
+        blockTimestampSeconds = 0L;
+        startOnce();
+        render();
+        out.println();
+        out.flush();
+        lastWidth = 0;
+        phase = Phase.IDLE;
+    }
+
+    private synchronized void render() {
         Phase snapshotPhase = phase;
         if (snapshotPhase == Phase.IDLE) {
             return;

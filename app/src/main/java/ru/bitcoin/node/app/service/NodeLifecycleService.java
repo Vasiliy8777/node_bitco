@@ -453,7 +453,7 @@ public final class NodeLifecycleService
          * is emitted concurrently. Publish the authoritative final chain-state
          * height once more before logging completion.
          */
-        SyncProgressConsole.headers(
+        SyncProgressConsole.headersComplete(
                 finalHeight,
                 Math.max(remoteTargetHeight, finalHeight)
         );

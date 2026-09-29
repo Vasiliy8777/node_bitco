@@ -18,10 +18,8 @@ digest/count/value and undo availability with an independently generated referen
 It also invalidates/reconsiders the recovered tip and connects another block.
 
 The racing case accepts either complete state; it does not establish that the process
-was killed inside the native RocksDB write. The fixture uses coinbase-only blocks;
-crashes inside spending transactions, multi-block reorg and snapshot finalization
-remain separate scenarios. A process kill does not model power failure, lost disk
-cache writes, disk-full or media corruption.
+was killed inside the native RocksDB write. A process kill does not model power
+failure, lost disk cache writes, disk-full or media corruption.
 
 On Windows the harness waits up to five seconds for exclusive file sharing on LOCK
 to be released after process termination. It does not delete LOCK, retry RocksDB
@@ -31,3 +29,40 @@ recovery or repair the database. Failure to regain file access fails the test.
 Surefire report for these scenarios. Its success means automated checks passed.
 The entire stage remains OPEN pending power-loss, disk I/O fault injection and
 sustained resource-load evidence; source-file existence alone cannot close it.
+
+## Spending and multi-block disconnect/reconnect (30 September 2026)
+
+The fixture now covers twelve named scenarios: before/after/racing each of ordinary
+block submission, submission of two dependent spending transactions, disconnect of
+three blocks, and reconnect of those blocks. A coinbase at height 1 is matured by
+height 101. At height 102 its output is spent, and the resulting output is spent
+again within the same block. Invalidation at height 101 rolls back heights 101–103;
+reconsideration reactivates the same chain. The reference independently reconstructs
+the same scenario and must match the recovered old or new state, including the
+persistent invalidation root.
+
+Besides the aggregate UTXO digest, assertions check the original/intermediate/final
+outpoints, amounts, heights, scripts and coinbase flags. The intermediate output
+must never survive. Expected surviving amounts and heights are asserted explicitly,
+not solely compared with the reference implementation of the same node.
+
+The gate checks the named scenarios, zero failures/errors and zero skips.
+Snapshot finalization, deterministic injection inside commit, disk I/O errors
+and power failure remain open.
+
+## Competing branch activation (30 September 2026)
+
+Three additional scenarios terminate the child before, after or racing activation
+of a branch with greater chainwork (15 crash scenarios total). Two branches fork
+after height 101 and spend the same mature coinbase differently. Branch A is active
+at height 103. Branch B's heights 102 and 103 are stored as context-pending without
+changing the active tip; submission of B104 triggers activation. The alternative
+blocks are built in a separate temporary database with their own UTXO view.
+
+After recovery the harness requires either the complete A103 state or the complete
+B104 state, including the exact surviving output, amount and height. Outputs from
+the losing branch and intermediate spends must not appear in the recovered UTXO
+set. Raw blocks, undo availability and chainwork are compared with the reference.
+If A remains active, B104 is resubmitted before the existing invalidate/reconsider
+and further-block checks. A racing kill may happen outside the native commit;
+these tests do not claim deterministic failure injection inside RocksDB.
