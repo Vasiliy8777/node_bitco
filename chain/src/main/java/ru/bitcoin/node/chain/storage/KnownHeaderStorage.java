@@ -2,6 +2,7 @@ package ru.bitcoin.node.chain.storage;
 
 import ru.bitcoin.node.chain.BlockIndex;
 import ru.bitcoin.node.chain.BlockIndexStorageMapper;
+import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.storage.block.RocksDbBlockIndexStore;
 import ru.bitcoin.node.storage.chain.RocksDbChainStateStore;
 import ru.bitcoin.node.storage.rocksdb.RocksDbDatabase;
@@ -51,6 +52,19 @@ public final class KnownHeaderStorage {
             List<BlockIndex> newIndexes,
             BlockIndex bestHeaderTip
     ) {
+        saveBatch(newIndexes, bestHeaderTip, null);
+    }
+
+    /**
+     * Persists a validated batch using skip ancestors already resolved by the validation
+     * overlay. This removes the second ancestry walk (and its RocksDB reads) from header IBD.
+     * A null map retains the compatibility path used by standalone callers.
+     */
+    public void saveBatch(
+            List<BlockIndex> newIndexes,
+            BlockIndex bestHeaderTip,
+            java.util.Map<Hash256, Hash256> resolvedSkipHashes
+    ) {
         if (newIndexes == null) {
             throw new IllegalArgumentException("newIndexes must not be null");
         }
@@ -59,32 +73,44 @@ public final class KnownHeaderStorage {
         }
 
         try (RocksDbWriteBatch batch = new RocksDbWriteBatch()) {
-            java.util.Map<ru.bitcoin.node.common.types.Hash256, BlockIndex> local = new java.util.HashMap<>();
-            java.util.Map<ru.bitcoin.node.common.types.Hash256, ru.bitcoin.node.common.types.Hash256> localSkips = new java.util.HashMap<>();
+            java.util.Map<Hash256, BlockIndex> local =
+                    resolvedSkipHashes == null ? new java.util.HashMap<>() : null;
+            java.util.Map<Hash256, Hash256> localSkips =
+                    resolvedSkipHashes == null ? new java.util.HashMap<>() : null;
             for (BlockIndex index : newIndexes) {
                 blockIndexStore.saveNew(batch, BlockIndexStorageMapper.toStored(index));
                 if (index.height() > 0) {
-                    long target = RocksDbBlockIndexStore.getSkipHeight(index.height());
-                    BlockIndex current = index;
-                    while (current.height() > target) {
-                        long skipHeight = RocksDbBlockIndexStore.getSkipHeight(current.height());
-                        long skipPrev = RocksDbBlockIndexStore.getSkipHeight(current.height() - 1);
-                        ru.bitcoin.node.common.types.Hash256 skip = localSkips.get(current.hash());
-                        if (skip == null) skip = blockIndexStore.findSkipHash(current.hash()).orElse(null);
-                        boolean useSkip = skip != null && (skipHeight == target
-                                || (skipHeight > target && !(skipPrev < skipHeight - 2 && skipPrev >= target)));
-                        ru.bitcoin.node.common.types.Hash256 nextHash = useSkip ? skip : current.previousBlockHash();
-                        BlockIndex next = local.get(nextHash);
-                        if (next == null) {
-                            next = blockIndexStore.find(nextHash).map(BlockIndexStorageMapper::fromStored).orElse(null);
+                    Hash256 skipHash;
+                    if (resolvedSkipHashes != null) {
+                        skipHash = resolvedSkipHashes.get(index.hash());
+                        if (skipHash == null) {
+                            throw new IllegalStateException(
+                                    "Missing pre-resolved skip hash for " + index.hash().toDisplayHex());
                         }
-                        if (next == null) throw new IllegalStateException("Missing ancestor while creating skip index");
-                        current = next;
+                    } else {
+                        long target = RocksDbBlockIndexStore.getSkipHeight(index.height());
+                        BlockIndex current = index;
+                        while (current.height() > target) {
+                            long skipHeight = RocksDbBlockIndexStore.getSkipHeight(current.height());
+                            long skipPrev = RocksDbBlockIndexStore.getSkipHeight(current.height() - 1);
+                            Hash256 skip = localSkips.get(current.hash());
+                            if (skip == null) skip = blockIndexStore.findSkipHash(current.hash()).orElse(null);
+                            boolean useSkip = skip != null && (skipHeight == target
+                                    || (skipHeight > target && !(skipPrev < skipHeight - 2 && skipPrev >= target)));
+                            Hash256 nextHash = useSkip ? skip : current.previousBlockHash();
+                            BlockIndex next = local.get(nextHash);
+                            if (next == null) {
+                                next = blockIndexStore.find(nextHash).map(BlockIndexStorageMapper::fromStored).orElse(null);
+                            }
+                            if (next == null) throw new IllegalStateException("Missing ancestor while creating skip index");
+                            current = next;
+                        }
+                        skipHash = current.hash();
+                        localSkips.put(index.hash(), skipHash);
                     }
-                    blockIndexStore.saveSkipNew(batch, BlockIndexStorageMapper.toStored(index), current.hash());
-                    localSkips.put(index.hash(), current.hash());
+                    blockIndexStore.saveSkipNew(batch, BlockIndexStorageMapper.toStored(index), skipHash);
                 }
-                local.put(index.hash(), index);
+                if (local != null) local.put(index.hash(), index);
             }
             if (bestHeaderTip != null) {
                 chainStateStore.saveBestHeaderTipHash(

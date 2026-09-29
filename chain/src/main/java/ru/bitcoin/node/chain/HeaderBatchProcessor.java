@@ -97,17 +97,36 @@ public final class HeaderBatchProcessor {
 
         List<BlockIndex> processed = new ArrayList<>(headers.size());
         List<BlockIndex> newlyCreated = new ArrayList<>(headers.size());
+        Map<Hash256, Hash256> resolvedSkipHashes = new HashMap<>(Math.max(16, headers.size() * 2));
         BlockIndex initialBest = headerChainState.bestHeaderTip();
         BlockIndex candidateBest = initialBest;
+        BlockIndex previousBatchNew = null;
 
         for (BlockHeader header : headers) {
-            HeaderProcessor.ProcessResult result =
-                    headerProcessor.processDetailed(header, effectiveLookup);
+            HeaderProcessor.ProcessResult result;
+            if (previousBatchNew != null
+                    && header.previousBlockHash().equals(previousBatchNew.hash())
+                    && !overlay.containsKey(header.hash())) {
+                result = headerProcessor.processNewWithKnownBatchParent(
+                        header, previousBatchNew, effectiveLookup);
+            } else {
+                result = headerProcessor.processDetailed(header, effectiveLookup);
+            }
             BlockIndex index = result.index();
 
             if (result.newlyCreated()) {
                 overlay.put(index.hash(), index);
                 newlyCreated.add(index);
+                if (index.height() > 0) {
+                    long skipHeight = ru.bitcoin.node.storage.block.RocksDbBlockIndexStore
+                            .getSkipHeight(index.height());
+                    BlockIndex skipAncestor = ((BlockIndexAncestorLookup) effectiveLookup)
+                            .ancestor(index, skipHeight);
+                    resolvedSkipHashes.put(index.hash(), skipAncestor.hash());
+                }
+                previousBatchNew = index;
+            } else {
+                previousBatchNew = null;
             }
 
             boolean failed = failureResolver != null
@@ -121,7 +140,7 @@ public final class HeaderBatchProcessor {
         }
 
         boolean bestChanged = !candidateBest.hash().equals(initialBest.hash());
-        headerStorage.saveBatch(newlyCreated, bestChanged ? candidateBest : null);
+        headerStorage.saveBatch(newlyCreated, bestChanged ? candidateBest : null, resolvedSkipHashes);
 
         if (bestChanged) {
             boolean changed = headerChainState.consider(candidateBest);

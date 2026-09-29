@@ -104,6 +104,38 @@ public final class HeaderProcessor {
         );
     }
 
+    /**
+     * Fast path for a header whose parent was created earlier in the same HEADERS batch.
+     * The caller must only use this when the parent is batch-local. In that case a durable
+     * child index cannot already exist in a consistent store, because its parent itself was
+     * not durable before this batch. All contextual/PoW validation remains identical.
+     */
+    ProcessResult processNewWithKnownBatchParent(
+            BlockHeader header,
+            BlockIndex parent,
+            BlockIndexLookup lookup
+    ) {
+        if (header == null || parent == null || lookup == null) {
+            throw new IllegalArgumentException("fast-path arguments must not be null");
+        }
+        if (!header.previousBlockHash().equals(parent.hash())) {
+            throw new IllegalArgumentException("Header previous block hash does not match batch parent");
+        }
+
+        ChainHeaderValidator.validate(
+                header,
+                parent,
+                lookup,
+                networkParameters,
+                adjustedTime
+        );
+
+        return new ProcessResult(
+                BlockIndexFactory.createChild(parent, header),
+                true
+        );
+    }
+
     BlockIndexLookup baseLookup() {
         return blockIndexLookup;
     }
