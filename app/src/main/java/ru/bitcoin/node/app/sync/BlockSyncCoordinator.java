@@ -5,8 +5,6 @@ import ru.bitcoin.node.chain.BlockIndex;
 import ru.bitcoin.node.chain.BlockIndexLookup;
 import ru.bitcoin.node.chain.BlockProcessingResult;
 import ru.bitcoin.node.chain.HeaderChainState;
-import ru.bitcoin.node.chain.ReorganizationPlan;
-import ru.bitcoin.node.chain.ReorganizationPlanner;
 import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.p2p.Peer;
 import ru.bitcoin.node.p2p.sync.*;
@@ -36,6 +34,19 @@ public final class BlockSyncCoordinator {
      * in-flight request limit.
      */
     private static final int DEFAULT_DOWNLOAD_WINDOW = 1024;
+
+    /*
+     * Block-index materialization is deliberately larger than the logical
+     * download horizon. If both sizes are identical, the materialized chunk
+     * itself becomes a false sliding-window boundary: after processing the
+     * first block of a chunk the scheduler cannot expose a block from the next
+     * chunk even though that height is already inside the logical horizon.
+     *
+     * 8192 BlockIndex references/objects remain bounded for IBD while giving
+     * the 1024-block download window ample look-ahead. Small test windows also
+     * retain true sliding behaviour because short paths fit in one chunk.
+     */
+    private static final int BLOCK_INDEX_MATERIALIZATION_CHUNK = 8192;
     private static final Duration DOWNLOAD_COMPLETION_POLL_INTERVAL =
             Duration.ofMillis(250);
     private final int downloadWindow;
@@ -248,82 +259,75 @@ public final class BlockSyncCoordinator {
 
     public List<BlockIndex> synchronize()
             throws IOException {
-        return synchronize(
-                Integer.MAX_VALUE
-        );
+        return synchronizeInternal(Integer.MAX_VALUE, true);
     }
 
     public List<BlockIndex> synchronize(
             int maxBlocks
     ) throws IOException {
+        return synchronizeInternal(maxBlocks, true);
+    }
+
+    /**
+     * Production IBD entry point.
+     *
+     * <p>Unlike {@link #synchronize()}, this method does not retain every
+     * processed {@link BlockIndex} until the complete IBD finishes. A public
+     * test/API caller can still use synchronize() when it needs the returned
+     * path, while lifecycle synchronization keeps connect-path materialization
+     * bounded independently of total chain height.</p>
+     */
+    public void synchronizeToTip()
+            throws IOException {
+        synchronizeInternal(Integer.MAX_VALUE, false);
+    }
+
+    private List<BlockIndex> synchronizeInternal(
+            int maxBlocks,
+            boolean collectResult
+    ) throws IOException {
 
         ensureNotCancelled();
 
         if (maxBlocks <= 0) {
-            throw new IllegalArgumentException(
-                    "maxBlocks must be positive"
-            );
+            throw new IllegalArgumentException("maxBlocks must be positive");
         }
 
-        BlockIndex activeTip =
-                validationService.activeTip();
+        BlockIndex activeTip = validationService.activeTip();
+        BlockIndex bestHeaderTip = headerChainState.bestHeaderTip();
 
-        BlockIndex bestHeaderTip =
-                headerChainState.bestHeaderTip();
-
-        if (activeTip.hash().equals(
-                bestHeaderTip.hash()
-        )) {
+        if (activeTip.hash().equals(bestHeaderTip.hash())) {
             return List.of();
         }
 
-        ReorganizationPlan plan =
-                ReorganizationPlanner.plan(
+        /*
+         * Do NOT materialize ReorganizationPlanner.plan(...).blocksToConnect()
+         * here. During first IBD that path can contain several million indexes.
+         * Find the branch point once, then materialize only the current bounded
+         * download window. StoredBlockIndexLookup uses Core-style skip pointers
+         * for the height jump to each window end.
+         */
+        BlockIndex commonAncestor =
+                ru.bitcoin.node.chain.CommonAncestorFinder.find(
                         activeTip,
                         bestHeaderTip,
                         lookup
                 );
 
-        List<BlockIndex> blocksToConnect =
-                plan.blocksToConnect();
+        long remainingLong =
+                Math.subtractExact(bestHeaderTip.height(), commonAncestor.height());
 
-        int downloadCount =
-                Math.min(
-                        maxBlocks,
-                        blocksToConnect.size()
-                );
+        if (remainingLong <= 0) {
+            throw new IllegalStateException(
+                    "Best header tip does not extend the common ancestor: activeHeight="
+                            + activeTip.height() + ", bestHeaderHeight=" + bestHeaderTip.height()
+            );
+        }
 
-        List<BlockIndex> blocksToDownload =
-                blocksToConnect.subList(
-                        0,
-                        downloadCount
-                );
-
-        /*
-         * Bodies which are already available either from local
-         * storage or from an asynchronous network completion.
-         *
-         * Consensus processing still consumes this map strictly
-         * in blocksToDownload order.
-         */
-        Map<Hash256, AvailableBlock> availableBlocks =
-                new HashMap<>();
-
-        /*
-         * nextToExpose:
-         *     first connect-path position which has not yet entered
-         *     the download horizon.
-         *
-         * nextToProcess:
-         *     first connect-path position which has not yet passed
-         *     through validationService.processBlock().
-         *
-         * The permitted horizon is:
-         *
-         * [nextToProcess, nextToProcess + downloadWindow)
-         */
-        int nextToExpose = 0;
-        int nextToProcess = 0;
+        int downloadCount = (int) Math.min((long) maxBlocks, remainingLong);
+        List<BlockIndex> result = collectResult
+                ? new ArrayList<>(Math.min(downloadCount, downloadWindow))
+                : null;
 
         final long targetHeight = bestHeaderTip.height();
         SyncProgressConsole.blocks(
@@ -333,387 +337,291 @@ public final class BlockSyncCoordinator {
         );
 
         BlockDownloadSession session = openActiveSession();
+        int processedTotal = 0;
 
         try (session) {
-
-            while (nextToProcess
-                    < blocksToDownload.size()) {
-
-                /*
-                 * Extend the horizon as far as currently permitted.
-                 *
-                 * Local bodies enter availableBlocks immediately.
-                 * Missing bodies are submitted to the SAME long-lived
-                 * download session.
-                 */
-                int horizonEnd =
-                        Math.min(
-                                blocksToDownload.size(),
-                                Math.addExact(
-                                        nextToProcess,
-                                        downloadWindow
-                                )
-                        );
-
-                List<BlockDownloadRequest> missingToSubmit =
-                        new ArrayList<>();
-
-                while (nextToExpose
-                        < horizonEnd) {
-
-                    BlockIndex index =
-                            blocksToDownload.get(
-                                    nextToExpose
-                            );
-
-                    Block localBlock =
-                            blockStore.find(
-                                            index.hash()
-                                    )
-                                    .orElse(null);
-
-                    if (localBlock != null) {
-
-                        AvailableBlock previous =
-                                availableBlocks.put(
-                                        index.hash(),
-                                        new AvailableBlock(localBlock, null)
-                                );
-
-                        if (previous != null) {
-                            throw new IllegalStateException(
-                                    "Block body became available more than once: "
-                                            + index.hash()
-                                            .toDisplayHex()
-                            );
-                        }
-
-                    } else {
-
-                        missingToSubmit.add(
-                                new BlockDownloadRequest(
-                                        index.hash(),
-                                        index.height()
-                                )
-                        );
-                    }
-
-                    nextToExpose =
-                            Math.incrementExact(
-                                    nextToExpose
-                            );
-                }
-
-                if (!missingToSubmit.isEmpty()) {
-
-                    session.submitRequests(
-                            missingToSubmit
-                    );
-                }
+            while (processedTotal < downloadCount) {
+                ensureNotCancelled();
 
                 /*
-                 * Process every contiguous body which is already
-                 * available.
-                 *
-                 * This is the operation which slides the horizon.
+                 * IMPORTANT: this is a materialization chunk, not the logical
+                 * download window. processWindow() still enforces downloadWindow
+                 * relative to nextToProcess. Keeping more indexes materialized
+                 * lets that horizon slide across the old chunk boundary.
                  */
-                boolean processedAny =
-                        false;
-
-                while (nextToProcess
-                        < blocksToDownload.size()) {
-
-                    BlockIndex index =
-                            blocksToDownload.get(
-                                    nextToProcess
-                            );
-
-                    AvailableBlock available =
-                            availableBlocks.remove(
-                                    index.hash()
-                            );
-
-                    if (available == null) {
-                        break;
-                    }
-
-                    Block block = available.block();
-
-                    if (!block.hash().equals(
-                            index.hash()
-                    )) {
-                        throw new IllegalStateException(
-                                "Available block does not match connect path: "
-                                        + "expected "
-                                        + index.hash()
-                                        .toDisplayHex()
-                                        + ", actual "
-                                        + block.hash()
-                                        .toDisplayHex()
-                        );
-                    }
-
-                    BlockProcessingResult result =
-                            validationService.processBlock(
-                                    block
-                            );
-
-                    if (result ==
-                            BlockProcessingResult.UNKNOWN_PARENT) {
-
-                        throw new IllegalStateException(
-                                "Block has unknown parent: "
-                                        + index.hash()
-                                        .toDisplayHex()
-                                        + " at height "
-                                        + index.height()
-                        );
-                    }
-
-                    if (result == BlockProcessingResult.CONNECTED) {
-                        connectedBlockListener.onConnected(block, available.sourcePeer());
-                    }
-
-                    nextToProcess =
-                            Math.incrementExact(
-                                    nextToProcess
-                            );
-
-                    SyncProgressConsole.blocks(
-                            index.height(),
-                            targetHeight,
-                            index.header().timestamp().value()
-                    );
-
-                    processedAny =
-                            true;
-                }
-
-                /*
-                 * Processing one or more blocks changed the left
-                 * edge of the horizon.
-                 *
-                 * Loop immediately so newly admitted positions are
-                 * submitted BEFORE waiting for older outstanding
-                 * downloads.
-                 *
-                 * Example with window=2:
-                 *
-                 * B1,B2 submitted
-                 * B1 completes
-                 * B1 processed
-                 * loop
-                 * B3 submitted while B2 remains in-flight
-                 */
-                if (processedAny) {
-
-                    stallTracker.update(
-                            null
-                    );
-
-                    continue;
-                }
-
-                if (session.pendingCount() == 0) {
-
-                    stallTracker.update(
-                            null
-                    );
-
-                    throw new IOException(
-                            "No pending block downloads while synchronization is incomplete"
-                    );
-                }
-
-                Optional<Peer> stallingPeer =
-                        stallDetector.findStallingPeer(
-                                blocksToDownload,
-                                nextToProcess,
-                                downloadWindow,
-                                index -> {
-
-                                    Hash256 hash =
-                                            index.hash();
-
-                                    if (availableBlocks.containsKey(
-                                            hash
-                                    )) {
-                                        return true;
-                                    }
-
-                                    return blockStore.find(
-                                            hash
-                                    ).isPresent();
-                                },
-                                index ->
-                                        session.inFlightPeer(
-                                                index.hash()
-                                        )
-                        );
-
-                stallTracker.update(
-                        stallingPeer.orElse(
-                                null
-                        )
+                int windowCount = Math.min(
+                        BLOCK_INDEX_MATERIALIZATION_CHUNK,
+                        downloadCount - processedTotal
                 );
 
-                BlockDownloadStallTimeoutEvaluator.Evaluation
-                        stallEvaluation =
-                        stallTimeoutEvaluator.evaluate();
+                long firstHeight = Math.addExact(
+                        commonAncestor.height(),
+                        (long) processedTotal + 1L
+                );
+                long lastHeight = Math.addExact(
+                        firstHeight,
+                        windowCount - 1L
+                );
 
-                if (stallEvaluation.timedOut()) {
+                List<BlockIndex> window = connectWindow(
+                        bestHeaderTip,
+                        firstHeight,
+                        lastHeight
+                );
 
-                    Peer timedOutPeer =
-                            stallEvaluation.peer();
+                processWindow(session, window, targetHeight);
 
-                    IOException stallFailure =
-                            new IOException(
-                                    "Peer stalled block download window for "
-                                            + stallEvaluation.stallingAge()
-                                            + " with timeout "
-                                            + stallEvaluation.timeout()
-                            );
-
-                    /*
-                     * Release every block currently assigned to the
-                     * stalling peer before disconnecting it.
-                     *
-                     * The session keeps those blocks pending so they
-                     * can be reassigned to another ready peer.
-                     */
-                    session.failPeer(
-                            timedOutPeer,
-                            stallFailure
-                    );
-
-                    try {
-                        timedOutPeer.close();
-                    } catch (IOException closeException) {
-                        stallFailure.addSuppressed(
-                                closeException
-                        );
-                    }
-
-                    /*
-                     * A real stall timeout was handled, therefore
-                     * increase the adaptive timeout for a subsequent
-                     * stall event.
-                     */
-                    stallTimeoutEvaluator.timeoutHandled();
-
-                    stallTracker.clear(
-                            timedOutPeer
-                    );
-
-                    /*
-                     * Re-enter the coordinator loop. The session will
-                     * assign the released blocks to another ready peer.
-                     */
-                    continue;
+                if (collectResult) {
+                    result.addAll(window);
                 }
-
-                Optional<CompletedBlockDownload> completedOptional =
-                        session.pollCompleted(
-                                DOWNLOAD_COMPLETION_POLL_INTERVAL
-                        );
-
-                if (completedOptional.isEmpty()) {
-                    continue;
-                }
-
-                CompletedBlockDownload completed =
-                        completedOptional.get();
-
-                Hash256 completedHash =
-                        completed.requestedHash();
-
-                Block completedBlock =
-                        completed.block();
-
-                if (!completedHash.equals(
-                        completedBlock.hash()
-                )) {
-                    throw new IllegalStateException(
-                            "Completed block does not match requested hash: "
-                                    + "expected "
-                                    + completedHash.toDisplayHex()
-                                    + ", actual "
-                                    + completedBlock.hash()
-                                    .toDisplayHex()
-                    );
-                }
-
-                AvailableBlock previous =
-                        availableBlocks.put(
-                                completedHash,
-                                new AvailableBlock(completedBlock, completed.sourcePeer())
-                        );
-
-                if (previous != null) {
-                    throw new IllegalStateException(
-                            "Block body completed more than once: "
-                                    + completedHash.toDisplayHex()
-                    );
-                }
+                processedTotal = Math.addExact(processedTotal, window.size());
             }
 
-            /*
-             * Every network request admitted into the horizon must
-             * have completed before the complete bounded path can
-             * have been processed.
-             */
             if (session.pendingCount() != 0) {
                 throw new IllegalStateException(
-                        "Block synchronization processed its bounded path "
-                                + "with "
-                                + session.pendingCount()
-                                + " download(s) still pending"
+                        "Block synchronization processed its bounded path with "
+                                + session.pendingCount() + " download(s) still pending"
                 );
             }
         } finally {
-
             clearActiveSession(session);
             stallTracker.clear();
         }
 
-        /*
-         * Reaching bestHeaderTip is required only when this invocation
-         * covered the complete remaining connect path.
-         */
-        boolean complete =
-                downloadCount
-                        == blocksToConnect.size();
-
+        boolean complete = ((long) downloadCount) == remainingLong;
         if (complete) {
-
-            BlockIndex finalTip =
-                    validationService.activeTip();
-
-            // A concurrently submitted local block may already extend this download's target.
+            BlockIndex finalTip = validationService.activeTip();
             while (finalTip.height() > bestHeaderTip.height()) {
-                finalTip = Objects.requireNonNull(lookup.find(finalTip.previousBlockHash()), "Missing active ancestor");
+                finalTip = Objects.requireNonNull(
+                        lookup.find(finalTip.previousBlockHash()),
+                        "Missing active ancestor"
+                );
             }
-            if (!finalTip.hash().equals(
-                    bestHeaderTip.hash()
-            )) {
-
+            if (!finalTip.hash().equals(bestHeaderTip.hash())) {
                 throw new IllegalStateException(
-                        "Block synchronization completed "
-                                + "without activating best header tip: "
-                                + "expected "
-                                + bestHeaderTip.hash()
-                                .toDisplayHex()
-                                + ", actual "
-                                + finalTip.hash()
-                                .toDisplayHex()
+                        "Block synchronization completed without activating best header tip: expected "
+                                + bestHeaderTip.hash().toDisplayHex()
+                                + ", actual " + finalTip.hash().toDisplayHex()
                 );
             }
         }
 
-        return List.copyOf(
-                blocksToDownload
-        );
+        return collectResult ? List.copyOf(result) : List.of();
     }
+
+    /** Materializes only one forward connect window, never the complete IBD path. */
+    private List<BlockIndex> connectWindow(
+            BlockIndex bestHeaderTip,
+            long firstHeight,
+            long lastHeight
+    ) {
+        if (firstHeight < 1 || lastHeight < firstHeight || lastHeight > bestHeaderTip.height()) {
+            throw new IllegalArgumentException(
+                    "Invalid connect window " + firstHeight + ".." + lastHeight
+                            + " for best header height " + bestHeaderTip.height()
+            );
+        }
+
+        BlockIndex end = ancestorAtHeight(bestHeaderTip, lastHeight);
+        int size = Math.toIntExact(lastHeight - firstHeight + 1L);
+        ArrayList<BlockIndex> reversed = new ArrayList<>(size);
+        BlockIndex current = end;
+
+        while (true) {
+            reversed.add(current);
+            if (current.height() == firstHeight) {
+                break;
+            }
+            BlockIndex parent = lookup.find(current.previousBlockHash());
+            if (parent == null) {
+                throw new IllegalStateException(
+                        "Missing connect-window ancestor: "
+                                + current.previousBlockHash().toDisplayHex()
+                );
+            }
+            if (parent.height() != current.height() - 1L) {
+                throw new IllegalStateException(
+                        "Invalid connect-window ancestry at height " + current.height()
+                );
+            }
+            current = parent;
+        }
+
+        Collections.reverse(reversed);
+        return List.copyOf(reversed);
+    }
+
+    private BlockIndex ancestorAtHeight(BlockIndex index, long targetHeight) {
+        if (lookup instanceof ru.bitcoin.node.chain.BlockIndexAncestorLookup ancestorLookup) {
+            return ancestorLookup.ancestor(index, targetHeight);
+        }
+        BlockIndex current = index;
+        while (current.height() > targetHeight) {
+            BlockIndex parent = lookup.find(current.previousBlockHash());
+            if (parent == null) {
+                throw new IllegalStateException(
+                        "Missing ancestor for block " + current.hash().toDisplayHex()
+                );
+            }
+            current = parent;
+        }
+        return current;
+    }
+
+    private void processWindow(
+            BlockDownloadSession session,
+            List<BlockIndex> blocksToDownload,
+            long targetHeight
+    ) throws IOException {
+        Map<Hash256, AvailableBlock> availableBlocks = new HashMap<>();
+        int nextToExpose = 0;
+        int nextToProcess = 0;
+
+        while (nextToProcess < blocksToDownload.size()) {
+            int horizonEnd = Math.min(
+                    blocksToDownload.size(),
+                    Math.addExact(nextToProcess, downloadWindow)
+            );
+
+            List<BlockDownloadRequest> missingToSubmit = new ArrayList<>();
+            while (nextToExpose < horizonEnd) {
+                BlockIndex index = blocksToDownload.get(nextToExpose);
+                Block localBlock = blockStore.find(index.hash()).orElse(null);
+                if (localBlock != null) {
+                    AvailableBlock previous = availableBlocks.put(
+                            index.hash(), new AvailableBlock(localBlock, null));
+                    if (previous != null) {
+                        throw new IllegalStateException(
+                                "Block body became available more than once: "
+                                        + index.hash().toDisplayHex());
+                    }
+                } else {
+                    missingToSubmit.add(new BlockDownloadRequest(index.hash(), index.height()));
+                }
+                nextToExpose = Math.incrementExact(nextToExpose);
+            }
+
+            if (!missingToSubmit.isEmpty()) {
+                session.submitRequests(missingToSubmit);
+            }
+
+            boolean processedAny = false;
+            while (nextToProcess < blocksToDownload.size()) {
+                BlockIndex index = blocksToDownload.get(nextToProcess);
+                AvailableBlock available = availableBlocks.remove(index.hash());
+                if (available == null) break;
+
+                Block block = available.block();
+                if (!block.hash().equals(index.hash())) {
+                    throw new IllegalStateException(
+                            "Available block does not match connect path: expected "
+                                    + index.hash().toDisplayHex() + ", actual "
+                                    + block.hash().toDisplayHex());
+                }
+
+                BlockProcessingResult processingResult = validationService.processBlock(block);
+                if (processingResult == BlockProcessingResult.UNKNOWN_PARENT) {
+                    throw new IllegalStateException(
+                            "Block has unknown parent: " + index.hash().toDisplayHex()
+                                    + " at height " + index.height());
+                }
+                if (processingResult == BlockProcessingResult.CONNECTED) {
+                    connectedBlockListener.onConnected(block, available.sourcePeer());
+                }
+
+                nextToProcess = Math.incrementExact(nextToProcess);
+                SyncProgressConsole.blocks(
+                        index.height(), targetHeight, index.header().timestamp().value());
+                processedAny = true;
+            }
+
+            if (processedAny) {
+                /*
+                 * Ordered progress opens a new slot at the tail of the logical
+                 * download window. Return to the top immediately so that the
+                 * newly exposed block is submitted before we wait for another
+                 * completion or evaluate a stall.
+                 *
+                 * This is safe across the old window boundary because the
+                 * materialized connect chunk is deliberately larger than the
+                 * logical downloadWindow.
+                 */
+                stallTracker.update(null);
+                continue;
+            }
+
+            /*
+             * SchedulerBlockDownloadSession rejects pollCompleted() when there
+             * is no outstanding request. A queued completion still counts as
+             * pending until pollCompleted() consumes it, so this guard does not
+             * hide a completed block.
+             */
+            if (session.pendingCount() == 0) {
+                stallTracker.update(null);
+                throw new IOException(
+                        "No pending block downloads while synchronization is incomplete");
+            }
+
+            Optional<Peer> stallingPeer = stallDetector.findStallingPeer(
+                    blocksToDownload,
+                    nextToProcess,
+                    downloadWindow,
+                    index -> {
+                        Hash256 hash = index.hash();
+                        if (availableBlocks.containsKey(hash)) return true;
+                        return blockStore.find(hash).isPresent();
+                    },
+                    index -> session.inFlightPeer(index.hash())
+            );
+
+            stallTracker.update(stallingPeer.orElse(null));
+            BlockDownloadStallTimeoutEvaluator.Evaluation stallEvaluation =
+                    stallTimeoutEvaluator.evaluate();
+
+            if (stallEvaluation.timedOut()) {
+                Peer timedOutPeer = stallEvaluation.peer();
+                IOException stallFailure = new IOException(
+                        "Peer stalled block download window for "
+                                + stallEvaluation.stallingAge() + " with timeout "
+                                + stallEvaluation.timeout());
+                session.failPeer(timedOutPeer, stallFailure);
+                try {
+                    timedOutPeer.close();
+                } catch (IOException closeException) {
+                    stallFailure.addSuppressed(closeException);
+                }
+                stallTimeoutEvaluator.timeoutHandled();
+                stallTracker.clear(timedOutPeer);
+                continue;
+            }
+
+            Optional<CompletedBlockDownload> completedOptional =
+                    session.pollCompleted(DOWNLOAD_COMPLETION_POLL_INTERVAL);
+            if (completedOptional.isEmpty()) {
+                continue;
+            }
+
+            CompletedBlockDownload completed = completedOptional.get();
+            Hash256 completedHash = completed.requestedHash();
+            Block completedBlock = completed.block();
+            if (!completedHash.equals(completedBlock.hash())) {
+                throw new IllegalStateException(
+                        "Completed block does not match requested hash: expected "
+                                + completedHash.toDisplayHex() + ", actual "
+                                + completedBlock.hash().toDisplayHex());
+            }
+
+            AvailableBlock previous = availableBlocks.put(
+                    completedHash,
+                    new AvailableBlock(completedBlock, completed.sourcePeer()));
+            if (previous != null) {
+                throw new IllegalStateException(
+                        "Block body completed more than once: "
+                                + completedHash.toDisplayHex());
+            }
+        }
+    }
+
     public void cancel() {
 
         BlockDownloadSession sessionToClose;
@@ -778,5 +686,4 @@ public final class BlockSyncCoordinator {
             Objects.requireNonNull(block, "block");
         }
     }
-
 }

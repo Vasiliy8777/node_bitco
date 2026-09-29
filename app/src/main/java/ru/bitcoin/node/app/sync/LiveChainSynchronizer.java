@@ -85,7 +85,7 @@ public final class LiveChainSynchronizer implements AutoCloseable {
                                     infrastructure.headerSyncService(), infrastructure.headerChainState(),
                                     infrastructure.blockLocatorBuilder()).synchronize(new Hash256(new byte[32]));
                             if (closed) break;
-                            blocks.synchronize();
+                            blocks.synchronizeToTip();
                             synchronized (wakeup) {
                                 if (wakeup.availablePermits() == 0) lastSuccess = System.nanoTime();
                             }

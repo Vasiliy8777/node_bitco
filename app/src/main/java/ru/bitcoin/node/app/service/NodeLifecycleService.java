@@ -584,7 +584,7 @@ public final class NodeLifecycleService
                 NodeLifecycleState.SYNCHRONIZING_BLOCKS
         );
 
-        blockSyncCoordinator.synchronize();
+        blockSyncCoordinator.synchronizeToTip();
     }
 
     private void verifySynchronized() {
