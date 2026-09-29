@@ -51,6 +51,8 @@ public final class RocksDbNamespaces {
     public static final byte ASSUMEUTXO_BACKGROUND_STATE = 0x28;
     public static final byte ASSUMEUTXO_FINALIZATION_STATE = 0x29;
     public static final byte MEMPOOL_FEE_DELTA = 0x2A;
+    public static final byte BLOCK_SKIP_INDEX = 0x2B;
+    public static final byte BLOCK_SKIP_INDEX_VERSION = 0x2C;
 
     /** Legacy v1 prune-usage marker that collided with BLOCK_HEIGHT_INDEX. */
     public static final byte[] LEGACY_PRUNE_USAGE_VERSION_KEY = {BLOCK_HEIGHT_INDEX, 0x01};

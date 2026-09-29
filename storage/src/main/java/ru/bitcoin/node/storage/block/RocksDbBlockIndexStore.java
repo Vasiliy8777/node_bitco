@@ -18,6 +18,9 @@ public final class RocksDbBlockIndexStore
     private static final byte HEIGHT_INDEX_PREFIX = RocksDbNamespaces.BLOCK_HEIGHT_INDEX;
     private static final byte[] HEIGHT_INDEX_VERSION_KEY =
             RocksDbNamespaces.singletonKey(RocksDbNamespaces.BLOCK_HEIGHT_INDEX_VERSION);
+    private static final byte SKIP_INDEX_PREFIX = RocksDbNamespaces.BLOCK_SKIP_INDEX;
+    private static final byte[] SKIP_INDEX_VERSION_KEY =
+            RocksDbNamespaces.singletonKey(RocksDbNamespaces.BLOCK_SKIP_INDEX_VERSION);
 
     private final RocksDbDatabase database;
 
@@ -228,6 +231,98 @@ public final class RocksDbBlockIndexStore
         return key;
     }
 
+
+    public static long getSkipHeight(long height) {
+        if (height < 2) return 0;
+        if ((height & 1L) != 0) return invertLowestOne(invertLowestOne(height - 1)) + 1;
+        return invertLowestOne(height);
+    }
+
+    private static long invertLowestOne(long value) {
+        return value & (value - 1);
+    }
+
+    public Optional<Hash256> findSkipHash(Hash256 hash) {
+        if (hash == null) throw new IllegalArgumentException("hash must not be null");
+        byte[] value = database.get(skipKey(hash));
+        if (value == null) return Optional.empty();
+        if (value.length != HASH_SIZE) throw new IllegalStateException("Invalid block skip hash size: " + value.length);
+        return Optional.of(new Hash256(value));
+    }
+
+    /** Builds the branch-safe skip namespace once for existing v1 block-index records. */
+    public void ensureSkipIndex() {
+        synchronized (database) {
+            byte[] version = database.get(SKIP_INDEX_VERSION_KEY);
+            if (version != null) {
+                if (!java.util.Arrays.equals(version, new byte[]{1})) {
+                    throw new IllegalStateException("Unsupported block skip index version");
+                }
+                return;
+            }
+            ensureHeightIndex();
+            final java.util.Map<Hash256, Hash256> pending = new java.util.HashMap<>(8192);
+            class Migration implements AutoCloseable {
+                RocksDbWriteBatch batch = new RocksDbWriteBatch();
+                int count;
+                Hash256 skipOf(Hash256 hash) {
+                    Hash256 local = pending.get(hash);
+                    return local != null ? local : findSkipHash(hash).orElse(null);
+                }
+                StoredBlockIndex ancestor(StoredBlockIndex start, long targetHeight) {
+                    StoredBlockIndex current = start;
+                    while (current.height() > targetHeight) {
+                        long skipHeight = getSkipHeight(current.height());
+                        long skipPrev = getSkipHeight(current.height() - 1);
+                        Hash256 skip = skipOf(current.hash());
+                        boolean useSkip = skip != null && (skipHeight == targetHeight
+                                || (skipHeight > targetHeight && !(skipPrev < skipHeight - 2 && skipPrev >= targetHeight)));
+                        Hash256 nextHash = useSkip ? skip : current.previousBlockHash();
+                        current = find(nextHash).orElseThrow(() -> new IllegalStateException(
+                                "Missing block-index ancestor while building skip index: " + nextHash.toDisplayHex()));
+                    }
+                    return current;
+                }
+                void add(StoredBlockIndex index) {
+                    if (index.height() == 0) return;
+                    long target = getSkipHeight(index.height());
+                    StoredBlockIndex ancestor = ancestor(index, target);
+                    batch.put(skipKey(index.hash()), ancestor.hash().bytes());
+                    pending.put(index.hash(), ancestor.hash());
+                    if (++count == 4096) flush();
+                }
+                void flush() {
+                    if (count == 0) return;
+                    database.write(batch, false);
+                    batch.close();
+                    batch = new RocksDbWriteBatch();
+                    pending.clear();
+                    count = 0;
+                }
+                public void close() { batch.close(); }
+            }
+            try (var migration = new Migration()) {
+                visitByHeightAscending(index -> { migration.add(index); return true; });
+                migration.flush();
+                try (var marker = new RocksDbWriteBatch()) {
+                    marker.put(SKIP_INDEX_VERSION_KEY, new byte[]{1});
+                    database.write(marker, true);
+                }
+            }
+        }
+    }
+
+    public void saveSkipNew(RocksDbWriteBatch batch, StoredBlockIndex index, Hash256 skipHash) {
+        if (batch == null || index == null || skipHash == null) throw new IllegalArgumentException("skip arguments must not be null");
+        if (index.height() > 0) batch.put(skipKey(index.hash()), skipHash.bytes());
+    }
+
+    private static byte[] skipKey(Hash256 hash) {
+        byte[] key = new byte[1 + HASH_SIZE];
+        key[0] = SKIP_INDEX_PREFIX;
+        System.arraycopy(hash.bytes(), 0, key, 1, HASH_SIZE);
+        return key;
+    }
     @Override
     public void delete(
             Hash256 hash
@@ -337,6 +432,8 @@ public final class RocksDbBlockIndexStore
         batch.delete(WORK_INDEX_VERSION_KEY);
         batch.deletePrefix(HEIGHT_INDEX_PREFIX);
         batch.delete(HEIGHT_INDEX_VERSION_KEY);
+        batch.deletePrefix(SKIP_INDEX_PREFIX);
+        batch.delete(SKIP_INDEX_VERSION_KEY);
     }
 
     public void delete(
@@ -362,5 +459,6 @@ public final class RocksDbBlockIndexStore
         batch.delete(
                 key(hash)
         );
+        batch.delete(skipKey(hash));
     }
 }

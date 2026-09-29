@@ -165,8 +165,19 @@ class KnownHeaderStorageTest {
             RocksDbChainStateStore chainStateStore = new RocksDbChainStateStore(database);
             KnownHeaderStorage storage = new KnownHeaderStorage(database, blockIndexStore, chainStateStore);
 
-            BlockIndex first = blockIndex(10L, BigInteger.valueOf(1_000));
-            BlockIndex second = blockIndex(11L, BigInteger.valueOf(2_000));
+            BlockIndex previous = null;
+            for (long height = 0; height < 10; height++) {
+                BlockIndex current = blockIndex(
+                        height,
+                        previous,
+                        BigInteger.valueOf((height + 1) * 100)
+                );
+                storage.save(current, false);
+                previous = current;
+            }
+
+            BlockIndex first = blockIndex(10L, previous, BigInteger.valueOf(1_100));
+            BlockIndex second = blockIndex(11L, first, BigInteger.valueOf(1_200));
 
             storage.saveBatch(java.util.List.of(first, second), second);
 
@@ -174,6 +185,48 @@ class KnownHeaderStorageTest {
             assertTrue(blockIndexStore.find(second.hash()).isPresent());
             assertEquals(second.hash(), chainStateStore.loadBestHeaderTipHash().orElseThrow());
         }
+    }
+
+    private static BlockIndex blockIndex(
+            long height,
+            BlockIndex previous,
+            BigInteger chainWork
+    ) {
+        Hash256 previousBlockHash =
+                previous == null
+                        ? Hash256.fromDisplayHex(
+                        "0".repeat(64)
+                )
+                        : previous.hash();
+
+        BlockHeader header =
+                new BlockHeader(
+                        4,
+                        previousBlockHash,
+                        Hash256.fromDisplayHex(
+                                "%064x".formatted(
+                                        height + 1
+                                )
+                        ),
+                        new UInt32(
+                                1_700_000_000L
+                                        + height
+                        ),
+                        new UInt32(
+                                0x207fffffL
+                        ),
+                        new UInt32(
+                                height
+                        )
+                );
+
+        return new BlockIndex(
+                header.hash(),
+                header,
+                height,
+                previousBlockHash,
+                chainWork
+        );
     }
 
     private static BlockIndex blockIndex(

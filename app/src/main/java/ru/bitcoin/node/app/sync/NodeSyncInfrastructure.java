@@ -51,6 +51,9 @@ public final class NodeSyncInfrastructure {
                         database
                 );
 
+        // One-time, restart-safe acceleration index for Bitcoin Core-style GetAncestor.
+        blockIndexStore.ensureSkipIndex();
+
         this.blockStore =
                 new RocksDbBlockStore(
                         database
