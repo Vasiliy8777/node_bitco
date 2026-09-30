@@ -646,15 +646,41 @@ public final class BlockSyncCoordinator {
                         session.pendingCount()
                 );
                 IOException stallFailure = new IOException(
-                        "Peer stalled block download window for "
+                        "Peer stalled frontier block for "
                                 + stallEvaluation.stallingAge() + " with timeout "
                                 + stallEvaluation.timeout());
-                session.failPeer(timedOutPeer, stallFailure);
-                try {
-                    timedOutPeer.close();
-                } catch (IOException closeException) {
-                    stallFailure.addSuppressed(closeException);
+
+                /*
+                 * Stage 8: rescue only the block that pins ordered progress.
+                 *
+                 * Disconnecting the peer here used to discard every one of its
+                 * otherwise useful in-flight blocks and trigger outbound-peer
+                 * reconnect churn. The scheduler now releases only the frontier
+                 * hash. Because the original peer is retained in that state's
+                 * attemptedPeers set, the retry is forced onto another READY
+                 * peer while the original connection remains available for the
+                 * rest of the IBD pipeline.
+                 *
+                 * Genuine transport/download timeouts are still handled by the
+                 * scheduler's BlockDownloadTimeoutEvaluator and may close a peer.
+                 */
+                boolean rescued = session.retryBlock(
+                        blockedIndex.hash(),
+                        timedOutPeer,
+                        stallFailure
+                );
+
+                if (rescued) {
+                    log.log(
+                            System.Logger.Level.INFO,
+                            "IBD frontier rescue: height={0}, hash={1}, previousPeer={2}, pending={3}",
+                            blockedIndex.height(),
+                            blockedIndex.hash().toDisplayHex(),
+                            timedOutPeer.remoteAddress(),
+                            session.pendingCount()
+                    );
                 }
+
                 stallTimeoutEvaluator.timeoutHandled();
                 stallTracker.clear(timedOutPeer);
                 continue;

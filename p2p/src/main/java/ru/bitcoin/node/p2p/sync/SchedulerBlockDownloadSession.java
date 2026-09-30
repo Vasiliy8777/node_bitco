@@ -1464,6 +1464,66 @@ public final class SchedulerBlockDownloadSession
     }
 
     @Override
+    public synchronized boolean retryBlock(
+            Hash256 blockHash,
+            Peer expectedPeer,
+            IOException failure
+    ) throws IOException {
+
+        ensureOpen();
+        Objects.requireNonNull(blockHash, "blockHash");
+        Objects.requireNonNull(expectedPeer, "expectedPeer");
+        Objects.requireNonNull(failure, "failure");
+
+        Peer owner = inFlightTracker.peerForBlock(blockHash);
+        if (owner != expectedPeer) {
+            return false;
+        }
+
+        CompletableFuture<DownloadResult> ownedFuture = null;
+        DownloadState ownedState = null;
+
+        for (var entry : activeDownloads.entrySet()) {
+            ActiveDownload active = entry.getValue();
+            if (active.peer() == expectedPeer
+                    && active.state().blockHash.equals(blockHash)) {
+                ownedFuture = entry.getKey();
+                ownedState = active.state();
+                break;
+            }
+        }
+
+        if (ownedFuture == null || ownedState == null) {
+            throw new IllegalStateException(
+                    "In-flight frontier block has no active download: "
+                            + blockHash.toDisplayHex()
+            );
+        }
+
+        activeDownloads.remove(ownedFuture);
+        inFlightTracker.remove(expectedPeer, blockHash);
+        ownedState.inFlight = false;
+        ownedState.failures.add(failure);
+
+        /*
+         * The peer is deliberately kept READY. attemptedPeers already contains
+         * expectedPeer, therefore this block cannot immediately bounce back to
+         * the same connection and will be assigned to another eligible peer.
+         * Cancelling the scheduler future makes a late completion stale; the
+         * underlying dispatcher may still finish normally without owning the
+         * logical download anymore.
+         */
+        ownedFuture.cancel(true);
+
+        List<Peer> peers = peerManager.readyPeers();
+        if (!peers.isEmpty()) {
+            assignAvailable(peers);
+        }
+
+        return true;
+    }
+
+    @Override
     public synchronized void failPeer(
             Peer peer,
             IOException failure

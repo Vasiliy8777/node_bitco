@@ -48,6 +48,17 @@ public interface BlockDownloadSession
             IOException failure
     ) throws IOException;
 
+    /**
+     * Release only the supplied frontier block from its current peer so it can
+     * be retried on another READY peer without tearing down the whole
+     * connection. Returns true when the expected peer owned the block.
+     */
+    boolean retryBlock(
+            Hash256 blockHash,
+            Peer expectedPeer,
+            IOException failure
+    ) throws IOException;
+
     @Override
     void close();
 }

@@ -90,31 +90,62 @@ public final class BlockDownloadService {
         CompletableFuture<Block> network =
                 new BlockSynchronizer(peer).downloadAsync(blockHash);
 
-        return network.handle((block, failure) -> {
+        CompletableFuture<Block> result =
+                new CompletableFuture<>();
+
+        network.whenComplete((block, failure) -> {
             if (failure == null) {
-                return block;
+                result.complete(block);
+                return;
             }
 
             Throwable cause = unwrap(failure);
 
+            /*
+             * Scheduler-side frontier rescue deliberately cancels a single
+             * request. Cancellation is not a peer transport failure and must
+             * never tear down an otherwise healthy connection.
+             */
+            if (cause instanceof java.util.concurrent.CancellationException) {
+                result.cancel(false);
+                return;
+            }
+
             if (cause instanceof BlockNotFoundException notFound) {
-                throw new CompletionException(notFound);
+                result.completeExceptionally(notFound);
+                return;
             }
 
             if (cause instanceof IOException ioException) {
                 closeAndRemove(peer, ioException);
-                throw new CompletionException(ioException);
+                result.completeExceptionally(ioException);
+                return;
             }
 
             if (cause instanceof RuntimeException runtimeException) {
-                throw runtimeException;
+                result.completeExceptionally(runtimeException);
+                return;
             }
 
             IOException ioException =
                     new IOException("Block download failed", cause);
             closeAndRemove(peer, ioException);
-            throw new CompletionException(ioException);
+            result.completeExceptionally(ioException);
         });
+
+        /*
+         * CompletableFuture dependent stages do not propagate cancellation
+         * upstream. Explicit propagation is required so a rescued/stale GETDATA
+         * unregisters its dispatcher future instead of leaking until a late
+         * BLOCK or peer close arrives.
+         */
+        result.whenComplete((ignoredBlock, ignoredFailure) -> {
+            if (result.isCancelled()) {
+                network.cancel(false);
+            }
+        });
+
+        return result;
     }
 
     private void closeAndRemove(Peer peer, IOException failure) {

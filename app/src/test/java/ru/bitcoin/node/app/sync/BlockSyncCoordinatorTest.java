@@ -3059,7 +3059,7 @@ class BlockSyncCoordinatorTest {
     }
 
     @Test
-    void shouldDisconnectStallingPeerAndRetryBlockedWindowOnAnotherPeer()
+    void shouldReleaseStalledFrontierAndRetryOnAnotherPeerWithoutDisconnect()
             throws Exception {
 
         Block genesisBlock =
@@ -3166,14 +3166,14 @@ class BlockSyncCoordinatorTest {
                             1
                     );
 
-            CountDownLatch stalledPeerDisconnected =
+            CountDownLatch releaseStalledPeer =
                     new CountDownLatch(
                             1
                     );
 
             /*
-             * P2 must receive the retried B1 after P1 is
-             * disconnected, and then B2 after B1 advances
+             * P2 must receive the retried B1 after P1's stalled
+             * request is released, and then B2 after B1 advances
              * the one-block download window.
              */
             CountDownLatch retryReceived =
@@ -3198,7 +3198,7 @@ class BlockSyncCoordinatorTest {
                                     block1,
                                     0x6162636465666791L,
                                     stalledRequestReceived,
-                                    stalledPeerDisconnected
+                                    releaseStalledPeer
                             )
                     );
 
@@ -3350,19 +3350,27 @@ class BlockSyncCoordinatorTest {
             );
 
             /*
-             * Stall recovery must:
-             *
-             * 1. release P1's B1 from the session;
-             * 2. close P1;
-             * 3. retry B1 on P2.
+             * Stage 8 stall recovery is request-scoped. The adaptive timeout
+             * transition is the deterministic barrier proving that the rescue
+             * path has executed; check P1 BEFORE the fake server is released.
              */
-            assertTrue(
-                    stalledPeerDisconnected.await(
-                            5,
-                            TimeUnit.SECONDS
-                    ),
-                    "Stalling P1 was not disconnected"
+            awaitCondition(
+                    () -> stallTimeoutPolicy.timeout()
+                            .equals(Duration.ofSeconds(4)),
+                    "Stall timeout policy was not increased from 2 seconds to 4 seconds"
             );
+
+            assertTrue(
+                    stalledPeer.isReady(),
+                    "Frontier rescue must not disconnect P1"
+            );
+
+            /*
+             * The property under test is now proved. Close the deliberately
+             * non-serving fake P1 from the test side so it cannot receive B2
+             * after B1 advances the one-block horizon.
+             */
+            releaseStalledPeer.countDown();
 
             assertTrue(
                     retryReceived.await(
@@ -3402,10 +3410,6 @@ class BlockSyncCoordinatorTest {
                     index2.hash(),
                     validationService.activeTip()
                             .hash()
-            );
-
-            assertFalse(
-                    stalledPeer.isReady()
             );
 
             assertTrue(
@@ -3549,19 +3553,22 @@ class BlockSyncCoordinatorTest {
             CountDownLatch firstRequestReceived =
                     new CountDownLatch(1);
 
-            CountDownLatch firstDisconnected =
+            CountDownLatch releaseFirstPeer =
                     new CountDownLatch(1);
 
             CountDownLatch thirdRequestReceived =
                     new CountDownLatch(1);
 
-            CountDownLatch thirdDisconnected =
+            CountDownLatch releaseThirdPeer =
                     new CountDownLatch(1);
 
             CountDownLatch secondRequestReceived =
                     new CountDownLatch(1);
 
             CountDownLatch secondBlockReceived =
+                    new CountDownLatch(1);
+
+            CountDownLatch allowSecondPeerResponse =
                     new CountDownLatch(1);
 
             CountDownLatch releaseSecondPeer =
@@ -3574,7 +3581,7 @@ class BlockSyncCoordinatorTest {
                                     block1.hash(),
                                     0x1112131415161791L,
                                     firstRequestReceived,
-                                    firstDisconnected
+                                    releaseFirstPeer
                             )
                     );
 
@@ -3590,6 +3597,7 @@ class BlockSyncCoordinatorTest {
                                     0x2122232425262792L,
                                     secondRequestReceived,
                                     secondBlockReceived,
+                                    allowSecondPeerResponse,
                                     releaseSecondPeer
                             )
                     );
@@ -3605,7 +3613,7 @@ class BlockSyncCoordinatorTest {
                                     block1.hash(),
                                     0x3132333435363793L,
                                     thirdRequestReceived,
-                                    thirdDisconnected
+                                    releaseThirdPeer
                             )
                     );
 
@@ -3628,10 +3636,12 @@ class BlockSyncCoordinatorTest {
                     firstPeer
             );
 
-            peerManager.add(
-                    secondPeer
-            );
-
+            /*
+             * Keep P2 connected but outside the scheduler initially. This makes
+             * the Stage 8 retry deterministic: after P1 has attempted B1, P3 is
+             * the only eligible READY peer. P2 is admitted only after the second
+             * request-scoped rescue.
+             */
             peerManager.add(
                     thirdPeer
             );
@@ -3717,31 +3727,11 @@ class BlockSyncCoordinatorTest {
                             .toNanos()
             );
 
-            assertTrue(
-                    firstDisconnected.await(
-                            5,
-                            TimeUnit.SECONDS
-                    ),
-                    "P1 was not disconnected after 2-second stall timeout"
-            );
-
-            awaitCondition(
-                    () -> !firstPeer.isReady(),
-                    "P1 connection closed, but Peer state did not leave READY"
-            );
-
-            assertFalse(
-                    firstPeer.isReady()
-            );
-
             /*
-             * Peer disconnection and adaptive timeout update happen
-             * in the same coordinator recovery path, but the fake server
-             * can observe EOF before the coordinator executes
-             * timeoutHandled().
-             *
-             * Therefore wait for the actual policy transition instead
-             * of treating socket closure as its synchronization barrier.
+             * Stage 8 handles a frontier timeout without penalizing the
+             * whole connection. Wait for the adaptive timeout transition;
+             * this is also the synchronization barrier proving that the
+             * first stall timeout was handled.
              */
             awaitCondition(
                     () -> stallTimeoutPolicy.timeout()
@@ -3754,6 +3744,11 @@ class BlockSyncCoordinatorTest {
             assertEquals(
                     Duration.ofSeconds(4),
                     stallTimeoutPolicy.timeout()
+            );
+
+            assertTrue(
+                    firstPeer.isReady(),
+                    "P1 must remain READY after request-scoped stall recovery"
             );
 
             /*
@@ -3782,6 +3777,21 @@ class BlockSyncCoordinatorTest {
             assertSame(
                     thirdPeer,
                     stallTracker.stallingPeer()
+            );
+
+            /*
+             * Admit P2 while P3 still owns B1, not after P3 is rescued.
+             *
+             * Once retryBlock() releases the last active assignment, the
+             * scheduler is allowed to conclude immediately that all currently
+             * READY peers have been exhausted. Adding P2 only after observing
+             * the 4 -> 8 second timeout transition therefore races that terminal
+             * exhaustion path. At this point P3 already owns B1, so adding P2
+             * cannot steal the current attempt; it only makes P2 available for
+             * the deterministic retry after P3 times out.
+             */
+            peerManager.add(
+                    secondPeer
             );
 
             long thirdStallStartedAt =
@@ -3833,21 +3843,21 @@ class BlockSyncCoordinatorTest {
                             .toNanos()
             );
 
-            assertTrue(
-                    thirdDisconnected.await(
-                            5,
-                            TimeUnit.SECONDS
-                    ),
-                    "P3 was not disconnected after the 4-second stall timeout"
-            );
-
+            /*
+             * Crossing the current threshold releases only P3's B1
+             * assignment. The connection itself remains usable.
+             */
             awaitCondition(
-                    () -> !thirdPeer.isReady(),
-                    "P3 connection closed, but Peer state did not leave READY"
+                    () -> stallTimeoutPolicy.timeout()
+                            .equals(
+                                    Duration.ofSeconds(8)
+                            ),
+                    "Second stall timeout was not handled"
             );
 
-            assertFalse(
-                    thirdPeer.isReady()
+            assertTrue(
+                    thirdPeer.isReady(),
+                    "P3 must remain READY after request-scoped stall recovery"
             );
 
             /*
@@ -3868,11 +3878,18 @@ class BlockSyncCoordinatorTest {
             );
 
             /*
+             * Both request-scoped rescues have now been proved while P1/P3
+             * remained READY. P2 was admitted while P3 still owned B1, so when
+             * the second rescue runs it is already the only eligible peer that
+             * has not attempted the frontier block.
+             */
+
+            /*
              * =====================================================
              * RECOVERY
              *
-             * P1 and P3 have now failed.
-             * P2 is the remaining ready peer and must receive B1.
+             * P2 is the only scheduler peer that has not attempted B1 and must
+             * receive the rescued frontier block.
              * =====================================================
              */
 
@@ -3883,6 +3900,32 @@ class BlockSyncCoordinatorTest {
                     ),
                     "B1 was not reassigned to recovery peer P2"
             );
+
+            /*
+             * P1 and P3 intentionally remained READY through both Stage 8
+             * request-scoped rescues. They are no longer part of what this
+             * test needs to exercise, so retire them explicitly before P2 is
+             * allowed to answer B1. Otherwise the round-robin scheduler is
+             * free to assign the newly exposed B2 to either still-READY peer,
+             * making the old "P2 must receive B2" assertion nondeterministic.
+             */
+            assertTrue(
+                    firstPeer.isReady(),
+                    "P1 must still be READY before the test retires it"
+            );
+
+            assertTrue(
+                    thirdPeer.isReady(),
+                    "P3 must still be READY before the test retires it"
+            );
+
+            releaseFirstPeer.countDown();
+            releaseThirdPeer.countDown();
+
+            firstPeer.close();
+            thirdPeer.close();
+
+            allowSecondPeerResponse.countDown();
 
             assertTrue(
                     secondBlockReceived.await(
@@ -3913,16 +3956,8 @@ class BlockSyncCoordinatorTest {
                             .hash()
             );
 
-            assertFalse(
-                    firstPeer.isReady()
-            );
-
             assertTrue(
                     secondPeer.isReady()
-            );
-
-            assertFalse(
-                    thirdPeer.isReady()
             );
 
             assertEquals(
@@ -3958,7 +3993,7 @@ class BlockSyncCoordinatorTest {
             Hash256 expectedBlockHash,
             long remoteNonce,
             CountDownLatch requestReceived,
-            CountDownLatch disconnected
+            CountDownLatch releasePeer
     ) {
 
         try (Socket socket =
@@ -4007,16 +4042,17 @@ class BlockSyncCoordinatorTest {
             requestReceived.countDown();
 
             /*
-             * Never return the requested block.
-             * Coordinator must eventually disconnect us.
+             * Never return the requested block. Stage 8 releases only
+             * this request, so keep the connection alive until the test
+             * has proved reassignment and explicitly releases the peer.
              */
-            assertEquals(
-                    -1,
-                    input.read(),
-                    "Expected coordinator to close stalling peer"
+            assertTrue(
+                    releasePeer.await(
+                            15,
+                            TimeUnit.SECONDS
+                    ),
+                    "Timed out waiting to release stalling peer"
             );
-
-            disconnected.countDown();
 
         } catch (Exception exception) {
             throw new RuntimeException(
@@ -4053,6 +4089,7 @@ class BlockSyncCoordinatorTest {
             long remoteNonce,
             CountDownLatch firstBlockRequested,
             CountDownLatch secondBlockRequested,
+            CountDownLatch allowFirstBlockResponse,
             CountDownLatch releasePeer
     ) {
 
@@ -4100,6 +4137,14 @@ class BlockSyncCoordinatorTest {
             );
 
             firstBlockRequested.countDown();
+
+            assertTrue(
+                    allowFirstBlockResponse.await(
+                            5,
+                            TimeUnit.SECONDS
+                    ),
+                    "Timed out waiting to allow final recovery peer to answer B1"
+            );
 
             output.write(
                     encoder.encode(
@@ -4153,7 +4198,7 @@ class BlockSyncCoordinatorTest {
             Block expectedBlock,
             long remoteNonce,
             CountDownLatch requestReceived,
-            CountDownLatch disconnected
+            CountDownLatch releasePeer
     ) {
 
         try (Socket socket =
@@ -4202,22 +4247,16 @@ class BlockSyncCoordinatorTest {
             requestReceived.countDown();
 
             /*
-             * Deliberately send no block.
-             *
-             * The coordinator must eventually identify this
-             * connection as the peer blocking its download
-             * window and close it.
+             * Deliberately send no block. Stage 8 must release the
+             * stalled request without closing the peer connection.
              */
-            int value =
-                    input.read();
-
-            assertEquals(
-                    -1,
-                    value,
-                    "Stalling peer connection was not closed"
+            assertTrue(
+                    releasePeer.await(
+                            15,
+                            TimeUnit.SECONDS
+                    ),
+                    "Timed out waiting to release stalling peer"
             );
-
-            disconnected.countDown();
 
         } catch (Exception exception) {
             throw new RuntimeException(
