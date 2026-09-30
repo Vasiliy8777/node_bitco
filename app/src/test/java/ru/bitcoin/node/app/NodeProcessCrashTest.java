@@ -169,7 +169,7 @@ class NodeProcessCrashTest {
         return new NodeValidationService(db, NetworkParametersRegistry.regtest(), () -> 1_800_000_000L, new Mempool());
     }
 
-    private static void awaitLockFileRelease(Path data) throws Exception {
+    static void awaitLockFileRelease(Path data) throws Exception {
         if (!System.getProperty("os.name").startsWith("Windows")) return;
         long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
         while (true) {
@@ -280,7 +280,7 @@ class NodeProcessCrashTest {
                 List.of(new TxOut(amount, new byte[]{0x51})), new UInt32(0));
     }
 
-    private static void awaitMarker(Process process, Path marker, Path log) throws Exception {
+    static void awaitMarker(Process process, Path marker, Path log) throws Exception {
         long deadline = System.nanoTime() + Duration.ofSeconds(45).toNanos();
         while (!Files.exists(marker) && process.isAlive() && System.nanoTime() < deadline) Thread.sleep(10);
         assertTrue(Files.exists(marker), () -> {

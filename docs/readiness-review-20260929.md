@@ -340,3 +340,31 @@ key/value, не проверка декодирования coins. Целевы�
 2 Testnet4MiningTest, 2 Core integration, 16 storage-failure, 15 process-crash
 и 4 stall-detector теста. Логи: `../testnet4-focused.log`,
 `../testnet4-recovery-focused.log`, `../testnet4-stage.log`.
+
+## Восьмой этап: process-crash при финализации AssumeUTXO — 30 сентября
+
+Добавлен SnapshotProcessCrashTest: пять остановок дочерней JVM — до финализации,
+после clear/marker, после первой порции 10 000 UTXO, после остатка и после cleanup.
+Тестовый делегат пропускает настоящий синхронный native write, затем удерживает
+процесс на барьере с открытой БД до destroyForcibly. Production hooks не добавлены.
+Запуск проходит через конструктор NodeValidationService, где финализация выполняется
+до ChainInitializer. Это не остановка внутри native write и не power-loss.
+
+Фикстура строит два валидных regtest-блока с 10 002 UTXO; активная цепочка на блок
+дальше snapshot base. Маркеры активации/завершённой фоновой валидации устанавливает
+harness: импорт snapshot и фоновая проверка истории не входят в этот тест.
+До восстановления проверяется ожидаемая стадия копирования и маркеры. После запуска
+сравниваются tip, chainwork, UTXO hash/count/value с независимо построенным эталоном,
+проверяется chainstate consistency, invalidate/reconsider, новый блок и ещё одно
+переоткрытие БД. Производственный код инициализации менять не потребовалось.
+
+Целевой прогон: 5 SnapshotProcessCrashTest и 12 ChainInitializerTest без ошибок
+и пропусков. Лог: `../snapshot-crash-focused.log`. Gate требует все пять имён
+новых сценариев без skipped. Реальные disk/WAL faults, power-loss и длительная
+нагрузка остаются открытыми.
+
+Итог восьмого этапа: полный recovery stage gate с `clean test` и
+`-CoreBinary 'C:/Program Files/Bitcoin/daemon/bitcoind.exe'` завершился с exit 0.
+3813 тестов, 0 failures/errors, 3 skipped. Все 5 новых snapshot process-crash
+сценариев выполнены (91.49 с), оба Core integration теста прошли без пропусков.
+Лог: `../snapshot-crash-stage.log`.

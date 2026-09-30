@@ -113,3 +113,24 @@ storage copy protocol, not snapshot validation or coin decoding.
 The gate requires 16 storage-failure test cases. This covers deterministic rejected
 writes during promotion, but not native partial writes, process termination during
 snapshot finalization, actual filesystem errors or power loss.
+
+## Process termination during snapshot promotion
+
+`SnapshotProcessCrashTest` pauses a child JVM before promotion or immediately after
+one of the four native synchronous writes, then forcibly terminates it with its
+database open. The test-only RocksDB delegate performs the real write before the
+barrier; no production crash hook is added. Startup runs through the production
+`NodeValidationService` constructor, including finalization before `ChainInitializer`.
+
+The fixture uses 10,002 actual UTXOs from two accepted regtest blocks. Snapshot
+activation/background-validation markers are installed by the harness; this does
+not test snapshot import or historical background validation. The active tip is one
+block beyond the snapshot base. Before recovery, assertions distinguish the empty,
+10,000-entry and fully copied canonical namespaces and remaining markers. Recovery
+must match an independently built reference chain, including the UTXO digest,
+count/value and chainwork. Invalidate/reconsider exercises recovered undo; another
+block is mined and the database reopened again.
+
+The gate requires all five named scenarios without failures or skips. These are
+deterministic process kills between native commits, not kills inside native writes,
+power-loss simulations or real filesystem/WAL fault injection.
