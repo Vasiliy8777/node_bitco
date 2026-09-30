@@ -406,7 +406,9 @@ public final class NodeValidationService implements AutoCloseable {
         byte startupUtxoPrefix = snapshotActiveAtStartup
                 ? ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.SNAPSHOT_UTXO_STAGING
                 : ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.UTXO;
-        utxos = new RocksDbUtxoStore(database, startupUtxoPrefix);
+        // The primary chainstate gets a bounded positive UTXO read cache. 500k entries
+        // is intentionally conservative; snapshot/background stores keep the uncached default.
+        utxos = new RocksDbUtxoStore(database, startupUtxoPrefix, 500_000);
         indexes = new RocksDbBlockIndexStore(database);
         availability = new RocksDbBlockAvailabilityStore(database);
         validationStatus = new RocksDbBlockValidationStatusStore(database);

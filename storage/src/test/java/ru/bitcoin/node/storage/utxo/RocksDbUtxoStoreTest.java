@@ -320,4 +320,41 @@ class RocksDbUtxoStoreTest {
             assertTrue(normal.find(point).isPresent());
         }
     }
+    @Test
+    void boundedReadCacheTracksCommittedCreatesAndSpends() {
+        try (RocksDbDatabase database = new RocksDbDatabase(tempDirectory.resolve("read-cache"))) {
+            var store = new RocksDbUtxoStore(database, (byte) 0x03, 2);
+            var first = testOutPoint(41);
+            var second = testOutPoint(42);
+            var third = testOutPoint(43);
+            var coin = testUtxo();
+
+            store.save(first, coin);
+            assertEquals(coin, store.find(first).orElseThrow());
+            assertTrue(store.cacheStats().hits() >= 1L);
+
+            store.save(second, coin);
+            store.save(third, coin);
+            assertTrue(store.cacheStats().size() <= 2);
+
+            store.delete(first);
+            assertTrue(store.find(first).isEmpty());
+        }
+    }
+
+    @Test
+    void cacheIsClearedWhenUtxoNamespaceChanges() {
+        try (RocksDbDatabase database = new RocksDbDatabase(tempDirectory.resolve("read-cache-namespace"))) {
+            var point = testOutPoint(51);
+            var store = new RocksDbUtxoStore(database, (byte) 0x03, 8);
+            store.save(point, testUtxo());
+            assertTrue(store.find(point).isPresent());
+            assertTrue(store.cacheStats().size() > 0);
+
+            store.activateNamespace(ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.SNAPSHOT_UTXO_STAGING);
+            assertEquals(0, store.cacheStats().size());
+            assertTrue(store.find(point).isEmpty());
+        }
+    }
+
 }

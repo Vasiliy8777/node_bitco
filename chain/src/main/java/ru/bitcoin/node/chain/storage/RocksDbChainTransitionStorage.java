@@ -238,8 +238,12 @@ public final class RocksDbChainTransitionStorage {
             // and best-header pointer) joins the exact same durable transaction.
             extraWrites.accept(batch);
 
-            /* Один atomic + sync RocksDB commit. */
+            /* Один atomic RocksDB commit. During IBD the outer durability scope may defer fsync. */
             database.write(batch);
+
+            // Never expose speculative UTXO state through the read cache. Cache publication
+            // happens strictly after RocksDB accepted the complete atomic transition.
+            utxoStore.applyCommittedChanges(utxoChanges);
         }
     }
 }

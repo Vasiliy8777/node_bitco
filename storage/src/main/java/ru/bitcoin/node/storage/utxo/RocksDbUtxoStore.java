@@ -7,6 +7,8 @@ import ru.bitcoin.node.storage.rocksdb.RocksDbWriteBatch;
 import java.util.Optional;
 import java.util.Arrays;
 import java.util.TreeMap;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import ru.bitcoin.node.common.types.Hash256;
@@ -26,23 +28,91 @@ public final class RocksDbUtxoStore
     private final RocksDbDatabase database;
     private volatile byte prefix;
 
+    /*
+     * Positive-only bounded read cache. Missing coins are deliberately not cached:
+     * an outpoint that is absent now may legally be created by a later block. Keeping
+     * only positive entries makes invalidation simple and consensus-safe.
+     */
+    private final int readCacheCapacity;
+    private final Map<OutPoint, StoredUtxo> readCache;
+    private long cacheHits;
+    private long cacheMisses;
+
     public RocksDbUtxoStore(
             RocksDbDatabase database
     ) {
-        this(database, DEFAULT_UTXO_PREFIX);
+        this(database, DEFAULT_UTXO_PREFIX, 0);
     }
 
     /** Creates the same UTXO store layout under an isolated first-byte namespace. */
     public RocksDbUtxoStore(RocksDbDatabase database, byte prefix) {
+        this(database, prefix, 0);
+    }
+
+    /**
+     * Creates a UTXO store with an optional bounded positive read cache.
+     * A capacity of zero preserves the historical uncached behaviour.
+     */
+    public RocksDbUtxoStore(RocksDbDatabase database, byte prefix, int readCacheCapacity) {
         if (database == null) throw new IllegalArgumentException("database must not be null");
+        if (readCacheCapacity < 0) throw new IllegalArgumentException("readCacheCapacity must not be negative");
         this.database = database;
         this.prefix = prefix;
+        this.readCacheCapacity = readCacheCapacity;
+        this.readCache = readCacheCapacity == 0 ? null : new LinkedHashMap<>(1024, 0.75f, true) {
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<OutPoint, StoredUtxo> eldest) {
+                return size() > RocksDbUtxoStore.this.readCacheCapacity;
+            }
+        };
     }
 
     public byte namespacePrefix() { return prefix; }
 
     /** Switches this already-wired store to another isolated UTXO namespace. */
-    public void activateNamespace(byte prefix) { this.prefix = prefix; }
+    public synchronized void activateNamespace(byte prefix) {
+        this.prefix = prefix;
+        clearReadCache();
+    }
+
+    public synchronized CacheStats cacheStats() {
+        return new CacheStats(cacheHits, cacheMisses, readCache == null ? 0 : readCache.size(), readCacheCapacity);
+    }
+
+    public record CacheStats(long hits, long misses, int size, int capacity) {
+        public double hitRate() {
+            long total = hits + misses;
+            return total == 0 ? 0.0d : (double) hits / (double) total;
+        }
+    }
+
+    public synchronized void clearReadCache() {
+        if (readCache != null) readCache.clear();
+    }
+
+    private synchronized StoredUtxo cached(OutPoint outPoint) {
+        if (readCache == null) return null;
+        StoredUtxo value = readCache.get(outPoint);
+        if (value != null) cacheHits++; else cacheMisses++;
+        return value;
+    }
+
+    private synchronized void cache(OutPoint outPoint, StoredUtxo utxo) {
+        if (readCache != null) readCache.put(outPoint, utxo);
+    }
+
+    private synchronized void invalidate(OutPoint outPoint) {
+        if (readCache != null) readCache.remove(outPoint);
+    }
+
+    /** Updates the cache only after the corresponding atomic chain transition committed. */
+    public void applyCommittedChanges(UtxoChanges changes) {
+        if (changes == null || readCache == null) return;
+        synchronized (this) {
+            for (OutPoint spent : changes.spentOutputs()) readCache.remove(spent);
+            for (CreatedUtxo created : changes.createdOutputs()) readCache.put(created.outPoint(), created.utxo());
+        }
+    }
 
     @Override
     public void save(
@@ -67,6 +137,7 @@ public final class RocksDbUtxoStore
                         utxo
                 )
         );
+        cache(outPoint, utxo);
     }
 
     @Override
@@ -79,20 +150,15 @@ public final class RocksDbUtxoStore
             );
         }
 
-        byte[] value =
-                database.get(
-                        key(outPoint)
-                );
+        StoredUtxo cached = cached(outPoint);
+        if (cached != null) return Optional.of(cached);
 
-        if (value == null) {
-            return Optional.empty();
-        }
+        byte[] value = database.get(key(outPoint));
+        if (value == null) return Optional.empty();
 
-        return Optional.of(
-                StoredUtxoSerializer.deserialize(
-                        value
-                )
-        );
+        StoredUtxo restored = StoredUtxoSerializer.deserialize(value);
+        cache(outPoint, restored);
+        return Optional.of(restored);
     }
 
     @Override
@@ -108,6 +174,7 @@ public final class RocksDbUtxoStore
         database.delete(
                 key(outPoint)
         );
+        invalidate(outPoint);
     }
 
     private byte[] key(
@@ -198,6 +265,7 @@ public final class RocksDbUtxoStore
                         utxo
                 )
         );
+        invalidate(outPoint);
     }
 
     public void delete(
@@ -219,6 +287,7 @@ public final class RocksDbUtxoStore
         batch.delete(
                 key(outPoint)
         );
+        invalidate(outPoint);
     }
     /** Removes the complete persistent namespace in the caller's atomic batch. */
     public void clear(RocksDbWriteBatch batch) {
@@ -226,6 +295,7 @@ public final class RocksDbUtxoStore
             throw new IllegalArgumentException("batch must not be null");
         }
         batch.deletePrefix(prefix);
+        clearReadCache();
     }
 
     /**
