@@ -38,109 +38,118 @@ public final class BlockSynchronizer {
             Hash256 blockHash
     ) throws IOException {
 
-        Objects.requireNonNull(
-                blockHash,
-                "blockHash"
+        CompletableFuture<Block> future =
+                downloadAsync(blockHash);
+
+        return completedBlock(
+                future,
+                peer,
+                blockHash
         );
+    }
+
+    /**
+     * Starts a full-block request without occupying a platform thread while the
+     * peer reader waits for the BLOCK/NOTFOUND response. The returned future is
+     * completed directly by PeerMessageDispatcher. Dispatcher ownership is
+     * released on every terminal path, including cancellation.
+     */
+    public CompletableFuture<Block> downloadAsync(
+            Hash256 blockHash
+    ) {
+
+        Objects.requireNonNull(blockHash, "blockHash");
 
         PeerMessageDispatcher dispatcher =
                 peer.messageDispatcher();
 
-        CompletableFuture<Block> future =
-                dispatcher.registerBlock(
-                        blockHash
+        CompletableFuture<Block> source =
+                dispatcher.registerBlock(blockHash);
+
+        CompletableFuture<Block> result =
+                new CompletableFuture<>();
+
+        source.whenComplete((block, failure) -> {
+            if (failure == null) {
+                result.complete(block);
+                return;
+            }
+
+            Throwable cause = unwrapCompletionFailure(failure);
+
+            if (cause instanceof IOException) {
+                result.completeExceptionally(cause);
+                return;
+            }
+
+            if (cause instanceof RuntimeException runtimeException) {
+                if (peer.isReady()) {
+                    result.completeExceptionally(runtimeException);
+                } else {
+                    result.completeExceptionally(
+                            new IOException(
+                                    "Peer disconnected while waiting for block "
+                                            + blockHash.toDisplayHex(),
+                                    runtimeException
+                            )
+                    );
+                }
+                return;
+            }
+
+            result.completeExceptionally(
+                    new IOException("Block download failed", cause)
+            );
+        });
+
+        result.whenComplete((ignoredBlock, ignoredFailure) ->
+                dispatcher.unregisterBlock(blockHash, source));
+
+        if (source.isDone()) {
+            return result;
+        }
+
+        GetDataMessage request =
+                new GetDataMessage(
+                        List.of(
+                                new InventoryVector(
+                                        InventoryVector.MSG_WITNESS_BLOCK,
+                                        blockHash
+                                )
+                        )
                 );
 
         try {
-
-            /*
-             * An alternative transport (BIP152) may have completed this
-             * scheduler-owned request immediately before registration. In that
-             * case the dispatcher returns an already-completed future and no
-             * duplicate full-block GETDATA is necessary.
-             */
-            if (future.isDone()) {
-                return completedBlock(
-                        future,
-                        peer,
-                        blockHash
-                );
-            }
-
-            GetDataMessage request =
-                    new GetDataMessage(
-                            List.of(
-                                    new InventoryVector(
-                                            InventoryVector.MSG_WITNESS_BLOCK,
-                                            blockHash
-                                    )
-                            )
-                    );
-
-            try {
-                peer.send(
-                        BitcoinMessages.getData(
-                                request
+            peer.send(BitcoinMessages.getData(request));
+        } catch (IOException exception) {
+            result.completeExceptionally(exception);
+        } catch (IllegalStateException exception) {
+            if (peer.isReady()) {
+                result.completeExceptionally(exception);
+            } else {
+                result.completeExceptionally(
+                        new IOException(
+                                "Peer disconnected before block GETDATA could be sent for "
+                                        + blockHash.toDisplayHex(),
+                                exception
                         )
                 );
-            } catch (IllegalStateException exception) {
-                /*
-                 * The background reader can transition the peer out of READY
-                 * after registerBlock() but immediately before send(). Peer.send()
-                 * deliberately reports that state race as IllegalStateException.
-                 * For a block-download worker this is a recoverable transport race,
-                 * not a scheduler/programming failure: BlockDownloadService must see
-                 * IOException so it can remove the dead peer and leave the request
-                 * pending for a replacement peer.
-                 *
-                 * Preserve genuine API/state bugs: only translate the exception when
-                 * the peer really ceased to be READY.
-                 */
-                if (peer.isReady()) {
-                    throw exception;
-                }
-
-                throw new IOException(
-                        "Peer disconnected before block GETDATA could be sent for "
-                                + blockHash.toDisplayHex(),
-                        exception
-                );
             }
-
-            boolean diagnostic = DIAGNOSTIC_LOG_BUDGET.getAndDecrement() > 0;
-            if (diagnostic) {
-                log.log(
-                        System.Logger.Level.INFO,
-                        "IBD GETDATA sent: hash={0}, peer={1}",
-                        blockHash.toDisplayHex(),
-                        diagnosticPeerAddress(peer)
-                );
-            }
-
-            Block block = completedBlock(
-                    future,
-                    peer,
-                    blockHash
-            );
-
-            if (diagnostic) {
-                log.log(
-                        System.Logger.Level.INFO,
-                        "IBD BLOCK received: hash={0}, peer={1}",
-                        blockHash.toDisplayHex(),
-                        diagnosticPeerAddress(peer)
-                );
-            }
-
-            return block;
-
-        } finally {
-
-            dispatcher.unregisterBlock(
-                    blockHash,
-                    future
-            );
+        } catch (RuntimeException exception) {
+            result.completeExceptionally(exception);
         }
+
+        return result;
+    }
+
+    private static Throwable unwrapCompletionFailure(Throwable failure) {
+        Throwable current = failure;
+        while ((current instanceof CompletionException
+                || current instanceof java.util.concurrent.ExecutionException)
+                && current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current;
     }
 
     private static Block completedBlock(

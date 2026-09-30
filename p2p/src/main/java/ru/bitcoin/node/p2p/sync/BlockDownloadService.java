@@ -7,6 +7,8 @@ import ru.bitcoin.node.protocol.block.Block;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.Objects;
 
 public final class BlockDownloadService {
@@ -67,6 +69,72 @@ public final class BlockDownloadService {
         }
 
         throw failure;
+    }
+
+    public CompletableFuture<Block> downloadAsync(
+            Peer peer,
+            Hash256 blockHash
+    ) {
+        Objects.requireNonNull(peer, "peer");
+        Objects.requireNonNull(blockHash, "blockHash");
+
+        if (!peer.isReady()) {
+            return CompletableFuture.failedFuture(
+                    new IOException(
+                            "Peer is not ready for block "
+                                    + blockHash.toDisplayHex()
+                    )
+            );
+        }
+
+        CompletableFuture<Block> network =
+                new BlockSynchronizer(peer).downloadAsync(blockHash);
+
+        return network.handle((block, failure) -> {
+            if (failure == null) {
+                return block;
+            }
+
+            Throwable cause = unwrap(failure);
+
+            if (cause instanceof BlockNotFoundException notFound) {
+                throw new CompletionException(notFound);
+            }
+
+            if (cause instanceof IOException ioException) {
+                closeAndRemove(peer, ioException);
+                throw new CompletionException(ioException);
+            }
+
+            if (cause instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            }
+
+            IOException ioException =
+                    new IOException("Block download failed", cause);
+            closeAndRemove(peer, ioException);
+            throw new CompletionException(ioException);
+        });
+    }
+
+    private void closeAndRemove(Peer peer, IOException failure) {
+        try {
+            peer.close();
+        } catch (IOException closeException) {
+            failure.addSuppressed(closeException);
+        } finally {
+            peerManager.remove(peer);
+        }
+    }
+
+    private static Throwable unwrap(Throwable failure) {
+        Throwable current = failure;
+        while ((current instanceof CompletionException
+                || current instanceof java.util.concurrent.ExecutionException)
+                && current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current;
     }
 
     public Block download(

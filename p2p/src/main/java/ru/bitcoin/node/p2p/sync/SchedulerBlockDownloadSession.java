@@ -40,15 +40,17 @@ public final class SchedulerBlockDownloadSession
             new BlockInFlightTracker();
 
     private final IdentityHashMap<
-            Future<DownloadResult>,
+            CompletableFuture<DownloadResult>,
             ActiveDownload
             > activeDownloads =
             new IdentityHashMap<>();
 
-    private ThreadPoolExecutor executor;
-
-    private CompletionService<DownloadResult>
-            completionService;
+    /**
+     * Futures are completed by peer-reader/dispatcher callbacks. This queue is
+     * only a readiness notification mechanism; no worker thread waits per block.
+     */
+    private final BlockingQueue<CompletableFuture<DownloadResult>>
+            completionQueue = new LinkedBlockingQueue<>();
 
     private int nextIndex;
     private int pendingCount;
@@ -189,7 +191,6 @@ public final class SchedulerBlockDownloadSession
         pendingCount = prospectivePendingCount;
 
         if (!peers.isEmpty()) {
-            ensureExecutor(peers.size());
             assignAvailable(peers);
         }
     }
@@ -227,7 +228,7 @@ public final class SchedulerBlockDownloadSession
             );
         }
 
-        Future<DownloadResult> future;
+        CompletableFuture<DownloadResult> future;
 
         boolean waitForReadyPeer = false;
 
@@ -253,10 +254,6 @@ public final class SchedulerBlockDownloadSession
                     peerManager.readyPeers();
 
             if (!peers.isEmpty()) {
-
-                ensureExecutor(
-                        peers.size()
-                );
 
                 assignAvailable(
                         peers
@@ -328,7 +325,7 @@ public final class SchedulerBlockDownloadSession
         try {
 
             future =
-                    completionService.poll(
+                    completionQueue.poll(
                             timeout.toNanos(),
                             TimeUnit.NANOSECONDS
                     );
@@ -397,7 +394,7 @@ public final class SchedulerBlockDownloadSession
         try {
 
             result =
-                    future.get();
+                    future.join();
 
         } catch (CancellationException exception) {
 
@@ -406,20 +403,10 @@ public final class SchedulerBlockDownloadSession
                     exception
             );
 
-        } catch (InterruptedException exception) {
-
-            Thread.currentThread()
-                    .interrupt();
+        } catch (CompletionException exception) {
 
             throw new IOException(
-                    "Block download interrupted",
-                    exception
-            );
-
-        } catch (ExecutionException exception) {
-
-            throw new IOException(
-                    "Unexpected block download task failure",
+                    "Unexpected asynchronous block download failure",
                     exception.getCause()
             );
         }
@@ -662,8 +649,7 @@ public final class SchedulerBlockDownloadSession
     @Override
     public void close() {
 
-        List<Future<DownloadResult>> futures;
-        ExecutorService executorToClose;
+        List<CompletableFuture<DownloadResult>> futures;
 
         synchronized (this) {
 
@@ -686,11 +672,9 @@ public final class SchedulerBlockDownloadSession
 
             activeDownloads.clear();
 
-            executorToClose =
-                    executor;
         }
 
-        for (Future<DownloadResult> future :
+        for (CompletableFuture<DownloadResult> future :
                 futures) {
 
             future.cancel(
@@ -698,9 +682,6 @@ public final class SchedulerBlockDownloadSession
             );
         }
 
-        if (executorToClose != null) {
-            executorToClose.shutdownNow();
-        }
 
         closeListener.accept(
                 this
@@ -762,7 +743,7 @@ public final class SchedulerBlockDownloadSession
                 );
             }
 
-            Future<DownloadResult> ordinaryFuture =
+            CompletableFuture<DownloadResult> ordinaryFuture =
                     activeFutureForState(
                             state
                     );
@@ -834,10 +815,6 @@ public final class SchedulerBlockDownloadSession
                 peerManager.readyPeers();
 
         if (!readyPeers.isEmpty()) {
-            ensureExecutor(
-                    readyPeers.size()
-            );
-
             assignAvailable(
                     readyPeers
             );
@@ -847,7 +824,7 @@ public final class SchedulerBlockDownloadSession
         return true;
     }
 
-    private Future<DownloadResult> activeFutureForState(
+    private CompletableFuture<DownloadResult> activeFutureForState(
             DownloadState state
     ) {
 
@@ -860,71 +837,9 @@ public final class SchedulerBlockDownloadSession
         return null;
     }
 
-    private void ensureExecutor(
-            int readyPeerCount
-    ) {
-
-        if (readyPeerCount <= 0) {
-            throw new IllegalArgumentException(
-                    "readyPeerCount must be positive"
-            );
-        }
-
-        int threadCount =
-                Math.multiplyExact(
-                        readyPeerCount,
-                        BlockInFlightTracker
-                                .DEFAULT_MAX_BLOCKS_PER_PEER
-                );
-
-        if (executor == null) {
-            /*
-             * One worker may block in BlockSynchronizer for every in-flight
-             * block. The pool therefore has to cover the complete per-peer
-             * in-flight budget, not merely the peer count.
-             */
-            executor =
-                    new ThreadPoolExecutor(
-                            threadCount,
-                            threadCount,
-                            0L,
-                            TimeUnit.MILLISECONDS,
-                            new LinkedBlockingQueue<>()
-                    );
-
-            completionService =
-                    new ExecutorCompletionService<>(
-                            executor
-                    );
-            return;
-        }
-
-        /*
-         * READY peers can be added after a session has started (notably while
-         * OutboundPeerSupervisor fills the remaining outbound slots during
-         * IBD). A fixed pool sized from the first peer snapshot deadlocks that
-         * expansion: sixteen blocked downloads to the initial peer occupy all
-         * workers, while work assigned to newly connected peers sits forever in
-         * the executor queue. Grow the pool with the READY peer set so those
-         * peers can actually perform their assigned downloads immediately.
-         *
-         * Never shrink a live pool here. Shrinking is unnecessary for the
-         * bounded session and could strand already submitted work.
-         */
-        if (threadCount > executor.getMaximumPoolSize()) {
-            executor.setMaximumPoolSize(threadCount);
-            executor.setCorePoolSize(threadCount);
-            executor.prestartAllCoreThreads();
-        }
-    }
-
     private void assignAvailable(
             List<Peer> peers
     ) {
-
-        if (completionService == null) {
-            return;
-        }
 
         boolean assigned;
 
@@ -976,17 +891,20 @@ public final class SchedulerBlockDownloadSession
                         state.blockHash
                 );
 
-                Future<DownloadResult> future;
+                CompletableFuture<DownloadResult> future;
 
                 try {
 
                     future =
-                            completionService.submit(
-                                    () -> download(
-                                            peer,
-                                            state
-                                    )
+                            downloadAsync(
+                                    peer,
+                                    state
                             );
+
+                    future.whenComplete(
+                            (ignoredResult, ignoredFailure) ->
+                                    completionQueue.offer(future)
+                    );
 
                 } catch (RuntimeException exception) {
 
@@ -1096,67 +1014,41 @@ public final class SchedulerBlockDownloadSession
         return null;
     }
 
-    private DownloadResult download(
+    private CompletableFuture<DownloadResult> downloadAsync(
             Peer peer,
             DownloadState state
     ) {
+        return blockDownloadService
+                .downloadAsync(peer, state.blockHash)
+                .handle((block, failure) -> {
+                    if (failure == null) {
+                        return DownloadResult.success(peer, state, block);
+                    }
 
-        try {
+                    Throwable cause = unwrapCompletionFailure(failure);
+                    IOException ioFailure;
 
-            if (state.index < FRONTIER_DIAGNOSTIC_STATE_LIMIT) {
-                log.log(
-                        System.Logger.Level.INFO,
-                        "IBD worker start: index={0}, height={1}, hash={2}, peer={3}",
-                        state.index,
-                        state.height,
-                        state.blockHash.toDisplayHex(),
-                        diagnosticPeerAddress(peer)
-                );
-            }
+                    if (cause instanceof IOException ioException) {
+                        ioFailure = ioException;
+                    } else {
+                        ioFailure = new IOException(
+                                "Asynchronous block download failed",
+                                cause
+                        );
+                    }
 
-            Block block =
-                    blockDownloadService.download(
-                            peer,
-                            state.blockHash
-                    );
+                    return DownloadResult.failure(peer, state, ioFailure);
+                });
+    }
 
-            if (state.index < FRONTIER_DIAGNOSTIC_STATE_LIMIT) {
-                log.log(
-                        System.Logger.Level.INFO,
-                        "IBD worker success: index={0}, height={1}, hash={2}, peer={3}",
-                        state.index,
-                        state.height,
-                        state.blockHash.toDisplayHex(),
-                        diagnosticPeerAddress(peer)
-                );
-            }
-
-            return DownloadResult.success(
-                    peer,
-                    state,
-                    block
-            );
-
-        } catch (IOException exception) {
-
-            if (state.index < FRONTIER_DIAGNOSTIC_STATE_LIMIT) {
-                log.log(
-                        System.Logger.Level.INFO,
-                        "IBD worker failure: index={0}, height={1}, hash={2}, peer={3}, error={4}",
-                        state.index,
-                        state.height,
-                        state.blockHash.toDisplayHex(),
-                        diagnosticPeerAddress(peer),
-                        exception.toString()
-                );
-            }
-
-            return DownloadResult.failure(
-                    peer,
-                    state,
-                    exception
-            );
+    private static Throwable unwrapCompletionFailure(Throwable failure) {
+        Throwable current = failure;
+        while ((current instanceof CompletionException
+                || current instanceof ExecutionException)
+                && current.getCause() != null) {
+            current = current.getCause();
         }
+        return current;
     }
 
     /**
@@ -1346,7 +1238,7 @@ public final class SchedulerBlockDownloadSession
         }
     }
 
-    private List<Future<DownloadResult>>
+    private List<CompletableFuture<DownloadResult>>
     activeDownloadsForPeer(
             Peer peer
     ) {
@@ -1356,7 +1248,7 @@ public final class SchedulerBlockDownloadSession
                 "peer"
         );
 
-        List<Future<DownloadResult>> futures =
+        List<CompletableFuture<DownloadResult>> futures =
                 new ArrayList<>();
 
         for (var entry :
@@ -1391,7 +1283,7 @@ public final class SchedulerBlockDownloadSession
                 "failure"
         );
 
-        List<Future<DownloadResult>> futures =
+        List<CompletableFuture<DownloadResult>> futures =
                 activeDownloadsForPeer(
                         peer
                 );
@@ -1413,7 +1305,7 @@ public final class SchedulerBlockDownloadSession
 
         int released = 0;
 
-        for (Future<DownloadResult> future :
+        for (CompletableFuture<DownloadResult> future :
                 futures) {
 
             ActiveDownload activeDownload =
