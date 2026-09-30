@@ -145,10 +145,69 @@ public final class RocksDbDatabase
      * When this method returns successfully, RocksDB has requested
      * that the write be synchronously flushed to durable storage.
      */
+    private static final class DeferredSyncState {
+        int depth;
+        boolean dirty;
+    }
+
+    private final ThreadLocal<DeferredSyncState> deferredSync = new ThreadLocal<>();
+
     public void write(
             RocksDbWriteBatch batch
     ) {
-        write(batch, true);
+        DeferredSyncState state = deferredSync.get();
+        if (state == null) {
+            write(batch, true);
+            return;
+        }
+        write(batch, false);
+        state.dirty = true;
+    }
+
+    /**
+     * Groups the default durable writes performed by the current thread behind one WAL sync.
+     * Every RocksDB batch is still applied atomically and is immediately visible to subsequent
+     * validation; only the expensive fsync is deferred until the outermost scope completes.
+     * This mirrors the durability shape needed by IBD without weakening ordinary RPC/mining
+     * block admission, which continues to use one synchronous commit per block.
+     */
+    public <T> T withDeferredSync(java.util.function.Supplier<T> action) {
+        if (action == null) throw new IllegalArgumentException("action must not be null");
+        DeferredSyncState state = deferredSync.get();
+        boolean outer = state == null;
+        if (outer) {
+            state = new DeferredSyncState();
+            deferredSync.set(state);
+        }
+        state.depth++;
+        Throwable primary = null;
+        try {
+            return action.get();
+        } catch (RuntimeException | Error failure) {
+            primary = failure;
+            throw failure;
+        } finally {
+            state.depth--;
+            if (outer) {
+                try {
+                    if (state.dirty) syncWal();
+                } catch (RuntimeException syncFailure) {
+                    if (primary != null) primary.addSuppressed(syncFailure);
+                    else throw syncFailure;
+                } finally {
+                    deferredSync.remove();
+                }
+            }
+        }
+    }
+
+    private synchronized void syncWal() {
+        ensureOpen();
+        try {
+            database.syncWal();
+        } catch (RocksDBException exception) {
+            throw new IllegalStateException("Failed to synchronize RocksDB WAL", exception);
+        }
     }
 
     /**

@@ -233,7 +233,7 @@ public class NodeConfiguration {
     public OutboundPeerSupervisor outboundPeerSupervisor(
             OutboundPeerManager outboundPeerManager,
             NodeValidationService validationService,
-            @Value("${bitcoin.p2p.target-outbound-peers:1}")
+            @Value("${bitcoin.p2p.target-outbound-peers:8}")
             int targetOutboundPeers,
             @Value("${bitcoin.p2p.target-block-relay-peers:2}")
             int targetBlockRelayPeers

@@ -50,7 +50,7 @@ public final class BlockSyncCoordinator {
     private static final Duration DOWNLOAD_COMPLETION_POLL_INTERVAL =
             Duration.ofMillis(250);
     private static final Duration DOWNLOAD_COMPLETION_DRAIN_INTERVAL = Duration.ZERO;
-    private static final int INITIAL_SYNC_CONNECT_BATCH = 64;
+    private static final int INITIAL_SYNC_CONNECT_BATCH = 128;
     private final int downloadWindow;
     private final BlockDownloadScheduler blockDownloadScheduler;
     private final NodeValidationService validationService;

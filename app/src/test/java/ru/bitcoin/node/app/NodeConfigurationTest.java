@@ -234,12 +234,12 @@ class NodeConfigurationTest {
     }
 
     @Test
-    void outboundPeerSupervisorUsesSinglePeerByDefault() {
+    void outboundPeerSupervisorUsesEightFullRelayPeersByDefault() {
         try (var context = createContext(Map.of())) {
             OutboundPeerSupervisor supervisor =
                     context.getBean(OutboundPeerSupervisor.class);
 
-            assertEquals(1, supervisor.targetOutboundPeers());
+            assertEquals(8, supervisor.targetOutboundPeers());
         }
     }
 

@@ -522,24 +522,28 @@ public final class NodeValidationService implements AutoCloseable {
         if (batch.isEmpty()) return List.of();
 
         synchronized (chain) {
+            // No other chain/mempool API can observe an intermediate tip while this lock is
+            // held, so reconcile the mempool once against the final batch tip instead of
+            // rebuilding a reorg plan and rescanning block bodies after every connected block.
             synchronizePool();
-            List<BlockProcessingResult> results = new ArrayList<>(batch.size());
-            boolean connectedAny = false;
 
-            for (Block block : batch) {
-                Objects.requireNonNull(block, "batch block");
-                BlockProcessingResult result = processor.process(block);
-                results.add(result);
+            List<BlockProcessingResult> results = database.withDeferredSync(() -> {
+                List<BlockProcessingResult> batchResults = new ArrayList<>(batch.size());
+                for (Block block : batch) {
+                    Objects.requireNonNull(block, "batch block");
+                    batchResults.add(processor.process(block));
+                }
+                return batchResults;
+            });
 
-                // Keep the mempool exactly synchronized with each committed active tip.
-                // This is intentionally not deferred across the batch.
-                synchronizePool();
-                connectedAny |= result == BlockProcessingResult.CONNECTED;
-            }
+            // The deferred-sync scope has now issued one WAL sync for all chainstate/UTXO/undo
+            // commits in this contiguous IBD batch. Bring dependent in-memory state to that same
+            // durable tip exactly once.
+            synchronizePool();
 
+            boolean connectedAny = results.stream()
+                    .anyMatch(result -> result == BlockProcessingResult.CONNECTED);
             if (connectedAny) {
-                // These services already synchronize from their durable cursor to activeTip,
-                // so one catch-up pass is equivalent to doing the same work after every block.
                 if (txIndexEnabled) synchronizeTxIndex();
                 if (txOutSpenderIndexEnabled) synchronizeTxOutSpenderIndex();
                 if (coinStatsIndexEnabled) synchronizeCoinStatsIndex();
