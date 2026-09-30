@@ -271,6 +271,81 @@ class NodeConfigurationTest {
         assertNotNull(exception);
     }
 
+    @Test
+    void springStartupFinalizesValidatedSnapshot() { verifySnapshotStartup(false, false); }
+
+    @Test
+    void springStartupResumesInterruptedSnapshotCopy() { verifySnapshotStartup(false, true); }
+
+    @Test
+    void springStartupRollsBackInvalidSnapshot() { verifySnapshotStartup(true, false); }
+
+    private void verifySnapshotStartup(boolean invalid, boolean copying) {
+        var params = ru.bitcoin.node.protocol.network.NetworkParametersRegistry.regtest();
+        ru.bitcoin.node.common.types.Hash256 minedHash;
+        try (var db = new ru.bitcoin.node.storage.rocksdb.RocksDbDatabase(directory);
+             var node = new NodeValidationService(db, params, () -> 1_800_000_000L,
+                     new ru.bitcoin.node.mempool.Mempool())) {
+            var template = node.createMiningTemplate(new byte[]{0x51}, new byte[0], 4_000_000,
+                    new ru.bitcoin.node.mempool.FeeRate(0));
+            var mined = ru.bitcoin.node.mining.NonceMiner.search(template, params, 0, 100_000, () -> false).orElseThrow();
+            node.processBlock(mined);
+            minedHash = mined.hash();
+            if (invalid) node.invalidateBlock(minedHash);
+        }
+        byte staging = ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.SNAPSHOT_UTXO_STAGING;
+        byte canonical = ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.UTXO;
+        try (var db = new ru.bitcoin.node.storage.rocksdb.RocksDbDatabase(directory)) {
+            if (invalid) {
+                db.put(new byte[]{staging, 99}, new byte[]{42});
+            } else {
+                try (var batch = new ru.bitcoin.node.storage.rocksdb.RocksDbWriteBatch()) {
+                    db.forEachEntryByPrefix(canonical, (key, value) -> {
+                        byte[] target = key.clone();
+                        target[0] = staging;
+                        batch.put(target, value);
+                    });
+                    batch.deletePrefix(canonical);
+                    if (copying) batch.put(new byte[]{
+                            ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.ASSUMEUTXO_FINALIZATION_STATE, 1}, new byte[]{1});
+                    db.write(batch);
+                }
+            }
+            var tips = new ru.bitcoin.node.storage.chain.RocksDbChainStateStore(db);
+            tips.saveActiveTipHash(params.genesisBlockHash());
+            new ru.bitcoin.node.storage.utxo.RocksDbSnapshotChainStateStore(db)
+                    .activate(params.genesisBlockHash(), 0, minedHash, 1);
+            var background = new ru.bitcoin.node.storage.utxo.RocksDbAssumeUtxoBackgroundStore(db);
+            background.initialize(params.genesisBlockHash(), 0);
+            background.mark(invalid
+                            ? ru.bitcoin.node.storage.utxo.RocksDbAssumeUtxoBackgroundStore.Status.INVALID
+                            : ru.bitcoin.node.storage.utxo.RocksDbAssumeUtxoBackgroundStore.Status.VALIDATED,
+                    invalid ? params.genesisBlockHash() : minedHash, invalid ? 0 : 1);
+        }
+        for (int restart = 0; restart < 2; restart++) {
+            try (var context = createContext(Map.of("bitcoin.node.auto-start", "false",
+                    "bitcoin.p2p.listen", "false", "bitcoin.p2p.peers", ""))) {
+                var node = context.getBean(NodeValidationService.class);
+                var db = context.getBean(ru.bitcoin.node.storage.rocksdb.RocksDbDatabase.class);
+                assertEquals(invalid ? params.genesisBlockHash() : minedHash, node.activeTip().hash());
+                assertEquals(invalid ? 0 : 1, node.utxoSetInfo().txouts());
+                assertEquals(invalid ? 0 : 5_000_000_000L, node.utxoSetInfo().totalAmount());
+                assertTrue(new ru.bitcoin.node.storage.utxo.RocksDbSnapshotChainStateStore(db).load().isEmpty());
+                assertTrue(new ru.bitcoin.node.storage.utxo.RocksDbAssumeUtxoBackgroundStore(db).load().isEmpty());
+                assertNull(db.get(new byte[]{
+                        ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.ASSUMEUTXO_FINALIZATION_STATE, 1}));
+                if (invalid) assertArrayEquals(new byte[]{42}, db.get(new byte[]{staging, 99}));
+                else {
+                    long[] entries = {0};
+                    db.forEachEntryByPrefix(staging, (key, value) -> entries[0]++);
+                    assertEquals(0, entries[0]);
+                }
+                assertNotNull(context.getBean(NodeSyncInfrastructure.class));
+                assertEquals(NodeLifecycleState.NEW, context.getBean(NodeLifecycleService.class).state());
+                assertTrue(context.getBean(PeerManager.class).isEmpty());
+            }
+        }
+    }
     private AnnotationConfigApplicationContext createContext(
             Map<String, Object> overrides
     ) {

@@ -393,3 +393,23 @@ Gate теперь требует все семь snapshot process-crash сцен
 3816 тестов, 0 failures/errors, 3 skipped. Все 7 snapshot process-crash сценариев
 выполнены (74.61 с), оба Core integration теста прошли без пропусков.
 Лог: ../snapshot-rollback-stage.log.
+
+## Десятый этап: recovery через Spring-конфигурацию — 30 сентября
+
+NodeConfigurationTest дополнен тремя сценариями старта контекста с настоящими
+NetworkConfiguration и NodeConfiguration: финализация VALIDATED snapshot,
+продолжение копирования с маркером COPYING и rollback INVALID snapshot. Фикстура
+использует блок, принятый обычным валидатором; маркеры recovery устанавливает тест.
+В варианте INVALID блок явно инвалидируется до установки snapshot-маркера.
+Каждый сценарий дважды открывает и закрывает Spring-контекст на одной БД.
+
+Проверяются выбранный tip, количество и сумма активных UTXO, удаление маркеров,
+очистка staging при продвижении и сохранность диагностических staging-байтов
+при откате. Подтверждено создание NodeSyncInfrastructure; lifecycle остаётся NEW,
+пиры отсутствуют. Это проверка Spring wiring восстановления, без запуска сети,
+импорта snapshot и фоновой проверки истории. Production-код не изменён.
+
+Целевой Maven-прогон: NodeConfigurationTest — 7, ChainInitializerTest — 12;
+все 19 тестов без ошибок и пропусков, BUILD SUCCESS. Лог: ../spring-recovery-focused.log.
+Полный reactor и Core integration повторно не запускались: изменены только тесты.
+Реальные disk/WAL faults, power-loss и длительные нагрузочные испытания остаются открытыми.

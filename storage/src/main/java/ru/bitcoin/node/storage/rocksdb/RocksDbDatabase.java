@@ -10,6 +10,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Supplier;
 
 public final class RocksDbDatabase
         implements AutoCloseable {
@@ -23,6 +24,10 @@ public final class RocksDbDatabase
     private final long[] namespaceVersions = new long[256];
 
     private boolean closed;
+
+    /** Per-thread IBD durability scope. Atomic WriteBatches remain WAL-backed, but
+     * intermediate writes do not force an fsync; the outermost scope performs one syncWal(). */
+    private final ThreadLocal<Integer> deferredSyncDepth = ThreadLocal.withInitial(() -> 0);
 
     public RocksDbDatabase(
             Path databasePath
@@ -145,68 +150,41 @@ public final class RocksDbDatabase
      * When this method returns successfully, RocksDB has requested
      * that the write be synchronously flushed to durable storage.
      */
-    private static final class DeferredSyncState {
-        int depth;
-        boolean dirty;
-    }
-
-    private final ThreadLocal<DeferredSyncState> deferredSync = new ThreadLocal<>();
-
     public void write(
             RocksDbWriteBatch batch
     ) {
-        DeferredSyncState state = deferredSync.get();
-        if (state == null) {
-            write(batch, true);
-            return;
-        }
-        write(batch, false);
-        state.dirty = true;
+        write(batch, deferredSyncDepth.get() == 0);
     }
 
     /**
-     * Groups the default durable writes performed by the current thread behind one WAL sync.
-     * Every RocksDB batch is still applied atomically and is immediately visible to subsequent
-     * validation; only the expensive fsync is deferred until the outermost scope completes.
-     * This mirrors the durability shape needed by IBD without weakening ordinary RPC/mining
-     * block admission, which continues to use one synchronous commit per block.
+     * Runs a sequence of individually atomic WAL-backed writes with one durability barrier.
+     * Visibility and write ordering are unchanged; only per-write fsync is coalesced.
+     * The WAL is synchronized even when the operation fails so already committed prefixes
+     * remain restart-safe. Nested scopes collapse into the outermost barrier.
      */
-    public <T> T withDeferredSync(java.util.function.Supplier<T> action) {
-        if (action == null) throw new IllegalArgumentException("action must not be null");
-        DeferredSyncState state = deferredSync.get();
-        boolean outer = state == null;
-        if (outer) {
-            state = new DeferredSyncState();
-            deferredSync.set(state);
-        }
-        state.depth++;
-        Throwable primary = null;
+    public <T> T withDeferredSync(Supplier<T> operation) {
+        if (operation == null) throw new IllegalArgumentException("operation must not be null");
+        ensureOpen();
+        int depth = deferredSyncDepth.get();
+        deferredSyncDepth.set(depth + 1);
         try {
-            return action.get();
-        } catch (RuntimeException | Error failure) {
-            primary = failure;
-            throw failure;
+            return operation.get();
         } finally {
-            state.depth--;
-            if (outer) {
-                try {
-                    if (state.dirty) syncWal();
-                } catch (RuntimeException syncFailure) {
-                    if (primary != null) primary.addSuppressed(syncFailure);
-                    else throw syncFailure;
-                } finally {
-                    deferredSync.remove();
-                }
+            if (depth == 0) {
+                deferredSyncDepth.remove();
+                syncWal();
+            } else {
+                deferredSyncDepth.set(depth);
             }
         }
     }
 
-    private synchronized void syncWal() {
+    public synchronized void syncWal() {
         ensureOpen();
         try {
             database.syncWal();
-        } catch (RocksDBException exception) {
-            throw new IllegalStateException("Failed to synchronize RocksDB WAL", exception);
+        } catch (RocksDBException e) {
+            throw new IllegalStateException("Failed to synchronize RocksDB WAL", e);
         }
     }
 

@@ -9,7 +9,7 @@ bitcoin:
   p2p:
     listen: true
     max-inbound-peers: 32
-    target-outbound-peers: 3
+    target-outbound-peers: 8
     target-block-relay-peers: 2
     v2-transport: true
 

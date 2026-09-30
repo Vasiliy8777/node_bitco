@@ -522,27 +522,24 @@ public final class NodeValidationService implements AutoCloseable {
         if (batch.isEmpty()) return List.of();
 
         synchronized (chain) {
-            // No other chain/mempool API can observe an intermediate tip while this lock is
-            // held, so reconcile the mempool once against the final batch tip instead of
-            // rebuilding a reorg plan and rescanning block bodies after every connected block.
+            // Reconcile once at the batch boundary. No external chain/mempool API can
+            // observe an intermediate tip while the chain monitor is held.
             synchronizePool();
-
             List<BlockProcessingResult> results = database.withDeferredSync(() -> {
-                List<BlockProcessingResult> batchResults = new ArrayList<>(batch.size());
+                List<BlockProcessingResult> processed = new ArrayList<>(batch.size());
                 for (Block block : batch) {
                     Objects.requireNonNull(block, "batch block");
-                    batchResults.add(processor.process(block));
+                    processed.add(processor.process(block));
                 }
-                return batchResults;
+                return processed;
             });
-
-            // The deferred-sync scope has now issued one WAL sync for all chainstate/UTXO/undo
-            // commits in this contiguous IBD batch. Bring dependent in-memory state to that same
-            // durable tip exactly once.
-            synchronizePool();
 
             boolean connectedAny = results.stream()
                     .anyMatch(result -> result == BlockProcessingResult.CONNECTED);
+
+            // The active tip is now durable for the whole batch. Bring mempool and
+            // derived indexes to that one final tip instead of repeating O(batch) work.
+            synchronizePool();
             if (connectedAny) {
                 if (txIndexEnabled) synchronizeTxIndex();
                 if (txOutSpenderIndexEnabled) synchronizeTxOutSpenderIndex();
