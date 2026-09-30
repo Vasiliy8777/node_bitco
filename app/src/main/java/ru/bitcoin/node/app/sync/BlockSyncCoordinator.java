@@ -592,11 +592,9 @@ public final class BlockSyncCoordinator {
                     blocksToDownload,
                     nextToProcess,
                     downloadWindow,
-                    index -> {
-                        Hash256 hash = index.hash();
-                        if (availableBlocks.containsKey(hash)) return true;
-                        return blockStore.find(hash).isPresent();
-                    },
+                    index -> availableBlocks.containsKey(
+                            index.hash()
+                    ),
                     index -> session.inFlightPeer(index.hash())
             );
 

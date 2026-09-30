@@ -113,7 +113,7 @@ public final class BlockSynchronizer {
                         System.Logger.Level.INFO,
                         "IBD GETDATA sent: hash={0}, peer={1}",
                         blockHash.toDisplayHex(),
-                        peer.remoteAddress()
+                        diagnosticPeerAddress(peer)
                 );
             }
 
@@ -128,7 +128,7 @@ public final class BlockSynchronizer {
                         System.Logger.Level.INFO,
                         "IBD BLOCK received: hash={0}, peer={1}",
                         blockHash.toDisplayHex(),
-                        peer.remoteAddress()
+                        diagnosticPeerAddress(peer)
                 );
             }
 
@@ -187,4 +187,13 @@ public final class BlockSynchronizer {
             );
         }
     }
+    /** Diagnostic logging must never turn a normal disconnect into a worker failure. */
+    private static String diagnosticPeerAddress(Peer peer) {
+        try {
+            return String.valueOf(peer.remoteAddress());
+        } catch (RuntimeException exception) {
+            return "<disconnected>";
+        }
+    }
+
 }
