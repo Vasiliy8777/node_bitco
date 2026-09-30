@@ -13,6 +13,11 @@ import java.util.concurrent.*;
 public final class SchedulerBlockDownloadSession
         implements BlockDownloadSession {
 
+    private static final System.Logger log =
+            System.getLogger(SchedulerBlockDownloadSession.class.getName());
+
+    private static final int FRONTIER_DIAGNOSTIC_STATE_LIMIT = 8;
+
     private final PeerManager peerManager;
     private final BlockDownloadService blockDownloadService;
 
@@ -997,6 +1002,19 @@ public final class SchedulerBlockDownloadSession
                         )
                 );
 
+                if (state.index < FRONTIER_DIAGNOSTIC_STATE_LIMIT) {
+                    log.log(
+                            System.Logger.Level.INFO,
+                            "IBD scheduler assigned: index={0}, height={1}, hash={2}, peer={3}, active={4}, pending={5}",
+                            state.index,
+                            state.height,
+                            state.blockHash.toDisplayHex(),
+                            diagnosticPeerAddress(peer),
+                            activeDownloads.size(),
+                            pendingCount
+                    );
+                }
+
                 nextPeerIndex =
                         (peerIndex + 1)
                                 % peers.size();
@@ -1074,11 +1092,33 @@ public final class SchedulerBlockDownloadSession
 
         try {
 
+            if (state.index < FRONTIER_DIAGNOSTIC_STATE_LIMIT) {
+                log.log(
+                        System.Logger.Level.INFO,
+                        "IBD worker start: index={0}, height={1}, hash={2}, peer={3}",
+                        state.index,
+                        state.height,
+                        state.blockHash.toDisplayHex(),
+                        diagnosticPeerAddress(peer)
+                );
+            }
+
             Block block =
                     blockDownloadService.download(
                             peer,
                             state.blockHash
                     );
+
+            if (state.index < FRONTIER_DIAGNOSTIC_STATE_LIMIT) {
+                log.log(
+                        System.Logger.Level.INFO,
+                        "IBD worker success: index={0}, height={1}, hash={2}, peer={3}",
+                        state.index,
+                        state.height,
+                        state.blockHash.toDisplayHex(),
+                        diagnosticPeerAddress(peer)
+                );
+            }
 
             return DownloadResult.success(
                     peer,
@@ -1088,11 +1128,40 @@ public final class SchedulerBlockDownloadSession
 
         } catch (IOException exception) {
 
+            if (state.index < FRONTIER_DIAGNOSTIC_STATE_LIMIT) {
+                log.log(
+                        System.Logger.Level.INFO,
+                        "IBD worker failure: index={0}, height={1}, hash={2}, peer={3}, error={4}",
+                        state.index,
+                        state.height,
+                        state.blockHash.toDisplayHex(),
+                        diagnosticPeerAddress(peer),
+                        exception.toString()
+                );
+            }
+
             return DownloadResult.failure(
                     peer,
                     state,
                     exception
             );
+        }
+    }
+
+    /**
+     * Diagnostic logging must never change scheduler semantics. A peer may
+     * become CLOSED between the network operation and the log statement;
+     * Peer.remoteAddress() then legitimately throws IllegalStateException.
+     */
+    private static String diagnosticPeerAddress(
+            Peer peer
+    ) {
+        try {
+            return String.valueOf(
+                    peer.remoteAddress()
+            );
+        } catch (RuntimeException exception) {
+            return "<disconnected>";
         }
     }
 

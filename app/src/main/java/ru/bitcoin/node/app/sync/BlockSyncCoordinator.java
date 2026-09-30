@@ -502,7 +502,33 @@ public final class BlockSyncCoordinator {
             }
 
             if (!missingToSubmit.isEmpty()) {
+                if (nextToProcess == 0) {
+                    BlockDownloadRequest first = missingToSubmit.get(0);
+                    log.log(
+                            System.Logger.Level.INFO,
+                            "IBD frontier submit: height={0}, hash={1}, requests={2}, horizonEnd={3}, materialized={4}, pendingBefore={5}",
+                            first.height(),
+                            first.blockHash().toDisplayHex(),
+                            missingToSubmit.size(),
+                            horizonEnd,
+                            blocksToDownload.size(),
+                            session.pendingCount()
+                    );
+                }
                 session.submitRequests(missingToSubmit);
+                if (nextToProcess == 0) {
+                    BlockIndex frontier = blocksToDownload.get(0);
+                    log.log(
+                            System.Logger.Level.INFO,
+                            "IBD frontier submitted: height={0}, hash={1}, pendingAfter={2}, owner={3}",
+                            frontier.height(),
+                            frontier.hash().toDisplayHex(),
+                            session.pendingCount(),
+                            session.inFlightPeer(frontier.hash())
+                                    .map(peer -> String.valueOf(peer.remoteAddress()))
+                                    .orElse("UNASSIGNED")
+                    );
+                }
             }
 
             boolean processedAny = false;
