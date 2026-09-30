@@ -17,7 +17,15 @@ public final class BlockInFlightTracker {
     private final IdentityHashMap<Peer, Long> downloadingSinceByPeer =
             new IdentityHashMap<>();
 
-    public static final int DEFAULT_MAX_BLOCKS_PER_PEER = 16;
+    /*
+     * The original Core-compatible conservative value (16) is excellent for
+     * normal steady-state relay, but this scheduler uses the same limit for
+     * bulk IBD. With one GETDATA future per block, 16 requests per peer leaves
+     * a high-bandwidth/latency path idle and caps early-chain throughput long
+     * before validation becomes expensive. Keep a bounded window, but allow
+     * 32 concurrent IBD block requests per READY peer.
+     */
+    public static final int DEFAULT_MAX_BLOCKS_PER_PEER = 32;
 
     private final int maxBlocksPerPeer;
     private final LongSupplier nanoTime;

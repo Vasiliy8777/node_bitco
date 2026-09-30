@@ -173,7 +173,7 @@ class BlockInFlightTrackerTest {
     }
 
     @Test
-    void shouldEnforceSixteenBlockLimitPerPeer()
+    void shouldEnforceConfiguredDefaultBlockLimitPerPeer()
             throws Exception {
 
         try (Peer peer =
@@ -219,7 +219,7 @@ class BlockInFlightTrackerTest {
             }
 
             assertEquals(
-                    16,
+                    BlockInFlightTracker.DEFAULT_MAX_BLOCKS_PER_PEER,
                     tracker.count(
                             peer
                     )
@@ -237,7 +237,7 @@ class BlockInFlightTrackerTest {
                             () -> tracker.register(
                                     peer,
                                     hash(
-                                            17
+                                            BlockInFlightTracker.DEFAULT_MAX_BLOCKS_PER_PEER + 1
                                     )
                             )
                     );
@@ -259,7 +259,7 @@ class BlockInFlightTrackerTest {
             );
 
             assertEquals(
-                    15,
+                    BlockInFlightTracker.DEFAULT_MAX_BLOCKS_PER_PEER - 1,
                     tracker.count(
                             peer
                     )
@@ -274,12 +274,12 @@ class BlockInFlightTrackerTest {
             tracker.register(
                     peer,
                     hash(
-                            17
+                            BlockInFlightTracker.DEFAULT_MAX_BLOCKS_PER_PEER + 1
                     )
             );
 
             assertEquals(
-                    16,
+                    BlockInFlightTracker.DEFAULT_MAX_BLOCKS_PER_PEER,
                     tracker.count(
                             peer
                     )

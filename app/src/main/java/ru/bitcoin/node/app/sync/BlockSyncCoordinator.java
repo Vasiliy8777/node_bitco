@@ -33,7 +33,7 @@ public final class BlockSyncCoordinator {
      * It is intentionally independent from the per-peer
      * in-flight request limit.
      */
-    private static final int DEFAULT_DOWNLOAD_WINDOW = 1024;
+    private static final int DEFAULT_DOWNLOAD_WINDOW = 4096;
 
     /*
      * Block-index materialization is deliberately larger than the logical
@@ -42,15 +42,15 @@ public final class BlockSyncCoordinator {
      * first block of a chunk the scheduler cannot expose a block from the next
      * chunk even though that height is already inside the logical horizon.
      *
-     * 8192 BlockIndex references/objects remain bounded for IBD while giving
-     * the 1024-block download window ample look-ahead. Small test windows also
+     * 32768 BlockIndex references/objects remain bounded for IBD while giving
+     * the 4096-block download window ample look-ahead. Small test windows also
      * retain true sliding behaviour because short paths fit in one chunk.
      */
-    private static final int BLOCK_INDEX_MATERIALIZATION_CHUNK = 8192;
+    private static final int BLOCK_INDEX_MATERIALIZATION_CHUNK = 32768;
     private static final Duration DOWNLOAD_COMPLETION_POLL_INTERVAL =
             Duration.ofMillis(250);
     private static final Duration DOWNLOAD_COMPLETION_DRAIN_INTERVAL = Duration.ZERO;
-    private static final int INITIAL_SYNC_CONNECT_BATCH = 128;
+    private static final int INITIAL_SYNC_CONNECT_BATCH = 512;
     private final int downloadWindow;
     private final BlockDownloadScheduler blockDownloadScheduler;
     private final NodeValidationService validationService;
