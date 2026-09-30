@@ -55,6 +55,49 @@ class AssumeValidPolicyTest {
         assertTrue(policy.shouldVerifyScripts(genesis));
     }
 
+    @Test
+    void usesAncestorLookupInsteadOfLinearParentWalkWhenAvailable() {
+        NetworkParameters parameters = NetworkParametersRegistry.regtest();
+        Map<Hash256, BlockIndex> indexes = new HashMap<>();
+        BlockIndex genesis = block(null, 0, 0, indexes);
+        BlockIndex cursor = genesis;
+        BlockIndex assumed = null;
+        for (int height = 1; height <= 2017; height++) {
+            cursor = block(cursor, height, height, indexes);
+            if (height == 1000) assumed = cursor;
+        }
+        BlockIndex best = cursor;
+        BlockIndex assumedBlock = assumed;
+        int[] ancestorCalls = {0};
+
+        BlockIndexAncestorLookup lookup = new BlockIndexAncestorLookup() {
+            @Override
+            public BlockIndex find(Hash256 hash) {
+                return indexes.get(hash);
+            }
+
+            @Override
+            public BlockIndex ancestor(BlockIndex index, long targetHeight) {
+                ancestorCalls[0]++;
+                BlockIndex current = index;
+                while (current.height() > targetHeight) {
+                    current = indexes.get(current.previousBlockHash());
+                    if (current == null) {
+                        throw new IllegalStateException("Missing test ancestor");
+                    }
+                }
+                return current;
+            }
+        };
+
+        AssumeValidPolicy policy = new AssumeValidPolicy(
+                lookup, () -> best, parameters, assumedBlock.hash());
+
+        assertFalse(policy.shouldVerifyScripts(genesis));
+        assertEquals(2, ancestorCalls[0],
+                "assumed-valid and best-header ancestry must use BlockIndexAncestorLookup");
+    }
+
     private static BlockIndex block(BlockIndex parent, long height, long nonce, Map<Hash256, BlockIndex> indexes) {
         Hash256 zero = new Hash256(new byte[32]);
         BlockHeader header = new BlockHeader(1, parent == null ? zero : parent.hash(), zero,

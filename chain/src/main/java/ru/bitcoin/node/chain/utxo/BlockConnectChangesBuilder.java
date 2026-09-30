@@ -20,8 +20,11 @@ import ru.bitcoin.node.storage.utxo.UtxoStore;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.logging.Logger;
 
 public final class BlockConnectChangesBuilder {
+
+    private static final Logger LOG = Logger.getLogger(BlockConnectChangesBuilder.class.getName());
 
     private BlockConnectChangesBuilder() {
     }
@@ -145,18 +148,16 @@ public final class BlockConnectChangesBuilder {
          * - Merkle root;
          * - mutated Merkle tree.
          */
-        BlockValidator.validateStructure(
-                block
-        );
+        diagnostic(blockHeight, block, "structure start");
+        BlockValidator.validateStructure(block);
+        diagnostic(blockHeight, block, "structure done");
 
         List<Transaction> transactions =
                 block.transactions();
 
-        Bip34Validator.validate(
-                transactions.get(0),
-                blockHeight,
-                networkParameters
-        );
+        diagnostic(blockHeight, block, "BIP34 start");
+        Bip34Validator.validate(transactions.get(0), blockHeight, networkParameters);
+        diagnostic(blockHeight, block, "BIP34 done");
 
         UtxoOverlayView utxoView =
                 new UtxoOverlayView(
@@ -175,17 +176,19 @@ public final class BlockConnectChangesBuilder {
                         networkParameters
                 );
 
-        int scriptVerifyFlags =
-                ConsensusScriptFlags.forBlock(
-                        blockHeight,
-                        block.header().hash(),
-                        networkParameters
-                );
+        diagnostic(blockHeight, block, "script flags start");
+        int scriptVerifyFlags = ConsensusScriptFlags.forBlock(
+                blockHeight, block.header().hash(), networkParameters);
+        diagnostic(blockHeight, block, "script flags done flags=" + scriptVerifyFlags);
 
+        diagnostic(blockHeight, block, "witness validation start");
         WitnessCommitmentValidator.validate(block, blockHeight >= networkParameters.segwitHeight());
+        diagnostic(blockHeight, block, "witness validation done");
         SignetBlockValidator.validate(block, networkParameters);
+        diagnostic(blockHeight, block, "signet validation done");
         long sigOpsCost = 0;
 
+        diagnostic(blockHeight, block, "transactions start count=" + transactions.size());
         for (int transactionIndex = 0;
              transactionIndex < transactions.size();
              transactionIndex++) {
@@ -304,12 +307,10 @@ public final class BlockConnectChangesBuilder {
                     overlay
             );
         }
-        CoinbaseValidator.validateReward(
-                transactions.get(0),
-                blockHeight,
-                totalFees,
-                networkParameters
-        );
+        diagnostic(blockHeight, block, "transactions done");
+        diagnostic(blockHeight, block, "coinbase reward start");
+        CoinbaseValidator.validateReward(transactions.get(0), blockHeight, totalFees, networkParameters);
+        diagnostic(blockHeight, block, "coinbase reward done");
 
         return new BlockUndoData(
                 transactionUndos
@@ -494,4 +495,12 @@ public final class BlockConnectChangesBuilder {
 
         return List.copyOf(result);
     }
+    private static void diagnostic(long height, Block block, String stage) {
+        if (height <= 32) {
+            LOG.info("CONNECT-BUILD height=" + height
+                    + ", hash=" + block.header().hash().toDisplayHex() + ": " + stage);
+        }
+    }
+
+
 }

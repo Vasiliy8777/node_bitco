@@ -545,7 +545,32 @@ public final class BlockSyncCoordinator {
                                     + block.hash().toDisplayHex());
                 }
 
+                if (nextToProcess < 8) {
+                    log.log(
+                            System.Logger.Level.INFO,
+                            "IBD connect start: index={0}, height={1}, hash={2}",
+                            nextToProcess,
+                            index.height(),
+                            index.hash().toDisplayHex()
+                    );
+                }
+
+                long connectStartedNanos = System.nanoTime();
                 BlockProcessingResult processingResult = validationService.processBlock(block);
+
+                if (nextToProcess < 8) {
+                    long connectMillis = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(
+                            System.nanoTime() - connectStartedNanos);
+                    log.log(
+                            System.Logger.Level.INFO,
+                            "IBD connect done: index={0}, height={1}, result={2}, elapsedMs={3}",
+                            nextToProcess,
+                            index.height(),
+                            processingResult,
+                            connectMillis
+                    );
+                }
+
                 if (processingResult == BlockProcessingResult.UNKNOWN_PARENT) {
                     throw new IllegalStateException(
                             "Block has unknown parent: " + index.hash().toDisplayHex()
@@ -637,6 +662,16 @@ public final class BlockSyncCoordinator {
             }
 
             CompletedBlockDownload completed = completedOptional.get();
+            if (completed.index() < 8) {
+                log.log(
+                        System.Logger.Level.INFO,
+                        "IBD coordinator received completion: index={0}, hash={1}, nextToProcess={2}, pending={3}",
+                        completed.index(),
+                        completed.requestedHash().toDisplayHex(),
+                        nextToProcess,
+                        session.pendingCount()
+                );
+            }
             Hash256 completedHash = completed.requestedHash();
             Block completedBlock = completed.block();
             if (!completedHash.equals(completedBlock.hash())) {

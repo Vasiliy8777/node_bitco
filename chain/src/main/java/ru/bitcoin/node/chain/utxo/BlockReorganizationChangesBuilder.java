@@ -16,8 +16,11 @@ import ru.bitcoin.node.storage.utxo.UtxoStore;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.logging.Logger;
 
 public final class BlockReorganizationChangesBuilder {
+
+    private static final Logger LOG = Logger.getLogger(BlockReorganizationChangesBuilder.class.getName());
 
     private BlockReorganizationChangesBuilder() {
     }
@@ -182,15 +185,21 @@ public final class BlockReorganizationChangesBuilder {
                 );
             }
 
+            diagnostic(candidateIndex, "candidate lookup done");
             AncestorMedianTimePastResolver medianTimePastResolver =
                     new AncestorMedianTimePastResolver(
                             candidateIndex,
                             blockIndexLookup
                     );
+            diagnostic(candidateIndex, "MTP resolver created");
 
             final BlockUndoData undoData;
 
             try {
+                diagnostic(candidateIndex, "assumevalid start");
+                boolean verifyScripts = assumeValidPolicy.shouldVerifyScripts(candidateIndex);
+                diagnostic(candidateIndex, "assumevalid done verifyScripts=" + verifyScripts);
+                diagnostic(candidateIndex, "connect apply start");
                 undoData =
                         BlockConnectChangesBuilder.apply(
                                 blockToConnect.block(),
@@ -200,8 +209,9 @@ public final class BlockReorganizationChangesBuilder {
                                 overlay,
                                 networkParameters,
                                 medianTimePastResolver,
-                                assumeValidPolicy.shouldVerifyScripts(candidateIndex)
+                                verifyScripts
                         );
+                diagnostic(candidateIndex, "connect apply done");
             } catch (BlockValidationException
                      | TransactionValidationException
                      | ScriptExecutionException exception) {
@@ -226,4 +236,12 @@ public final class BlockReorganizationChangesBuilder {
                 connectedUndo
         );
     }
+    private static void diagnostic(BlockIndex index, String stage) {
+        if (index != null && index.height() <= 32) {
+            LOG.info("REORG-BUILD height=" + index.height()
+                    + ", hash=" + index.hash().toDisplayHex() + ": " + stage);
+        }
+    }
+
+
 }

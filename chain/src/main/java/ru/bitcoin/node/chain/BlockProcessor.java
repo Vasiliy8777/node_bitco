@@ -14,6 +14,11 @@ import java.util.Objects;
  * Storage and validation exceptions propagate to the caller unchanged.
  */
 public final class BlockProcessor {
+    private static final System.Logger log =
+            System.getLogger(BlockProcessor.class.getName());
+
+    private static final long IBD_DIAGNOSTIC_HEIGHT_LIMIT = 32L;
+
     private final ChainState chainState;
     private final BlockIndexLookup lookup;
     private final KnownBlockStorage storage;
@@ -118,8 +123,14 @@ public final class BlockProcessor {
             if (parent == null) {
                 return BlockProcessingResult.UNKNOWN_PARENT;
             }
+
+            long diagnosticHeight = Math.addExact(parent.height(), 1L);
+            logDiagnostic(diagnosticHeight, block, "structure+lookup done");
+
             ChainHeaderValidator.validate(
                     block.header(), parent, lookup, parameters, adjustedTime);
+            logDiagnostic(diagnosticHeight, block, "header validation done");
+
             BlockIndex candidate = BlockIndexFactory.createChild(parent, block.header());
             if (failureResolver != null
                     && failureResolver.isFailed(
@@ -134,8 +145,11 @@ public final class BlockProcessor {
             ru.bitcoin.node.consensus.block.WitnessCommitmentValidator.validate(
                     block, candidate.height() >= parameters.segwitHeight());
             ru.bitcoin.node.consensus.block.SignetBlockValidator.validate(block, parameters);
+            logDiagnostic(candidate.height(), block, "witness+signet validation done");
 
+            logDiagnostic(candidate.height(), block, "prepareUpdate start");
             ChainUpdate update = chainState.prepareUpdate(candidate, lookup);
+            logDiagnostic(candidate.height(), block, "prepareUpdate done");
             if (update == null) {
                 // Side-chain/context-pending bodies still need their own durable storage commit.
                 storage.save(block, candidate);
@@ -147,6 +161,7 @@ public final class BlockProcessor {
             // writes are then committed atomically with the chain transition in one batch.
             PreparedChainReorganization prepared;
             try {
+                logDiagnostic(candidate.height(), block, "reorg prepare start");
                 prepared = executor.prepare(update, block, invalidIndex -> {
                     // The observer receives the exact BlockIndex resolved by the prepare-phase
                     // overlay. It may not be durable yet during reindex or first connection.
@@ -158,6 +173,7 @@ public final class BlockProcessor {
                         failureManager.markFailed(invalidIndex);
                     }
                 });
+                logDiagnostic(candidate.height(), block, "reorg prepare done");
             } catch (ru.bitcoin.node.consensus.block.BlockValidationException
                      | ru.bitcoin.node.consensus.transaction.TransactionValidationException
                      | ru.bitcoin.node.script.ScriptExecutionException exception) {
@@ -169,11 +185,31 @@ public final class BlockProcessor {
                 }
                 throw exception;
             }
+            logDiagnostic(candidate.height(), block, "commit start");
             executor.commitWithStagedNewTipIndex(
                     prepared, batch -> storage.save(batch, block, candidate));
+            logDiagnostic(candidate.height(), block, "commit done");
 
             return BlockProcessingResult.CONNECTED;
         }
+    }
+
+    private static void logDiagnostic(
+            long height,
+            Block block,
+            String stage
+    ) {
+        if (height > IBD_DIAGNOSTIC_HEIGHT_LIMIT) {
+            return;
+        }
+
+        log.log(
+                System.Logger.Level.INFO,
+                "BLOCKPROC height={0}, hash={1}: {2}",
+                height,
+                block.hash().toDisplayHex(),
+                stage
+        );
     }
 
     private boolean isActiveChainBlock(BlockIndex candidate) {

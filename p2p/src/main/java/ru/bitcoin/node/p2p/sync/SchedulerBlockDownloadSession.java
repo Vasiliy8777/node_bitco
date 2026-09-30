@@ -529,6 +529,17 @@ public final class SchedulerBlockDownloadSession
                 );
             }
 
+            if (state.index < FRONTIER_DIAGNOSTIC_STATE_LIMIT) {
+                log.log(
+                        System.Logger.Level.INFO,
+                        "IBD completion delivered: index={0}, height={1}, hash={2}, pending={3}",
+                        state.index,
+                        state.height,
+                        state.blockHash.toDisplayHex(),
+                        pendingCount
+                );
+            }
+
             return Optional.of(
                     new CompletedBlockDownload(
                             state.index,

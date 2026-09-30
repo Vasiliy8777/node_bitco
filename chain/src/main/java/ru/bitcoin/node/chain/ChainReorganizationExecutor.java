@@ -14,8 +14,11 @@ import ru.bitcoin.node.storage.utxo.UtxoStore;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.logging.Logger;
 
 public final class ChainReorganizationExecutor {
+
+    private static final Logger LOG = Logger.getLogger(ChainReorganizationExecutor.class.getName());
 
     private final BlockIndexLookup blockIndexLookup;
     private final BlockStore blockStore;
@@ -135,12 +138,17 @@ public final class ChainReorganizationExecutor {
             throw new IllegalArgumentException("preparationInvalidBlockObserver must not be null");
         }
         ReorganizationPlan plan = update.reorganizationPlan();
+        diagnostic(plan, "load disconnect start");
         List<BlockToDisconnect> disconnectBlocks = loadDisconnectBlocks(plan.blocksToDisconnect());
+        diagnostic(plan, "load disconnect done count=" + disconnectBlocks.size());
         List<BlockToConnect> connectBlocks = loadConnectBlocks(plan.blocksToConnect(), suppliedConnectBlock);
+        diagnostic(plan, "load connect done count=" + connectBlocks.size());
         BlockIndexLookup preparationLookup = preparationLookup(plan);
+        diagnostic(plan, "preparation lookup done");
         BlockReorganizationChanges changes = BlockReorganizationChangesBuilder.build(
                 disconnectBlocks, connectBlocks, utxoStore, networkParameters,
                 preparationLookup, preparationInvalidBlockObserver, assumeValidPolicy);
+        diagnostic(plan, "changes build done");
         return new PreparedChainReorganization(update, changes);
     }
 
@@ -155,6 +163,16 @@ public final class ChainReorganizationExecutor {
                 disconnectBlocks, connectBlocks, utxoStore, networkParameters,
                 preparationLookup, invalidBlockObserver, assumeValidPolicy);
         return new PreparedChainReorganization(update, changes);
+    }
+
+
+    private static void diagnostic(ReorganizationPlan plan, String stage) {
+        if (plan == null || plan.blocksToConnect().isEmpty()) return;
+        BlockIndex tip = plan.blocksToConnect().getLast();
+        if (tip != null && tip.height() <= 32) {
+            LOG.info("REORG prepare height=" + tip.height()
+                    + ", hash=" + tip.hash().toDisplayHex() + ": " + stage);
+        }
     }
 
     public void commit(PreparedChainReorganization prepared) {

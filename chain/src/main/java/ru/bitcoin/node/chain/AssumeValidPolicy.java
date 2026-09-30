@@ -65,6 +65,28 @@ public final class AssumeValidPolicy {
     }
 
     private boolean isAncestor(BlockIndex ancestor, BlockIndex descendant) {
+        if (ancestor.height() > descendant.height()) {
+            return false;
+        }
+
+        /*
+         * Assume-valid is evaluated for every connected block during IBD.  Walking
+         * backwards one parent at a time from the assumed-valid/best-header tip
+         * makes the first historical block perform millions of RocksDB lookups.
+         * StoredBlockIndexLookup already exposes Bitcoin Core-style skip ancestry,
+         * so use it whenever available.
+         */
+        if (lookup instanceof BlockIndexAncestorLookup ancestorLookup) {
+            try {
+                BlockIndex resolved = ancestorLookup.ancestor(descendant, ancestor.height());
+                return resolved != null && resolved.hash().equals(ancestor.hash());
+            } catch (IllegalStateException missingAncestry) {
+                // Preserve the old fail-safe behaviour: an incomplete ancestry means
+                // assume-valid must not skip script verification.
+                return false;
+            }
+        }
+
         BlockIndex cursor = descendant;
         while (cursor.height() > ancestor.height()) {
             cursor = lookup.find(cursor.previousBlockHash());
