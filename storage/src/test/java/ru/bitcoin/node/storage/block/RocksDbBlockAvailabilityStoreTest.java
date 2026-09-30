@@ -18,6 +18,37 @@ class RocksDbBlockAvailabilityStoreTest {
     @TempDir Path temp;
 
     @Test
+    void cancelledBatchDoesNotPersistLegacyMigrationAndRetryPreservesFlags() {
+        var path = temp.resolve("cancelled-migration");
+        var hash = GenesisBlockFactory.create(NetworkParametersRegistry.regtest()).hash();
+        byte[] bodyKey = new byte[33];
+        bodyKey[0] = 0x05;
+        System.arraycopy(hash.bytes(), 0, bodyKey, 1, 32);
+        try (var db = new RocksDbDatabase(path)) {
+            // A legacy body without availability metadata; availability migration checks presence only.
+            db.put(bodyKey, new byte[]{1});
+            var availability = new RocksDbBlockAvailabilityStore(db);
+            long version = db.namespaceVersion((byte) 0x10);
+            try (var batch = new RocksDbWriteBatch()) {
+                availability.markUndo(batch, hash);
+                assertTrue(db.valuesByPrefix((byte) 0x10).isEmpty());
+            }
+            assertTrue(db.valuesByPrefix((byte) 0x10).isEmpty());
+            assertEquals(version, db.namespaceVersion((byte) 0x10));
+        }
+        try (var db = new RocksDbDatabase(path)) {
+            assertTrue(db.valuesByPrefix((byte) 0x10).isEmpty());
+            var availability = new RocksDbBlockAvailabilityStore(db);
+            try (var batch = new RocksDbWriteBatch()) {
+                availability.markUndo(batch, hash);
+                db.write(batch);
+            }
+            assertEquals(RocksDbBlockAvailabilityStore.HAVE_DATA | RocksDbBlockAvailabilityStore.HAVE_UNDO,
+                    availability.status(hash));
+        }
+    }
+
+    @Test
     void payloadStoresOwnAvailabilityFlagsAcrossDirectAndBatchWrites() {
         try (var db = new RocksDbDatabase(temp.resolve("db"))) {
             var block = GenesisBlockFactory.create(NetworkParametersRegistry.regtest());

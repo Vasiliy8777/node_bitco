@@ -1,8 +1,11 @@
+param([string]$CoreBinary)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 Push-Location $root
 try {
-    & .\mvnw.cmd clean test
+    $testArguments = @('clean', 'test')
+    if (-not [string]::IsNullOrWhiteSpace($CoreBinary)) { $testArguments += "-Dbitcoin.core.binary=$CoreBinary" }
+    & .\mvnw.cmd @testArguments
     if ($LASTEXITCODE -ne 0) { throw "full reactor test suite failed" }
     $required = @(
       'storage/src/test/java/ru/bitcoin/node/storage/rocksdb/RocksDbWriteBatchTest.java',
@@ -41,9 +44,24 @@ try {
     foreach ($case in $requiredCrashCases) {
         if ($case -notin $executedCrashCases) { throw "missing executed crash scenario: $case" }
     }
+    $ioReport = 'app/target/surefire-reports/TEST-ru.bitcoin.node.app.NodeStorageFailureTest.xml'
+    if (-not (Test-Path -LiteralPath $ioReport)) { throw 'missing executed storage-failure report' }
+    [xml]$ioResults = Get-Content -LiteralPath $ioReport -Raw
+    $ioSuite = $ioResults.testsuite
+    if ([int]$ioSuite.tests -lt 10 -or [int]$ioSuite.failures -ne 0 -or
+        [int]$ioSuite.errors -ne 0 -or [int]$ioSuite.skipped -ne 0) {
+        throw 'storage-failure tests must execute without failures or skips'
+    }
+    foreach ($case in @('failedSpendingCommitIsAtomicAndRetryable', 'failedDisconnectDoesNotMarkBranchInvalid',
+            'failedReconnectDoesNotClearInvalidation', 'failedForkSwitchPreservesOriginalChain',
+            'failedHeaderBatchDoesNotPublishBestHeader')) {
+        $executed = @($ioSuite.testcase | Where-Object { $_.name.StartsWith($case + '(') })
+        if ($executed.Count -lt 2) { throw "missing IOError/NoSpace scenarios: $case" }
+    }
     Write-Host '[OK] full reactor test suite'
     Write-Host '[OK] forced termination before/after/racing coinbase, dependent spends, disconnect/reconnect and competing-fork activation; chain/UTXO/undo checks'
     Write-Host '[OK] pruning, parser/P2P/RPC bounds, per-peer relay budgets and BIP157 overload contracts present'
+    Write-Host '[OK] injected pre-commit IOError/NoSpace preserves state and allows retry'
     Write-Host 'AUTOMATED RECOVERY / RESOURCE CHECKS: PASSED'
-    Write-Host 'STAGE REMAINS OPEN: power-loss, disk I/O fault injection and sustained resource-load evidence are still required'
+    Write-Host 'STAGE REMAINS OPEN: power-loss, real filesystem/WAL I/O faults and sustained resource-load evidence are still required'
 } finally { Pop-Location }

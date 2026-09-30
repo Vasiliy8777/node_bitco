@@ -37,9 +37,7 @@ public final class RocksDbBlockAvailabilityStore {
         synchronized (database) {
             value = database.get(key(AVAILABILITY_PREFIX, hash));
             if (value != null) return decode(value);
-            int migrated = 0;
-            if (database.get(key(BLOCK_PREFIX, hash)) != null) migrated |= HAVE_DATA;
-            if (database.get(key(UNDO_PREFIX, hash)) != null) migrated |= HAVE_UNDO;
+            int migrated = legacyStatus(hash);
             database.put(key(AVAILABILITY_PREFIX, hash), new byte[]{(byte) migrated});
             return migrated;
         }
@@ -83,11 +81,21 @@ public final class RocksDbBlockAvailabilityStore {
         if (pending.touched()) {
             current = pending.value() == null ? 0 : decode(pending.value());
         } else {
-            current = status(hash);
+            // Batch preparation must not persist lazy-migration metadata independently.
+            // The derived legacy flags and requested update become durable together.
+            byte[] stored = database.get(metadataKey);
+            current = stored == null ? legacyStatus(hash) : decode(stored);
         }
 
         int next = (current | set) & ~clear;
         batch.put(metadataKey, new byte[]{(byte) next});
+    }
+
+    private int legacyStatus(Hash256 hash) {
+        int status = 0;
+        if (database.get(key(BLOCK_PREFIX, hash)) != null) status |= HAVE_DATA;
+        if (database.get(key(UNDO_PREFIX, hash)) != null) status |= HAVE_UNDO;
+        return status;
     }
 
     private static int decode(byte[] value) {

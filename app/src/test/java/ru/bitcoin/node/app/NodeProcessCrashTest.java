@@ -163,7 +163,7 @@ class NodeProcessCrashTest {
         }
     }
 
-    private static NodeValidationService service(RocksDbDatabase db) {
+    static NodeValidationService service(RocksDbDatabase db) {
         new ru.bitcoin.node.chain.ChainstateConsistencyChecker(db, NetworkParametersRegistry.regtest(),
                 ru.bitcoin.node.chain.ChainstateConsistencyChecker.DEFAULT_REORG_SAFETY_DEPTH).verify();
         return new NodeValidationService(db, NetworkParametersRegistry.regtest(), () -> 1_800_000_000L, new Mempool());
@@ -183,7 +183,7 @@ class NodeProcessCrashTest {
         }
     }
 
-    private static void assertState(NodeValidationService expected, NodeValidationService actual) {
+    static void assertState(NodeValidationService expected, NodeValidationService actual) {
         assertEquals(expected.activeTip().hash(), actual.activeTip().hash());
         assertEquals(expected.activeTip().chainWork(), actual.activeTip().chainWork());
         var left = expected.utxoSetInfo();
@@ -211,7 +211,7 @@ class NodeProcessCrashTest {
             throw new IllegalStateException("Fixture block did not connect");
     }
 
-    private record Action(Block block, Hash256 failureRoot, boolean reconnect, List<OutPoint> points) {
+    record Action(Block block, Hash256 failureRoot, boolean reconnect, List<OutPoint> points) {
         void apply(NodeValidationService service) {
             if (block != null) {
                 if (service.processBlock(block) != BlockProcessingResult.CONNECTED)
@@ -221,7 +221,7 @@ class NodeProcessCrashTest {
         }
     }
 
-    private static Action prepare(NodeValidationService service, RocksDbDatabase db, String scenario, Path forkData) {
+    static Action prepare(NodeValidationService service, RocksDbDatabase db, String scenario, Path forkData) {
         if (scenario.equals("coinbase")) {
             for (int i = 0; i < BASE_HEIGHT; i++) connect(service, db);
             return new Action(candidate(service, db), null, false, List.of());

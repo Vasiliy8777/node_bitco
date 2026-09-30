@@ -66,3 +66,23 @@ set. Raw blocks, undo availability and chainwork are compared with the reference
 If A remains active, B104 is resubmitted before the existing invalidate/reconsider
 and further-block checks. A racing kill may happen outside the native commit;
 these tests do not claim deterministic failure injection inside RocksDB.
+
+## Rejected native writes (30 September 2026)
+
+`NodeStorageFailureTest` adds ten scenarios: IOError and IOError/NoSpace at the
+RocksDB write boundary for spending-block commit, disconnect, reconnect, competing
+fork activation and header-batch submission. The database and node are real; a
+test-only delegate rejects the native write before it executes. Assertions compare
+all persisted namespaces and their generation counters, chain/UTXO state and header
+publication. Removing the fault must permit retry, reopening and further transitions.
+
+These checks exposed availability migration writing metadata outside the pending
+batch. Batch preparation now derives legacy flags without persisting them separately;
+the metadata becomes durable with the batch. A storage regression test also cancels
+an uncommitted batch, reopens the database and retries while preserving legacy flags.
+
+The gate requires all ten failure scenarios without skips. Pass `-CoreBinary` with
+the path to `bitcoind` to include the Bitcoin Core roundtrip in its `clean test` run.
+Injected pre-write rejection does not simulate actual disk exhaustion, a partial WAL
+write, an error with uncertain commit outcome, power loss or sustained resource load.
+Those checks, along with snapshot-finalization fault coverage, remain open.

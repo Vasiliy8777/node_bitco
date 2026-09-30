@@ -258,3 +258,33 @@ A103 выполняется повторная отправка B104. Далее
 4 skipped. Все 15 process-crash сценариев выполнены (31.77 с), проверка их имён
 в gate прошла. Core roundtrip не активирован в этом прогоне. Логи:
 `../crash-fork-focused.log`, `../crash-fork-stage.log`.
+
+## Пятый этап: отказ записи и атомарность availability — 30 сентября
+
+Добавлен NodeStorageFailureTest: десять сценариев IOError и IOError/NoSpace при
+подключении блока с расходованиями, disconnect, reconnect, переключении ветки и
+записи пакета заголовков. Реальная БД используется через тестовый делегат, который
+отклоняет native write до его выполнения. Проверяются все пространства ключей,
+счётчики изменений, состояние цепочки и UTXO, публикация best header; затем повтор
+операции без отказа, переоткрытие БД и дальнейшие переходы цепи.
+
+Найден и исправлен побочный эффект: подготовка batch через markUndo вызывала status,
+который сохранял lazy-migration availability отдельным database.put. Отладчик
+подтвердил путь commit → save undo → markUndo → status → put и отсутствие прежнего
+значения метаданных. Теперь legacy-флаги вычисляются без отдельной записи, а
+availability сохраняется атомарно с batch. Добавлен storage-тест отмены batch,
+переоткрытия и повторной записи с сохранением legacy-флагов.
+
+Целевые тесты отказов, availability и BlockDownloadWindowStallDetectorTest прошли.
+Gate требует все десять сценариев отказа без skipped и принимает параметр
+`-CoreBinary` для roundtrip с Bitcoin Core. Это моделирование отказа перед записью,
+а не настоящий disk-full или частичный WAL write: неопределённый результат commit,
+power-loss, snapshot finalization и длительная нагрузка остаются открытыми.
+Testnet4/BIP94 этим этапом не изменён.
+
+Итог пятого этапа: `crash-recovery-resource-dos-stage-gate.ps1 -CoreBinary
+'C:/Program Files/Bitcoin/daemon/bitcoind.exe'` завершился с exit 0 после `clean test`:
+3788 тестов, 0 failures/errors, 3 skipped. Выполнены все 15 process-crash,
+10 storage-failure, 3 availability и 4 stall-detector теста. Core mining roundtrip
+выполнен без пропуска. Логи: `../storage-failure-focused.log`,
+`../storage-failure-stage.log`.
