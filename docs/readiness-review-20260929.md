@@ -368,3 +368,28 @@ harness: импорт snapshot и фоновая проверка истории
 3813 тестов, 0 failures/errors, 3 skipped. Все 5 новых snapshot process-crash
 сценариев выполнены (91.49 с), оба Core integration теста прошли без пропусков.
 Лог: `../snapshot-crash-stage.log`.
+
+## Девятый этап: process-crash при откате INVALID snapshot — 30 сентября
+
+Добавлены два сценария SnapshotProcessCrashTest: завершение JVM до rollback и
+после его синхронного native commit. Фикстура имеет исторический tip/UTXO высоты 1
+и snapshot tip высоты 2; маркер INVALID устанавливает harness. Блок высоты 2 сам
+по себе валиден и явно инвалидирован фикстурой. Проверяется восстановление после
+решения об откате, а не обнаружение невалидности snapshot.
+
+После перезапуска проверяются выбор исторического tip и UTXO, удаление маркеров,
+сохранность failure flag и диагностических staging-байтов. Заведомо недекодируемые
+staging-данные не должны читаться как активные coins. Состояние сопоставляется с
+независимой эталонной цепочкой; затем выполняются явный reconsider, новый блок
+и ещё одно переоткрытие. Производственный код менять не потребовалось.
+
+Целевой прогон двух новых сценариев и ChainInitializerTest прошёл без ошибок.
+Gate теперь требует все семь snapshot process-crash сценариев без пропусков.
+Лог: ../snapshot-rollback-focused.log. Реальные disk/WAL faults, power-loss,
+остановка внутри native write и длительная нагрузка остаются открытыми.
+
+Итог девятого этапа: полный recovery stage gate с clean test и параметром
+-CoreBinary 'C:/Program Files/Bitcoin/daemon/bitcoind.exe' — exit 0.
+3816 тестов, 0 failures/errors, 3 skipped. Все 7 snapshot process-crash сценариев
+выполнены (74.61 с), оба Core integration теста прошли без пропусков.
+Лог: ../snapshot-rollback-stage.log.

@@ -134,3 +134,19 @@ block is mined and the database reopened again.
 The gate requires all five named scenarios without failures or skips. These are
 deterministic process kills between native commits, not kills inside native writes,
 power-loss simulations or real filesystem/WAL fault injection.
+
+## Process termination during invalid snapshot rollback
+
+Two additional SnapshotProcessCrashTest cases terminate the child before rollback
+or immediately after its synchronous native commit. The harness installs INVALID
+background metadata, with the historical UTXO set at height 1 and a snapshot tip
+at height 2. Undecodable staging data must remain diagnostic-only across recovery.
+The fixture explicitly invalidates the otherwise valid height-2 block to preserve
+the historical tip; this tests rollback, not detection of an invalid snapshot.
+
+Recovery must select the historical tip and coins, atomically remove activation
+and background markers, preserve diagnostic staging bytes and the existing block
+failure flag, and match an independent reference. Explicit reconsider, another
+mined block and another reopening verify subsequent chain operation. The gate now
+requires all seven named snapshot process-crash scenarios without skips. Kills
+inside native writes, real disk/WAL faults and power-loss remain outside coverage.

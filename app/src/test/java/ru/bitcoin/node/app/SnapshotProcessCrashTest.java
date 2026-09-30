@@ -33,7 +33,67 @@ class SnapshotProcessCrashTest {
     @Test void killAfterFirstCopyBatch() throws Exception { verifyCrash(2); }
     @Test void killAfterLastCopyBatch() throws Exception { verifyCrash(3); }
     @Test void killAfterCleanupCommit() throws Exception { verifyCrash(4); }
+    @Test void killBeforeInvalidSnapshotRollback() throws Exception { verifyInvalidRollback(0); }
+    @Test void killAfterInvalidSnapshotRollbackCommit() throws Exception { verifyInvalidRollback(1); }
 
+    private void verifyInvalidRollback(int boundary) throws Exception {
+        Path data = directory.resolve("invalid");
+        var params = NetworkParametersRegistry.regtest();
+        ru.bitcoin.node.common.types.Hash256 snapshotTip;
+        ru.bitcoin.node.common.types.Hash256 historicalTip;
+        byte[] diagnosticKey = {RocksDbNamespaces.SNAPSHOT_UTXO_STAGING, 99};
+        try (var db = new RocksDbDatabase(data); var node = service(db)) {
+            connect(node, false);
+            historicalTip = node.activeTip().hash();
+            connect(node, false);
+            snapshotTip = node.activeTip().hash();
+            node.invalidateBlock(snapshotTip);
+        }
+        try (var db = new RocksDbDatabase(data)) {
+            new RocksDbSnapshotChainStateStore(db).activate(historicalTip, 1, snapshotTip, 2);
+            var background = new RocksDbAssumeUtxoBackgroundStore(db);
+            background.initialize(historicalTip, 1);
+            background.mark(RocksDbAssumeUtxoBackgroundStore.Status.INVALID, historicalTip, 1);
+            // Deliberately undecodable: startup must never select the invalid snapshot coins.
+            db.put(diagnosticKey, new byte[]{42});
+        }
+        killAtBoundary(data, boundary);
+        try (var db = new RocksDbDatabase(data)) {
+            assertEquals(boundary == 0, new RocksDbSnapshotChainStateStore(db).load().isPresent());
+            assertEquals(boundary == 0, new RocksDbAssumeUtxoBackgroundStore(db).load().isPresent());
+            assertEquals(boundary == 0 ? snapshotTip : historicalTip,
+                    new RocksDbChainStateStore(db).loadActiveTipHash().orElseThrow());
+            assertArrayEquals(new byte[]{42}, db.get(diagnosticKey));
+            try (var actual = service(db); var referenceDb = new RocksDbDatabase(directory.resolve("reference"));
+                 var reference = service(referenceDb)) {
+                connect(reference, false);
+                connect(reference, false);
+                reference.invalidateBlock(snapshotTip);
+                NodeProcessCrashTest.assertState(reference, actual);
+                assertEquals(historicalTip, actual.activeTip().hash());
+                assertEquals(1, actual.utxoSetInfo().txouts());
+                assertTrue(actual.isBlockFailed(snapshotTip));
+                assertTrue(new RocksDbSnapshotChainStateStore(db).load().isEmpty());
+                assertTrue(new RocksDbAssumeUtxoBackgroundStore(db).load().isEmpty());
+                assertArrayEquals(new byte[]{42}, db.get(diagnosticKey));
+                assertFalse(new RocksDbAssumeUtxoFinalizer(db).finalizeOnStartup());
+                new ChainstateConsistencyChecker(db, params,
+                        ChainstateConsistencyChecker.DEFAULT_REORG_SAFETY_DEPTH).verify();
+                // The fixture's block is valid: explicit reconsider tests recovered undo/chain control.
+                actual.reconsiderBlock(snapshotTip);
+                reference.reconsiderBlock(snapshotTip);
+                NodeProcessCrashTest.assertState(reference, actual);
+                connect(actual, false);
+                connect(reference, false);
+                NodeProcessCrashTest.assertState(reference, actual);
+            }
+        }
+        try (var db = new RocksDbDatabase(data); var node = service(db)) {
+            assertEquals(3, node.activeTip().height());
+            assertEquals(3, node.utxoSetInfo().txouts());
+            assertArrayEquals(new byte[]{42}, db.get(diagnosticKey));
+        }
+    }
     private void verifyCrash(int boundary) throws Exception {
         Path data = directory.resolve("actual");
         try (var db = new RocksDbDatabase(data); var node = service(db)) {
@@ -61,6 +121,11 @@ class SnapshotProcessCrashTest {
             background.initialize(genesis, 0);
             background.mark(RocksDbAssumeUtxoBackgroundStore.Status.VALIDATED, base, 1);
         }
+        killAtBoundary(data, boundary);
+        verifyRecoveredPromotion(data, boundary);
+    }
+
+    private void killAtBoundary(Path data, int boundary) throws Exception {
         Path marker = directory.resolve("boundary");
         Path log = directory.resolve("child.log");
         String java = Path.of(System.getProperty("java.home"), "bin",
@@ -82,6 +147,9 @@ class SnapshotProcessCrashTest {
             }
         }
         NodeProcessCrashTest.awaitLockFileRelease(data);
+    }
+
+    private void verifyRecoveredPromotion(Path data, int boundary) throws Exception {
         try (var db = new RocksDbDatabase(data)) {
             assertEquals(boundary < 4, new RocksDbSnapshotChainStateStore(db).load().isPresent());
             assertEquals(boundary < 4, new RocksDbAssumeUtxoBackgroundStore(db).load().isPresent());

@@ -63,17 +63,18 @@ try {
     if (-not (Test-Path -LiteralPath $snapshotReport)) { throw 'missing executed snapshot process-crash report' }
     [xml]$snapshotResults = Get-Content -LiteralPath $snapshotReport -Raw
     $snapshotSuite = $snapshotResults.testsuite
-    if ([int]$snapshotSuite.tests -lt 5 -or [int]$snapshotSuite.failures -ne 0 -or
+    if ([int]$snapshotSuite.tests -lt 7 -or [int]$snapshotSuite.failures -ne 0 -or
         [int]$snapshotSuite.errors -ne 0 -or [int]$snapshotSuite.skipped -ne 0) {
         throw 'snapshot process-crash tests must execute without failures or skips'
     }
     $snapshotCases = @($snapshotSuite.testcase | ForEach-Object { $_.name })
     foreach ($case in @('killBeforePromotion', 'killAfterCanonicalClear', 'killAfterFirstCopyBatch',
-            'killAfterLastCopyBatch', 'killAfterCleanupCommit')) {
+            'killAfterLastCopyBatch', 'killAfterCleanupCommit', 'killBeforeInvalidSnapshotRollback',
+            'killAfterInvalidSnapshotRollbackCommit')) {
         if ($case -notin $snapshotCases) { throw "missing executed snapshot crash scenario: $case" }
     }
     Write-Host '[OK] full reactor test suite'
-    Write-Host '[OK] forced termination at five snapshot promotion boundaries; startup, UTXO, undo and continued mining checks'
+    Write-Host '[OK] forced termination at five snapshot promotion and two invalid-snapshot rollback boundaries; startup, UTXO, undo and continued mining checks'
     Write-Host '[OK] forced termination before/after/racing coinbase, dependent spends, disconnect/reconnect and competing-fork activation; chain/UTXO/undo checks'
     Write-Host '[OK] pruning, parser/P2P/RPC bounds, per-peer relay budgets and BIP157 overload contracts present'
     Write-Host '[OK] injected pre-commit IOError/NoSpace preserves state and allows retry'

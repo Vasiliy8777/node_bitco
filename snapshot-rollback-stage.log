@@ -1,0 +1,1836 @@
+[INFO] Scanning for projects...
+[INFO] ------------------------------------------------------------------------
+[INFO] Reactor Build Order:
+[INFO] 
+[INFO] bitcoin-node                                                       [pom]
+[INFO] common                                                             [jar]
+[INFO] crypto                                                             [jar]
+[INFO] protocol                                                           [jar]
+[INFO] script                                                             [jar]
+[INFO] consensus                                                          [jar]
+[INFO] storage                                                            [jar]
+[INFO] chain                                                              [jar]
+[INFO] mempool                                                            [jar]
+[INFO] p2p                                                                [jar]
+[INFO] mining                                                             [jar]
+[INFO] stratum                                                            [jar]
+[INFO] app                                                                [jar]
+[INFO] 
+[INFO] -----------------------< ru.bitcoin.mining:node >-----------------------
+[INFO] Building bitcoin-node 0.0.1-SNAPSHOT                              [1/13]
+[INFO]   from pom.xml
+[INFO] --------------------------------[ pom ]---------------------------------
+[INFO] 
+[INFO] --- clean:3.2.0:clean (default-clean) @ node ---
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ node ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] ----------------------< ru.bitcoin.mining:common >----------------------
+[INFO] Building common 0.0.1-SNAPSHOT                                    [2/13]
+[INFO]   from common\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- clean:3.2.0:clean (default-clean) @ common ---
+[INFO] Deleting C:\Users\Vasiliy\IdeaProjects\bitcoin-node\common\target
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ common ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.4.0:resources (default-resources) @ common ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.15.0:compile (default-compile) @ common ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed source code.
+[INFO] Compiling 8 source files with javac [forked debug release 21] to target\classes
+[INFO] 
+[INFO] --- resources:3.4.0:testResources (default-testResources) @ common ---
+[INFO] skip non existing resourceDirectory C:\Users\Vasiliy\IdeaProjects\bitcoin-node\common\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.15.0:testCompile (default-testCompile) @ common ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 3 source files with javac [forked debug release 21] to target\test-classes
+[INFO] 
+[INFO] --- surefire:3.5.4:test (default-test) @ common ---
+[INFO] Toolchain in maven-surefire-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running ru.bitcoin.node.CompactSizeTest
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.047 s -- in ru.bitcoin.node.CompactSizeTest
+[INFO] Running ru.bitcoin.node.LittleEndianTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in ru.bitcoin.node.LittleEndianTest
+[INFO] Running ru.bitcoin.node.VarIntTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.008 s -- in ru.bitcoin.node.VarIntTest
+[INFO] 
+[INFO] Results:
+[INFO] 
+[INFO] Tests run: 13, Failures: 0, Errors: 0, Skipped: 0
+[INFO] 
+[INFO] 
+[INFO] ----------------------< ru.bitcoin.mining:crypto >----------------------
+[INFO] Building crypto 0.0.1-SNAPSHOT                                    [3/13]
+[INFO]   from crypto\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- clean:3.2.0:clean (default-clean) @ crypto ---
+[INFO] Deleting C:\Users\Vasiliy\IdeaProjects\bitcoin-node\crypto\target
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ crypto ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.4.0:resources (default-resources) @ crypto ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.15.0:compile (default-compile) @ crypto ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 25 source files with javac [forked debug release 21] to target\classes
+[INFO] 
+[INFO] --- resources:3.4.0:testResources (default-testResources) @ crypto ---
+[INFO] Copying 2 resources from src\test\resources to target\test-classes
+[INFO] 
+[INFO] --- compiler:3.15.0:testCompile (default-testCompile) @ crypto ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 19 source files with javac [forked debug release 21] to target\test-classes
+[INFO] 
+[INFO] --- surefire:3.5.4:test (default-test) @ crypto ---
+[INFO] Toolchain in maven-surefire-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running ru.bitcoin.node.crypto.Bip340VectorIntegrityTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.041 s -- in ru.bitcoin.node.crypto.Bip340VectorIntegrityTest
+[INFO] Running ru.bitcoin.node.crypto.filter.BasicBlockFilterTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.009 s -- in ru.bitcoin.node.crypto.filter.BasicBlockFilterTest
+[INFO] Running ru.bitcoin.node.crypto.hash.Hash160Test
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.042 s -- in ru.bitcoin.node.crypto.hash.Hash160Test
+[INFO] Running ru.bitcoin.node.crypto.hash.Hash256DigestTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in ru.bitcoin.node.crypto.hash.Hash256DigestTest
+[INFO] Running ru.bitcoin.node.crypto.hash.MuHash3072StateTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.011 s -- in ru.bitcoin.node.crypto.hash.MuHash3072StateTest
+[INFO] Running ru.bitcoin.node.crypto.hash.MuHash3072Test
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.009 s -- in ru.bitcoin.node.crypto.hash.MuHash3072Test
+[INFO] Running ru.bitcoin.node.crypto.hash.Ripemd160Test
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in ru.bitcoin.node.crypto.hash.Ripemd160Test
+[INFO] Running ru.bitcoin.node.crypto.hash.Sha1Test
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in ru.bitcoin.node.crypto.hash.Sha1Test
+[INFO] Running ru.bitcoin.node.crypto.hash.Sha256Test
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in ru.bitcoin.node.crypto.hash.Sha256Test
+[INFO] Running ru.bitcoin.node.crypto.merkle.MerkleTreeTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.007 s -- in ru.bitcoin.node.crypto.merkle.MerkleTreeTest
+[INFO] Running ru.bitcoin.node.crypto.SchnorrSignatureTest
+[INFO] Tests run: 19, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.041 s -- in ru.bitcoin.node.crypto.SchnorrSignatureTest
+[INFO] Running ru.bitcoin.node.crypto.secp256k1.EcdsaTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.026 s -- in ru.bitcoin.node.crypto.secp256k1.EcdsaTest
+[INFO] Running ru.bitcoin.node.crypto.secp256k1.LegacyDerSignatureReaderTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in ru.bitcoin.node.crypto.secp256k1.LegacyDerSignatureReaderTest
+[INFO] Running ru.bitcoin.node.crypto.secp256k1.Secp256k1Test
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in ru.bitcoin.node.crypto.secp256k1.Secp256k1Test
+[INFO] Running ru.bitcoin.node.crypto.transport.Bip324ElligatorSwiftTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.018 s -- in ru.bitcoin.node.crypto.transport.Bip324ElligatorSwiftTest
+[INFO] Running ru.bitcoin.node.crypto.transport.Bip324KeyExchangeTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.026 s -- in ru.bitcoin.node.crypto.transport.Bip324KeyExchangeTest
+[INFO] Running ru.bitcoin.node.crypto.transport.Bip324OfficialVectorsTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in ru.bitcoin.node.crypto.transport.Bip324OfficialVectorsTest
+[INFO] Running ru.bitcoin.node.crypto.transport.Bip324PacketCipherTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.018 s -- in ru.bitcoin.node.crypto.transport.Bip324PacketCipherTest
+[INFO] Running ru.bitcoin.node.crypto.transport.HkdfSha256Test
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in ru.bitcoin.node.crypto.transport.HkdfSha256Test
+[INFO] 
+[INFO] Results:
+[INFO] 
+[INFO] Tests run: 63, Failures: 0, Errors: 0, Skipped: 0
+[INFO] 
+[INFO] 
+[INFO] ---------------------< ru.bitcoin.mining:protocol >---------------------
+[INFO] Building protocol 0.0.1-SNAPSHOT                                  [4/13]
+[INFO]   from protocol\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- clean:3.2.0:clean (default-clean) @ protocol ---
+[INFO] Deleting C:\Users\Vasiliy\IdeaProjects\bitcoin-node\protocol\target
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ protocol ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.4.0:resources (default-resources) @ protocol ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.15.0:compile (default-compile) @ protocol ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 24 source files with javac [forked debug release 21] to target\classes
+[INFO] 
+[INFO] --- resources:3.4.0:testResources (default-testResources) @ protocol ---
+[INFO] skip non existing resourceDirectory C:\Users\Vasiliy\IdeaProjects\bitcoin-node\protocol\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.15.0:testCompile (default-testCompile) @ protocol ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 8 source files with javac [forked debug release 21] to target\test-classes
+[INFO] 
+[INFO] --- surefire:3.5.4:test (default-test) @ protocol ---
+[INFO] Toolchain in maven-surefire-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running ru.bitcoin.node.protocol.serialization.block.BlockHeaderTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.075 s -- in ru.bitcoin.node.protocol.serialization.block.BlockHeaderTest
+[INFO] Running ru.bitcoin.node.protocol.serialization.block.BlockTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in ru.bitcoin.node.protocol.serialization.block.BlockTest
+[INFO] Running ru.bitcoin.node.protocol.serialization.block.GenesisBlockFactoryTest
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.012 s -- in ru.bitcoin.node.protocol.serialization.block.GenesisBlockFactoryTest
+[INFO] Running ru.bitcoin.node.protocol.serialization.block.GenesisBlockTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in ru.bitcoin.node.protocol.serialization.block.GenesisBlockTest
+[INFO] Running ru.bitcoin.node.protocol.serialization.network.NetworkParametersRegistryTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.006 s -- in ru.bitcoin.node.protocol.serialization.network.NetworkParametersRegistryTest
+[INFO] Running ru.bitcoin.node.protocol.serialization.network.NetworkParametersTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.006 s -- in ru.bitcoin.node.protocol.serialization.network.NetworkParametersTest
+[INFO] Running ru.bitcoin.node.protocol.serialization.ParserLimitsTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in ru.bitcoin.node.protocol.serialization.ParserLimitsTest
+[INFO] Running ru.bitcoin.node.protocol.serialization.TransactionSerializerTest
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.008 s -- in ru.bitcoin.node.protocol.serialization.TransactionSerializerTest
+[INFO] 
+[INFO] Results:
+[INFO] 
+[INFO] Tests run: 33, Failures: 0, Errors: 0, Skipped: 0
+[INFO] 
+[INFO] 
+[INFO] ----------------------< ru.bitcoin.mining:script >----------------------
+[INFO] Building script 0.0.1-SNAPSHOT                                    [5/13]
+[INFO]   from script\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- clean:3.2.0:clean (default-clean) @ script ---
+[INFO] Deleting C:\Users\Vasiliy\IdeaProjects\bitcoin-node\script\target
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ script ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.4.0:resources (default-resources) @ script ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.15.0:compile (default-compile) @ script ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 39 source files with javac [forked debug release 21] to target\classes
+[INFO] 
+[INFO] --- resources:3.4.0:testResources (default-testResources) @ script ---
+[INFO] Copying 8 resources from src\test\resources to target\test-classes
+[INFO] 
+[INFO] --- compiler:3.15.0:testCompile (default-testCompile) @ script ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 48 source files with javac [forked debug release 21] to target\test-classes
+[INFO] 
+[INFO] --- surefire:3.5.4:test (default-test) @ script ---
+[INFO] Toolchain in maven-surefire-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running ru.bitcoin.node.script.BitcoinCoreLegacySignatureHashTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.096 s -- in ru.bitcoin.node.script.BitcoinCoreLegacySignatureHashTest
+[INFO] Running ru.bitcoin.node.script.BitcoinCoreSighashVectorsTest
+[INFO] Tests run: 500, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.166 s -- in ru.bitcoin.node.script.BitcoinCoreSighashVectorsTest
+[INFO] Running ru.bitcoin.node.script.CheckLockTimeVerifyTest
+[INFO] Tests run: 9, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.022 s -- in ru.bitcoin.node.script.CheckLockTimeVerifyTest
+[INFO] Running ru.bitcoin.node.script.CheckSequenceVerifyTest
+[INFO] Tests run: 13, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.014 s -- in ru.bitcoin.node.script.CheckSequenceVerifyTest
+[INFO] Running ru.bitcoin.node.script.CheckSigTest
+[INFO] Tests run: 11, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.160 s -- in ru.bitcoin.node.script.CheckSigTest
+[INFO] Running ru.bitcoin.node.script.ConsensusVectorIntegrityTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in ru.bitcoin.node.script.ConsensusVectorIntegrityTest
+[INFO] Running ru.bitcoin.node.script.ConstScriptCodeExecutionTest
+[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.008 s -- in ru.bitcoin.node.script.ConstScriptCodeExecutionTest
+[INFO] Running ru.bitcoin.node.script.ConstScriptCodeSeparatorTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in ru.bitcoin.node.script.ConstScriptCodeSeparatorTest
+[INFO] Running ru.bitcoin.node.script.ConstScriptCodeTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.006 s -- in ru.bitcoin.node.script.ConstScriptCodeTest
+[INFO] Running ru.bitcoin.node.script.DiscourageUpgradableNopsTest
+[INFO] Tests run: 11, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.006 s -- in ru.bitcoin.node.script.DiscourageUpgradableNopsTest
+[INFO] Running ru.bitcoin.node.script.LegacyCleanStackTest
+[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in ru.bitcoin.node.script.LegacyCleanStackTest
+[INFO] Running ru.bitcoin.node.script.LegacyP2shVerifierTest
+[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.006 s -- in ru.bitcoin.node.script.LegacyP2shVerifierTest
+[INFO] Running ru.bitcoin.node.script.LegacyScriptCodeTest
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in ru.bitcoin.node.script.LegacyScriptCodeTest
+[INFO] Running ru.bitcoin.node.script.LegacySignatureHashTest
+[INFO] Tests run: 10, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in ru.bitcoin.node.script.LegacySignatureHashTest
+[INFO] Running ru.bitcoin.node.script.MinimalPushTest
+[INFO] Tests run: 12, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in ru.bitcoin.node.script.MinimalPushTest
+[INFO] Running ru.bitcoin.node.script.MultisigOrderRegressionTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in ru.bitcoin.node.script.MultisigOrderRegressionTest
+[INFO] Running ru.bitcoin.node.script.P2pkhScriptTest
+[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.010 s -- in ru.bitcoin.node.script.P2pkhScriptTest
+[INFO] Running ru.bitcoin.node.script.P2shScriptTest
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in ru.bitcoin.node.script.P2shScriptTest
+[INFO] Running ru.bitcoin.node.script.P2shWitnessProgramTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in ru.bitcoin.node.script.P2shWitnessProgramTest
+[INFO] Running ru.bitcoin.node.script.ScriptAltStackTest
+[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in ru.bitcoin.node.script.ScriptAltStackTest
+[INFO] Running ru.bitcoin.node.script.ScriptBinaryNumericOpcodeTest
+[INFO] Tests run: 22, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.009 s -- in ru.bitcoin.node.script.ScriptBinaryNumericOpcodeTest
+[INFO] Running ru.bitcoin.node.script.ScriptConditionalTest
+[INFO] Tests run: 10, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.008 s -- in ru.bitcoin.node.script.ScriptConditionalTest
+[INFO] Running ru.bitcoin.node.script.ScriptConsensusLimitsTest
+[INFO] Tests run: 9, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.008 s -- in ru.bitcoin.node.script.ScriptConsensusLimitsTest
+[INFO] Running ru.bitcoin.node.script.ScriptDisabledOpcodeTest
+[INFO] Tests run: 10, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.009 s -- in ru.bitcoin.node.script.ScriptDisabledOpcodeTest
+[INFO] Running ru.bitcoin.node.script.ScriptHashOpcodeTest
+[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.008 s -- in ru.bitcoin.node.script.ScriptHashOpcodeTest
+[INFO] Running ru.bitcoin.node.script.ScriptInterpreterCheckMultiSigTest
+[INFO] Tests run: 10, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.023 s -- in ru.bitcoin.node.script.ScriptInterpreterCheckMultiSigTest
+[INFO] Running ru.bitcoin.node.script.ScriptInterpreterTest
+[INFO] Tests run: 18, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.007 s -- in ru.bitcoin.node.script.ScriptInterpreterTest
+[INFO] Running ru.bitcoin.node.script.ScriptMachineTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0 s -- in ru.bitcoin.node.script.ScriptMachineTest
+[INFO] Running ru.bitcoin.node.script.ScriptMinimalDataTest
+[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.009 s -- in ru.bitcoin.node.script.ScriptMinimalDataTest
+[INFO] Running ru.bitcoin.node.script.ScriptMinimalIfTest
+[INFO] Tests run: 12, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.009 s -- in ru.bitcoin.node.script.ScriptMinimalIfTest
+[INFO] Running ru.bitcoin.node.script.ScriptNullFailTest
+[INFO] Tests run: 11, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.014 s -- in ru.bitcoin.node.script.ScriptNullFailTest
+[INFO] Running ru.bitcoin.node.script.ScriptNumberMinimalEncodingTest
+[INFO] Tests run: 10, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in ru.bitcoin.node.script.ScriptNumberMinimalEncodingTest
+[INFO] Running ru.bitcoin.node.script.ScriptNumberTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in ru.bitcoin.node.script.ScriptNumberTest
+[INFO] Running ru.bitcoin.node.script.ScriptParserTest
+[INFO] Tests run: 12, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in ru.bitcoin.node.script.ScriptParserTest
+[INFO] Running ru.bitcoin.node.script.ScriptPubKeyClassifierTest
+[INFO] Tests run: 18, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in ru.bitcoin.node.script.ScriptPubKeyClassifierTest
+[INFO] Running ru.bitcoin.node.script.ScriptStackOpcodeTest
+[INFO] Tests run: 25, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.011 s -- in ru.bitcoin.node.script.ScriptStackOpcodeTest
+[INFO] Running ru.bitcoin.node.script.ScriptUnaryNumericOpcodeTest
+[INFO] Tests run: 16, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.006 s -- in ru.bitcoin.node.script.ScriptUnaryNumericOpcodeTest
+[INFO] Running ru.bitcoin.node.script.ScriptVerifyFlagNamesTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in ru.bitcoin.node.script.ScriptVerifyFlagNamesTest
+[INFO] Running ru.bitcoin.node.script.SignatureEncodingTest
+[INFO] Tests run: 19, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.017 s -- in ru.bitcoin.node.script.SignatureEncodingTest
+[INFO] Running ru.bitcoin.node.script.SignatureStrictEncodingTest
+[INFO] Tests run: 14, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in ru.bitcoin.node.script.SignatureStrictEncodingTest
+[INFO] Running ru.bitcoin.node.script.SigOpCounterTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in ru.bitcoin.node.script.SigOpCounterTest
+[INFO] Running ru.bitcoin.node.script.TaprootSignatureHashTest
+[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.016 s -- in ru.bitcoin.node.script.TaprootSignatureHashTest
+[INFO] Running ru.bitcoin.node.script.TaprootValidatorTest
+[INFO] Tests run: 11, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.025 s -- in ru.bitcoin.node.script.TaprootValidatorTest
+[INFO] Running ru.bitcoin.node.script.UnspendableScriptTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in ru.bitcoin.node.script.UnspendableScriptTest
+[INFO] Running ru.bitcoin.node.script.WitnessProgramTest
+[INFO] Tests run: 12, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in ru.bitcoin.node.script.WitnessProgramTest
+[INFO] Running ru.bitcoin.node.script.WitnessPubKeyTypeTest
+[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in ru.bitcoin.node.script.WitnessPubKeyTypeTest
+[INFO] Running ru.bitcoin.node.script.WitnessV0ScriptVerifierTest
+[INFO] Tests run: 10, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.008 s -- in ru.bitcoin.node.script.WitnessV0ScriptVerifierTest
+[INFO] Running ru.bitcoin.node.script.WitnessV0SignatureHashTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in ru.bitcoin.node.script.WitnessV0SignatureHashTest
+[INFO] 
+[INFO] Results:
+[INFO] 
+[INFO] Tests run: 934, Failures: 0, Errors: 0, Skipped: 0
+[INFO] 
+[INFO] 
+[INFO] --------------------< ru.bitcoin.mining:consensus >---------------------
+[INFO] Building consensus 0.0.1-SNAPSHOT                                 [6/13]
+[INFO]   from consensus\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- clean:3.2.0:clean (default-clean) @ consensus ---
+[INFO] Deleting C:\Users\Vasiliy\IdeaProjects\bitcoin-node\consensus\target
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ consensus ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.4.0:resources (default-resources) @ consensus ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.15.0:compile (default-compile) @ consensus ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 49 source files with javac [forked debug release 21] to target\classes
+[INFO] 
+[INFO] --- resources:3.4.0:testResources (default-testResources) @ consensus ---
+[INFO] Copying 7 resources from src\test\resources to target\test-classes
+[INFO] 
+[INFO] --- compiler:3.15.0:testCompile (default-testCompile) @ consensus ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 40 source files with javac [forked debug release 21] to target\test-classes
+[INFO] 
+[INFO] --- surefire:3.5.4:test (default-test) @ consensus ---
+[INFO] Toolchain in maven-surefire-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running ru.bitcoin.node.consensus.block.Bip30Test
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.073 s -- in ru.bitcoin.node.consensus.block.Bip30Test
+[INFO] Running ru.bitcoin.node.consensus.block.Bip34ValidatorTest
+[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.014 s -- in ru.bitcoin.node.consensus.block.Bip34ValidatorTest
+[INFO] Running ru.bitcoin.node.consensus.block.BlockHeaderValidatorTest
+[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.027 s -- in ru.bitcoin.node.consensus.block.BlockHeaderValidatorTest
+[INFO] Running ru.bitcoin.node.consensus.block.BlockValidatorTest
+[INFO] Tests run: 9, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.038 s -- in ru.bitcoin.node.consensus.block.BlockValidatorTest
+[INFO] Running ru.bitcoin.node.consensus.block.BlockWeightTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in ru.bitcoin.node.consensus.block.BlockWeightTest
+[INFO] Running ru.bitcoin.node.consensus.block.CoinbaseValidatorTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.007 s -- in ru.bitcoin.node.consensus.block.CoinbaseValidatorTest
+[INFO] Running ru.bitcoin.node.consensus.block.SignetBlockValidatorTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.146 s -- in ru.bitcoin.node.consensus.block.SignetBlockValidatorTest
+[INFO] Running ru.bitcoin.node.consensus.block.WitnessCommitmentValidatorTest
+[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.008 s -- in ru.bitcoin.node.consensus.block.WitnessCommitmentValidatorTest
+[INFO] Running ru.bitcoin.node.consensus.deployment.DeploymentManagerTest
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.008 s -- in ru.bitcoin.node.consensus.deployment.DeploymentManagerTest
+[INFO] Running ru.bitcoin.node.consensus.money.BlockSubsidyTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in ru.bitcoin.node.consensus.money.BlockSubsidyTest
+[INFO] Running ru.bitcoin.node.consensus.pow.ChainWorkTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in ru.bitcoin.node.consensus.pow.ChainWorkTest
+[INFO] Running ru.bitcoin.node.consensus.pow.CompactTargetTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in ru.bitcoin.node.consensus.pow.CompactTargetTest
+[INFO] Running ru.bitcoin.node.consensus.pow.DifficultyAdjustmentTest
+[INFO] Tests run: 9, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in ru.bitcoin.node.consensus.pow.DifficultyAdjustmentTest
+[INFO] Running ru.bitcoin.node.consensus.pow.MoneyTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in ru.bitcoin.node.consensus.pow.MoneyTest
+[INFO] Running ru.bitcoin.node.consensus.pow.NextWorkRequiredTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in ru.bitcoin.node.consensus.pow.NextWorkRequiredTest
+[INFO] Running ru.bitcoin.node.consensus.pow.ProofOfWorkTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in ru.bitcoin.node.consensus.pow.ProofOfWorkTest
+[INFO] Running ru.bitcoin.node.consensus.script.ConsensusScriptFlagsTest
+[INFO] Tests run: 24, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.012 s -- in ru.bitcoin.node.consensus.script.ConsensusScriptFlagsTest
+[INFO] Running ru.bitcoin.node.consensus.transaction.BitcoinCoreScriptVectorsTest
+[INFO] Tests run: 1212, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.334 s -- in ru.bitcoin.node.consensus.transaction.BitcoinCoreScriptVectorsTest
+[INFO] Running ru.bitcoin.node.consensus.transaction.BitcoinCoreTransactionVectorsTest
+[INFO] Tests run: 213, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.097 s -- in ru.bitcoin.node.consensus.transaction.BitcoinCoreTransactionVectorsTest
+[INFO] Running ru.bitcoin.node.consensus.transaction.ConsensusCorpusIntegrityTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in ru.bitcoin.node.consensus.transaction.ConsensusCorpusIntegrityTest
+[INFO] Running ru.bitcoin.node.consensus.transaction.ConsensusDifferentialStageContractTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in ru.bitcoin.node.consensus.transaction.ConsensusDifferentialStageContractTest
+[INFO] Running ru.bitcoin.node.consensus.transaction.ContextualTransactionValidatorTest
+[INFO] Tests run: 15, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.009 s -- in ru.bitcoin.node.consensus.transaction.ContextualTransactionValidatorTest
+[INFO] Running ru.bitcoin.node.consensus.transaction.InputScriptValidatorP2shP2wpkhTest
+[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.012 s -- in ru.bitcoin.node.consensus.transaction.InputScriptValidatorP2shP2wpkhTest
+[INFO] Running ru.bitcoin.node.consensus.transaction.InputScriptValidatorP2shP2wshTest
+[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.009 s -- in ru.bitcoin.node.consensus.transaction.InputScriptValidatorP2shP2wshTest
+[INFO] Running ru.bitcoin.node.consensus.transaction.InputScriptValidatorP2wpkhTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.010 s -- in ru.bitcoin.node.consensus.transaction.InputScriptValidatorP2wpkhTest
+[INFO] Running ru.bitcoin.node.consensus.transaction.InputScriptValidatorP2wshMultiSigTest
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.010 s -- in ru.bitcoin.node.consensus.transaction.InputScriptValidatorP2wshMultiSigTest
+[INFO] Running ru.bitcoin.node.consensus.transaction.InputScriptValidatorP2wshTest
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.011 s -- in ru.bitcoin.node.consensus.transaction.InputScriptValidatorP2wshTest
+[INFO] Running ru.bitcoin.node.consensus.transaction.InputScriptValidatorTaprootTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in ru.bitcoin.node.consensus.transaction.InputScriptValidatorTaprootTest
+[INFO] Running ru.bitcoin.node.consensus.transaction.InputScriptValidatorTest
+[INFO] Tests run: 10, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.014 s -- in ru.bitcoin.node.consensus.transaction.InputScriptValidatorTest
+[INFO] Running ru.bitcoin.node.consensus.transaction.InputScriptValidatorUpgradableWitnessTest
+[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in ru.bitcoin.node.consensus.transaction.InputScriptValidatorUpgradableWitnessTest
+[INFO] Running ru.bitcoin.node.consensus.transaction.LockTimeCutoffTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in ru.bitcoin.node.consensus.transaction.LockTimeCutoffTest
+[INFO] Running ru.bitcoin.node.consensus.transaction.P2shWitnessWrapperRegressionTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in ru.bitcoin.node.consensus.transaction.P2shWitnessWrapperRegressionTest
+[INFO] Running ru.bitcoin.node.consensus.transaction.SequenceLocksTest
+[INFO] Tests run: 15, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.010 s -- in ru.bitcoin.node.consensus.transaction.SequenceLocksTest
+[INFO] Running ru.bitcoin.node.consensus.transaction.SequenceLockValidatorTest
+[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in ru.bitcoin.node.consensus.transaction.SequenceLockValidatorTest
+[INFO] Running ru.bitcoin.node.consensus.transaction.SigPushOnlyTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in ru.bitcoin.node.consensus.transaction.SigPushOnlyTest
+[INFO] Running ru.bitcoin.node.consensus.transaction.TransactionFinalityTest
+[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.006 s -- in ru.bitcoin.node.consensus.transaction.TransactionFinalityTest
+[INFO] Running ru.bitcoin.node.consensus.transaction.TransactionSigOpCostTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in ru.bitcoin.node.consensus.transaction.TransactionSigOpCostTest
+[INFO] Running ru.bitcoin.node.consensus.transaction.TransactionValidatorTest
+[INFO] Tests run: 11, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.008 s -- in ru.bitcoin.node.consensus.transaction.TransactionValidatorTest
+[INFO] Running ru.bitcoin.node.consensus.transaction.TransactionWeightTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in ru.bitcoin.node.consensus.transaction.TransactionWeightTest
+[INFO] Running ru.bitcoin.node.consensus.transaction.WitnessOuterScriptTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in ru.bitcoin.node.consensus.transaction.WitnessOuterScriptTest
+[INFO] 
+[INFO] Results:
+[INFO] 
+[INFO] Tests run: 1669, Failures: 0, Errors: 0, Skipped: 0
+[INFO] 
+[INFO] 
+[INFO] ---------------------< ru.bitcoin.mining:storage >----------------------
+[INFO] Building storage 0.0.1-SNAPSHOT                                   [7/13]
+[INFO]   from storage\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- clean:3.2.0:clean (default-clean) @ storage ---
+[INFO] Deleting C:\Users\Vasiliy\IdeaProjects\bitcoin-node\storage\target
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ storage ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.4.0:resources (default-resources) @ storage ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.15.0:compile (default-compile) @ storage ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 59 source files with javac [forked debug release 21] to target\classes
+[INFO] 
+[INFO] --- resources:3.4.0:testResources (default-testResources) @ storage ---
+[INFO] skip non existing resourceDirectory C:\Users\Vasiliy\IdeaProjects\bitcoin-node\storage\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.15.0:testCompile (default-testCompile) @ storage ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 44 source files with javac [forked debug release 21] to target\test-classes
+[INFO] 
+[INFO] --- surefire:3.5.4:test (default-test) @ storage ---
+[INFO] Toolchain in maven-surefire-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running ru.bitcoin.node.storage.block.RocksDbBlockAvailabilityStoreTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.310 s -- in ru.bitcoin.node.storage.block.RocksDbBlockAvailabilityStoreTest
+[INFO] Running ru.bitcoin.node.storage.block.RocksDbBlockIndexStoreTest
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.704 s -- in ru.bitcoin.node.storage.block.RocksDbBlockIndexStoreTest
+[INFO] Running ru.bitcoin.node.storage.block.RocksDbBlockStoreTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.179 s -- in ru.bitcoin.node.storage.block.RocksDbBlockStoreTest
+[INFO] Running ru.bitcoin.node.storage.block.RocksDbBlockValidationMigrationStoreTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.039 s -- in ru.bitcoin.node.storage.block.RocksDbBlockValidationMigrationStoreTest
+[INFO] Running ru.bitcoin.node.storage.block.RocksDbBlockValidationStatusStoreTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.038 s -- in ru.bitcoin.node.storage.block.RocksDbBlockValidationStatusStoreTest
+[INFO] Running ru.bitcoin.node.storage.block.RocksDbBlockWorkIndexTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.226 s -- in ru.bitcoin.node.storage.block.RocksDbBlockWorkIndexTest
+[INFO] Running ru.bitcoin.node.storage.block.RocksDbNativeTest
+Java version: 21.0.7
+Java home: C:\Program Files\Java\jdk-21
+OS: Windows 11
+Architecture: amd64
+Loading RocksDB...
+RocksDB loaded successfully
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in ru.bitcoin.node.storage.block.RocksDbNativeTest
+[INFO] Running ru.bitcoin.node.storage.block.StoredBlockIndexSerializerTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in ru.bitcoin.node.storage.block.StoredBlockIndexSerializerTest
+[INFO] Running ru.bitcoin.node.storage.block.StoredBlockIndexTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in ru.bitcoin.node.storage.block.StoredBlockIndexTest
+[INFO] Running ru.bitcoin.node.storage.chain.BlockConnectionStorageTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.184 s -- in ru.bitcoin.node.storage.chain.BlockConnectionStorageTest
+[INFO] Running ru.bitcoin.node.storage.chain.BlockDisconnectionStorageTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.131 s -- in ru.bitcoin.node.storage.chain.BlockDisconnectionStorageTest
+[INFO] Running ru.bitcoin.node.storage.chain.RocksDbChainStateStoreTest
+[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.221 s -- in ru.bitcoin.node.storage.chain.RocksDbChainStateStoreTest
+[INFO] Running ru.bitcoin.node.storage.chain.RocksDbFullReindexStateStoreTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.130 s -- in ru.bitcoin.node.storage.chain.RocksDbFullReindexStateStoreTest
+[INFO] Running ru.bitcoin.node.storage.chain.RocksDbPruneStateStoreTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.097 s -- in ru.bitcoin.node.storage.chain.RocksDbPruneStateStoreTest
+[INFO] Running ru.bitcoin.node.storage.chain.RocksDbPruneUsageStoreTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.263 s -- in ru.bitcoin.node.storage.chain.RocksDbPruneUsageStoreTest
+[INFO] Running ru.bitcoin.node.storage.chain.RocksDbReindexStateStoreTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.051 s -- in ru.bitcoin.node.storage.chain.RocksDbReindexStateStoreTest
+[INFO] Running ru.bitcoin.node.storage.mempool.RocksDbMempoolFeeDeltaStoreTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.028 s -- in ru.bitcoin.node.storage.mempool.RocksDbMempoolFeeDeltaStoreTest
+[INFO] Running ru.bitcoin.node.storage.mempool.RocksDbMempoolStoreTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.075 s -- in ru.bitcoin.node.storage.mempool.RocksDbMempoolStoreTest
+[INFO] Running ru.bitcoin.node.storage.rocksdb.RocksDbDatabaseTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.045 s -- in ru.bitcoin.node.storage.rocksdb.RocksDbDatabaseTest
+[INFO] Running ru.bitcoin.node.storage.rocksdb.RocksDbNamespacesTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in ru.bitcoin.node.storage.rocksdb.RocksDbNamespacesTest
+[INFO] Running ru.bitcoin.node.storage.rocksdb.RocksDbSharedDatabaseTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.086 s -- in ru.bitcoin.node.storage.rocksdb.RocksDbSharedDatabaseTest
+[INFO] Running ru.bitcoin.node.storage.rocksdb.RocksDbStoreBatchTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.038 s -- in ru.bitcoin.node.storage.rocksdb.RocksDbStoreBatchTest
+[INFO] Running ru.bitcoin.node.storage.rocksdb.RocksDbWriteBatchTest
+[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.164 s -- in ru.bitcoin.node.storage.rocksdb.RocksDbWriteBatchTest
+[INFO] Running ru.bitcoin.node.storage.txindex.RocksDbTxIndexStoreTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.061 s -- in ru.bitcoin.node.storage.txindex.RocksDbTxIndexStoreTest
+[INFO] Running ru.bitcoin.node.storage.txospender.RocksDbTxOutSpenderIndexStoreTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.021 s -- in ru.bitcoin.node.storage.txospender.RocksDbTxOutSpenderIndexStoreTest
+[INFO] Running ru.bitcoin.node.storage.undo.BlockUndoDataSerializerTest
+[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in ru.bitcoin.node.storage.undo.BlockUndoDataSerializerTest
+[INFO] Running ru.bitcoin.node.storage.undo.BlockUndoDataTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in ru.bitcoin.node.storage.undo.BlockUndoDataTest
+[INFO] Running ru.bitcoin.node.storage.undo.RocksDbUndoStoreTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.124 s -- in ru.bitcoin.node.storage.undo.RocksDbUndoStoreTest
+[INFO] Running ru.bitcoin.node.storage.undo.TransactionUndoTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in ru.bitcoin.node.storage.undo.TransactionUndoTest
+[INFO] Running ru.bitcoin.node.storage.utxo.CoreCoinStatsSerializerTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in ru.bitcoin.node.storage.utxo.CoreCoinStatsSerializerTest
+[INFO] Running ru.bitcoin.node.storage.utxo.CreatedUtxoTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in ru.bitcoin.node.storage.utxo.CreatedUtxoTest
+[INFO] Running ru.bitcoin.node.storage.utxo.RocksDbAssumeUtxoBackgroundStoreTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.031 s -- in ru.bitcoin.node.storage.utxo.RocksDbAssumeUtxoBackgroundStoreTest
+[INFO] Running ru.bitcoin.node.storage.utxo.RocksDbAssumeUtxoFinalizerTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.096 s -- in ru.bitcoin.node.storage.utxo.RocksDbAssumeUtxoFinalizerTest
+[INFO] Running ru.bitcoin.node.storage.utxo.RocksDbSnapshotChainStateStoreTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.064 s -- in ru.bitcoin.node.storage.utxo.RocksDbSnapshotChainStateStoreTest
+[INFO] Running ru.bitcoin.node.storage.utxo.RocksDbUtxoStoreTest
+[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.212 s -- in ru.bitcoin.node.storage.utxo.RocksDbUtxoStoreTest
+[INFO] Running ru.bitcoin.node.storage.utxo.StoredUtxoSerializerTest
+[INFO] Tests run: 9, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in ru.bitcoin.node.storage.utxo.StoredUtxoSerializerTest
+[INFO] Running ru.bitcoin.node.storage.utxo.StoredUtxoTest
+[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in ru.bitcoin.node.storage.utxo.StoredUtxoTest
+[INFO] Running ru.bitcoin.node.storage.utxo.UtxoChangesTest
+[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in ru.bitcoin.node.storage.utxo.UtxoChangesTest
+[INFO] Running ru.bitcoin.node.storage.utxo.UtxoSnapshotCoinCodecTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in ru.bitcoin.node.storage.utxo.UtxoSnapshotCoinCodecTest
+[INFO] Running ru.bitcoin.node.storage.utxo.UtxoSnapshotMetadataTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in ru.bitcoin.node.storage.utxo.UtxoSnapshotMetadataTest
+[INFO] Running ru.bitcoin.node.storage.utxo.UtxoSnapshotReaderTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.021 s -- in ru.bitcoin.node.storage.utxo.UtxoSnapshotReaderTest
+[INFO] Running ru.bitcoin.node.storage.utxo.UtxoSnapshotStagerTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.019 s -- in ru.bitcoin.node.storage.utxo.UtxoSnapshotStagerTest
+[INFO] Running ru.bitcoin.node.storage.utxo.UtxoSnapshotVerifierTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.019 s -- in ru.bitcoin.node.storage.utxo.UtxoSnapshotVerifierTest
+[INFO] Running ru.bitcoin.node.storage.utxo.UtxoSnapshotWriterTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.053 s -- in ru.bitcoin.node.storage.utxo.UtxoSnapshotWriterTest
+[INFO] 
+[INFO] Results:
+[INFO] 
+[INFO] Tests run: 153, Failures: 0, Errors: 0, Skipped: 0
+[INFO] 
+[INFO] 
+[INFO] ----------------------< ru.bitcoin.mining:chain >-----------------------
+[INFO] Building chain 0.0.1-SNAPSHOT                                     [8/13]
+[INFO]   from chain\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- clean:3.2.0:clean (default-clean) @ chain ---
+[INFO] Deleting C:\Users\Vasiliy\IdeaProjects\bitcoin-node\chain\target
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ chain ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.4.0:resources (default-resources) @ chain ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.15.0:compile (default-compile) @ chain ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 63 source files with javac [forked debug release 21] to target\classes
+[INFO] 
+[INFO] --- resources:3.4.0:testResources (default-testResources) @ chain ---
+[INFO] skip non existing resourceDirectory C:\Users\Vasiliy\IdeaProjects\bitcoin-node\chain\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.15.0:testCompile (default-testCompile) @ chain ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 43 source files with javac [forked debug release 21] to target\test-classes
+[INFO] 
+[INFO] --- surefire:3.5.4:test (default-test) @ chain ---
+[INFO] Toolchain in maven-surefire-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running ru.bitcoin.node.chain.AncestorMedianTimePastResolverTest
+[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.093 s -- in ru.bitcoin.node.chain.AncestorMedianTimePastResolverTest
+[INFO] Running ru.bitcoin.node.chain.AssumeValidPolicyTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.038 s -- in ru.bitcoin.node.chain.AssumeValidPolicyTest
+[INFO] Running ru.bitcoin.node.chain.BlockFailureRecoveryTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.224 s -- in ru.bitcoin.node.chain.BlockFailureRecoveryTest
+[INFO] Running ru.bitcoin.node.chain.BlockFailureResolverTest
+[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.442 s -- in ru.bitcoin.node.chain.BlockFailureResolverTest
+[INFO] Running ru.bitcoin.node.chain.BlockIndexFactoryTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in ru.bitcoin.node.chain.BlockIndexFactoryTest
+[INFO] Running ru.bitcoin.node.chain.BlockIndexMedianTimePastResolverTest
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.007 s -- in ru.bitcoin.node.chain.BlockIndexMedianTimePastResolverTest
+[INFO] Running ru.bitcoin.node.chain.BlockIndexStorageMapperTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in ru.bitcoin.node.chain.BlockIndexStorageMapperTest
+[INFO] Running ru.bitcoin.node.chain.BlockIndexTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in ru.bitcoin.node.chain.BlockIndexTest
+[INFO] Running ru.bitcoin.node.chain.BlockLocatorBuilderTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.009 s -- in ru.bitcoin.node.chain.BlockLocatorBuilderTest
+[INFO] Running ru.bitcoin.node.chain.BlockProcessorTest
+[INFO] Tests run: 20, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.675 s -- in ru.bitcoin.node.chain.BlockProcessorTest
+[INFO] Running ru.bitcoin.node.chain.BlockPrunerTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.184 s -- in ru.bitcoin.node.chain.BlockPrunerTest
+[INFO] Running ru.bitcoin.node.chain.BlockValidationStatusMigratorTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.084 s -- in ru.bitcoin.node.chain.BlockValidationStatusMigratorTest
+[INFO] Running ru.bitcoin.node.chain.ChainHeaderValidatorTest
+[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in ru.bitcoin.node.chain.ChainHeaderValidatorTest
+[INFO] Running ru.bitcoin.node.chain.ChainHeaderVersionTest
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.006 s -- in ru.bitcoin.node.chain.ChainHeaderVersionTest
+[INFO] Running ru.bitcoin.node.chain.ChainInitializerTest
+[INFO] Tests run: 12, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.268 s -- in ru.bitcoin.node.chain.ChainInitializerTest
+[INFO] Running ru.bitcoin.node.chain.ChainReorganizationBip68Test
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.034 s -- in ru.bitcoin.node.chain.ChainReorganizationBip68Test
+[INFO] Running ru.bitcoin.node.chain.ChainReorganizationExecutorSuccessTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.025 s -- in ru.bitcoin.node.chain.ChainReorganizationExecutorSuccessTest
+[INFO] Running ru.bitcoin.node.chain.ChainReorganizationExecutorTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.020 s -- in ru.bitcoin.node.chain.ChainReorganizationExecutorTest
+[INFO] Running ru.bitcoin.node.chain.ChainSelectorTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in ru.bitcoin.node.chain.ChainSelectorTest
+[INFO] Running ru.bitcoin.node.chain.ChainstateConsistencyCheckerTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.102 s -- in ru.bitcoin.node.chain.ChainstateConsistencyCheckerTest
+[INFO] Running ru.bitcoin.node.chain.ChainStateLoaderTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in ru.bitcoin.node.chain.ChainStateLoaderTest
+[INFO] Running ru.bitcoin.node.chain.ChainStateManagerTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in ru.bitcoin.node.chain.ChainStateManagerTest
+[INFO] Running ru.bitcoin.node.chain.ChainstateReindexerTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.100 s -- in ru.bitcoin.node.chain.ChainstateReindexerTest
+[INFO] Running ru.bitcoin.node.chain.ChainStateTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in ru.bitcoin.node.chain.ChainStateTest
+[INFO] Running ru.bitcoin.node.chain.ChainTransitionManagerTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.069 s -- in ru.bitcoin.node.chain.ChainTransitionManagerTest
+[INFO] Running ru.bitcoin.node.chain.CommonAncestorFinderTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in ru.bitcoin.node.chain.CommonAncestorFinderTest
+[INFO] Running ru.bitcoin.node.chain.FullReindexerTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.137 s -- in ru.bitcoin.node.chain.FullReindexerTest
+[INFO] Running ru.bitcoin.node.chain.HeaderBatchProcessorTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.020 s -- in ru.bitcoin.node.chain.HeaderBatchProcessorTest
+[INFO] Running ru.bitcoin.node.chain.HeaderChainStateLoaderTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.070 s -- in ru.bitcoin.node.chain.HeaderChainStateLoaderTest
+[INFO] Running ru.bitcoin.node.chain.HeaderChainStateTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in ru.bitcoin.node.chain.HeaderChainStateTest
+[INFO] Running ru.bitcoin.node.chain.HeaderProcessorTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in ru.bitcoin.node.chain.HeaderProcessorTest
+[INFO] Running ru.bitcoin.node.chain.InitialBlockDownloadStateTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in ru.bitcoin.node.chain.InitialBlockDownloadStateTest
+[INFO] Running ru.bitcoin.node.chain.MedianTimePastTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in ru.bitcoin.node.chain.MedianTimePastTest
+[INFO] Running ru.bitcoin.node.chain.ReorganizationPlannerTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in ru.bitcoin.node.chain.ReorganizationPlannerTest
+[INFO] Running ru.bitcoin.node.chain.storage.KnownBlockStorageTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.040 s -- in ru.bitcoin.node.chain.storage.KnownBlockStorageTest
+[INFO] Running ru.bitcoin.node.chain.storage.KnownHeaderStorageTest
+[INFO] Tests run: 9, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.309 s -- in ru.bitcoin.node.chain.storage.KnownHeaderStorageTest
+[INFO] Running ru.bitcoin.node.chain.storage.RocksDbChainTransitionStorageTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.125 s -- in ru.bitcoin.node.chain.storage.RocksDbChainTransitionStorageTest
+[INFO] Running ru.bitcoin.node.chain.TaprootDeploymentTest
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.056 s -- in ru.bitcoin.node.chain.TaprootDeploymentTest
+[INFO] Running ru.bitcoin.node.chain.Testnet4ConsensusTest
+[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.028 s -- in ru.bitcoin.node.chain.Testnet4ConsensusTest
+[INFO] Running ru.bitcoin.node.chain.utxo.BlockConnectChangesBuilderTest
+[INFO] Tests run: 21, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.029 s -- in ru.bitcoin.node.chain.utxo.BlockConnectChangesBuilderTest
+[INFO] Running ru.bitcoin.node.chain.utxo.BlockConnectSequenceLocksTest
+[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.014 s -- in ru.bitcoin.node.chain.utxo.BlockConnectSequenceLocksTest
+[INFO] Running ru.bitcoin.node.chain.utxo.BlockDisconnectApplierTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in ru.bitcoin.node.chain.utxo.BlockDisconnectApplierTest
+[INFO] Running ru.bitcoin.node.chain.utxo.UtxoOverlayTest
+[INFO] Tests run: 11, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in ru.bitcoin.node.chain.utxo.UtxoOverlayTest
+[INFO] 
+[INFO] Results:
+[INFO] 
+[INFO] Tests run: 212, Failures: 0, Errors: 0, Skipped: 0
+[INFO] 
+[INFO] 
+[INFO] ---------------------< ru.bitcoin.mining:mempool >----------------------
+[INFO] Building mempool 0.0.1-SNAPSHOT                                   [9/13]
+[INFO]   from mempool\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- clean:3.2.0:clean (default-clean) @ mempool ---
+[INFO] Deleting C:\Users\Vasiliy\IdeaProjects\bitcoin-node\mempool\target
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ mempool ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.4.0:resources (default-resources) @ mempool ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.15.0:compile (default-compile) @ mempool ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 16 source files with javac [forked debug release 21] to target\classes
+[INFO] 
+[INFO] --- resources:3.4.0:testResources (default-testResources) @ mempool ---
+[INFO] skip non existing resourceDirectory C:\Users\Vasiliy\IdeaProjects\bitcoin-node\mempool\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.15.0:testCompile (default-testCompile) @ mempool ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 16 source files with javac [forked debug release 21] to target\test-classes
+[INFO] 
+[INFO] --- surefire:3.5.4:test (default-test) @ mempool ---
+[INFO] Toolchain in maven-surefire-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running ru.bitcoin.node.mempool.ClusterLinearizationTest
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.084 s -- in ru.bitcoin.node.mempool.ClusterLinearizationTest
+[INFO] Running ru.bitcoin.node.mempool.ExtendedMempoolPolicyTest
+[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.027 s -- in ru.bitcoin.node.mempool.ExtendedMempoolPolicyTest
+[INFO] Running ru.bitcoin.node.mempool.FeeRateTest
+[INFO] Tests run: 10, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.008 s -- in ru.bitcoin.node.mempool.FeeRateTest
+[INFO] Running ru.bitcoin.node.mempool.MempoolContextTest
+[INFO] Tests run: 11, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.026 s -- in ru.bitcoin.node.mempool.MempoolContextTest
+[INFO] Running ru.bitcoin.node.mempool.MempoolEntryTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in ru.bitcoin.node.mempool.MempoolEntryTest
+[INFO] Running ru.bitcoin.node.mempool.MempoolManagementTest
+[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.014 s -- in ru.bitcoin.node.mempool.MempoolManagementTest
+[INFO] Running ru.bitcoin.node.mempool.MempoolTest
+[INFO] Tests run: 12, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.017 s -- in ru.bitcoin.node.mempool.MempoolTest
+[INFO] Running ru.bitcoin.node.mempool.MempoolTestAcceptTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.007 s -- in ru.bitcoin.node.mempool.MempoolTestAcceptTest
+[INFO] Running ru.bitcoin.node.mempool.MempoolValidatorScriptPolicyTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in ru.bitcoin.node.mempool.MempoolValidatorScriptPolicyTest
+[INFO] Running ru.bitcoin.node.mempool.PackageAdmissionTest
+[INFO] Tests run: 9, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.014 s -- in ru.bitcoin.node.mempool.PackageAdmissionTest
+[INFO] Running ru.bitcoin.node.mempool.policy.MempoolPolicyTest
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in ru.bitcoin.node.mempool.policy.MempoolPolicyTest
+[INFO] Running ru.bitcoin.node.mempool.policy.MempoolStandardStructurePolicyTest
+[INFO] Tests run: 12, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.011 s -- in ru.bitcoin.node.mempool.policy.MempoolStandardStructurePolicyTest
+[INFO] Running ru.bitcoin.node.mempool.policy.StandardScriptVerifyFlagsTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in ru.bitcoin.node.mempool.policy.StandardScriptVerifyFlagsTest
+[INFO] Running ru.bitcoin.node.mempool.policy.StandardTransactionPolicyTest
+[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in ru.bitcoin.node.mempool.policy.StandardTransactionPolicyTest
+[INFO] Running ru.bitcoin.node.mempool.ReorgTrucPolicyTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in ru.bitcoin.node.mempool.ReorgTrucPolicyTest
+[INFO] Running ru.bitcoin.node.mempool.SingleRbfClusterPolicyTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.080 s -- in ru.bitcoin.node.mempool.SingleRbfClusterPolicyTest
+[INFO] 
+[INFO] Results:
+[INFO] 
+[INFO] Tests run: 103, Failures: 0, Errors: 0, Skipped: 0
+[INFO] 
+[INFO] 
+[INFO] -----------------------< ru.bitcoin.mining:p2p >------------------------
+[INFO] Building p2p 0.0.1-SNAPSHOT                                      [10/13]
+[INFO]   from p2p\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- clean:3.2.0:clean (default-clean) @ p2p ---
+[INFO] Deleting C:\Users\Vasiliy\IdeaProjects\bitcoin-node\p2p\target
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ p2p ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.4.0:resources (default-resources) @ p2p ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.15.0:compile (default-compile) @ p2p ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 113 source files with javac [forked debug release 21] to target\classes
+[INFO] 
+[INFO] --- resources:3.4.0:testResources (default-testResources) @ p2p ---
+[INFO] skip non existing resourceDirectory C:\Users\Vasiliy\IdeaProjects\bitcoin-node\p2p\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.15.0:testCompile (default-testCompile) @ p2p ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 69 source files with javac [forked debug release 21] to target\test-classes
+[INFO] 
+[INFO] --- surefire:3.5.4:test (default-test) @ p2p ---
+[INFO] Toolchain in maven-surefire-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running ru.bitcoin.node.p2p.address.AddrManTest
+[INFO] Tests run: 20, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.176 s -- in ru.bitcoin.node.p2p.address.AddrManTest
+[INFO] Running ru.bitcoin.node.p2p.address.NetworkDnsSeedsTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in ru.bitcoin.node.p2p.address.NetworkDnsSeedsTest
+[INFO] Running ru.bitcoin.node.p2p.address.OutboundPeerSelectorTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.029 s -- in ru.bitcoin.node.p2p.address.OutboundPeerSelectorTest
+[INFO] Running ru.bitcoin.node.p2p.address.PeerAddressBip155Test
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.011 s -- in ru.bitcoin.node.p2p.address.PeerAddressBip155Test
+[INFO] Running ru.bitcoin.node.p2p.address.PeerAddressManagerStoreTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.035 s -- in ru.bitcoin.node.p2p.address.PeerAddressManagerStoreTest
+[INFO] Running ru.bitcoin.node.p2p.address.PeerAddressManagerTest
+[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.011 s -- in ru.bitcoin.node.p2p.address.PeerAddressManagerTest
+[INFO] Running ru.bitcoin.node.p2p.address.PeerAddressProtocolTest
+[INFO] Tests run: 10, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.029 s -- in ru.bitcoin.node.p2p.address.PeerAddressProtocolTest
+[INFO] Running ru.bitcoin.node.p2p.address.PeerAddressRelayStateTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.021 s -- in ru.bitcoin.node.p2p.address.PeerAddressRelayStateTest
+[INFO] Running ru.bitcoin.node.p2p.BitcoinClientTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.121 s -- in ru.bitcoin.node.p2p.BitcoinClientTest
+[INFO] Running ru.bitcoin.node.p2p.BitcoinCoreRegtestIntegrationTest
+[WARNING] Tests run: 1, Failures: 0, Errors: 0, Skipped: 1, Time elapsed: 0.006 s -- in ru.bitcoin.node.p2p.BitcoinCoreRegtestIntegrationTest
+[INFO] Running ru.bitcoin.node.p2p.BitcoinServerTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.024 s -- in ru.bitcoin.node.p2p.BitcoinServerTest
+[INFO] Running ru.bitcoin.node.p2p.codec.AddrMessageCodecTest
+[INFO] Tests run: 12, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.010 s -- in ru.bitcoin.node.p2p.codec.AddrMessageCodecTest
+[INFO] Running ru.bitcoin.node.p2p.codec.AddrV2MessageCodecTest
+[INFO] Tests run: 21, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.014 s -- in ru.bitcoin.node.p2p.codec.AddrV2MessageCodecTest
+[INFO] Running ru.bitcoin.node.p2p.codec.Bip152WireCodecTest
+[INFO] Tests run: 10, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.015 s -- in ru.bitcoin.node.p2p.codec.Bip152WireCodecTest
+[INFO] Running ru.bitcoin.node.p2p.codec.BitcoinMessageDecoderTest
+[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in ru.bitcoin.node.p2p.codec.BitcoinMessageDecoderTest
+[INFO] Running ru.bitcoin.node.p2p.codec.BitcoinMessageEncoderTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in ru.bitcoin.node.p2p.codec.BitcoinMessageEncoderTest
+[INFO] Running ru.bitcoin.node.p2p.codec.BitcoinMessageStreamReaderTest
+[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in ru.bitcoin.node.p2p.codec.BitcoinMessageStreamReaderTest
+[INFO] Running ru.bitcoin.node.p2p.codec.BitcoinWireGoldenVectorTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in ru.bitcoin.node.p2p.codec.BitcoinWireGoldenVectorTest
+[INFO] Running ru.bitcoin.node.p2p.codec.BlockMessageCodecTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in ru.bitcoin.node.p2p.codec.BlockMessageCodecTest
+[INFO] Running ru.bitcoin.node.p2p.codec.CompactFilterMessageCodecTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.006 s -- in ru.bitcoin.node.p2p.codec.CompactFilterMessageCodecTest
+[INFO] Running ru.bitcoin.node.p2p.codec.GetDataMessageCodecTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in ru.bitcoin.node.p2p.codec.GetDataMessageCodecTest
+[INFO] Running ru.bitcoin.node.p2p.codec.GetHeadersMessageCodecTest
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in ru.bitcoin.node.p2p.codec.GetHeadersMessageCodecTest
+[INFO] Running ru.bitcoin.node.p2p.codec.HeadersMessageCodecTest
+[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.011 s -- in ru.bitcoin.node.p2p.codec.HeadersMessageCodecTest
+[INFO] Running ru.bitcoin.node.p2p.codec.InvMessageCodecTest
+[INFO] Tests run: 9, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in ru.bitcoin.node.p2p.codec.InvMessageCodecTest
+[INFO] Running ru.bitcoin.node.p2p.codec.NotFoundMessageCodecTest
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in ru.bitcoin.node.p2p.codec.NotFoundMessageCodecTest
+[INFO] Running ru.bitcoin.node.p2p.codec.PingPongMessageCodecTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in ru.bitcoin.node.p2p.codec.PingPongMessageCodecTest
+[INFO] Running ru.bitcoin.node.p2p.codec.VersionMessageCodecTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in ru.bitcoin.node.p2p.codec.VersionMessageCodecTest
+[INFO] Running ru.bitcoin.node.p2p.FeeFilterMessageCodecTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in ru.bitcoin.node.p2p.FeeFilterMessageCodecTest
+[INFO] Running ru.bitcoin.node.p2p.LimitedHistoryPeerPolicyTest
+[INFO] Tests run: 9, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in ru.bitcoin.node.p2p.LimitedHistoryPeerPolicyTest
+[INFO] Running ru.bitcoin.node.p2p.message.AddrMessageTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in ru.bitcoin.node.p2p.message.AddrMessageTest
+[INFO] Running ru.bitcoin.node.p2p.message.AddrV2MessageTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in ru.bitcoin.node.p2p.message.AddrV2MessageTest
+[INFO] Running ru.bitcoin.node.p2p.message.BitcoinMessagesNotFoundTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in ru.bitcoin.node.p2p.message.BitcoinMessagesNotFoundTest
+[INFO] Running ru.bitcoin.node.p2p.message.BitcoinMessagesTest
+[INFO] Tests run: 16, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in ru.bitcoin.node.p2p.message.BitcoinMessagesTest
+[INFO] Running ru.bitcoin.node.p2p.message.BitcoinMessageTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in ru.bitcoin.node.p2p.message.BitcoinMessageTest
+[INFO] Running ru.bitcoin.node.p2p.message.GetAddrMessageTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in ru.bitcoin.node.p2p.message.GetAddrMessageTest
+[INFO] Running ru.bitcoin.node.p2p.message.NetworkAddressTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0 s -- in ru.bitcoin.node.p2p.message.NetworkAddressTest
+[INFO] Running ru.bitcoin.node.p2p.message.VerAckMessageTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in ru.bitcoin.node.p2p.message.VerAckMessageTest
+[INFO] Running ru.bitcoin.node.p2p.OutboundPeerManagerTest
+[INFO] Tests run: 10, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.018 s -- in ru.bitcoin.node.p2p.OutboundPeerManagerTest
+[INFO] Running ru.bitcoin.node.p2p.OutboundPeerSupervisorTest
+����. 30, 2026 8:16:09 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor start
+INFO: Outbound peer supervisor started with target=1; initial peer=127.0.0.1:52959
+����. 30, 2026 8:16:09 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor onPeerClosed
+WARNING: Outbound peer disconnected from slot 0: 127.0.0.1:52959; cause: java.io.IOException: Peer disconnected
+����. 30, 2026 8:16:09 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor connectForSlot
+INFO: Outbound reconnect attempt #1 for slot 0, startHeight=101, excludedAddresses=0, excludedNetGroups=0
+����. 30, 2026 8:16:09 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor reconnectUntilSuccessful
+INFO: Outbound peer reconnected successfully for slot 0 on attempt #1: 127.0.0.1:52959
+����. 30, 2026 8:16:09 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor close
+INFO: Stopping outbound peer supervisor
+����. 30, 2026 8:16:09 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor close
+INFO: Outbound peer supervisor stopped
+����. 30, 2026 8:16:09 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor start
+INFO: Outbound peer supervisor started with target=2; initial peer=127.0.0.1:52962
+����. 30, 2026 8:16:09 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor connectForSlot
+INFO: Outbound reconnect attempt #1 for slot 1, startHeight=101, excludedAddresses=1, excludedNetGroups=0
+����. 30, 2026 8:16:09 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor reconnectUntilSuccessful
+INFO: Outbound peer reconnected successfully for slot 1 on attempt #1: 127.0.0.1:52963
+����. 30, 2026 8:16:09 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor close
+INFO: Stopping outbound peer supervisor
+����. 30, 2026 8:16:09 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor close
+INFO: Outbound peer supervisor stopped
+����. 30, 2026 8:16:09 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor start
+INFO: Outbound peer supervisor started with target=1; initial peer=127.0.0.1:52968
+����. 30, 2026 8:16:09 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor connectForSlot
+INFO: Outbound reconnect attempt #1 for slot 1, startHeight=101, excludedAddresses=1, excludedNetGroups=0
+����. 30, 2026 8:16:09 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor reconnectUntilSuccessful
+INFO: Outbound peer reconnected successfully for slot 1 on attempt #1: 127.0.0.1:52966
+����. 30, 2026 8:16:09 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor connectForSlot
+INFO: Outbound reconnect attempt #1 for slot 2, startHeight=101, excludedAddresses=2, excludedNetGroups=0
+����. 30, 2026 8:16:09 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor reconnectUntilSuccessful
+INFO: Outbound peer reconnected successfully for slot 2 on attempt #1: 127.0.0.1:52967
+����. 30, 2026 8:16:09 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor close
+INFO: Stopping outbound peer supervisor
+����. 30, 2026 8:16:09 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor close
+INFO: Outbound peer supervisor stopped
+����. 30, 2026 8:16:09 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor start
+INFO: Outbound peer supervisor started with target=1; initial peer=127.0.0.1:52973
+����. 30, 2026 8:16:09 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor onPeerClosed
+WARNING: Outbound peer disconnected from slot 0: 127.0.0.1:52973; cause: java.io.IOException: Peer disconnected
+����. 30, 2026 8:16:09 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor connectForSlot
+INFO: Outbound reconnect attempt #1 for slot 0, startHeight=100, excludedAddresses=0, excludedNetGroups=0
+����. 30, 2026 8:16:09 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor reconnectUntilSuccessful
+WARNING: Outbound reconnect attempt #1 for slot 0 failed: java.io.IOException: Unable to connect to any known peer address
+����. 30, 2026 8:16:09 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor reconnectUntilSuccessful
+INFO: Next outbound reconnect attempt for slot 0 in 200 ms
+����. 30, 2026 8:16:09 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor close
+INFO: Stopping outbound peer supervisor
+����. 30, 2026 8:16:09 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor close
+INFO: Outbound peer supervisor stopped
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.588 s -- in ru.bitcoin.node.p2p.OutboundPeerSupervisorTest
+[INFO] Running ru.bitcoin.node.p2p.PeerBanManagerTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.170 s -- in ru.bitcoin.node.p2p.PeerBanManagerTest
+[INFO] Running ru.bitcoin.node.p2p.PeerConnectionInboundTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.006 s -- in ru.bitcoin.node.p2p.PeerConnectionInboundTest
+[INFO] Running ru.bitcoin.node.p2p.PeerConnectionTest
+[INFO] Tests run: 14, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.749 s -- in ru.bitcoin.node.p2p.PeerConnectionTest
+[INFO] Running ru.bitcoin.node.p2p.PeerDiscouragementManagerTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in ru.bitcoin.node.p2p.PeerDiscouragementManagerTest
+[INFO] Running ru.bitcoin.node.p2p.PeerIdleConnectionTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.505 s -- in ru.bitcoin.node.p2p.PeerIdleConnectionTest
+[INFO] Running ru.bitcoin.node.p2p.PeerInventoryListenerTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.010 s -- in ru.bitcoin.node.p2p.PeerInventoryListenerTest
+[INFO] Running ru.bitcoin.node.p2p.PeerLivenessServiceTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.096 s -- in ru.bitcoin.node.p2p.PeerLivenessServiceTest
+[INFO] Running ru.bitcoin.node.p2p.PeerManagerTest
+[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in ru.bitcoin.node.p2p.PeerManagerTest
+[INFO] Running ru.bitcoin.node.p2p.PeerMessageDispatcherTest
+[INFO] Tests run: 18, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.007 s -- in ru.bitcoin.node.p2p.PeerMessageDispatcherTest
+[INFO] Running ru.bitcoin.node.p2p.PeerProtocolListenerTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in ru.bitcoin.node.p2p.PeerProtocolListenerTest
+[INFO] Running ru.bitcoin.node.p2p.PeerTest
+[INFO] Tests run: 21, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.035 s -- in ru.bitcoin.node.p2p.PeerTest
+[INFO] Running ru.bitcoin.node.p2p.PeerWriteBudgetTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in ru.bitcoin.node.p2p.PeerWriteBudgetTest
+[INFO] Running ru.bitcoin.node.p2p.PeerWriteDeadlineTest
+[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.647 s -- in ru.bitcoin.node.p2p.PeerWriteDeadlineTest
+[INFO] Running ru.bitcoin.node.p2p.sync.BlockDownloadSchedulerTest
+[INFO] Tests run: 11, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.990 s -- in ru.bitcoin.node.p2p.sync.BlockDownloadSchedulerTest
+[INFO] Running ru.bitcoin.node.p2p.sync.BlockDownloadServiceTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.013 s -- in ru.bitcoin.node.p2p.sync.BlockDownloadServiceTest
+[INFO] Running ru.bitcoin.node.p2p.sync.BlockDownloadStallTimeoutEvaluatorTest
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in ru.bitcoin.node.p2p.sync.BlockDownloadStallTimeoutEvaluatorTest
+[INFO] Running ru.bitcoin.node.p2p.sync.BlockDownloadStallTimeoutPolicyTest
+[INFO] Tests run: 9, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in ru.bitcoin.node.p2p.sync.BlockDownloadStallTimeoutPolicyTest
+[INFO] Running ru.bitcoin.node.p2p.sync.BlockDownloadStallTrackerTest
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in ru.bitcoin.node.p2p.sync.BlockDownloadStallTrackerTest
+[INFO] Running ru.bitcoin.node.p2p.sync.BlockDownloadTimeoutEvaluatorTest
+[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in ru.bitcoin.node.p2p.sync.BlockDownloadTimeoutEvaluatorTest
+[INFO] Running ru.bitcoin.node.p2p.sync.BlockDownloadTimeoutPolicyTest
+[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in ru.bitcoin.node.p2p.sync.BlockDownloadTimeoutPolicyTest
+[INFO] Running ru.bitcoin.node.p2p.sync.BlockInFlightTrackerTest
+[INFO] Tests run: 13, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.008 s -- in ru.bitcoin.node.p2p.sync.BlockInFlightTrackerTest
+[INFO] Running ru.bitcoin.node.p2p.sync.BlockSynchronizerTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.010 s -- in ru.bitcoin.node.p2p.sync.BlockSynchronizerTest
+[INFO] Running ru.bitcoin.node.p2p.sync.HeaderSynchronizerTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.113 s -- in ru.bitcoin.node.p2p.sync.HeaderSynchronizerTest
+[INFO] Running ru.bitcoin.node.p2p.sync.PeerDiscoveryTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in ru.bitcoin.node.p2p.sync.PeerDiscoveryTest
+[INFO] Running ru.bitcoin.node.p2p.sync.SchedulerBlockDownloadReconnectTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.526 s -- in ru.bitcoin.node.p2p.sync.SchedulerBlockDownloadReconnectTest
+[INFO] Running ru.bitcoin.node.p2p.transport.Bip324ApplicationCodecTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in ru.bitcoin.node.p2p.transport.Bip324ApplicationCodecTest
+[INFO] Running ru.bitcoin.node.p2p.transport.Bip324StageContractTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in ru.bitcoin.node.p2p.transport.Bip324StageContractTest
+[INFO] Running ru.bitcoin.node.p2p.transport.Bip324TransportSessionTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.006 s -- in ru.bitcoin.node.p2p.transport.Bip324TransportSessionTest
+[INFO] 
+[INFO] Results:
+[INFO] 
+[WARNING] Tests run: 411, Failures: 0, Errors: 0, Skipped: 1
+[INFO] 
+[INFO] 
+[INFO] ----------------------< ru.bitcoin.mining:mining >----------------------
+[INFO] Building mining 0.0.1-SNAPSHOT                                   [11/13]
+[INFO]   from mining\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- clean:3.2.0:clean (default-clean) @ mining ---
+[INFO] Deleting C:\Users\Vasiliy\IdeaProjects\bitcoin-node\mining\target
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ mining ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.4.0:resources (default-resources) @ mining ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.15.0:compile (default-compile) @ mining ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 17 source files with javac [forked debug release 21] to target\classes
+[INFO] 
+[INFO] --- resources:3.4.0:testResources (default-testResources) @ mining ---
+[INFO] skip non existing resourceDirectory C:\Users\Vasiliy\IdeaProjects\bitcoin-node\mining\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.15.0:testCompile (default-testCompile) @ mining ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 5 source files with javac [forked debug release 21] to target\test-classes
+[INFO] 
+[INFO] --- surefire:3.5.4:test (default-test) @ mining ---
+[INFO] Toolchain in maven-surefire-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running ru.bitcoin.node.mining.BlockTemplateBuilderTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.088 s -- in ru.bitcoin.node.mining.BlockTemplateBuilderTest
+[INFO] Running ru.bitcoin.node.mining.coinbase.CoinbaseBuilderTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.010 s -- in ru.bitcoin.node.mining.coinbase.CoinbaseBuilderTest
+[INFO] Running ru.bitcoin.node.mining.MiningVersionBitsTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in ru.bitcoin.node.mining.MiningVersionBitsTest
+[INFO] Running ru.bitcoin.node.mining.NonceMinerTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in ru.bitcoin.node.mining.NonceMinerTest
+[INFO] Running ru.bitcoin.node.mining.TransactionSelectorTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.006 s -- in ru.bitcoin.node.mining.TransactionSelectorTest
+[INFO] 
+[INFO] Results:
+[INFO] 
+[INFO] Tests run: 14, Failures: 0, Errors: 0, Skipped: 0
+[INFO] 
+[INFO] 
+[INFO] ---------------------< ru.bitcoin.mining:stratum >----------------------
+[INFO] Building stratum 0.0.1-SNAPSHOT                                  [12/13]
+[INFO]   from stratum\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- clean:3.2.0:clean (default-clean) @ stratum ---
+[INFO] Deleting C:\Users\Vasiliy\IdeaProjects\bitcoin-node\stratum\target
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ stratum ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.4.0:resources (default-resources) @ stratum ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.15.0:compile (default-compile) @ stratum ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 23 source files with javac [forked debug release 21] to target\classes
+[INFO] 
+[INFO] --- resources:3.4.0:testResources (default-testResources) @ stratum ---
+[INFO] skip non existing resourceDirectory C:\Users\Vasiliy\IdeaProjects\bitcoin-node\stratum\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.15.0:testCompile (default-testCompile) @ stratum ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 3 source files with javac [forked debug release 21] to target\test-classes
+[INFO] 
+[INFO] --- surefire:3.5.4:test (default-test) @ stratum ---
+[INFO] Toolchain in maven-surefire-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running ru.bitcoin.node.stratum.MiningJobTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.113 s -- in ru.bitcoin.node.stratum.MiningJobTest
+[INFO] Running ru.bitcoin.node.stratum.VarDiffControllerTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.006 s -- in ru.bitcoin.node.stratum.VarDiffControllerTest
+[INFO] Running ru.bitcoin.node.stratum.VersionRollingTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in ru.bitcoin.node.stratum.VersionRollingTest
+[INFO] 
+[INFO] Results:
+[INFO] 
+[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0
+[INFO] 
+[INFO] 
+[INFO] -----------------------< ru.bitcoin.mining:app >------------------------
+[INFO] Building app 0.0.1-SNAPSHOT                                      [13/13]
+[INFO]   from app\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- clean:3.2.0:clean (default-clean) @ app ---
+[INFO] Deleting C:\Users\Vasiliy\IdeaProjects\bitcoin-node\app\target
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ app ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.4.0:resources (default-resources) @ app ---
+[INFO] Copying 6 resources from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.15.0:compile (default-compile) @ app ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 41 source files with javac [forked debug release 21] to target\classes
+[INFO] 
+[INFO] --- resources:3.4.0:testResources (default-testResources) @ app ---
+[INFO] Copying 134 resources from src\test\resources to target\test-classes
+[INFO] 
+[INFO] --- compiler:3.15.0:testCompile (default-testCompile) @ app ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 51 source files with javac [forked debug release 21] to target\test-classes
+[INFO] 
+[INFO] --- surefire:3.5.4:test (default-test) @ app ---
+[INFO] Toolchain in maven-surefire-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running ru.bitcoin.node.app.ActiveChainAncestorsTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.179 s -- in ru.bitcoin.node.app.ActiveChainAncestorsTest
+[INFO] Running ru.bitcoin.node.app.BitcoinCoreHeaderSyncIntegrationTest
+[WARNING] Tests run: 2, Failures: 0, Errors: 0, Skipped: 2, Time elapsed: 0.009 s -- in ru.bitcoin.node.app.BitcoinCoreHeaderSyncIntegrationTest
+[INFO] Running ru.bitcoin.node.app.BitcoinCoreMiningRoundTripTest
+20:16:33.819 [bitcoin-node-lifecycle] INFO ru.bitcoin.node.app.service.NodeLifecycleService -- Bitcoin node state: NEW -> STARTING
+20:16:33.987 [bitcoin-node-lifecycle] INFO ru.bitcoin.node.app.service.NodeLifecycleService -- Bitcoin node state: STARTING -> SYNCHRONIZING_HEADERS
+
+HDR 0.0% 0/101 0/s
+HDR 100.0% 101/101 6208/s
+20:16:34.007 [bitcoin-node-lifecycle] INFO ru.bitcoin.node.app.service.NodeLifecycleService -- Header sync completed at height 101 (peer advertised target 101)
+����. 30, 2026 8:16:34 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor start
+INFO: Outbound peer supervisor started with target=1; initial peer=127.0.0.1:60962
+20:16:34.012 [bitcoin-node-lifecycle] INFO ru.bitcoin.node.app.service.NodeLifecycleService -- Bitcoin node state: SYNCHRONIZING_HEADERS -> SYNCHRONIZING_BLOCKS
+����. 30, 2026 8:16:34 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor connectForSlot
+INFO: Outbound reconnect attempt #1 for slot 1, startHeight=0, excludedAddresses=1, excludedNetGroups=0
+����. 30, 2026 8:16:34 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor connectForSlot
+INFO: Outbound reconnect attempt #1 for slot 2, startHeight=0, excludedAddresses=1, excludedNetGroups=0
+����. 30, 2026 8:16:34 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor reconnectUntilSuccessful
+WARNING: Outbound reconnect attempt #1 for slot 1 failed: java.io.IOException: No known peer addresses available
+����. 30, 2026 8:16:34 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor reconnectUntilSuccessful
+WARNING: Outbound reconnect attempt #1 for slot 2 failed: java.io.IOException: No known peer addresses available
+����. 30, 2026 8:16:34 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor reconnectUntilSuccessful
+INFO: Next outbound reconnect attempt for slot 1 in 1�000 ms
+����. 30, 2026 8:16:34 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor reconnectUntilSuccessful
+INFO: Next outbound reconnect attempt for slot 2 in 1�000 ms
+����. 30, 2026 8:16:34 PM ru.bitcoin.node.app.sync.BlockSyncCoordinator processWindow
+INFO: IBD frontier submit: height=1, hash=5bb79d962fb5ea41cf9e248c429661100b15439995c2b9e81da7c57a3dc025a3, requests=101, horizonEnd=101, materialized=101, pendingBefore=0
+����. 30, 2026 8:16:34 PM ru.bitcoin.node.app.sync.BlockSyncCoordinator processWindow
+INFO: IBD frontier submitted: height=1, hash=5bb79d962fb5ea41cf9e248c429661100b15439995c2b9e81da7c57a3dc025a3, pendingAfter=101, owner=/127.0.0.1:60962
+20:16:34.170 [bitcoin-node-lifecycle] INFO ru.bitcoin.node.app.service.NodeLifecycleService -- Bitcoin node state: SYNCHRONIZING_BLOCKS -> RUNNING
+
+����. 30, 2026 8:16:35 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor connectForSlot
+INFO: Outbound reconnect attempt #2 for slot 1, startHeight=102, excludedAddresses=1, excludedNetGroups=0
+����. 30, 2026 8:16:35 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor reconnectUntilSuccessful
+WARNING: Outbound reconnect attempt #2 for slot 1 failed: java.io.IOException: No known peer addresses available
+����. 30, 2026 8:16:35 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor connectForSlot
+INFO: Outbound reconnect attempt #2 for slot 2, startHeight=102, excludedAddresses=1, excludedNetGroups=0
+����. 30, 2026 8:16:35 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor reconnectUntilSuccessful
+INFO: Next outbound reconnect attempt for slot 1 in 2�000 ms
+����. 30, 2026 8:16:35 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor reconnectUntilSuccessful
+WARNING: Outbound reconnect attempt #2 for slot 2 failed: java.io.IOException: No known peer addresses available
+����. 30, 2026 8:16:35 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor reconnectUntilSuccessful
+INFO: Next outbound reconnect attempt for slot 2 in 2�000 ms
+����. 30, 2026 8:16:35 PM ru.bitcoin.node.app.sync.BlockSyncCoordinator processWindow
+INFO: IBD frontier submit: height=103, hash=416f32bfc6cc35ae8289b2a16891d69869c016c8f8ded848fb0340826bb15f0e, requests=1, horizonEnd=1, materialized=1, pendingBefore=0
+����. 30, 2026 8:16:35 PM ru.bitcoin.node.app.sync.BlockSyncCoordinator processWindow
+INFO: IBD frontier submitted: height=103, hash=416f32bfc6cc35ae8289b2a16891d69869c016c8f8ded848fb0340826bb15f0e, pendingAfter=1, owner=/127.0.0.1:60962
+����. 30, 2026 8:16:35 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor onPeerClosed
+WARNING: Outbound peer disconnected from slot 0: 127.0.0.1:60962; cause: java.io.IOException: Peer closed
+����. 30, 2026 8:16:35 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor connectForSlot
+INFO: Outbound reconnect attempt #1 for slot 0, startHeight=103, excludedAddresses=0, excludedNetGroups=0
+����. 30, 2026 8:16:35 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor reconnectUntilSuccessful
+INFO: Outbound peer reconnected successfully for slot 0 on attempt #1: 127.0.0.1:60962
+BLK 100.0% 101/101 0/s 2026
+����. 30, 2026 8:16:36 PM ru.bitcoin.node.app.sync.BlockSyncCoordinator processWindow
+INFO: IBD frontier submit: height=104, hash=70b2d0ea126236d27c22cfe65ba3c572a4f0f1a168c50907b1a44b81115762df, requests=1, horizonEnd=1, materialized=1, pendingBefore=0
+����. 30, 2026 8:16:36 PM ru.bitcoin.node.app.sync.BlockSyncCoordinator processWindow
+INFO: IBD frontier submitted: height=104, hash=70b2d0ea126236d27c22cfe65ba3c572a4f0f1a168c50907b1a44b81115762df, pendingAfter=1, owner=/127.0.0.1:60962
+BLK 100.0% 103/103 2/s 2026
+����. 30, 2026 8:16:37 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor connectForSlot
+INFO: Outbound reconnect attempt #3 for slot 1, startHeight=105, excludedAddresses=1, excludedNetGroups=0
+����. 30, 2026 8:16:37 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor reconnectUntilSuccessful
+WARNING: Outbound reconnect attempt #3 for slot 1 failed: java.io.IOException: No known peer addresses available
+����. 30, 2026 8:16:37 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor reconnectUntilSuccessful
+INFO: Next outbound reconnect attempt for slot 1 in 4�000 ms
+����. 30, 2026 8:16:37 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor connectForSlot
+INFO: Outbound reconnect attempt #3 for slot 2, startHeight=105, excludedAddresses=1, excludedNetGroups=0
+����. 30, 2026 8:16:37 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor reconnectUntilSuccessful
+WARNING: Outbound reconnect attempt #3 for slot 2 failed: java.io.IOException: No known peer addresses available
+����. 30, 2026 8:16:37 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor reconnectUntilSuccessful
+INFO: Next outbound reconnect attempt for slot 2 in 4�000 ms
+BLK 100.0% 104/104 1/s 202620:16:37.199 [main] INFO ru.bitcoin.node.app.service.NodeLifecycleService -- Bitcoin node state: RUNNING -> STOPPING
+����. 30, 2026 8:16:37 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor close
+INFO: Stopping outbound peer supervisor
+����. 30, 2026 8:16:37 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor close
+INFO: Outbound peer supervisor stopped
+20:16:37.213 [main] INFO ru.bitcoin.node.app.service.NodeLifecycleService -- Bitcoin node state: STOPPING -> STOPPED
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 8.623 s -- in ru.bitcoin.node.app.BitcoinCoreMiningRoundTripTest
+[INFO] Running ru.bitcoin.node.app.BitcoinCoreRegtestBlocksTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.046 s -- in ru.bitcoin.node.app.BitcoinCoreRegtestBlocksTest
+[INFO] Running ru.bitcoin.node.app.BitcoinCoreReorgTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.152 s -- in ru.bitcoin.node.app.BitcoinCoreReorgTest
+[INFO] Running ru.bitcoin.node.app.BitcoinCoreSpendTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.133 s -- in ru.bitcoin.node.app.BitcoinCoreSpendTest
+[INFO] Running ru.bitcoin.node.app.BitcoinNodeApplicationTests
+20:16:37.861 [main] INFO org.springframework.test.context.support.AnnotationConfigContextLoaderUtils -- Could not detect default configuration classes for test class [ru.bitcoin.node.app.BitcoinNodeApplicationTests]: BitcoinNodeApplicationTests does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+20:16:37.910 [main] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration ru.bitcoin.node.app.BitcoinNodeApplication for test class ru.bitcoin.node.app.BitcoinNodeApplicationTests
+20:16:37.960 [main] INFO org.springframework.test.context.support.AnnotationConfigContextLoaderUtils -- Could not detect default configuration classes for test class [ru.bitcoin.node.app.BitcoinNodeApplicationTests]: BitcoinNodeApplicationTests does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+20:16:37.961 [main] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration ru.bitcoin.node.app.BitcoinNodeApplication for test class ru.bitcoin.node.app.BitcoinNodeApplicationTests
+
+BLK 100.0% 104/104 0/s 2026
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v4.1.1)
+
+2026-09-30T20:16:38.154+07:00  INFO 28848 --- [           main] r.b.n.app.BitcoinNodeApplicationTests    : Starting BitcoinNodeApplicationTests using Java 21.0.7 with PID 28848 (started by Vasiliy in C:\Users\Vasiliy\IdeaProjects\bitcoin-node\app)
+2026-09-30T20:16:38.155+07:00  INFO 28848 --- [           main] r.b.n.app.BitcoinNodeApplicationTests    : The following 1 profile is active: "regtest"
+2026-09-30T20:16:38.407+07:00  INFO 28848 --- [           main] r.b.n.app.BitcoinNodeApplicationTests    : Started BitcoinNodeApplicationTests in 0.42 seconds (process running for 10.373)
+Mockito is currently self-attaching to enable the inline-mock-maker. This will no longer work in future releases of the JDK. Please add Mockito as an agent to your build as described in Mockito's documentation: https://javadoc.io/doc/org.mockito/mockito-core/latest/org.mockito/org/mockito/Mockito.html#0.3
+WARNING: A Java agent has been loaded dynamically (C:\Users\Vasiliy\.m2\repository\net\bytebuddy\byte-buddy-agent\1.18.11\byte-buddy-agent-1.18.11.jar)
+WARNING: If a serviceability tool is in use, please run with -XX:+EnableDynamicAgentLoading to hide this warning
+WARNING: If a serviceability tool is not in use, please run with -Djdk.instrument.traceUsage for more information
+WARNING: Dynamic loading of agents will be disallowed by default in a future release
+Java HotSpot(TM) 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+
+BLK 100.0% 104/104 0/s 20262026-09-30T20:16:39.054+07:00  INFO 28848 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: NEW -> STOPPING
+2026-09-30T20:16:39.059+07:00  INFO 28848 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STOPPING -> STOPPED
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.228 s -- in ru.bitcoin.node.app.BitcoinNodeApplicationTests
+[INFO] Running ru.bitcoin.node.app.BlockFilterIndexIntegrationTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.151 s -- in ru.bitcoin.node.app.BlockFilterIndexIntegrationTest
+[INFO] Running ru.bitcoin.node.app.ChainTipsIntegrationTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.164 s -- in ru.bitcoin.node.app.ChainTipsIntegrationTest
+[INFO] Running ru.bitcoin.node.app.CoinStatsIndexIntegrationTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.277 s -- in ru.bitcoin.node.app.CoinStatsIndexIntegrationTest
+[INFO] Running ru.bitcoin.node.app.config.AssumeValidConfigurationTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in ru.bitcoin.node.app.config.AssumeValidConfigurationTest
+[INFO] Running ru.bitcoin.node.app.config.ConfiguredPeerLoaderTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in ru.bitcoin.node.app.config.ConfiguredPeerLoaderTest
+[INFO] Running ru.bitcoin.node.app.config.PruneConfigurationTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in ru.bitcoin.node.app.config.PruneConfigurationTest
+[INFO] Running ru.bitcoin.node.app.FullReindexIntegrationTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.181 s -- in ru.bitcoin.node.app.FullReindexIntegrationTest
+[INFO] Running ru.bitcoin.node.app.HistoricalMainnetBlocksTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.098 s -- in ru.bitcoin.node.app.HistoricalMainnetBlocksTest
+[INFO] Running ru.bitcoin.node.app.ManualChainControlIntegrationTest
+
+BLK 100.0% 104/104 0/s 2026[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.494 s -- in ru.bitcoin.node.app.ManualChainControlIntegrationTest
+[INFO] Running ru.bitcoin.node.app.MinedBlockAdmissionTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.087 s -- in ru.bitcoin.node.app.MinedBlockAdmissionTest
+[INFO] Running ru.bitcoin.node.app.MiningRpcTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.277 s -- in ru.bitcoin.node.app.MiningRpcTest
+[INFO] Running ru.bitcoin.node.app.MiningTemplateServiceTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.022 s -- in ru.bitcoin.node.app.MiningTemplateServiceTest
+[INFO] Running ru.bitcoin.node.app.NetworkConfigurationTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in ru.bitcoin.node.app.NetworkConfigurationTest
+[INFO] Running ru.bitcoin.node.app.NodeConfigurationTest
+2026-09-30T20:16:40.873+07:00  INFO 28848 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: NEW -> STOPPING
+2026-09-30T20:16:40.878+07:00  INFO 28848 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STOPPING -> STOPPED
+2026-09-30T20:16:40.911+07:00  INFO 28848 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: NEW -> STOPPING
+2026-09-30T20:16:40.913+07:00  INFO 28848 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STOPPING -> STOPPED
+2026-09-30T20:16:40.944+07:00  INFO 28848 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: NEW -> STOPPING
+2026-09-30T20:16:40.947+07:00  INFO 28848 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STOPPING -> STOPPED
+2026-09-30T20:16:40.978+07:00  WARN 28848 --- [           main] s.c.a.AnnotationConfigApplicationContext : Exception encountered during context initialization - cancelling refresh attempt: org.springframework.beans.factory.BeanCreationException: Error creating bean with name 'outboundPeerSupervisor' defined in ru.bitcoin.node.app.config.NodeConfiguration: Failed to instantiate [ru.bitcoin.node.p2p.OutboundPeerSupervisor]: Factory method 'outboundPeerSupervisor' threw exception with message: targetOutboundPeers must be positive
+
+BLK 100.0% 104/104 0/s 20262026-09-30T20:16:41.013+07:00  INFO 28848 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: NEW -> STOPPING
+2026-09-30T20:16:41.016+07:00  INFO 28848 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STOPPING -> STOPPED
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.181 s -- in ru.bitcoin.node.app.NodeConfigurationTest
+[INFO] Running ru.bitcoin.node.app.NodeProcessCrashTest
+
+BLK 100.0% 104/104 0/s 2026
+BLK 100.0% 104/104 0/s 2026
+BLK 100.0% 104/104 0/s 2026
+BLK 100.0% 104/104 0/s 2026
+BLK 100.0% 104/104 0/s 2026
+BLK 100.0% 104/104 0/s 2026
+BLK 100.0% 104/104 0/s 2026
+BLK 100.0% 104/104 0/s 2026
+BLK 100.0% 104/104 0/s 2026
+BLK 100.0% 104/104 0/s 2026
+BLK 100.0% 104/104 0/s 2026
+BLK 100.0% 104/104 0/s 2026
+BLK 100.0% 104/104 0/s 2026
+BLK 100.0% 104/104 0/s 2026
+BLK 100.0% 104/104 0/s 2026
+BLK 100.0% 104/104 0/s 2026
+BLK 100.0% 104/104 0/s 2026
+BLK 100.0% 104/104 0/s 2026
+BLK 100.0% 104/104 0/s 2026
+BLK 100.0% 104/104 0/s 2026
+BLK 100.0% 104/104 0/s 2026
+BLK 100.0% 104/104 0/s 2026
+BLK 100.0% 104/104 0/s 2026
+BLK 100.0% 104/104 0/s 2026
+BLK 100.0% 104/104 0/s 2026
+BLK 100.0% 104/104 0/s 2026
+BLK 100.0% 104/104 0/s 2026
+BLK 100.0% 104/104 0/s 2026
+BLK 100.0% 104/104 0/s 2026
+BLK 100.0% 104/104 0/s 2026
+BLK 100.0% 104/104 0/s 2026[INFO] Tests run: 15, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 31.79 s -- in ru.bitcoin.node.app.NodeProcessCrashTest
+[INFO] Running ru.bitcoin.node.app.NodeRelayCompactBlockTest
+
+BLK 100.0% 104/104 0/s 2026[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.026 s -- in ru.bitcoin.node.app.NodeRelayCompactBlockTest
+[INFO] Running ru.bitcoin.node.app.NodeRelaySendHeadersTest
+
+BLK 100.0% 104/104 0/s 2026[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.620 s -- in ru.bitcoin.node.app.NodeRelaySendHeadersTest
+[INFO] Running ru.bitcoin.node.app.NodeRelayServiceTest
+
+BLK 100.0% 104/104 0/s 2026
+BLK 100.0% 104/104 0/s 2026
+BLK 100.0% 104/104 0/s 2026
+BLK 100.0% 104/104 0/s 2026
+BLK 100.0% 104/104 0/s 2026[INFO] Tests run: 12, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 5.446 s -- in ru.bitcoin.node.app.NodeRelayServiceTest
+[INFO] Running ru.bitcoin.node.app.NodeStorageFailureTest
+
+BLK 100.0% 104/104 0/s 2026
+BLK 100.0% 104/104 0/s 2026
+BLK 100.0% 104/104 0/s 2026
+BLK 100.0% 104/104 0/s 2026[INFO] Tests run: 16, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 3.902 s -- in ru.bitcoin.node.app.NodeStorageFailureTest
+[INFO] Running ru.bitcoin.node.app.NodeValidationServiceTest
+
+BLK 100.0% 104/104 0/s 2026[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.239 s -- in ru.bitcoin.node.app.NodeValidationServiceTest
+[INFO] Running ru.bitcoin.node.app.PublicSignetBlockTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.059 s -- in ru.bitcoin.node.app.PublicSignetBlockTest
+[INFO] Running ru.bitcoin.node.app.rpc.MiningTemplateTransactionsTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in ru.bitcoin.node.app.rpc.MiningTemplateTransactionsTest
+[INFO] Running ru.bitcoin.node.app.service.FeeFilterRounderTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in ru.bitcoin.node.app.service.FeeFilterRounderTest
+[INFO] Running ru.bitcoin.node.app.service.MempoolCheckpointServiceTest
+2026-09-30T20:17:24.170+07:00  WARN 28848 --- [pool-checkpoint] r.b.n.a.s.MempoolCheckpointService       : Failed to checkpoint persistent mempool; will retry
+
+java.lang.IllegalStateException: simulated write failure
+	at ru.bitcoin.node.app.service.MempoolCheckpointServiceTest.lambda$retriesAfterCheckpointFailure$2(MempoolCheckpointServiceTest.java:42) ~[test-classes/:na]
+	at ru.bitcoin.node.app.service.MempoolCheckpointService.checkpoint(MempoolCheckpointService.java:51) ~[classes/:na]
+	at java.base/java.util.concurrent.Executors$RunnableAdapter.call(Executors.java:572) ~[na:na]
+	at java.base/java.util.concurrent.FutureTask.runAndReset(FutureTask.java:358) ~[na:na]
+	at java.base/java.util.concurrent.ScheduledThreadPoolExecutor$ScheduledFutureTask.run(ScheduledThreadPoolExecutor.java:305) ~[na:na]
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1144) ~[na:na]
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:642) ~[na:na]
+	at java.base/java.lang.Thread.run(Thread.java:1583) ~[na:na]
+
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.147 s -- in ru.bitcoin.node.app.service.MempoolCheckpointServiceTest
+[INFO] Running ru.bitcoin.node.app.service.NodeLifecycleRunnerTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in ru.bitcoin.node.app.service.NodeLifecycleRunnerTest
+[INFO] Running ru.bitcoin.node.app.service.NodeLifecycleServiceTest
+2026-09-30T20:17:24.330+07:00  INFO 28848 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: NEW -> STARTING
+2026-09-30T20:17:24.335+07:00  INFO 28848 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STARTING -> SYNCHRONIZING_HEADERS
+
+HDR 100.0% 1/1 0/s         
+2026-09-30T20:17:24.337+07:00  INFO 28848 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Header sync completed at height 1 (peer advertised target 1)
+2026-09-30T20:17:24.337+07:00  INFO 28848 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: SYNCHRONIZING_HEADERS -> SYNCHRONIZING_BLOCKS
+2026-09-30T20:17:24.340+07:00  INFO 28848 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: SYNCHRONIZING_BLOCKS -> RUNNING
+2026-09-30T20:17:24.341+07:00  INFO 28848 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: RUNNING -> STOPPING
+2026-09-30T20:17:24.346+07:00  INFO 28848 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STOPPING -> STOPPED
+2026-09-30T20:17:24.398+07:00  INFO 28848 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: NEW -> STARTING
+2026-09-30T20:17:24.400+07:00  INFO 28848 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STARTING -> SYNCHRONIZING_HEADERS
+2026-09-30T20:17:24.401+07:00  WARN 28848 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : HEADER SYNC PEER FAILED peer=127.0.0.1:57471 state=CLOSED bestHeaderHeight=0 cause=java.io.IOException: Peer disconnected
+2026-09-30T20:17:24.403+07:00  INFO 28848 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: SYNCHRONIZING_HEADERS -> SYNCHRONIZING_HEADERS
+
+HDR 100.0% 1/1 0/s
+2026-09-30T20:17:24.405+07:00  INFO 28848 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Header sync completed at height 1 (peer advertised target 1)
+2026-09-30T20:17:24.406+07:00  INFO 28848 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: SYNCHRONIZING_HEADERS -> SYNCHRONIZING_BLOCKS
+2026-09-30T20:17:24.408+07:00  INFO 28848 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: SYNCHRONIZING_BLOCKS -> RUNNING
+2026-09-30T20:17:24.420+07:00  INFO 28848 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: RUNNING -> STOPPING
+
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 20112026-09-30T20:17:34.440+07:00  INFO 28848 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STOPPING -> STOPPED
+2026-09-30T20:17:34.492+07:00  INFO 28848 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: NEW -> STARTING
+2026-09-30T20:17:34.493+07:00 ERROR 28848 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STARTING -> FAILED
+
+java.io.IOException: Unable to synchronize headers with any known peer
+	at ru.bitcoin.node.app.service.NodeLifecycleService.synchronizeHeadersWithFailover(NodeLifecycleService.java:476) ~[classes/:na]
+	at ru.bitcoin.node.app.service.NodeLifecycleService.start(NodeLifecycleService.java:306) ~[classes/:na]
+	at org.junit.jupiter.api.AssertThrows.assertThrows(AssertThrows.java:54) ~[junit-jupiter-api-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.api.AssertThrows.assertThrows(AssertThrows.java:35) ~[junit-jupiter-api-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.api.Assertions.assertThrows(Assertions.java:3223) ~[junit-jupiter-api-6.0.3.jar:6.0.3]
+	at ru.bitcoin.node.app.service.NodeLifecycleServiceTest.shouldFailStartupWhenNoOutboundPeerCanBeDiscovered(NodeLifecycleServiceTest.java:108) ~[test-classes/:na]
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103) ~[na:na]
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580) ~[na:na]
+	at org.junit.platform.commons.util.ReflectionUtils.invokeMethod(ReflectionUtils.java:701) ~[junit-platform-commons-6.0.3.jar:6.0.3]
+	at org.junit.platform.commons.support.ReflectionSupport.invokeMethod(ReflectionSupport.java:502) ~[junit-platform-commons-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.support.MethodReflectionUtils.invoke(MethodReflectionUtils.java:45) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.MethodInvocation.proceed(MethodInvocation.java:61) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain$ValidatingInvocation.proceed(InvocationInterceptorChain.java:124) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.extension.TimeoutExtension.intercept(TimeoutExtension.java:163) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.extension.TimeoutExtension.interceptTestableMethod(TimeoutExtension.java:148) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.extension.TimeoutExtension.interceptTestMethod(TimeoutExtension.java:86) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker$ReflectiveInterceptorCall.lambda$ofVoidMethod$0(InterceptingExecutableInvoker.java:123) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.lambda$invoke$0(InterceptingExecutableInvoker.java:105) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain$InterceptedInvocation.proceed(InvocationInterceptorChain.java:99) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.proceed(InvocationInterceptorChain.java:66) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.chainAndInvoke(InvocationInterceptorChain.java:47) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.invoke(InvocationInterceptorChain.java:39) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invoke(InterceptingExecutableInvoker.java:104) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invoke(InterceptingExecutableInvoker.java:98) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invokeVoid(InterceptingExecutableInvoker.java:71) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.lambda$invokeTestMethod$0(TestMethodTestDescriptor.java:219) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.invokeTestMethod(TestMethodTestDescriptor.java:215) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.execute(TestMethodTestDescriptor.java:157) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.execute(TestMethodTestDescriptor.java:70) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$2(NodeTestTask.java:176) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$1(NodeTestTask.java:166) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:138) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$0(NodeTestTask.java:164) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:163) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:116) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596) ~[na:na]
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:42) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$2(NodeTestTask.java:180) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$1(NodeTestTask.java:166) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:138) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$0(NodeTestTask.java:164) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:163) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:116) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596) ~[na:na]
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:42) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$2(NodeTestTask.java:180) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$1(NodeTestTask.java:166) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:138) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$0(NodeTestTask.java:164) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:163) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:116) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.submit(SameThreadHierarchicalTestExecutorService.java:36) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.HierarchicalTestExecutor.execute(HierarchicalTestExecutor.java:52) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.HierarchicalTestEngine.execute(HierarchicalTestEngine.java:58) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.executeEngine(EngineExecutionOrchestrator.java:246) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.failOrExecuteEngine(EngineExecutionOrchestrator.java:218) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:179) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:108) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.lambda$execute$0(EngineExecutionOrchestrator.java:66) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.withInterceptedStreams(EngineExecutionOrchestrator.java:157) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:65) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.DefaultLauncher.execute(DefaultLauncher.java:125) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.DefaultLauncher.execute(DefaultLauncher.java:114) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.DelegatingLauncher.execute(DelegatingLauncher.java:58) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.InterceptingLauncher.lambda$execute$2(InterceptingLauncher.java:57) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.ClasspathAlignmentCheckingLauncherInterceptor.intercept(ClasspathAlignmentCheckingLauncherInterceptor.java:25) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.InterceptingLauncher.execute(InterceptingLauncher.java:56) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.DelegatingLauncher.execute(DelegatingLauncher.java:58) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103) ~[na:na]
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580) ~[na:na]
+	at org.apache.maven.surefire.api.util.ReflectionUtils.invokeMethodWithArray(ReflectionUtils.java:125) ~[surefire-api-3.5.4.jar:3.5.4]
+	at org.apache.maven.surefire.junitplatform.LauncherAdapter.executeWithCancellationToken(LauncherAdapter.java:68) ~[surefire-junit-platform-3.5.4.jar:3.5.4]
+	at org.apache.maven.surefire.junitplatform.LauncherAdapter.execute(LauncherAdapter.java:54) ~[surefire-junit-platform-3.5.4.jar:3.5.4]
+	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.execute(JUnitPlatformProvider.java:203) ~[surefire-junit-platform-3.5.4.jar:3.5.4]
+	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.invokeAllTests(JUnitPlatformProvider.java:168) ~[surefire-junit-platform-3.5.4.jar:3.5.4]
+	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.invoke(JUnitPlatformProvider.java:136) ~[surefire-junit-platform-3.5.4.jar:3.5.4]
+	at org.apache.maven.surefire.booter.ForkedBooter.runSuitesInProcess(ForkedBooter.java:385) ~[surefire-booter-3.5.4.jar:3.5.4]
+	at org.apache.maven.surefire.booter.ForkedBooter.execute(ForkedBooter.java:162) ~[surefire-booter-3.5.4.jar:3.5.4]
+	at org.apache.maven.surefire.booter.ForkedBooter.run(ForkedBooter.java:507) ~[surefire-booter-3.5.4.jar:3.5.4]
+	at org.apache.maven.surefire.booter.ForkedBooter.main(ForkedBooter.java:495) ~[surefire-booter-3.5.4.jar:3.5.4]
+	Suppressed: java.io.IOException: No known peer addresses available
+		at ru.bitcoin.node.p2p.OutboundPeerManager.connectOneWithAddress(OutboundPeerManager.java:222) ~[classes/:na]
+		at ru.bitcoin.node.p2p.OutboundPeerManager.connectOneWithAddress(OutboundPeerManager.java:166) ~[classes/:na]
+		at ru.bitcoin.node.p2p.OutboundPeerManager.connectOneWithAddress(OutboundPeerManager.java:158) ~[classes/:na]
+		at ru.bitcoin.node.app.service.NodeLifecycleService.synchronizeHeadersWithFailover(NodeLifecycleService.java:490) ~[classes/:na]
+		... 86 common frames omitted
+
+2026-09-30T20:17:34.494+07:00  INFO 28848 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: FAILED -> STOPPING
+2026-09-30T20:17:34.496+07:00  INFO 28848 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STOPPING -> STOPPED
+2026-09-30T20:17:34.536+07:00  INFO 28848 --- [onPool-worker-1] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: NEW -> STARTING
+2026-09-30T20:17:34.539+07:00  INFO 28848 --- [onPool-worker-1] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STARTING -> SYNCHRONIZING_HEADERS
+2026-09-30T20:17:34.539+07:00  INFO 28848 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: SYNCHRONIZING_HEADERS -> STOPPING
+2026-09-30T20:17:34.541+07:00  INFO 28848 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STOPPING -> STOPPED
+2026-09-30T20:17:34.595+07:00  INFO 28848 --- [onPool-worker-1] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: NEW -> STARTING
+2026-09-30T20:17:34.599+07:00  INFO 28848 --- [onPool-worker-1] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STARTING -> SYNCHRONIZING_HEADERS
+
+HDR 100.0% 1/1 0/s     
+2026-09-30T20:17:34.600+07:00  INFO 28848 --- [onPool-worker-1] r.b.n.app.service.NodeLifecycleService   : Header sync completed at height 1 (peer advertised target 1)
+2026-09-30T20:17:34.601+07:00  INFO 28848 --- [onPool-worker-1] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: SYNCHRONIZING_HEADERS -> SYNCHRONIZING_BLOCKS
+2026-09-30T20:17:34.602+07:00  INFO 28848 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: SYNCHRONIZING_BLOCKS -> STOPPING
+2026-09-30T20:17:34.621+07:00  INFO 28848 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STOPPING -> STOPPED
+2026-09-30T20:17:34.668+07:00  INFO 28848 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: NEW -> STARTING
+2026-09-30T20:17:34.670+07:00  INFO 28848 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STARTING -> SYNCHRONIZING_HEADERS
+
+HDR 0.0% 0/1 0/s
+2026-09-30T20:17:34.671+07:00  INFO 28848 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Header sync completed at height 0 (peer advertised target 1)
+2026-09-30T20:17:34.671+07:00  INFO 28848 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: SYNCHRONIZING_HEADERS -> SYNCHRONIZING_BLOCKS
+2026-09-30T20:17:34.671+07:00  INFO 28848 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: SYNCHRONIZING_BLOCKS -> RUNNING
+2026-09-30T20:17:34.693+07:00  INFO 28848 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: RUNNING -> STOPPING
+2026-09-30T20:17:34.695+07:00  INFO 28848 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STOPPING -> STOPPED
+2026-09-30T20:17:34.729+07:00  INFO 28848 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: NEW -> STARTING
+2026-09-30T20:17:34.731+07:00  INFO 28848 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STARTING -> SYNCHRONIZING_HEADERS
+
+HDR 100.0% 1/1 16/s
+2026-09-30T20:17:34.732+07:00  INFO 28848 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Header sync completed at height 1 (peer advertised target 1)
+2026-09-30T20:17:34.732+07:00  INFO 28848 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: SYNCHRONIZING_HEADERS -> SYNCHRONIZING_BLOCKS
+2026-09-30T20:17:34.985+07:00  INFO 28848 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: SYNCHRONIZING_BLOCKS -> RUNNING
+
+BLK 100.0% 1/1 0/s 20112026-09-30T20:17:35.002+07:00  INFO 28848 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: RUNNING -> STOPPING
+2026-09-30T20:17:35.008+07:00  INFO 28848 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STOPPING -> STOPPED
+2026-09-30T20:17:35.052+07:00  INFO 28848 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: NEW -> STARTING
+2026-09-30T20:17:35.053+07:00 ERROR 28848 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STARTING -> FAILED
+
+java.io.IOException: Unable to synchronize headers with any known peer
+	at ru.bitcoin.node.app.service.NodeLifecycleService.synchronizeHeadersWithFailover(NodeLifecycleService.java:476) ~[classes/:na]
+	at ru.bitcoin.node.app.service.NodeLifecycleService.start(NodeLifecycleService.java:306) ~[classes/:na]
+	at org.junit.jupiter.api.AssertThrows.assertThrows(AssertThrows.java:54) ~[junit-jupiter-api-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.api.AssertThrows.assertThrows(AssertThrows.java:35) ~[junit-jupiter-api-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.api.Assertions.assertThrows(Assertions.java:3223) ~[junit-jupiter-api-6.0.3.jar:6.0.3]
+	at ru.bitcoin.node.app.service.NodeLifecycleServiceTest.shouldRejectSecondStartAttemptAfterFailure(NodeLifecycleServiceTest.java:202) ~[test-classes/:na]
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103) ~[na:na]
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580) ~[na:na]
+	at org.junit.platform.commons.util.ReflectionUtils.invokeMethod(ReflectionUtils.java:701) ~[junit-platform-commons-6.0.3.jar:6.0.3]
+	at org.junit.platform.commons.support.ReflectionSupport.invokeMethod(ReflectionSupport.java:502) ~[junit-platform-commons-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.support.MethodReflectionUtils.invoke(MethodReflectionUtils.java:45) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.MethodInvocation.proceed(MethodInvocation.java:61) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain$ValidatingInvocation.proceed(InvocationInterceptorChain.java:124) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.extension.TimeoutExtension.intercept(TimeoutExtension.java:163) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.extension.TimeoutExtension.interceptTestableMethod(TimeoutExtension.java:148) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.extension.TimeoutExtension.interceptTestMethod(TimeoutExtension.java:86) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker$ReflectiveInterceptorCall.lambda$ofVoidMethod$0(InterceptingExecutableInvoker.java:123) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.lambda$invoke$0(InterceptingExecutableInvoker.java:105) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain$InterceptedInvocation.proceed(InvocationInterceptorChain.java:99) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.proceed(InvocationInterceptorChain.java:66) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.chainAndInvoke(InvocationInterceptorChain.java:47) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.invoke(InvocationInterceptorChain.java:39) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invoke(InterceptingExecutableInvoker.java:104) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invoke(InterceptingExecutableInvoker.java:98) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invokeVoid(InterceptingExecutableInvoker.java:71) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.lambda$invokeTestMethod$0(TestMethodTestDescriptor.java:219) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.invokeTestMethod(TestMethodTestDescriptor.java:215) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.execute(TestMethodTestDescriptor.java:157) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.execute(TestMethodTestDescriptor.java:70) ~[junit-jupiter-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$2(NodeTestTask.java:176) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$1(NodeTestTask.java:166) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:138) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$0(NodeTestTask.java:164) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:163) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:116) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596) ~[na:na]
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:42) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$2(NodeTestTask.java:180) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$1(NodeTestTask.java:166) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:138) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$0(NodeTestTask.java:164) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:163) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:116) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596) ~[na:na]
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:42) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$2(NodeTestTask.java:180) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$1(NodeTestTask.java:166) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:138) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$0(NodeTestTask.java:164) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:163) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:116) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.submit(SameThreadHierarchicalTestExecutorService.java:36) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.HierarchicalTestExecutor.execute(HierarchicalTestExecutor.java:52) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.engine.support.hierarchical.HierarchicalTestEngine.execute(HierarchicalTestEngine.java:58) ~[junit-platform-engine-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.executeEngine(EngineExecutionOrchestrator.java:246) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.failOrExecuteEngine(EngineExecutionOrchestrator.java:218) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:179) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:108) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.lambda$execute$0(EngineExecutionOrchestrator.java:66) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.withInterceptedStreams(EngineExecutionOrchestrator.java:157) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:65) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.DefaultLauncher.execute(DefaultLauncher.java:125) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.DefaultLauncher.execute(DefaultLauncher.java:114) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.DelegatingLauncher.execute(DelegatingLauncher.java:58) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.InterceptingLauncher.lambda$execute$2(InterceptingLauncher.java:57) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.ClasspathAlignmentCheckingLauncherInterceptor.intercept(ClasspathAlignmentCheckingLauncherInterceptor.java:25) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.InterceptingLauncher.execute(InterceptingLauncher.java:56) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at org.junit.platform.launcher.core.DelegatingLauncher.execute(DelegatingLauncher.java:58) ~[junit-platform-launcher-6.0.3.jar:6.0.3]
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103) ~[na:na]
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580) ~[na:na]
+	at org.apache.maven.surefire.api.util.ReflectionUtils.invokeMethodWithArray(ReflectionUtils.java:125) ~[surefire-api-3.5.4.jar:3.5.4]
+	at org.apache.maven.surefire.junitplatform.LauncherAdapter.executeWithCancellationToken(LauncherAdapter.java:68) ~[surefire-junit-platform-3.5.4.jar:3.5.4]
+	at org.apache.maven.surefire.junitplatform.LauncherAdapter.execute(LauncherAdapter.java:54) ~[surefire-junit-platform-3.5.4.jar:3.5.4]
+	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.execute(JUnitPlatformProvider.java:203) ~[surefire-junit-platform-3.5.4.jar:3.5.4]
+	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.invokeAllTests(JUnitPlatformProvider.java:168) ~[surefire-junit-platform-3.5.4.jar:3.5.4]
+	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.invoke(JUnitPlatformProvider.java:136) ~[surefire-junit-platform-3.5.4.jar:3.5.4]
+	at org.apache.maven.surefire.booter.ForkedBooter.runSuitesInProcess(ForkedBooter.java:385) ~[surefire-booter-3.5.4.jar:3.5.4]
+	at org.apache.maven.surefire.booter.ForkedBooter.execute(ForkedBooter.java:162) ~[surefire-booter-3.5.4.jar:3.5.4]
+	at org.apache.maven.surefire.booter.ForkedBooter.run(ForkedBooter.java:507) ~[surefire-booter-3.5.4.jar:3.5.4]
+	at org.apache.maven.surefire.booter.ForkedBooter.main(ForkedBooter.java:495) ~[surefire-booter-3.5.4.jar:3.5.4]
+	Suppressed: java.io.IOException: No known peer addresses available
+		at ru.bitcoin.node.p2p.OutboundPeerManager.connectOneWithAddress(OutboundPeerManager.java:222) ~[classes/:na]
+		at ru.bitcoin.node.p2p.OutboundPeerManager.connectOneWithAddress(OutboundPeerManager.java:166) ~[classes/:na]
+		at ru.bitcoin.node.p2p.OutboundPeerManager.connectOneWithAddress(OutboundPeerManager.java:158) ~[classes/:na]
+		at ru.bitcoin.node.app.service.NodeLifecycleService.synchronizeHeadersWithFailover(NodeLifecycleService.java:490) ~[classes/:na]
+		... 86 common frames omitted
+
+2026-09-30T20:17:35.053+07:00  INFO 28848 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: FAILED -> STOPPING
+2026-09-30T20:17:35.055+07:00  INFO 28848 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STOPPING -> STOPPED
+2026-09-30T20:17:35.091+07:00  INFO 28848 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: NEW -> STARTING
+2026-09-30T20:17:35.093+07:00  INFO 28848 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STARTING -> SYNCHRONIZING_HEADERS
+2026-09-30T20:17:35.250+07:00  WARN 28848 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : HEADER SYNC PEER FAILED peer=127.0.0.1:57520 state=READY bestHeaderHeight=0 cause=ru.bitcoin.node.p2p.sync.HeaderSynchronizationTimeoutException: Peer did not respond to getheaders within PT0.15S
+2026-09-30T20:17:35.251+07:00  INFO 28848 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: SYNCHRONIZING_HEADERS -> SYNCHRONIZING_HEADERS
+
+HDR 100.0% 1/1 0/s     
+2026-09-30T20:17:35.253+07:00  INFO 28848 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Header sync completed at height 1 (peer advertised target 1)
+2026-09-30T20:17:35.253+07:00  INFO 28848 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: SYNCHRONIZING_HEADERS -> SYNCHRONIZING_BLOCKS
+2026-09-30T20:17:35.254+07:00  INFO 28848 --- [-lifecycle-test] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: SYNCHRONIZING_BLOCKS -> RUNNING
+2026-09-30T20:17:35.594+07:00  INFO 28848 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: RUNNING -> STOPPING
+
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 20112026-09-30T20:17:45.611+07:00  INFO 28848 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STOPPING -> STOPPED
+[INFO] Tests run: 9, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 21.36 s -- in ru.bitcoin.node.app.service.NodeLifecycleServiceTest
+[INFO] Running ru.bitcoin.node.app.service.NodeLifecycleSpringAdapterTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.017 s -- in ru.bitcoin.node.app.service.NodeLifecycleSpringAdapterTest
+[INFO] Running ru.bitcoin.node.app.service.PendingCompactBlocksTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.048 s -- in ru.bitcoin.node.app.service.PendingCompactBlocksTest
+[INFO] Running ru.bitcoin.node.app.service.TransactionRequestSchedulerTest
+[INFO] Tests run: 10, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.063 s -- in ru.bitcoin.node.app.service.TransactionRequestSchedulerTest
+[INFO] Running ru.bitcoin.node.app.service.TxInventoryTrickleStateTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in ru.bitcoin.node.app.service.TxInventoryTrickleStateTest
+[INFO] Running ru.bitcoin.node.app.service.TxOrphanageTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in ru.bitcoin.node.app.service.TxOrphanageTest
+[INFO] Running ru.bitcoin.node.app.service.TxRelayStateTest
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.011 s -- in ru.bitcoin.node.app.service.TxRelayStateTest
+[INFO] Running ru.bitcoin.node.app.SnapshotProcessCrashTest
+
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 74.61 s -- in ru.bitcoin.node.app.SnapshotProcessCrashTest
+[INFO] Running ru.bitcoin.node.app.StratumIntegrationTest
+2026-09-30T20:19:00.462+07:00  INFO 28848 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: NEW -> STOPPING
+2026-09-30T20:19:00.465+07:00  INFO 28848 --- [           main] r.b.n.app.service.NodeLifecycleService   : Bitcoin node state: STOPPING -> STOPPED
+
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011
+BLK 100.0% 1/1 0/s 2011[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 4.220 s -- in ru.bitcoin.node.app.StratumIntegrationTest
+[INFO] Running ru.bitcoin.node.app.sync.BlockDownloadWindowStallDetectorTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in ru.bitcoin.node.app.sync.BlockDownloadWindowStallDetectorTest
+[INFO] Running ru.bitcoin.node.app.sync.BlockSyncCoordinatorTest
+
+BLK 0.0% 0/2 0/s 2011  
+BLK 75.0% 3/4 3/s 2011
+BLK 75.0% 3/4 0/s 2011
+BLK 75.0% 3/4 0/s 2011
+BLK 75.0% 3/4 0/s 2011
+BLK 75.0% 3/4 0/s 2011
+BLK 66.7% 2/3 0/s 2011
+BLK 66.7% 2/3 0/s 2011
+BLK 66.7% 2/3 0/s 2011
+BLK 66.7% 2/3 0/s 2011
+BLK 66.7% 2/3 0/s 2011[INFO] Tests run: 16, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 11.21 s -- in ru.bitcoin.node.app.sync.BlockSyncCoordinatorTest
+[INFO] Running ru.bitcoin.node.app.sync.HeaderSyncCoordinatorTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.116 s -- in ru.bitcoin.node.app.sync.HeaderSyncCoordinatorTest
+[INFO] Running ru.bitcoin.node.app.sync.HeaderSyncStreamingTest
+
+BLK 100.0% 4/4 2/s 2011[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.152 s -- in ru.bitcoin.node.app.sync.HeaderSyncStreamingTest
+[INFO] Running ru.bitcoin.node.app.Testnet4MiningTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.067 s -- in ru.bitcoin.node.app.Testnet4MiningTest
+[INFO] Running ru.bitcoin.node.app.TxIndexIntegrationTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.236 s -- in ru.bitcoin.node.app.TxIndexIntegrationTest
+[INFO] Running ru.bitcoin.node.p2p.address.AddressRelayBudgetTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in ru.bitcoin.node.p2p.address.AddressRelayBudgetTest
+[INFO] Running ru.bitcoin.node.p2p.PeerLivenessIsolationTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.207 s -- in ru.bitcoin.node.p2p.PeerLivenessIsolationTest
+[INFO] 
+[INFO] Results:
+[INFO] 
+[WARNING] Tests run: 203, Failures: 0, Errors: 0, Skipped: 2
+[INFO] 
+[INFO] ------------------------------------------------------------------------
+[INFO] Reactor Summary for bitcoin-node 0.0.1-SNAPSHOT:
+[INFO] 
+[INFO] bitcoin-node ....................................... SUCCESS [  0.154 s]
+[INFO] common ............................................. SUCCESS [  3.866 s]
+[INFO] crypto ............................................. SUCCESS [  3.880 s]
+[INFO] protocol ........................................... SUCCESS [  3.759 s]
+[INFO] script ............................................. SUCCESS [  4.954 s]
+[INFO] consensus .......................................... SUCCESS [  6.395 s]
+[INFO] storage ............................................ SUCCESS [  8.413 s]
+[INFO] chain .............................................. SUCCESS [  7.920 s]
+[INFO] mempool ............................................ SUCCESS [  4.230 s]
+[INFO] p2p ................................................ SUCCESS [ 12.287 s]
+[INFO] mining ............................................. SUCCESS [  3.315 s]
+[INFO] stratum ............................................ SUCCESS [  3.718 s]
+[INFO] app ................................................ SUCCESS [02:54 min]
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  03:58 min
+[INFO] Finished at: 2026-09-30T20:19:17+07:00
+[INFO] ------------------------------------------------------------------------
+[OK] full reactor test suite
+[OK] forced termination at five snapshot promotion and two invalid-snapshot rollback boundaries; startup, UTXO, undo and continued mining checks
+[OK] forced termination before/after/racing coinbase, dependent spends, disconnect/reconnect and competing-fork activation; chain/UTXO/undo checks
+[OK] pruning, parser/P2P/RPC bounds, per-peer relay budgets and BIP157 overload contracts present
+[OK] injected pre-commit IOError/NoSpace preserves state and allows retry
+AUTOMATED RECOVERY / RESOURCE CHECKS: PASSED
+STAGE REMAINS OPEN: power-loss, real filesystem/WAL I/O faults and sustained resource-load evidence are still required
