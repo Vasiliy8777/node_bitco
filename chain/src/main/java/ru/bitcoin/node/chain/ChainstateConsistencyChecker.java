@@ -17,10 +17,11 @@ import static ru.bitcoin.node.protocol.serialization.BlockSerializer.serialize;
 /**
  * Startup integrity check for persistent chain metadata and the reorg safety window.
  *
- * The full active/header ancestry is verified from block-index metadata. Raw block bodies
- * and undo data are required only for the configured recent active-chain depth, which keeps
- * this check compatible with future pruning while still guaranteeing that every block that
- * may need to be disconnected during an ordinary reorganization is locally available.
+ * Startup verification is deliberately bounded. The recent active/header ancestry is checked
+ * record-by-record and the remaining immutable prefix is anchored to the selected genesis via
+ * the persistent Core-style skip index. Re-walking millions of already validated BlockIndex
+ * records on every restart would make startup O(chain height). Raw block bodies and undo data
+ * are required only for the configured recent active-chain depth.
  */
 public final class ChainstateConsistencyChecker {
     public static final int DEFAULT_REORG_SAFETY_DEPTH = 288;
@@ -87,8 +88,10 @@ public final class ChainstateConsistencyChecker {
                     () -> new IllegalStateException(
                             "Startup consistency check failed: best-header tip metadata is missing")), "best-header");
 
-            long activeEntries = verifyAncestry(activeTip, storedGenesis, lookup, "active");
-            long headerEntries = verifyAncestry(bestHeaderTip, storedGenesis, lookup, "best-header");
+            long activeEntries = verifyAncestryBounded(
+                    activeTip, storedGenesis, lookup, "active", recentDataDepth);
+            long headerEntries = verifyAncestryBounded(
+                    bestHeaderTip, storedGenesis, lookup, "best-header", recentDataDepth);
 
             long recentChecked = verifyRecentActiveData(activeTip, lookup, blocks, undos);
             return new Result(activeEntries, headerEntries, recentChecked);
@@ -107,21 +110,19 @@ public final class ChainstateConsistencyChecker {
                                 + " tip BlockIndex is missing: " + hash.toDisplayHex()));
     }
 
-    private static long verifyAncestry(
+    private static long verifyAncestryBounded(
             BlockIndex tip,
             BlockIndex genesis,
             BlockIndexLookup lookup,
-            String kind
+            String kind,
+            int sequentialDepth
     ) {
         BlockIndex cursor = tip;
         long checked = 1L;
-        while (cursor.height() > 0) {
-            if (!cursor.hash().equals(cursor.header().hash())
-                    || !cursor.previousBlockHash().equals(cursor.header().previousBlockHash())) {
-                throw new IllegalStateException(
-                        "Startup consistency check failed: inconsistent " + kind
-                                + " BlockIndex at height " + cursor.height());
-            }
+        int sequentialChecked = 0;
+
+        while (cursor.height() > 0 && sequentialChecked < sequentialDepth) {
+            verifyIndexIdentity(cursor, kind);
             BlockIndex parent = lookup.find(cursor.previousBlockHash());
             if (parent == null || parent.height() != cursor.height() - 1) {
                 throw new IllegalStateException(
@@ -136,7 +137,31 @@ public final class ChainstateConsistencyChecker {
             }
             cursor = parent;
             checked++;
+            sequentialChecked++;
         }
+
+        if (cursor.height() > 0) {
+            BlockIndex anchoredGenesis;
+            if (lookup instanceof BlockIndexAncestorLookup accelerated) {
+                anchoredGenesis = accelerated.ancestor(cursor, 0L);
+            } else {
+                anchoredGenesis = cursor;
+                while (anchoredGenesis.height() > 0) {
+                    BlockIndex parent = lookup.find(anchoredGenesis.previousBlockHash());
+                    if (parent == null || parent.height() != anchoredGenesis.height() - 1) {
+                        throw new IllegalStateException(
+                                "Startup consistency check failed: missing/inconsistent " + kind
+                                        + " ancestor of " + anchoredGenesis.hash().toDisplayHex());
+                    }
+                    anchoredGenesis = parent;
+                    checked++;
+                }
+            }
+            cursor = anchoredGenesis;
+            checked++;
+        }
+
+        verifyIndexIdentity(cursor, kind);
         if (!BlockIndexStorageMapper.toStored(cursor)
                 .equals(BlockIndexStorageMapper.toStored(genesis))) {
             throw new IllegalStateException(
@@ -144,6 +169,15 @@ public final class ChainstateConsistencyChecker {
                             + " chain does not terminate at selected genesis");
         }
         return checked;
+    }
+
+    private static void verifyIndexIdentity(BlockIndex index, String kind) {
+        if (!index.hash().equals(index.header().hash())
+                || !index.previousBlockHash().equals(index.header().previousBlockHash())) {
+            throw new IllegalStateException(
+                    "Startup consistency check failed: inconsistent " + kind
+                            + " BlockIndex at height " + index.height());
+        }
     }
 
     private long verifyRecentActiveData(

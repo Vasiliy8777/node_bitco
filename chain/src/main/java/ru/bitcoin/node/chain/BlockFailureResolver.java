@@ -28,6 +28,23 @@ public final class BlockFailureResolver {
         return isFailed(index, null);
     }
 
+    /**
+     * Seeds a durable chain-state anchor that has already been selected as valid.
+     * This is primarily used for the persisted best-header tip at startup so the
+     * first newly received header does not re-walk millions of immutable ancestors.
+     */
+    public synchronized void seedKnownValid(BlockIndex index) {
+        Objects.requireNonNull(index, "index");
+        long revision = failureStore.revision();
+        if (revision < 0 || revision != cachedRevision || cachedAdditionalFailure != null) {
+            cache.clear();
+            cachedRevision = revision;
+            cachedAdditionalFailure = null;
+        }
+        cache.put(index.hash(), Boolean.FALSE);
+    }
+
+
     public synchronized boolean isFailed(BlockIndex index, Hash256 additionallyFailed) {
         return isFailed(index, additionallyFailed, lookup);
     }

@@ -131,6 +131,18 @@ public class NodeConfiguration {
             reindexer.rebuild();
         }
 
+        /*
+         * Only an already initialized chain may need the one-time skip-index
+         * migration. Running ensureSkipIndex() on a pristine database would
+         * create migration marker keys before ChainInitializer persists genesis,
+         * making the otherwise fresh database look partially initialized.
+         */
+        var startupTips = new ru.bitcoin.node.storage.chain.RocksDbChainStateStore(database);
+        if (startupTips.loadActiveTipHash().isPresent()) {
+            new ru.bitcoin.node.storage.block.RocksDbBlockIndexStore(database)
+                    .ensureSkipIndex();
+        }
+
         new ru.bitcoin.node.chain.ChainstateConsistencyChecker(
                 database,
                 parameters,

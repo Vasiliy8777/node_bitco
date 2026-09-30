@@ -45,6 +45,27 @@ class BlockFailureResolverTest {
     }
 
     @Test
+    void seededKnownValidTipAvoidsHistoricalWalkAndStillInvalidatesOnFailureRevision() {
+        var indexes = chain(4);
+        try (var db = new RocksDbDatabase(directory)) {
+            var failures = new RocksDbBlockFailureStore(db);
+            var reads = new AtomicInteger();
+            var resolver = new BlockFailureResolver(hash -> {
+                reads.incrementAndGet();
+                return indexes.get(hash);
+            }, failures);
+
+            resolver.seedKnownValid(index(2));
+            assertFalse(resolver.isFailed(index(3)));
+            assertEquals(1, reads.get());
+
+            failures.markFailed(index(1).hash());
+            assertTrue(resolver.isFailed(index(3)));
+            assertTrue(reads.get() > 1);
+        }
+    }
+
+    @Test
     void invalidatesAcrossStoreInstancesOnlyAfterBatchCommitAndSurvivesRestart() {
         var indexes = chain(4);
         try (var db = new RocksDbDatabase(directory)) {

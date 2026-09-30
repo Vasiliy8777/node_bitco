@@ -34,7 +34,12 @@ public final class ChainInitializer {
             var loaded = new ChainStateLoader(indexes, tips).load();
             if (loaded.isPresent()) {
                 ChainState state = loaded.orElseThrow();
-                validateAncestry(state.activeTip(), genesisIndex, new StoredBlockIndexLookup(indexes));
+                validateAncestryBounded(
+                        state.activeTip(),
+                        genesisIndex,
+                        new StoredBlockIndexLookup(indexes),
+                        ChainstateConsistencyChecker.DEFAULT_REORG_SAFETY_DEPTH
+                );
                 Block storedGenesis = blocks.find(genesis.hash()).orElseThrow(
                         () -> new IllegalStateException("Missing genesis block body"));
                 if (!Arrays.equals(serialize(genesis), serialize(storedGenesis))) {
@@ -101,9 +106,15 @@ public final class ChainInitializer {
         }
     }
 
-    private static void validateAncestry(BlockIndex tip, BlockIndex genesis, BlockIndexLookup lookup) {
+    private static void validateAncestryBounded(
+            BlockIndex tip,
+            BlockIndex genesis,
+            BlockIndexLookup lookup,
+            int sequentialDepth
+    ) {
         BlockIndex current = tip;
-        while (current.height() > 0) {
+        int checked = 0;
+        while (current.height() > 0 && checked < sequentialDepth) {
             if (!current.hash().equals(current.header().hash())
                     || !current.previousBlockHash().equals(current.header().previousBlockHash())) {
                 throw new IllegalStateException("Inconsistent stored block index");
@@ -114,12 +125,29 @@ public final class ChainInitializer {
             }
             BlockIndex expected = BlockIndexFactory.createChild(parent, current.header());
             if (!expected.chainWork().equals(current.chainWork())) {
-                throw new IllegalStateException("Inconsistent accumulated chain work");
+                throw new IllegalStateException("Invalid stored chain work");
             }
             current = parent;
+            checked++;
         }
-        if (!BlockIndexStorageMapper.toStored(current).equals(BlockIndexStorageMapper.toStored(genesis))) {
-            throw new IllegalStateException("Stored chain does not match selected network genesis");
+
+        if (current.height() > 0) {
+            if (lookup instanceof BlockIndexAncestorLookup accelerated) {
+                current = accelerated.ancestor(current, 0L);
+            } else {
+                while (current.height() > 0) {
+                    BlockIndex parent = lookup.find(current.previousBlockHash());
+                    if (parent == null || parent.height() != current.height() - 1) {
+                        throw new IllegalStateException("Missing or inconsistent active-chain ancestor");
+                    }
+                    current = parent;
+                }
+            }
+        }
+
+        if (!BlockIndexStorageMapper.toStored(current)
+                .equals(BlockIndexStorageMapper.toStored(genesis))) {
+            throw new IllegalStateException("Stored active chain does not terminate at selected genesis");
         }
     }
 }

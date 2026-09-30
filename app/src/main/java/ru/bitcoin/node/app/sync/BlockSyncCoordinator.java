@@ -10,8 +10,6 @@ import ru.bitcoin.node.p2p.Peer;
 import ru.bitcoin.node.p2p.sync.*;
 import ru.bitcoin.node.protocol.block.Block;
 import ru.bitcoin.node.storage.block.BlockStore;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -19,7 +17,9 @@ import java.util.*;
 
 public final class BlockSyncCoordinator {
 
-    private static final Logger log = LoggerFactory.getLogger(BlockSyncCoordinator.class);
+    private static final System.Logger log =
+            System.getLogger(BlockSyncCoordinator.class.getName());
+
 
     private final Object lifecycleLock = new Object();
     private boolean cancelled;
@@ -580,6 +580,17 @@ public final class BlockSyncCoordinator {
 
             if (stallEvaluation.timedOut()) {
                 Peer timedOutPeer = stallEvaluation.peer();
+                BlockIndex blockedIndex = blocksToDownload.get(nextToProcess);
+                log.log(
+                        System.Logger.Level.INFO,
+                        "Block download stall: height={0}, hash={1}, peer={2}, age={3}, timeout={4}, pending={5}",
+                        blockedIndex.height(),
+                        blockedIndex.hash().toDisplayHex(),
+                        timedOutPeer.remoteAddress(),
+                        stallEvaluation.stallingAge(),
+                        stallEvaluation.timeout(),
+                        session.pendingCount()
+                );
                 IOException stallFailure = new IOException(
                         "Peer stalled block download window for "
                                 + stallEvaluation.stallingAge() + " with timeout "

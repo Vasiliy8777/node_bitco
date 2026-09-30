@@ -64,12 +64,6 @@ public final class NodeSyncInfrastructure {
                         blockIndexStore
                 );
 
-        BlockFailureResolver failureResolver =
-                new BlockFailureResolver(
-                        blockIndexLookup,
-                        new RocksDbBlockFailureStore(database)
-                );
-
         this.headerChainState =
                 new HeaderChainStateLoader(
                         blockIndexStore,
@@ -82,6 +76,21 @@ public final class NodeSyncInfrastructure {
                                                 "Best header state was not initialized"
                                         )
                         );
+
+        BlockFailureResolver failureResolver =
+                new BlockFailureResolver(
+                        blockIndexLookup,
+                        new RocksDbBlockFailureStore(database)
+                );
+
+        /*
+         * BlockFailureManager never persists a failed ancestry as best-header.
+         * Seed that durable invariant into the resolver so the first HEADER after
+         * restart can stop at the persisted tip instead of scanning to genesis.
+         */
+        failureResolver.seedKnownValid(
+                this.headerChainState.bestHeaderTip()
+        );
 
         HeaderProcessor headerProcessor =
                 new HeaderProcessor(
