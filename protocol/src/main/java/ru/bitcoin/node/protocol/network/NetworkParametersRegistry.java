@@ -49,6 +49,7 @@ public final class NetworkParametersRegistry {
         return switch (network) {
             case MAINNET -> mainnet();
             case TESTNET -> testnet();
+            case TESTNET4 -> testnet4();
             case SIGNET -> signet();
             case REGTEST -> regtest();
         };
@@ -110,6 +111,17 @@ public final class NetworkParametersRegistry {
                 new BigInteger("0000000000000000000000000000000000000000000017dde1c649f3708d14b6", 16),
                 Hash256.fromDisplayHex("000000007a61e4230b28ac5cb6b5e5a0130de37ac1faf2f8987d2fa6505b67f4")
         );
+    }
+
+    /** Testnet4 consensus and bootstrap anchors from Bitcoin Core v30.0. */
+    public static NetworkParameters testnet4() {
+        return new NetworkParameters(
+                BitcoinNetwork.TESTNET4, 0x283F161CL, 48333,
+                Hash256.fromDisplayHex("00000000da84f2bafbbc53dee25a72ae507ff4914b867c565be350b0da8bf043"),
+                null, MAIN_POW_LIMIT, TARGET_SPACING, TARGET_TIMESPAN,
+                210_000L, 1L, 1L, 1L, 1L, 1L, true, true, false,
+                new BigInteger("00000000000000000000000000000000000000000000034a4690fe592dc49c7c", 16),
+                Hash256.fromDisplayHex("000000000000000180a58e7fa3b0db84b5ea76377524894f53660d93ac839d9b"));
     }
 
     public static NetworkParameters signet() {

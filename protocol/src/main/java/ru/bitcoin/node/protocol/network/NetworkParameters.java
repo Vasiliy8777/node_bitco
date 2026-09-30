@@ -226,7 +226,7 @@ public final class NetworkParameters {
     public long pruneAfterHeight() {
         return switch (network) {
             case MAINNET -> 100_000L;
-            case TESTNET, SIGNET, REGTEST -> 1_000L;
+            case TESTNET, TESTNET4, SIGNET, REGTEST -> 1_000L;
         };
     }
 
@@ -277,6 +277,9 @@ public final class NetworkParameters {
                     assume(2_500_000L, "f841584909f68e47897952345234e37fcd9128cd818f41ee6c3ca68db8071be7", 66_484_552L, "0000000000000093bcb68c03a9a168ae252572d348a2eaeba2cdf9231d73206f"),
                     assume(4_840_000L, "ce6bb677bb2ee9789c4a1c9d73e6683c53fc20e8fdbedbdaaf468982a0c8db2a", 536_078_574L, "00000000000000f4971a7fb37fbdff89315b69a2e1920c467654a382f0d64786"),
                     assume(5_125_000L, "d05430f34c9b7dd7eb98c0718cdf03782bcce8273847557d68ac2efc1365d4b8", 536_708_663L, "00000000000009ad1946e21cb4f1a6323ee99c89017b59d5166472672b868133")
+            );
+            case TESTNET4 -> java.util.List.of(
+                    assume(90_000L, "784fb5e98241de66fdd429f4392155c9e7db5c017148e66e8fdbc95746f8b9b5", 11_347_043L, "0000000002ebe8bcda020e0dd6ccfbdfac531d2f6a81457191b99fc2df2dbe3b")
             );
             case SIGNET -> java.util.List.of(
                     assume(160_000L, "fe0a44309b74d6b5883d246cb419c6221bcccf0b308c9b59b7d70783dbdf928a", 2_289_496L, "0000003ca3c99aff040f2563c2ad8f8ec88bd0fd6b8f0895cfaf1ef90353a62c"),

@@ -1,0 +1,488 @@
+[INFO] Scanning for projects...
+[INFO] ------------------------------------------------------------------------
+[INFO] Reactor Build Order:
+[INFO] 
+[INFO] bitcoin-node                                                       [pom]
+[INFO] common                                                             [jar]
+[INFO] crypto                                                             [jar]
+[INFO] protocol                                                           [jar]
+[INFO] script                                                             [jar]
+[INFO] consensus                                                          [jar]
+[INFO] storage                                                            [jar]
+[INFO] chain                                                              [jar]
+[INFO] mempool                                                            [jar]
+[INFO] p2p                                                                [jar]
+[INFO] mining                                                             [jar]
+[INFO] stratum                                                            [jar]
+[INFO] app                                                                [jar]
+[INFO] 
+[INFO] -----------------------< ru.bitcoin.mining:node >-----------------------
+[INFO] Building bitcoin-node 0.0.1-SNAPSHOT                              [1/13]
+[INFO]   from pom.xml
+[INFO] --------------------------------[ pom ]---------------------------------
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ node ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] ----------------------< ru.bitcoin.mining:common >----------------------
+[INFO] Building common 0.0.1-SNAPSHOT                                    [2/13]
+[INFO]   from common\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ common ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.4.0:resources (default-resources) @ common ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.15.0:compile (default-compile) @ common ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- resources:3.4.0:testResources (default-testResources) @ common ---
+[INFO] skip non existing resourceDirectory C:\Users\Vasiliy\IdeaProjects\bitcoin-node\common\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.15.0:testCompile (default-testCompile) @ common ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- surefire:3.5.4:test (default-test) @ common ---
+[INFO] Toolchain in maven-surefire-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] ----------------------< ru.bitcoin.mining:crypto >----------------------
+[INFO] Building crypto 0.0.1-SNAPSHOT                                    [3/13]
+[INFO]   from crypto\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ crypto ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.4.0:resources (default-resources) @ crypto ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.15.0:compile (default-compile) @ crypto ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- resources:3.4.0:testResources (default-testResources) @ crypto ---
+[INFO] Copying 2 resources from src\test\resources to target\test-classes
+[INFO] 
+[INFO] --- compiler:3.15.0:testCompile (default-testCompile) @ crypto ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- surefire:3.5.4:test (default-test) @ crypto ---
+[INFO] Toolchain in maven-surefire-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] ---------------------< ru.bitcoin.mining:protocol >---------------------
+[INFO] Building protocol 0.0.1-SNAPSHOT                                  [4/13]
+[INFO]   from protocol\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ protocol ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.4.0:resources (default-resources) @ protocol ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.15.0:compile (default-compile) @ protocol ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- resources:3.4.0:testResources (default-testResources) @ protocol ---
+[INFO] skip non existing resourceDirectory C:\Users\Vasiliy\IdeaProjects\bitcoin-node\protocol\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.15.0:testCompile (default-testCompile) @ protocol ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- surefire:3.5.4:test (default-test) @ protocol ---
+[INFO] Toolchain in maven-surefire-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running ru.bitcoin.node.protocol.serialization.block.GenesisBlockFactoryTest
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.072 s -- in ru.bitcoin.node.protocol.serialization.block.GenesisBlockFactoryTest
+[INFO] 
+[INFO] Results:
+[INFO] 
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0
+[INFO] 
+[INFO] 
+[INFO] ----------------------< ru.bitcoin.mining:script >----------------------
+[INFO] Building script 0.0.1-SNAPSHOT                                    [5/13]
+[INFO]   from script\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ script ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.4.0:resources (default-resources) @ script ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.15.0:compile (default-compile) @ script ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- resources:3.4.0:testResources (default-testResources) @ script ---
+[INFO] Copying 8 resources from src\test\resources to target\test-classes
+[INFO] 
+[INFO] --- compiler:3.15.0:testCompile (default-testCompile) @ script ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- surefire:3.5.4:test (default-test) @ script ---
+[INFO] Toolchain in maven-surefire-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --------------------< ru.bitcoin.mining:consensus >---------------------
+[INFO] Building consensus 0.0.1-SNAPSHOT                                 [6/13]
+[INFO]   from consensus\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ consensus ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.4.0:resources (default-resources) @ consensus ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.15.0:compile (default-compile) @ consensus ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- resources:3.4.0:testResources (default-testResources) @ consensus ---
+[INFO] Copying 7 resources from src\test\resources to target\test-classes
+[INFO] 
+[INFO] --- compiler:3.15.0:testCompile (default-testCompile) @ consensus ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- surefire:3.5.4:test (default-test) @ consensus ---
+[INFO] Toolchain in maven-surefire-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running ru.bitcoin.node.consensus.pow.NextWorkRequiredTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.059 s -- in ru.bitcoin.node.consensus.pow.NextWorkRequiredTest
+[INFO] 
+[INFO] Results:
+[INFO] 
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0
+[INFO] 
+[INFO] 
+[INFO] ---------------------< ru.bitcoin.mining:storage >----------------------
+[INFO] Building storage 0.0.1-SNAPSHOT                                   [7/13]
+[INFO]   from storage\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ storage ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.4.0:resources (default-resources) @ storage ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.15.0:compile (default-compile) @ storage ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed source code.
+[INFO] Compiling 59 source files with javac [forked debug release 21] to target\classes
+[INFO] 
+[INFO] --- resources:3.4.0:testResources (default-testResources) @ storage ---
+[INFO] skip non existing resourceDirectory C:\Users\Vasiliy\IdeaProjects\bitcoin-node\storage\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.15.0:testCompile (default-testCompile) @ storage ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 44 source files with javac [forked debug release 21] to target\test-classes
+[INFO] 
+[INFO] --- surefire:3.5.4:test (default-test) @ storage ---
+[INFO] Toolchain in maven-surefire-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] ----------------------< ru.bitcoin.mining:chain >-----------------------
+[INFO] Building chain 0.0.1-SNAPSHOT                                     [8/13]
+[INFO]   from chain\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ chain ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.4.0:resources (default-resources) @ chain ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.15.0:compile (default-compile) @ chain ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 63 source files with javac [forked debug release 21] to target\classes
+[INFO] 
+[INFO] --- resources:3.4.0:testResources (default-testResources) @ chain ---
+[INFO] skip non existing resourceDirectory C:\Users\Vasiliy\IdeaProjects\bitcoin-node\chain\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.15.0:testCompile (default-testCompile) @ chain ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 43 source files with javac [forked debug release 21] to target\test-classes
+[INFO] 
+[INFO] --- surefire:3.5.4:test (default-test) @ chain ---
+[INFO] Toolchain in maven-surefire-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running ru.bitcoin.node.chain.ChainHeaderValidatorTest
+[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.081 s -- in ru.bitcoin.node.chain.ChainHeaderValidatorTest
+[INFO] Running ru.bitcoin.node.chain.ChainInitializerTest
+[INFO] Tests run: 12, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.409 s -- in ru.bitcoin.node.chain.ChainInitializerTest
+[INFO] Running ru.bitcoin.node.chain.Testnet4ConsensusTest
+[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.051 s -- in ru.bitcoin.node.chain.Testnet4ConsensusTest
+[INFO] 
+[INFO] Results:
+[INFO] 
+[INFO] Tests run: 27, Failures: 0, Errors: 0, Skipped: 0
+[INFO] 
+[INFO] 
+[INFO] ---------------------< ru.bitcoin.mining:mempool >----------------------
+[INFO] Building mempool 0.0.1-SNAPSHOT                                   [9/13]
+[INFO]   from mempool\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ mempool ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.4.0:resources (default-resources) @ mempool ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.15.0:compile (default-compile) @ mempool ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- resources:3.4.0:testResources (default-testResources) @ mempool ---
+[INFO] skip non existing resourceDirectory C:\Users\Vasiliy\IdeaProjects\bitcoin-node\mempool\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.15.0:testCompile (default-testCompile) @ mempool ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- surefire:3.5.4:test (default-test) @ mempool ---
+[INFO] Toolchain in maven-surefire-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] -----------------------< ru.bitcoin.mining:p2p >------------------------
+[INFO] Building p2p 0.0.1-SNAPSHOT                                      [10/13]
+[INFO]   from p2p\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ p2p ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.4.0:resources (default-resources) @ p2p ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.15.0:compile (default-compile) @ p2p ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed source code.
+[INFO] Compiling 113 source files with javac [forked debug release 21] to target\classes
+[INFO] 
+[INFO] --- resources:3.4.0:testResources (default-testResources) @ p2p ---
+[INFO] skip non existing resourceDirectory C:\Users\Vasiliy\IdeaProjects\bitcoin-node\p2p\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.15.0:testCompile (default-testCompile) @ p2p ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 69 source files with javac [forked debug release 21] to target\test-classes
+[INFO] 
+[INFO] --- surefire:3.5.4:test (default-test) @ p2p ---
+[INFO] Toolchain in maven-surefire-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] ----------------------< ru.bitcoin.mining:mining >----------------------
+[INFO] Building mining 0.0.1-SNAPSHOT                                   [11/13]
+[INFO]   from mining\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ mining ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.4.0:resources (default-resources) @ mining ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.15.0:compile (default-compile) @ mining ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 17 source files with javac [forked debug release 21] to target\classes
+[INFO] 
+[INFO] --- resources:3.4.0:testResources (default-testResources) @ mining ---
+[INFO] skip non existing resourceDirectory C:\Users\Vasiliy\IdeaProjects\bitcoin-node\mining\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.15.0:testCompile (default-testCompile) @ mining ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 5 source files with javac [forked debug release 21] to target\test-classes
+[INFO] 
+[INFO] --- surefire:3.5.4:test (default-test) @ mining ---
+[INFO] Toolchain in maven-surefire-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] ---------------------< ru.bitcoin.mining:stratum >----------------------
+[INFO] Building stratum 0.0.1-SNAPSHOT                                  [12/13]
+[INFO]   from stratum\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ stratum ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.4.0:resources (default-resources) @ stratum ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.15.0:compile (default-compile) @ stratum ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 23 source files with javac [forked debug release 21] to target\classes
+[INFO] 
+[INFO] --- resources:3.4.0:testResources (default-testResources) @ stratum ---
+[INFO] skip non existing resourceDirectory C:\Users\Vasiliy\IdeaProjects\bitcoin-node\stratum\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.15.0:testCompile (default-testCompile) @ stratum ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 3 source files with javac [forked debug release 21] to target\test-classes
+[INFO] 
+[INFO] --- surefire:3.5.4:test (default-test) @ stratum ---
+[INFO] Toolchain in maven-surefire-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] -----------------------< ru.bitcoin.mining:app >------------------------
+[INFO] Building app 0.0.1-SNAPSHOT                                      [13/13]
+[INFO]   from app\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ app ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.4.0:resources (default-resources) @ app ---
+[INFO] Copying 6 resources from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.15.0:compile (default-compile) @ app ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 41 source files with javac [forked debug release 21] to target\classes
+[INFO] 
+[INFO] --- resources:3.4.0:testResources (default-testResources) @ app ---
+[INFO] Copying 134 resources from src\test\resources to target\test-classes
+[INFO] 
+[INFO] --- compiler:3.15.0:testCompile (default-testCompile) @ app ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 50 source files with javac [forked debug release 21] to target\test-classes
+[INFO] 
+[INFO] --- surefire:3.5.4:test (default-test) @ app ---
+[INFO] Toolchain in maven-surefire-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running ru.bitcoin.node.app.BitcoinCoreMiningRoundTripTest
+15:25:26.572 [bitcoin-node-lifecycle] INFO ru.bitcoin.node.app.service.NodeLifecycleService -- Bitcoin node state: NEW -> STARTING
+15:25:26.725 [bitcoin-node-lifecycle] INFO ru.bitcoin.node.app.service.NodeLifecycleService -- Bitcoin node state: STARTING -> SYNCHRONIZING_HEADERS
+
+HDR 0.0% 0/101 0/s
+HDR 100.0% 101/101 6762/s
+15:25:26.742 [bitcoin-node-lifecycle] INFO ru.bitcoin.node.app.service.NodeLifecycleService -- Header sync completed at height 101 (peer advertised target 101)
+15:25:26.747 [bitcoin-node-lifecycle] INFO ru.bitcoin.node.app.service.NodeLifecycleService -- Bitcoin node state: SYNCHRONIZING_HEADERS -> SYNCHRONIZING_BLOCKS
+����. 30, 2026 3:25:26 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor start
+INFO: Outbound peer supervisor started with target=1; initial peer=127.0.0.1:58262
+����. 30, 2026 3:25:26 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor connectForSlot
+INFO: Outbound reconnect attempt #1 for slot 2, startHeight=0, excludedAddresses=1, excludedNetGroups=0
+����. 30, 2026 3:25:26 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor reconnectUntilSuccessful
+WARNING: Outbound reconnect attempt #1 for slot 2 failed: java.io.IOException: No known peer addresses available
+����. 30, 2026 3:25:26 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor connectForSlot
+INFO: Outbound reconnect attempt #1 for slot 1, startHeight=0, excludedAddresses=1, excludedNetGroups=0
+����. 30, 2026 3:25:26 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor reconnectUntilSuccessful
+INFO: Next outbound reconnect attempt for slot 2 in 1�000 ms
+����. 30, 2026 3:25:26 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor reconnectUntilSuccessful
+WARNING: Outbound reconnect attempt #1 for slot 1 failed: java.io.IOException: No known peer addresses available
+����. 30, 2026 3:25:26 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor reconnectUntilSuccessful
+INFO: Next outbound reconnect attempt for slot 1 in 1�000 ms
+15:25:26.889 [bitcoin-node-lifecycle] INFO ru.bitcoin.node.app.service.NodeLifecycleService -- Bitcoin node state: SYNCHRONIZING_BLOCKS -> RUNNING
+
+����. 30, 2026 3:25:27 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor connectForSlot
+INFO: Outbound reconnect attempt #2 for slot 2, startHeight=102, excludedAddresses=1, excludedNetGroups=0
+����. 30, 2026 3:25:27 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor reconnectUntilSuccessful
+WARNING: Outbound reconnect attempt #2 for slot 2 failed: java.io.IOException: No known peer addresses available
+����. 30, 2026 3:25:27 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor connectForSlot
+INFO: Outbound reconnect attempt #2 for slot 1, startHeight=102, excludedAddresses=1, excludedNetGroups=0
+����. 30, 2026 3:25:27 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor reconnectUntilSuccessful
+INFO: Next outbound reconnect attempt for slot 2 in 2�000 ms
+����. 30, 2026 3:25:27 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor reconnectUntilSuccessful
+WARNING: Outbound reconnect attempt #2 for slot 1 failed: java.io.IOException: No known peer addresses available
+����. 30, 2026 3:25:27 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor reconnectUntilSuccessful
+INFO: Next outbound reconnect attempt for slot 1 in 2�000 ms
+����. 30, 2026 3:25:28 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor onPeerClosed
+WARNING: Outbound peer disconnected from slot 0: 127.0.0.1:58262; cause: java.io.IOException: Peer closed
+����. 30, 2026 3:25:28 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor connectForSlot
+INFO: Outbound reconnect attempt #1 for slot 0, startHeight=103, excludedAddresses=0, excludedNetGroups=0
+����. 30, 2026 3:25:28 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor reconnectUntilSuccessful
+INFO: Outbound peer reconnected successfully for slot 0 on attempt #1: 127.0.0.1:58262
+BLK 100.0% 101/101 0/s 2026
+BLK 100.0% 103/103 2/s 2026
+����. 30, 2026 3:25:29 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor connectForSlot
+INFO: Outbound reconnect attempt #3 for slot 2, startHeight=104, excludedAddresses=1, excludedNetGroups=0
+����. 30, 2026 3:25:29 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor reconnectUntilSuccessful
+WARNING: Outbound reconnect attempt #3 for slot 2 failed: java.io.IOException: No known peer addresses available
+����. 30, 2026 3:25:29 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor connectForSlot
+INFO: Outbound reconnect attempt #3 for slot 1, startHeight=104, excludedAddresses=1, excludedNetGroups=0
+����. 30, 2026 3:25:29 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor reconnectUntilSuccessful
+INFO: Next outbound reconnect attempt for slot 2 in 4�000 ms
+����. 30, 2026 3:25:29 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor reconnectUntilSuccessful
+WARNING: Outbound reconnect attempt #3 for slot 1 failed: java.io.IOException: No known peer addresses available
+����. 30, 2026 3:25:29 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor reconnectUntilSuccessful
+INFO: Next outbound reconnect attempt for slot 1 in 4�000 ms
+BLK 100.0% 104/104 1/s 202615:25:30.445 [main] INFO ru.bitcoin.node.app.service.NodeLifecycleService -- Bitcoin node state: RUNNING -> STOPPING
+15:25:30.451 [main] INFO ru.bitcoin.node.app.service.NodeLifecycleService -- Bitcoin node state: STOPPING -> STOPPED
+����. 30, 2026 3:25:30 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor close
+INFO: Stopping outbound peer supervisor
+����. 30, 2026 3:25:30 PM ru.bitcoin.node.p2p.OutboundPeerSupervisor close
+INFO: Outbound peer supervisor stopped
+
+BLK 100.0% 104/104 0/s 2026[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 9.321 s -- in ru.bitcoin.node.app.BitcoinCoreMiningRoundTripTest
+[INFO] Running ru.bitcoin.node.app.Testnet4MiningTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.077 s -- in ru.bitcoin.node.app.Testnet4MiningTest
+[INFO] 
+[INFO] Results:
+[INFO] 
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0
+[INFO] 
+[INFO] ------------------------------------------------------------------------
+[INFO] Reactor Summary for bitcoin-node 0.0.1-SNAPSHOT:
+[INFO] 
+[INFO] bitcoin-node ....................................... SUCCESS [  0.110 s]
+[INFO] common ............................................. SUCCESS [  0.341 s]
+[INFO] crypto ............................................. SUCCESS [  0.050 s]
+[INFO] protocol ........................................... SUCCESS [  1.029 s]
+[INFO] script ............................................. SUCCESS [  0.053 s]
+[INFO] consensus .......................................... SUCCESS [  0.890 s]
+[INFO] storage ............................................ SUCCESS [  3.615 s]
+[INFO] chain .............................................. SUCCESS [  4.787 s]
+[INFO] mempool ............................................ SUCCESS [  0.034 s]
+[INFO] p2p ................................................ SUCCESS [  4.391 s]
+[INFO] mining ............................................. SUCCESS [  2.152 s]
+[INFO] stratum ............................................ SUCCESS [  2.382 s]
+[INFO] app ................................................ SUCCESS [ 15.793 s]
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  35.838 s
+[INFO] Finished at: 2026-09-30T15:25:31+07:00
+[INFO] ------------------------------------------------------------------------

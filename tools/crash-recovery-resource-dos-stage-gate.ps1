@@ -48,13 +48,14 @@ try {
     if (-not (Test-Path -LiteralPath $ioReport)) { throw 'missing executed storage-failure report' }
     [xml]$ioResults = Get-Content -LiteralPath $ioReport -Raw
     $ioSuite = $ioResults.testsuite
-    if ([int]$ioSuite.tests -lt 10 -or [int]$ioSuite.failures -ne 0 -or
+    if ([int]$ioSuite.tests -lt 16 -or [int]$ioSuite.failures -ne 0 -or
         [int]$ioSuite.errors -ne 0 -or [int]$ioSuite.skipped -ne 0) {
         throw 'storage-failure tests must execute without failures or skips'
     }
     foreach ($case in @('failedSpendingCommitIsAtomicAndRetryable', 'failedDisconnectDoesNotMarkBranchInvalid',
             'failedReconnectDoesNotClearInvalidation', 'failedForkSwitchPreservesOriginalChain',
-            'failedHeaderBatchDoesNotPublishBestHeader')) {
+            'failedHeaderBatchDoesNotPublishBestHeader', 'failedGenesisInitializationLeavesEmptyDatabase',
+            'failedLegacyHeaderMigrationPreservesDatabase', 'failedSnapshotPromotionResumesAtEveryWriteBoundary')) {
         $executed = @($ioSuite.testcase | Where-Object { $_.name.StartsWith($case + '(') })
         if ($executed.Count -lt 2) { throw "missing IOError/NoSpace scenarios: $case" }
     }

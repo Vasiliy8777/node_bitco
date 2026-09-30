@@ -1,0 +1,8 @@
+bitcoin:
+  network: testnet4
+  data-directory: ${BITCOIN_DATA_DIRECTORY:./data/testnet4}
+  p2p:
+    port: 48333
+    peers: ""
+  rpc:
+    port: 48332

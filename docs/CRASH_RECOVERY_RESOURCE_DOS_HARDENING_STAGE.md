@@ -86,3 +86,30 @@ the path to `bitcoind` to include the Bitcoin Core roundtrip in its `clean test`
 Injected pre-write rejection does not simulate actual disk exhaustion, a partial WAL
 write, an error with uncertain commit outcome, power loss or sustained resource load.
 Those checks, along with snapshot-finalization fault coverage, remain open.
+
+## Initialization write rejection (30 September 2026)
+
+Four more `NodeStorageFailureTest` cases reject genesis initialization and legacy
+best-header migration with IOError or IOError/NoSpace (14 failure cases total).
+Rejected genesis writes must leave the database empty, including after reopening.
+Rejected migration must preserve every persisted key and namespace generation.
+Both operations are retried after reopening, then reopened again and compared with
+an independently initialized node, including its complete persisted contents.
+The existing initializer passed these checks without production changes. The stage
+gate now requires both new scenario names. These remain pre-write rejection tests,
+not partial native-write or power-loss simulations.
+
+## AssumeUTXO promotion write rejection (30 September 2026)
+
+Two parameterized cases now exercise IOError and IOError/NoSpace at each of four
+native-write boundaries in validated snapshot promotion: canonical clear/marker,
+the first 10,000 entries, the remaining entry, and final marker/staging cleanup.
+Already successful writes are real RocksDB commits. After rejection, staging and
+activation metadata must remain available; reopening and retrying must promote all
+10,001 entries, remove old canonical entries and metadata, and preserve the active
+tip. A subsequent finalization is a no-op. Opaque key/value fixtures exercise the
+storage copy protocol, not snapshot validation or coin decoding.
+
+The gate requires 16 storage-failure test cases. This covers deterministic rejected
+writes during promotion, but not native partial writes, process termination during
+snapshot finalization, actual filesystem errors or power loss.

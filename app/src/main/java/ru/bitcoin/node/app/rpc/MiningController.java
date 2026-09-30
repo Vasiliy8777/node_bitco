@@ -87,7 +87,7 @@ public final class MiningController {
         result.put("coinbasevalue", block.transactions().getFirst().outputs().stream().mapToLong(output -> output.value()).sum());
         result.put("longpollid", block.header().previousBlockHash().toDisplayHex() + ":" + snapshot.revision());
         result.put("target", String.format("%064x", CompactTarget.decode(block.header().bits().value())));
-        result.put("mintime", snapshot.medianTimePast() + 1);
+        result.put("mintime", snapshot.minimumTimestamp());
         result.put("mutable", List.of("time", "transactions", "prevblock"));
         result.put("noncerange", "00000000ffffffff");
         result.put("sigoplimit", 80_000);

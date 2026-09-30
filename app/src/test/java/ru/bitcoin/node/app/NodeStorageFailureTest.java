@@ -11,6 +11,12 @@ import ru.bitcoin.node.protocol.network.NetworkParametersRegistry;
 import ru.bitcoin.node.storage.block.RocksDbBlockIndexStore;
 import ru.bitcoin.node.storage.chain.RocksDbChainStateStore;
 import ru.bitcoin.node.storage.rocksdb.RocksDbDatabase;
+import ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces;
+import ru.bitcoin.node.storage.rocksdb.RocksDbWriteBatch;
+import ru.bitcoin.node.storage.utxo.RocksDbAssumeUtxoFinalizer;
+import ru.bitcoin.node.storage.utxo.RocksDbAssumeUtxoBackgroundStore;
+import ru.bitcoin.node.storage.utxo.RocksDbSnapshotChainStateStore;
+import ru.bitcoin.node.common.types.Hash256;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -25,6 +31,116 @@ import static org.mockito.Mockito.*;
 /** Inject errors at the JNI write boundary, before commit; never fills the host disk. */
 class NodeStorageFailureTest {
     @TempDir Path directory;
+
+    @ParameterizedTest @EnumSource(value = Status.SubCode.class, names = {"None", "NoSpace"})
+    void failedSnapshotPromotionResumesAtEveryWriteBoundary(Status.SubCode code) throws Exception {
+        // Marker/clear, first 10,000 coins, remaining coin, cleanup are separate commits.
+        for (int failAt = 1; failAt <= 4; failAt++) {
+            Path path = directory.resolve("snapshot-" + failAt);
+            var base = Hash256.fromDisplayHex("01".repeat(32));
+            var advanced = Hash256.fromDisplayHex("02".repeat(32));
+            try (var db = new RocksDbDatabase(path)) {
+                var tips = new RocksDbChainStateStore(db);
+                tips.saveActiveTipHash(base);
+                new RocksDbSnapshotChainStateStore(db).activate(base, 10, advanced, 20);
+                var background = new RocksDbAssumeUtxoBackgroundStore(db);
+                background.initialize(base, 10);
+                background.mark(RocksDbAssumeUtxoBackgroundStore.Status.VALIDATED, advanced, 20);
+                // Metadata test: finalizer copies opaque key/value pairs, without decoding coins.
+                db.put(new byte[]{RocksDbNamespaces.UTXO, 99}, new byte[]{99});
+                try (var batch = new RocksDbWriteBatch()) {
+                    for (int i = 0; i <= 10_000; i++) batch.put(snapshotKey(i), new byte[]{(byte) i});
+                    db.write(batch);
+                }
+                try (var fault = new WriteFailure(db, code, false, failAt)) {
+                    var thrown = assertThrows(IllegalStateException.class,
+                            () -> new RocksDbAssumeUtxoFinalizer(db).finalizeOnStartup());
+                    assertSame(fault.error, thrown.getCause());
+                    fault.assertUsed();
+                    assertTrue(new RocksDbSnapshotChainStateStore(db).load().isPresent());
+                    assertEquals(advanced, tips.loadActiveTipHash().orElseThrow());
+                    for (int i = 0; i <= 10_000; i++) assertArrayEquals(new byte[]{(byte) i}, db.get(snapshotKey(i)));
+                }
+            }
+            try (var db = new RocksDbDatabase(path)) {
+                assertTrue(new RocksDbAssumeUtxoFinalizer(db).finalizeOnStartup());
+                assertFalse(new RocksDbAssumeUtxoFinalizer(db).finalizeOnStartup());
+                assertTrue(new RocksDbSnapshotChainStateStore(db).load().isEmpty());
+                assertTrue(new RocksDbAssumeUtxoBackgroundStore(db).load().isEmpty());
+                assertEquals(advanced, new RocksDbChainStateStore(db).loadActiveTipHash().orElseThrow());
+                assertNull(db.get(new byte[]{RocksDbNamespaces.UTXO, 99}));
+                for (int i = 0; i <= 10_000; i++) {
+                    byte[] key = snapshotKey(i);
+                    assertNull(db.get(key));
+                    key[0] = RocksDbNamespaces.UTXO;
+                    assertArrayEquals(new byte[]{(byte) i}, db.get(key));
+                }
+            }
+        }
+    }
+
+    private static byte[] snapshotKey(int i) {
+        return new byte[]{RocksDbNamespaces.SNAPSHOT_UTXO_STAGING, (byte) (i >>> 8), (byte) i};
+    }
+
+    @ParameterizedTest @EnumSource(value = Status.SubCode.class, names = {"None", "NoSpace"})
+    void failedGenesisInitializationLeavesEmptyDatabase(Status.SubCode code) throws Exception {
+        Path path = directory.resolve("initialization");
+        try (var db = new RocksDbDatabase(path)) {
+            var generations = generations(db);
+            try (var fault = new WriteFailure(db, code)) {
+                var thrown = assertThrows(IllegalStateException.class,
+                        () -> new ChainInitializer(db, NetworkParametersRegistry.regtest()).initialize());
+                assertSame(fault.error, thrown.getCause());
+                fault.assertUsed();
+                assertTrue(db.isEmpty(), "Rejected genesis batch must leave no partial initialization");
+                assertArrayEquals(generations, generations(db));
+            }
+        }
+        try (var db = new RocksDbDatabase(path)) {
+            assertTrue(db.isEmpty());
+            new ChainInitializer(db, NetworkParametersRegistry.regtest()).initialize();
+        }
+        assertReopenedGenesisMatchesReference(path);
+    }
+
+    @ParameterizedTest @EnumSource(value = Status.SubCode.class, names = {"None", "NoSpace"})
+    void failedLegacyHeaderMigrationPreservesDatabase(Status.SubCode code) throws Exception {
+        Path path = directory.resolve("legacy");
+        List<String> before;
+        try (var db = new RocksDbDatabase(path)) {
+            new ChainInitializer(db, NetworkParametersRegistry.regtest()).initialize();
+            db.delete(new byte[]{0x02, 0x02}); // Legacy database has no separate best-header tip.
+            before = contents(db);
+            var generations = generations(db);
+            try (var fault = new WriteFailure(db, code, true)) {
+                var thrown = assertThrows(IllegalStateException.class,
+                        () -> new ChainInitializer(db, NetworkParametersRegistry.regtest()).initialize());
+                assertSame(fault.error, thrown.getCause());
+                fault.assertUsed();
+                assertContentsEqual(before, contents(db));
+                assertArrayEquals(generations, generations(db));
+            }
+        }
+        try (var db = new RocksDbDatabase(path)) {
+            assertContentsEqual(before, contents(db));
+            assertTrue(new RocksDbChainStateStore(db).loadBestHeaderTipHash().isEmpty());
+            new ChainInitializer(db, NetworkParametersRegistry.regtest()).initialize();
+        }
+        assertReopenedGenesisMatchesReference(path);
+    }
+
+    private void assertReopenedGenesisMatchesReference(Path path) {
+        try (var referenceDb = new RocksDbDatabase(directory.resolve("reference"));
+             var reference = NodeProcessCrashTest.service(referenceDb);
+             var db = new RocksDbDatabase(path);
+             var actual = NodeProcessCrashTest.service(db)) {
+            NodeProcessCrashTest.assertState(reference, actual);
+            assertContentsEqual(contents(referenceDb), contents(db));
+            assertEquals(NetworkParametersRegistry.regtest().genesisBlockHash(),
+                    new RocksDbChainStateStore(db).loadBestHeaderTipHash().orElseThrow());
+        }
+    }
 
     @ParameterizedTest @EnumSource(value = Status.SubCode.class, names = {"None", "NoSpace"})
     void failedSpendingCommitIsAtomicAndRetryable(Status.SubCode code) throws Exception { verifyTransition("spend", code); }
@@ -138,20 +254,39 @@ class NodeStorageFailureTest {
         private final RocksDB original;
         private final RocksDB proxy;
         private final RocksDBException error;
+        private final boolean singlePut;
+        private final int failAt;
 
         WriteFailure(RocksDbDatabase db, Status.SubCode code) throws RocksDBException {
+            this(db, code, false);
+        }
+
+        WriteFailure(RocksDbDatabase db, Status.SubCode code, boolean singlePut) throws RocksDBException {
+            this(db, code, singlePut, 1);
+        }
+
+        WriteFailure(RocksDbDatabase db, Status.SubCode code, boolean singlePut, int failAt) throws RocksDBException {
             this.db = db;
+            this.singlePut = singlePut;
+            this.failAt = failAt;
             original = (RocksDB) ReflectionTestUtils.getField(db, "database");
             assertNotNull(original);
             proxy = mock(RocksDB.class, delegatesTo(original));
             error = new RocksDBException(new Status(Status.Code.IOError, code, "Injected write failure"));
-            doThrow(error).when(proxy).write(any(WriteOptions.class), any(WriteBatch.class));
+            var calls = new java.util.concurrent.atomic.AtomicInteger();
+            doAnswer(invocation -> {
+                if (calls.incrementAndGet() == failAt) throw error;
+                original.write(invocation.getArgument(0, WriteOptions.class), invocation.getArgument(1, WriteBatch.class));
+                return null;
+            }).when(proxy).write(any(WriteOptions.class), any(WriteBatch.class));
+            if (singlePut) doThrow(error).when(proxy).put(any(byte[].class), any(byte[].class));
             // Test-only seam: production RocksDbDatabase still performs wrapping and generation publication.
             ReflectionTestUtils.setField(db, "database", proxy);
         }
 
         void assertUsed() throws RocksDBException {
-            verify(proxy, times(1)).write(any(WriteOptions.class), any(WriteBatch.class));
+            if (singlePut) verify(proxy, times(1)).put(any(byte[].class), any(byte[].class));
+            else verify(proxy, times(failAt)).write(any(WriteOptions.class), any(WriteBatch.class));
         }
 
         @Override public void close() { ReflectionTestUtils.setField(db, "database", original); }

@@ -1,0 +1,250 @@
+[INFO] Scanning for projects...
+[INFO] ------------------------------------------------------------------------
+[INFO] Reactor Build Order:
+[INFO] 
+[INFO] bitcoin-node                                                       [pom]
+[INFO] common                                                             [jar]
+[INFO] crypto                                                             [jar]
+[INFO] protocol                                                           [jar]
+[INFO] script                                                             [jar]
+[INFO] consensus                                                          [jar]
+[INFO] storage                                                            [jar]
+[INFO] chain                                                              [jar]
+[INFO] mempool                                                            [jar]
+[INFO] p2p                                                                [jar]
+[INFO] mining                                                             [jar]
+[INFO] stratum                                                            [jar]
+[INFO] app                                                                [jar]
+[INFO] 
+[INFO] -----------------------< ru.bitcoin.mining:node >-----------------------
+[INFO] Building bitcoin-node 0.0.1-SNAPSHOT                              [1/13]
+[INFO]   from pom.xml
+[INFO] --------------------------------[ pom ]---------------------------------
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ node ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] ----------------------< ru.bitcoin.mining:common >----------------------
+[INFO] Building common 0.0.1-SNAPSHOT                                    [2/13]
+[INFO]   from common\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ common ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.4.0:resources (default-resources) @ common ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.15.0:compile (default-compile) @ common ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] ----------------------< ru.bitcoin.mining:crypto >----------------------
+[INFO] Building crypto 0.0.1-SNAPSHOT                                    [3/13]
+[INFO]   from crypto\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ crypto ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.4.0:resources (default-resources) @ crypto ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.15.0:compile (default-compile) @ crypto ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] ---------------------< ru.bitcoin.mining:protocol >---------------------
+[INFO] Building protocol 0.0.1-SNAPSHOT                                  [4/13]
+[INFO]   from protocol\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ protocol ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.4.0:resources (default-resources) @ protocol ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.15.0:compile (default-compile) @ protocol ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed source code.
+[INFO] Compiling 24 source files with javac [forked debug release 21] to target\classes
+[INFO] 
+[INFO] ----------------------< ru.bitcoin.mining:script >----------------------
+[INFO] Building script 0.0.1-SNAPSHOT                                    [5/13]
+[INFO]   from script\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ script ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.4.0:resources (default-resources) @ script ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.15.0:compile (default-compile) @ script ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 39 source files with javac [forked debug release 21] to target\classes
+[INFO] 
+[INFO] --------------------< ru.bitcoin.mining:consensus >---------------------
+[INFO] Building consensus 0.0.1-SNAPSHOT                                 [6/13]
+[INFO]   from consensus\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ consensus ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.4.0:resources (default-resources) @ consensus ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.15.0:compile (default-compile) @ consensus ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 49 source files with javac [forked debug release 21] to target\classes
+[INFO] 
+[INFO] ---------------------< ru.bitcoin.mining:storage >----------------------
+[INFO] Building storage 0.0.1-SNAPSHOT                                   [7/13]
+[INFO]   from storage\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ storage ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.4.0:resources (default-resources) @ storage ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.15.0:compile (default-compile) @ storage ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 59 source files with javac [forked debug release 21] to target\classes
+[INFO] 
+[INFO] ----------------------< ru.bitcoin.mining:chain >-----------------------
+[INFO] Building chain 0.0.1-SNAPSHOT                                     [8/13]
+[INFO]   from chain\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ chain ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.4.0:resources (default-resources) @ chain ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.15.0:compile (default-compile) @ chain ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 63 source files with javac [forked debug release 21] to target\classes
+[INFO] 
+[INFO] ---------------------< ru.bitcoin.mining:mempool >----------------------
+[INFO] Building mempool 0.0.1-SNAPSHOT                                   [9/13]
+[INFO]   from mempool\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ mempool ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.4.0:resources (default-resources) @ mempool ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.15.0:compile (default-compile) @ mempool ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 16 source files with javac [forked debug release 21] to target\classes
+[INFO] 
+[INFO] -----------------------< ru.bitcoin.mining:p2p >------------------------
+[INFO] Building p2p 0.0.1-SNAPSHOT                                      [10/13]
+[INFO]   from p2p\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ p2p ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.4.0:resources (default-resources) @ p2p ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.15.0:compile (default-compile) @ p2p ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 113 source files with javac [forked debug release 21] to target\classes
+[INFO] 
+[INFO] ----------------------< ru.bitcoin.mining:mining >----------------------
+[INFO] Building mining 0.0.1-SNAPSHOT                                   [11/13]
+[INFO]   from mining\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ mining ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.4.0:resources (default-resources) @ mining ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.15.0:compile (default-compile) @ mining ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 17 source files with javac [forked debug release 21] to target\classes
+[INFO] 
+[INFO] ---------------------< ru.bitcoin.mining:stratum >----------------------
+[INFO] Building stratum 0.0.1-SNAPSHOT                                  [12/13]
+[INFO]   from stratum\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ stratum ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.4.0:resources (default-resources) @ stratum ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.15.0:compile (default-compile) @ stratum ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 23 source files with javac [forked debug release 21] to target\classes
+[INFO] 
+[INFO] -----------------------< ru.bitcoin.mining:app >------------------------
+[INFO] Building app 0.0.1-SNAPSHOT                                      [13/13]
+[INFO]   from app\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ app ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.4.0:resources (default-resources) @ app ---
+[INFO] Copying 6 resources from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.15.0:compile (default-compile) @ app ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 41 source files with javac [forked debug release 21] to target\classes
+[INFO] ------------------------------------------------------------------------
+[INFO] Reactor Summary for bitcoin-node 0.0.1-SNAPSHOT:
+[INFO] 
+[INFO] bitcoin-node ....................................... SUCCESS [  0.103 s]
+[INFO] common ............................................. SUCCESS [  0.223 s]
+[INFO] crypto ............................................. SUCCESS [  0.033 s]
+[INFO] protocol ........................................... SUCCESS [  1.678 s]
+[INFO] script ............................................. SUCCESS [  1.322 s]
+[INFO] consensus .......................................... SUCCESS [  1.378 s]
+[INFO] storage ............................................ SUCCESS [  2.001 s]
+[INFO] chain .............................................. SUCCESS [  1.985 s]
+[INFO] mempool ............................................ SUCCESS [  1.270 s]
+[INFO] p2p ................................................ SUCCESS [  2.082 s]
+[INFO] mining ............................................. SUCCESS [  1.020 s]
+[INFO] stratum ............................................ SUCCESS [  1.366 s]
+[INFO] app ................................................ SUCCESS [  2.154 s]
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  16.848 s
+[INFO] Finished at: 2026-09-30T15:19:17+07:00
+[INFO] ------------------------------------------------------------------------

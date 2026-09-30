@@ -51,6 +51,8 @@ public final class NetworkDnsSeeds {
 
             case TESTNET ->
                     TESTNET;
+            case TESTNET4 ->
+                    List.of("seed.testnet4.bitcoin.sprovoost.nl", "seed.testnet4.wiz.biz");
 
             case SIGNET ->
                     SIGNET;

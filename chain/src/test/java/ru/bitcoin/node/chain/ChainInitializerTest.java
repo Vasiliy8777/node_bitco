@@ -207,6 +207,22 @@ class ChainInitializerTest {
         assertThrows(IllegalStateException.class, () -> initializer(db).initialize());
     }
 
+    @Test
+    void testnet4ReopensAndRejectsTestnet3DatabaseReuse() {
+        var parameters = NetworkParametersRegistry.testnet4();
+        try (var db = new RocksDbDatabase(path)) {
+            assertEquals(parameters.genesisBlockHash(), new ChainInitializer(db, parameters).initialize().activeTip().hash());
+        }
+        try (var db = new RocksDbDatabase(path)) {
+            assertEquals(parameters.genesisBlockHash(), new ChainInitializer(db, parameters).initialize().activeTip().hash());
+            assertThrows(IllegalStateException.class,
+                    () -> new ChainInitializer(db, NetworkParametersRegistry.testnet()).initialize());
+            assertEquals(parameters.genesisBlockHash(), new RocksDbChainStateStore(db).loadActiveTipHash().orElseThrow());
+            assertTrue(new RocksDbUtxoStore(db).find(new OutPoint(
+                    GenesisBlockFactory.create(parameters).transactions().getFirst().txId(), new UInt32(0))).isEmpty());
+        }
+    }
+
     private static ChainInitializer initializer(RocksDbDatabase db) {
         return new ChainInitializer(db, NetworkParametersRegistry.regtest());
     }

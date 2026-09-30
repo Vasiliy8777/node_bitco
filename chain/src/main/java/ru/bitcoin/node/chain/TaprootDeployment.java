@@ -28,7 +28,7 @@ public final class TaprootDeployment {
     ) {
         if (candidate == null || lookup == null || parameters == null)
             throw new IllegalArgumentException("candidate, lookup and parameters must not be null");
-        if (parameters.network() == BitcoinNetwork.REGTEST || parameters.network() == BitcoinNetwork.SIGNET) return true;
+        if (parameters.network() == BitcoinNetwork.REGTEST || parameters.network() == BitcoinNetwork.SIGNET || parameters.network() == BitcoinNetwork.TESTNET4) return true;
         if (candidate.height() == 0) return false;
         BlockIndex parent = required(lookup, candidate.previousBlockHash());
         return manager(lookup, parameters).stateForNextBlock(parent) == DeploymentState.ACTIVE;
@@ -42,7 +42,7 @@ public final class TaprootDeployment {
     ) {
         if (parent == null || lookup == null || parameters == null)
             throw new IllegalArgumentException("parent, lookup and parameters must not be null");
-        if (parameters.network() == BitcoinNetwork.REGTEST || parameters.network() == BitcoinNetwork.SIGNET)
+        if (parameters.network() == BitcoinNetwork.REGTEST || parameters.network() == BitcoinNetwork.SIGNET || parameters.network() == BitcoinNetwork.TESTNET4)
             return DeploymentState.ACTIVE;
         return manager(lookup, parameters).stateForNextBlock(parent);
     }
@@ -52,7 +52,7 @@ public final class TaprootDeployment {
             BlockIndexLookup lookup,
             NetworkParameters parameters
     ) {
-        if (parameters.network() == BitcoinNetwork.REGTEST || parameters.network() == BitcoinNetwork.SIGNET)
+        if (parameters.network() == BitcoinNetwork.REGTEST || parameters.network() == BitcoinNetwork.SIGNET || parameters.network() == BitcoinNetwork.TESTNET4)
             return DeploymentState.ACTIVE;
         if (candidate.height() == 0) return DeploymentState.DEFINED;
         return manager(lookup, parameters).stateForNextBlock(required(lookup, candidate.previousBlockHash()));

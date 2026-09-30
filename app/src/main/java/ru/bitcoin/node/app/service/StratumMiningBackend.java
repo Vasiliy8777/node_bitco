@@ -51,8 +51,8 @@ public final class StratumMiningBackend implements MiningBackend {
         var snapshot = validation.miningSnapshot(payout,
                 new byte[ExtraNonceManager.EXTRANONCE1_SIZE + ExtraNonceManager.EXTRANONCE2_SIZE], maximumWeight, minimumFee);
         if (!isCurrent(snapshot.block().header().previousBlockHash())) { cached = null; return Optional.empty(); }
-        cached = new MiningWork(snapshot.block(), snapshot.medianTimePast() + 1, snapshot.revision(),
-                parameters.network() != BitcoinNetwork.TESTNET);
+        cached = new MiningWork(snapshot.block(), snapshot.minimumTimestamp(), snapshot.revision(),
+                !parameters.allowMinDifficultyBlocks() || parameters.noRetargeting());
         builtAt = System.nanoTime();
         return Optional.of(cached);
     }

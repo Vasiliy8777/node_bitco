@@ -14,6 +14,21 @@ public final class ChainHeaderValidator {
     private ChainHeaderValidator() {
     }
 
+    /** Shared lower bound for consensus validation, GBT and Stratum. */
+    public static long minimumTimestamp(BlockIndex parent, long medianTimePast, NetworkParameters parameters) {
+        long minimum = Math.addExact(medianTimePast, 1L);
+        if (parameters.enforceBip94()
+                && Math.addExact(parent.height(), 1L) % parameters.difficultyAdjustmentInterval() == 0) {
+            minimum = Math.max(minimum, parent.header().timestamp().value() - 600L);
+        }
+        return minimum;
+    }
+
+    private static void validateTimestamp(BlockHeader header, BlockIndex parent, long mtp, NetworkParameters parameters) {
+        if (header.timestamp().value() < minimumTimestamp(parent, mtp, parameters))
+            throw new BlockHeaderValidationException("Block timestamp violates MTP or BIP94 timewarp bound");
+    }
+
     /** Shared difficulty calculation for a candidate extending this parent. */
     public static UInt32 nextBits(BlockIndex parent, BlockIndexLookup lookup,
                                   NetworkParameters parameters, UInt32 timestamp) {
@@ -93,6 +108,7 @@ public final class ChainHeaderValidator {
                         lookup
                 );
 
+        validateTimestamp(header, parent, medianTimePast, parameters);
         UInt32 expectedBits =
                 calculateExpectedBits(
                         nextHeight,
@@ -126,6 +142,7 @@ public final class ChainHeaderValidator {
         long nextHeight = Math.addExact(parent.height(), 1L);
         validateBlockVersion(header, nextHeight, parameters);
         long medianTimePast = MedianTimePast.calculate(parent, lookup);
+        validateTimestamp(header, parent, medianTimePast, parameters);
         UInt32 expectedBits = calculateExpectedBits(nextHeight, header, parent, lookup, parameters);
         BlockHeaderValidator.validateWithoutProofOfWork(
                 header, expectedBits, medianTimePast, adjustedTime.currentTimeSeconds(), parameters);

@@ -27,12 +27,24 @@ public final class GenesisBlockFactory {
                         + "f6bc3f4cef38c4f35504e51ec112de5c384df7ba0b8d578a4c702b6bf11d5fac"))),
                 new UInt32(0));
         long time;
+        if (parameters.network() == ru.bitcoin.node.protocol.network.BitcoinNetwork.TESTNET4) {
+            byte[] message = ("03/May/2024 000000000000000000001ebd58c244970b3aa9d783bb001011fbe8ea8e98e00e")
+                    .getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+            byte[] prefix = HexUtils.decode("04ffff001d01044c4c");
+            byte[] script = java.util.Arrays.copyOf(prefix, prefix.length + message.length);
+            System.arraycopy(message, 0, script, prefix.length, message.length);
+            coinbase = new Transaction(1,
+                    List.of(new TxIn(OutPoint.coinbase(), script, TxIn.FINAL_SEQUENCE)),
+                    List.of(new TxOut(5_000_000_000L, HexUtils.decode("21" + "00".repeat(33) + "ac"))),
+                    new UInt32(0));
+        }
         long nonce;
         long bits;
         switch (parameters.network()) {
             case MAINNET -> { time = 1231006505L; nonce = 2083236893L; bits = 0x1d00ffffL; }
             // TESTNET currently denotes testnet3, not testnet4.
             case TESTNET -> { time = 1296688602L; nonce = 414098458L; bits = 0x1d00ffffL; }
+            case TESTNET4 -> { time = 1714777860L; nonce = 393743547L; bits = 0x1d00ffffL; }
             case SIGNET -> { time = 1598918400L; nonce = 52613770L; bits = 0x1e0377aeL; }
             case REGTEST -> { time = 1296688602L; nonce = 2L; bits = 0x207fffffL; }
             default -> throw new IllegalArgumentException("Unsupported network");

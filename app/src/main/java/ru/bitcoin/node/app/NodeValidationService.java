@@ -88,7 +88,7 @@ public final class NodeValidationService implements AutoCloseable {
     }
 
     public record MiningSnapshot(Block block, List<MempoolEntry> entries, long height, long medianTimePast,
-                                 long revision,
+                                 long minimumTimestamp, long revision,
                                  List<ru.bitcoin.node.mining.MiningVersionBits.DeploymentView> deployments) {
     }
 
@@ -103,7 +103,9 @@ public final class NodeValidationService implements AutoCloseable {
             Block block = createMiningTemplate(payout, extraNonce, weight, feeRate, supportedRules);
             BlockIndex parent = chain.activeTip();
             return new MiningSnapshot(block, mempool.entries(), parent.height() + 1,
-                    MedianTimePast.calculate(parent, lookup), revision, miningDeployments(parent));
+                    MedianTimePast.calculate(parent, lookup),
+                    ChainHeaderValidator.minimumTimestamp(parent, MedianTimePast.calculate(parent, lookup), parameters),
+                    revision, miningDeployments(parent));
         }
     }
 
@@ -1260,7 +1262,8 @@ public final class NodeValidationService implements AutoCloseable {
             expirePersistent();
             var parent = chain.activeTip();
             long now = time.currentTimeSeconds();
-            long timestamp = Math.max(now, Math.addExact(MedianTimePast.calculate(parent, lookup), 1));
+            long timestamp = Math.max(now, ChainHeaderValidator.minimumTimestamp(
+                    parent, MedianTimePast.calculate(parent, lookup), parameters));
             if (timestamp > Math.addExact(now, 7200))
                 throw new IllegalStateException("Chain time too far ahead of local time");
             var blockTime = new ru.bitcoin.node.common.types.UInt32(timestamp);

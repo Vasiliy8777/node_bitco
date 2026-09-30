@@ -1027,6 +1027,7 @@ public final class NodeRpcServer implements AutoCloseable {
         return switch (validation.networkParameters().network()) {
             case MAINNET -> "main";
             case TESTNET -> "test";
+            case TESTNET4 -> "testnet4";
             case SIGNET -> "signet";
             case REGTEST -> "regtest";
         };

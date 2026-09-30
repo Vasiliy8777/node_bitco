@@ -62,6 +62,9 @@ backend раз в секунду с fixed delay после завершения 
 
 ### P2: Testnet4/BIP94 реализован лишь частично
 
+**Обновление 30 сентября:** пробел реализации закрыт, см. [Testnet4](TESTNET4.md)
+и результаты седьмого этапа ниже. Далее сохранена исходная находка аудита.
+
 `BitcoinNetwork` и `NetworkParametersRegistry` не предоставляют Testnet4.
 `NextWorkRequired` поддерживает выбор первого bits периода через enforceBip94,
 но `ChainHeaderValidator` не проверяет на границе периода
@@ -288,3 +291,52 @@ Testnet4/BIP94 этим этапом не изменён.
 10 storage-failure, 3 availability и 4 stall-detector теста. Core mining roundtrip
 выполнен без пропуска. Логи: `../storage-failure-focused.log`,
 `../storage-failure-stage.log`.
+
+## Шестой этап: отказ инициализации цепочки — 30 сентября
+
+Проверен ChainInitializer. Добавлены четыре случая IOError/NoSpace: отказ первого
+batch с genesis и отказ записи best-header tip при миграции старой БД. Проверяется
+отсутствие частичной инициализации, неизменность содержимого БД и namespace versions,
+повтор операции после переоткрытия и ещё одно переоткрытие с сопоставлением всех
+ключей и состояния цепочки с независимой эталонной БД. Производственный код
+инициализатора не менялся: нарушения в этих сценариях не воспроизвелись.
+
+Stage gate теперь требует 14 сценариев отказов записи. Целевой прогон
+NodeStorageFailureTest (14) и ChainInitializerTest (11): 25 тестов, без ошибок
+и пропусков, BUILD SUCCESS. Лог: `../initialization-failure-focused.log`.
+Полный reactor и Core roundtrip в этом этапе повторно не запускались; результаты
+предыдущего полного прогона приведены выше. Реальные disk/WAL faults, power-loss
+и snapshot finalization остаются открытыми.
+
+## Седьмой этап: Testnet4/BIP94 и продолжение recovery — 30 сентября
+
+Закрыт пробел реализации Testnet4: отдельная сеть и профиль, genesis с точным
+сравнением с BIP94, magic/порты/DNS, активации с высоты 1, Taproot always-active,
+bootstrap anchors по Core v30.0, RPC chain=testnet4. Testnet3 сохраняет прежнее
+значение `testnet`. Переоткрытие Testnet4 и отказ использования БД как Testnet3
+проверены в ChainInitializerTest. Детали запуска: [TESTNET4.md](TESTNET4.md).
+
+Единая нижняя граница времени применяется в header/block/proposal validation,
+шаблонах, GBT mintime и Stratum. На границе периода учитываются MTP+1 и
+parent.time−600; Stratum запрещает time rolling при изменяемой от времени
+сложности, включая Testnet4. Проверены высоты 2015/2016/2017, −601/−600, MTP,
+retarget от первого bits периода, строгое 20-минутное исключение и возврат к
+предыдущей сложности. Проверены неизменные правила Mainnet/Testnet3.
+Изолированный Core подтвердил полные байты genesis Testnet4; regtest mining
+roundtrip также прошёл. Публичная синхронизация Testnet4 этим не подтверждается.
+
+Далее по recovery-плану добавлены IOError/NoSpace во всех четырёх точках записи
+финализации валидированного AssumeUTXO: clear/marker, первая порция 10 000 записей,
+остаток и cleanup. Предыдущие успешные commit реальны. После отказа и переоткрытия
+проверяются все 10 001 записи, отсутствие старых UTXO, сохранность tip, удаление
+маркеров и идемпотентность. Это тест протокола копирования с непрозрачными
+key/value, не проверка декодирования coins. Целевые проверки прошли; partial WAL,
+реальные ошибки файловой системы, process-crash внутри финализации, power-loss
+и длительная нагрузка остаются открытыми.
+
+Итог седьмого этапа: полный `clean test` через recovery stage gate с
+`-CoreBinary 'C:/Program Files/Bitcoin/daemon/bitcoind.exe'` — exit 0,
+3808 тестов, 0 failures/errors, 3 skipped. Выполнены 8 Testnet4ConsensusTest,
+2 Testnet4MiningTest, 2 Core integration, 16 storage-failure, 15 process-crash
+и 4 stall-detector теста. Логи: `../testnet4-focused.log`,
+`../testnet4-recovery-focused.log`, `../testnet4-stage.log`.

@@ -29,6 +29,37 @@ class BitcoinCoreMiningRoundTripTest {
     private Path cli;
     private Path coreData;
     private int rpcPort;
+    private String chainOption = "-regtest";
+
+    @Test
+    @EnabledIfSystemProperty(named = "bitcoin.core.binary", matches = ".+")
+    void testnet4GenesisMatchesIsolatedCore() throws Exception {
+        Path binary = Path.of(System.getProperty("bitcoin.core.binary"));
+        cli = binary.resolveSibling(System.getProperty("os.name").startsWith("Windows") ? "bitcoin-cli.exe" : "bitcoin-cli");
+        coreData = Files.createDirectory(directory.resolve("core-testnet4"));
+        chainOption = "-testnet4";
+        rpcPort = port();
+        var process = new ProcessBuilder(binary.toString(), "-datadir=" + coreData, chainOption, "-server",
+                "-rpcuser=test", "-rpcpassword=test-password", "-rpcport=" + rpcPort,
+                "-listen=0", "-connect=0", "-dnsseed=0", "-discover=0", "-listenonion=0", "-natpmp=0")
+                .redirectErrorStream(true).redirectOutput(directory.resolve("core-testnet4.log").toFile()).start();
+        try {
+            await(() -> {
+                try { command("getblockcount"); return true; } catch (Exception ignored) { return false; }
+            }, Duration.ofSeconds(20));
+            assertEquals("testnet4", JSON.readValue(command("getblockchaininfo"), Map.class).get("chain"));
+            var genesis = ru.bitcoin.node.protocol.block.GenesisBlockFactory.create(NetworkParametersRegistry.testnet4());
+            assertEquals(genesis.hash().toDisplayHex(), command("getblockhash", "0").strip());
+            assertEquals(HexFormat.of().formatHex(BlockSerializer.serialize(genesis)),
+                    command("getblock", genesis.hash().toDisplayHex(), "0").strip());
+        } finally {
+            try { command("stop"); } catch (Exception ignored) { }
+            if (!process.waitFor(10, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                assertTrue(process.waitFor(10, TimeUnit.SECONDS));
+            }
+        }
+    }
 
     @Test
     @EnabledIfSystemProperty(named = "bitcoin.core.binary", matches = ".+")
@@ -123,7 +154,7 @@ class BitcoinCoreMiningRoundTripTest {
     }
 
     private String command(String... arguments) throws Exception {
-        var command = new ArrayList<>(List.of(cli.toString(), "-datadir=" + coreData, "-regtest", "-rpcuser=test",
+        var command = new ArrayList<>(List.of(cli.toString(), "-datadir=" + coreData, chainOption, "-rpcuser=test",
                 "-rpcpassword=test-password", "-rpcport=" + rpcPort));
         command.addAll(List.of(arguments));
         Path outputFile = Files.createTempFile(directory, "core-rpc-", ".txt");

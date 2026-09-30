@@ -13,6 +13,30 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class GenesisBlockFactoryTest {
     @Test
+    void createsExactTestnet4Genesis() {
+        var parameters = NetworkParametersRegistry.testnet4();
+        var block = GenesisBlockFactory.create(parameters);
+        assertEquals("00000000da84f2bafbbc53dee25a72ae507ff4914b867c565be350b0da8bf043", block.hash().toDisplayHex());
+        assertEquals("7aa0a7ae1e223414cb807e40cd57e667b718e42aaf9306db9102fe28912b7b4e", block.header().merkleRoot().toDisplayHex());
+        assertEquals(1714777860L, block.header().timestamp().value());
+        assertEquals(393743547L, block.header().nonce().value());
+        assertEquals(0x283f161cL, parameters.magic());
+        assertEquals(48333, parameters.defaultPort());
+        assertEquals(1, parameters.bip34Height());
+        assertEquals(1, parameters.bip65Height());
+        assertEquals(1, parameters.bip66Height());
+        assertEquals(1, parameters.csvHeight());
+        assertEquals(1, parameters.segwitHeight());
+        assertTrue(parameters.enforceBip94());
+        assertTrue(parameters.allowMinDifficultyBlocks());
+        assertFalse(parameters.noRetargeting());
+        assertEquals(2016, parameters.difficultyAdjustmentInterval());
+        assertNull(parameters.bip16ExceptionBlockHash());
+        // Complete published BIP94 vector, including the different coinbase and output script.
+        assertArrayEquals(HexUtils.decode("0100000000000000000000000000000000000000000000000000000000000000000000004e7b2b9128fe0291db0693af2ae418b767e657cd407e80cb1434221eaea7a07a046f3566ffff001dbb0c78170101000000010000000000000000000000000000000000000000000000000000000000000000ffffffff5504ffff001d01044c4c30332f4d61792f323032342030303030303030303030303030303030303030303165626435386332343439373062336161396437383362623030313031316662653865613865393865303065ffffffff0100f2052a010000002321000000000000000000000000000000000000000000000000000000000000000000ac00000000"),
+                BlockSerializer.serialize(block));
+    }
+    @Test
     void createsMainnetGenesis() {
         assertGenesis(BitcoinNetwork.MAINNET,
                 "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f", 1231006505L, 2083236893L, 0x1d00ffffL);
