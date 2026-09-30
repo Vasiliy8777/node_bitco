@@ -212,6 +212,158 @@ class RocksDbUtxoStoreTest {
         }
     }
 
+    @Test
+    void abandonedBatchPreservesCoinsAndRetryPublishesCommittedCache() {
+        for (int capacity : new int[]{0, 2}) {
+            Path path = tempDirectory.resolve("atomic-" + capacity);
+            var spent = testOutPoint(0);
+            var created = testOutPoint(0xffff_ffffL);
+            var coin = testUtxo();
+            var replacement = new StoredUtxo(12_345L, new byte[]{0x51}, 850_001L, true);
+            try (var db = new RocksDbDatabase(path)) {
+                var store = new RocksDbUtxoStore(db, (byte) 0x03, capacity);
+                store.save(spent, coin);
+                var before = store.statistics();
+                try (var batch = new ru.bitcoin.node.storage.rocksdb.RocksDbWriteBatch()) {
+                    store.delete(batch, spent);
+                    store.save(batch, created, replacement);
+                    assertEquals(coin, store.find(spent).orElseThrow());
+                    assertTrue(store.find(created).isEmpty());
+                    // Discard the batch after reads have repopulated the cache.
+                }
+                assertEquals(before.hashSerialized3(), store.statistics().hashSerialized3());
+                assertEquals(coin, store.find(spent).orElseThrow());
+                assertTrue(store.find(created).isEmpty());
+                try (var batch = new ru.bitcoin.node.storage.rocksdb.RocksDbWriteBatch()) {
+                    store.delete(batch, spent);
+                    store.save(batch, created, replacement);
+                    assertEquals(coin, store.find(spent).orElseThrow());
+                    db.write(batch);
+                    store.applyCommittedChanges(new UtxoChanges(java.util.List.of(spent),
+                            java.util.List.of(new CreatedUtxo(created, replacement))));
+                }
+                assertTrue(store.find(spent).isEmpty());
+                assertEquals(replacement, store.find(created).orElseThrow());
+                assertEquals(1, store.count());
+                assertEquals(12_345L, store.statistics().totalAmount());
+                assertTrue(store.cacheStats().size() <= capacity);
+            }
+            try (var db = new RocksDbDatabase(path)) {
+                var store = new RocksDbUtxoStore(db);
+                assertTrue(store.find(spent).isEmpty());
+                assertEquals(replacement, store.find(created).orElseThrow());
+                assertEquals(1, store.count());
+            }
+        }
+    }
+
+    @Test
+    void abandonedNamespaceClearAndCommittedClearKeepSnapshotIsolated() {
+        Path path = tempDirectory.resolve("clear-isolation");
+        byte staging = ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.SNAPSHOT_UTXO_STAGING;
+        var point = testOutPoint(256);
+        var snapshotCoin = new StoredUtxo(321L, new byte[]{0x52}, 900_000L, true);
+        try (var db = new RocksDbDatabase(path)) {
+            var normal = new RocksDbUtxoStore(db, (byte) 0x03, 2);
+            var snapshot = new RocksDbUtxoStore(db, staging, 2);
+            normal.save(point, testUtxo());
+            snapshot.save(point, snapshotCoin);
+            var snapshotHash = snapshot.statistics().hashSerialized3();
+            try (var batch = new ru.bitcoin.node.storage.rocksdb.RocksDbWriteBatch()) {
+                normal.clear(batch);
+                assertEquals(testUtxo(), normal.find(point).orElseThrow());
+            }
+            assertEquals(testUtxo(), normal.find(point).orElseThrow());
+            try (var batch = new ru.bitcoin.node.storage.rocksdb.RocksDbWriteBatch()) {
+                normal.clear(batch);
+                db.write(batch);
+            }
+            assertTrue(normal.find(point).isEmpty());
+            assertEquals(0, normal.count());
+            assertEquals(snapshotCoin, snapshot.find(point).orElseThrow());
+            assertEquals(snapshotHash, snapshot.statistics().hashSerialized3());
+            normal.activateNamespace(staging);
+            assertEquals(snapshotCoin, normal.find(point).orElseThrow());
+            normal.activateNamespace((byte) 0x03);
+            assertTrue(normal.find(point).isEmpty());
+        }
+        try (var db = new RocksDbDatabase(path)) {
+            assertEquals(0, new RocksDbUtxoStore(db).count());
+            assertEquals(snapshotCoin, new RocksDbUtxoStore(db, staging).find(point).orElseThrow());
+        }
+    }
+    @Test
+    void deterministicChurnMatchesModelAcrossNamespacesAndRestarts() {
+        var random = new java.util.Random(0xB17C01L);
+        var expected = new java.util.ArrayList<java.util.Map<OutPoint, StoredUtxo>>();
+        expected.add(new java.util.HashMap<>());
+        expected.add(new java.util.HashMap<>());
+        byte[] prefixes = {0x03, ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.SNAPSHOT_UTXO_STAGING};
+        Path path = tempDirectory.resolve("churn");
+        for (int restart = 0; restart < 5; restart++) {
+            try (var db = new RocksDbDatabase(path)) {
+                var stores = new RocksDbUtxoStore[]{new RocksDbUtxoStore(db, prefixes[0], 7),
+                        new RocksDbUtxoStore(db, prefixes[1], 7)};
+                for (int ns = 0; ns < 2; ns++) assertModel(stores[ns], expected.get(ns));
+                for (int round = 0; round < 200; round++) {
+                    int ns = round % 2;
+                    var store = stores[ns];
+                    var model = expected.get(ns);
+                    var next = new java.util.HashMap<>(model);
+                    var touched = new java.util.LinkedHashSet<OutPoint>();
+                    while (touched.size() < 16) touched.add(testOutPoint(random.nextInt(256)));
+                    var spent = new java.util.ArrayList<OutPoint>();
+                    var created = new java.util.ArrayList<CreatedUtxo>();
+                    try (var batch = new ru.bitcoin.node.storage.rocksdb.RocksDbWriteBatch()) {
+                        for (var point : touched) {
+                            if (random.nextBoolean()) {
+                                var coin = new StoredUtxo(random.nextInt(100_000),
+                                        new byte[]{0x51, (byte) random.nextInt(256)}, restart * 200L + round,
+                                        random.nextBoolean());
+                                store.save(batch, point, coin);
+                                next.put(point, coin);
+                                created.add(new CreatedUtxo(point, coin));
+                            } else {
+                                store.delete(batch, point);
+                                next.remove(point);
+                                spent.add(point);
+                            }
+                            assertEquals(Optional.ofNullable(model.get(point)), store.find(point),
+                                    "Pending changes must remain invisible");
+                        }
+                        if (round % 7 != 0) {
+                            db.write(batch);
+                            store.applyCommittedChanges(new UtxoChanges(spent, created));
+                            model.clear();
+                            model.putAll(next);
+                        }
+                    }
+                    for (var point : touched)
+                        assertEquals(Optional.ofNullable(model.get(point)), store.find(point));
+                    assertTrue(store.cacheStats().size() <= 7);
+                    if (round % 40 == 0) {
+                        for (int check = 0; check < 2; check++) assertModel(stores[check], expected.get(check));
+                    }
+                }
+                for (int ns = 0; ns < 2; ns++) assertModel(stores[ns], expected.get(ns));
+            }
+        }
+        try (var db = new RocksDbDatabase(path)) {
+            for (int ns = 0; ns < 2; ns++) assertModel(new RocksDbUtxoStore(db, prefixes[ns]), expected.get(ns));
+        }
+    }
+
+    private static void assertModel(RocksDbUtxoStore store, java.util.Map<OutPoint, StoredUtxo> expected) {
+        for (int index = 0; index < 256; index++) {
+            var point = testOutPoint(index);
+            assertEquals(Optional.ofNullable(expected.get(point)), store.find(point));
+        }
+        assertEquals(expected.size(), store.count());
+        var stats = store.statistics();
+        assertEquals(expected.size(), stats.txouts());
+        assertEquals(expected.values().stream().mapToLong(StoredUtxo::amount).sum(), stats.totalAmount());
+        assertTrue(store.cacheStats().size() <= store.cacheStats().capacity());
+    }
     private static OutPoint testOutPoint(
             long index
     ) {

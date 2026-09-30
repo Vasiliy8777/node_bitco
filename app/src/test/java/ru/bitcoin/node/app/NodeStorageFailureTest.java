@@ -227,6 +227,71 @@ class NodeStorageFailureTest {
         }
     }
 
+    @ParameterizedTest @EnumSource(value = Status.SubCode.class, names = {"None", "NoSpace"})
+    void failedCachedUtxoTransitionPreservesCoinsAndRetryPublishesCache(Status.SubCode code) throws Exception {
+        Path path = directory.resolve("cached-transition");
+        var oldPoint = new ru.bitcoin.node.protocol.transaction.OutPoint(Hash256.fromDisplayHex("11".repeat(32)),
+                new ru.bitcoin.node.common.types.UInt32(0));
+        var newPoint = new ru.bitcoin.node.protocol.transaction.OutPoint(Hash256.fromDisplayHex("22".repeat(32)),
+                new ru.bitcoin.node.common.types.UInt32(1));
+        var oldCoin = new ru.bitcoin.node.storage.utxo.StoredUtxo(10_000, new byte[]{0x51}, 1, false);
+        var newCoin = new ru.bitcoin.node.storage.utxo.StoredUtxo(9_000, new byte[]{0x52}, 2, false);
+        Hash256 newTip;
+        try (var db = new RocksDbDatabase(path)) {
+            var genesis = new ChainInitializer(db, NetworkParametersRegistry.regtest()).initialize().activeTip();
+            var header = genesis.header();
+            var child = BlockIndexFactory.createChild(genesis, new ru.bitcoin.node.protocol.block.BlockHeader(
+                    4, genesis.hash(), header.merkleRoot(), new ru.bitcoin.node.common.types.UInt32(header.timestamp().value() + 1),
+                    header.bits(), new ru.bitcoin.node.common.types.UInt32(0)));
+            newTip = child.hash();
+            var indexes = new RocksDbBlockIndexStore(db);
+            indexes.save(BlockIndexStorageMapper.toStored(child));
+            var tips = new RocksDbChainStateStore(db);
+            var coins = new ru.bitcoin.node.storage.utxo.RocksDbUtxoStore(db, RocksDbNamespaces.UTXO, 2);
+            var undo = new ru.bitcoin.node.storage.undo.RocksDbUndoStore(db);
+            coins.save(oldPoint, oldCoin);
+            assertEquals(oldCoin, coins.find(oldPoint).orElseThrow());
+            assertTrue(coins.cacheStats().hits() > 0);
+            var changes = new ru.bitcoin.node.chain.utxo.BlockReorganizationChanges(
+                    new ru.bitcoin.node.storage.utxo.UtxoChanges(List.of(oldPoint),
+                            List.of(new ru.bitcoin.node.storage.utxo.CreatedUtxo(newPoint, newCoin))),
+                    java.util.Map.of(newTip, new ru.bitcoin.node.storage.undo.BlockUndoData(List.of(
+                            new ru.bitcoin.node.storage.undo.TransactionUndo(List.of(oldCoin))))));
+            var storage = new ru.bitcoin.node.chain.storage.RocksDbChainTransitionStorage(db, coins, undo, indexes, tips);
+            // Refill the old cache after batch preparation, just before native write.
+            java.util.function.Consumer<RocksDbWriteBatch> readBeforeCommit = batch -> {
+                assertEquals(oldCoin, coins.find(oldPoint).orElseThrow());
+                assertTrue(coins.find(newPoint).isEmpty());
+            };
+            var before = contents(db);
+            var versions = generations(db);
+            try (var fault = new WriteFailure(db, code)) {
+                var thrown = assertThrows(IllegalStateException.class,
+                        () -> storage.commit(genesis.hash(), child.hash(), changes, readBeforeCommit));
+                assertSame(fault.error, thrown.getCause());
+                fault.assertUsed();
+                assertContentsEqual(before, contents(db));
+                assertArrayEquals(versions, generations(db));
+                assertEquals(oldCoin, coins.find(oldPoint).orElseThrow());
+                assertTrue(coins.find(newPoint).isEmpty());
+                assertEquals(genesis.hash(), tips.loadActiveTipHash().orElseThrow());
+                assertTrue(undo.find(newTip).isEmpty());
+            }
+            storage.commit(genesis.hash(), newTip, changes, readBeforeCommit);
+            assertTrue(coins.find(oldPoint).isEmpty());
+            assertEquals(newCoin, coins.find(newPoint).orElseThrow());
+            assertEquals(newTip, tips.loadActiveTipHash().orElseThrow());
+            assertEquals(changes.connectedBlockUndo().get(newTip), undo.find(newTip).orElseThrow());
+            assertTrue(coins.cacheStats().size() <= 2);
+        }
+        try (var db = new RocksDbDatabase(path)) {
+            var coins = new ru.bitcoin.node.storage.utxo.RocksDbUtxoStore(db);
+            assertTrue(coins.find(oldPoint).isEmpty());
+            assertEquals(newCoin, coins.find(newPoint).orElseThrow());
+            assertEquals(newTip, new RocksDbChainStateStore(db).loadActiveTipHash().orElseThrow());
+            assertTrue(new ru.bitcoin.node.storage.undo.RocksDbUndoStore(db).find(newTip).isPresent());
+        }
+    }
     private static List<String> contents(RocksDbDatabase db) {
         var result = new ArrayList<String>();
         var hex = HexFormat.of();

@@ -413,3 +413,58 @@ NetworkConfiguration и NodeConfiguration: финализация VALIDATED snap
 все 19 тестов без ошибок и пропусков, BUILD SUCCESS. Лог: ../spring-recovery-focused.log.
 Полный reactor и Core integration повторно не запускались: изменены только тесты.
 Реальные disk/WAL faults, power-loss и длительные нагрузочные испытания остаются открытыми.
+
+## Одиннадцатый этап: batch, кеш и изоляция UTXO — 30 сентября
+
+В RocksDbUtxoStoreTest добавлены два сценария. Отмена batch со spend/create
+не публикует изменения; повторный commit и applyCommittedChanges обновляют
+кеш, даже если чтение до commit повторно загрузило старую монету. Проверка
+выполняется при ёмкости кеша 0 и 2, включая outpoint с индексом 0xffffffff,
+статистику и переоткрытие БД.
+
+Отмена очистки namespace сохраняет coins; подтверждённая очистка обычных UTXO
+не затрагивает snapshot с тем же outpoint и другими данными. Проверяются hash,
+переключение namespace и переоткрытие. Контракт вызова applyCommittedChanges
+после commit сохранён; произвольные конкурентные записи через другие store
+эти тесты не покрывают. Производственный код не изменён.
+
+Целевой прогон RocksDbUtxoStoreTest (12) и RocksDbWriteBatchTest (8): 20 тестов,
+без ошибок и пропусков, BUILD SUCCESS. Лог: ../utxo-atomicity-focused.log.
+Полный reactor повторно не запускался. Это проверка корректности, не длительная
+нагрузка и не эмуляция реальных disk/WAL faults или power-loss.
+
+## Двенадцатый этап: отказ commit при включённом кеше UTXO — 30 сентября
+
+NodeStorageFailureTest дополнен двумя случаями IOError/NoSpace при commit через
+RocksDbChainTransitionStorage с кешем ёмкостью 2. Чтение после подготовки batch
+повторно наполняет кеш старой монетой. После отказа проверяются все пространства
+ключей и namespace versions, старые coins и tip, отсутствие новых coins и undo.
+Успешный повтор должен обновить кеш внутри production commit без ручного вызова
+applyCommittedChanges из теста; после переоткрытия проверяются coins, tip и undo.
+
+Это storage-level фикстура с синтетическими индексами/coins, не новый сценарий
+полной валидации блока. Производственный код не изменён. Целевой прогон:
+NodeStorageFailureTest — 18, RocksDbChainTransitionStorageTest — 4,
+RocksDbUtxoStoreTest — 12; все 34 теста прошли без ошибок и пропусков.
+Лог: ../cached-utxo-failure-focused.log. Полный reactor повторно не запускался.
+Реальные disk/WAL faults, power-loss и длительная нагрузка остаются открытыми.
+
+## Тринадцатый этап: воспроизводимая серия изменений UTXO — 30 сентября
+
+В RocksDbUtxoStoreTest добавлен deterministicChurnMatchesModelAcrossNamespacesAndRestarts.
+При фиксированном seed выполняются 1000 batch по 16 уникальных outpoint:
+855 синхронных commit и 145 отмен. Рабочее множество — 256 outpoint на namespace,
+кеш — 7 записей; обычный и snapshot namespace чередуются. Независимые Map-модели
+учитывают только подтверждённые изменения. До commit проверяется невидимость
+подготовленных изменений, после — все затронутые coins и ограничение размера кеша.
+
+На контрольных точках сверяются все 256 ключей каждого namespace, количество
+и сумма UTXO. Между пятью сериями БД закрывается и открывается, после последней
+серии выполняется ещё одно переоткрытие без кеша. Это ограниченная проверка
+корректности storage под повторяющимися операциями, не измерение производительности,
+не длительный soak и не реальная блоковая/ASIC-нагрузка. Production-код не изменён.
+
+Целевой прогон: RocksDbUtxoStoreTest — 13, RocksDbWriteBatchTest — 8; все 21 тест
+без ошибок и пропусков, BUILD SUCCESS. Лог: ../utxo-churn-focused.log.
+Полный reactor повторно не запускался. Реальные disk/WAL faults, power-loss
+и длительные нагрузочные испытания остаются открытыми.
