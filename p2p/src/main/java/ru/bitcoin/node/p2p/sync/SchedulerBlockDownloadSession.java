@@ -16,7 +16,7 @@ public final class SchedulerBlockDownloadSession
     private static final System.Logger log =
             System.getLogger(SchedulerBlockDownloadSession.class.getName());
 
-    private static final int FRONTIER_DIAGNOSTIC_STATE_LIMIT = 8;
+    private static final int FRONTIER_DIAGNOSTIC_STATE_LIMIT = 0;
 
     private final PeerManager peerManager;
     private final BlockDownloadService blockDownloadService;

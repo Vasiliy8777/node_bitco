@@ -511,6 +511,47 @@ public final class NodeValidationService implements AutoCloseable {
         }
     }
 
+    /**
+     * IBD-oriented ordered block admission. Consensus validation and chain commits still
+     * happen for every block in order, but expensive derived-index/pruning maintenance is
+     * coalesced once for the whole contiguous batch. Mempool synchronization remains
+     * per-connected-block so externally visible transaction admission semantics are unchanged.
+     */
+    public List<BlockProcessingResult> processInitialSyncBatch(List<Block> batch) {
+        Objects.requireNonNull(batch, "batch");
+        if (batch.isEmpty()) return List.of();
+
+        synchronized (chain) {
+            synchronizePool();
+            List<BlockProcessingResult> results = new ArrayList<>(batch.size());
+            boolean connectedAny = false;
+
+            for (Block block : batch) {
+                Objects.requireNonNull(block, "batch block");
+                BlockProcessingResult result = processor.process(block);
+                results.add(result);
+
+                // Keep the mempool exactly synchronized with each committed active tip.
+                // This is intentionally not deferred across the batch.
+                synchronizePool();
+                connectedAny |= result == BlockProcessingResult.CONNECTED;
+            }
+
+            if (connectedAny) {
+                // These services already synchronize from their durable cursor to activeTip,
+                // so one catch-up pass is equivalent to doing the same work after every block.
+                if (txIndexEnabled) synchronizeTxIndex();
+                if (txOutSpenderIndexEnabled) synchronizeTxOutSpenderIndex();
+                if (coinStatsIndexEnabled) synchronizeCoinStatsIndex();
+                if (blockFilterIndexEnabled) synchronizeBlockFilterIndex();
+                blockPruner.prune(chain.activeTip(), assumeUtxoPruneCeiling());
+                initialBlockDownload.update(chain.activeTip());
+            }
+
+            return List.copyOf(results);
+        }
+    }
+
     public MempoolEntry admit(Transaction transaction) {
         synchronized (chain) {
             synchronizePool();

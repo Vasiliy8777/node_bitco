@@ -237,10 +237,7 @@ public final class BlockReorganizationChangesBuilder {
         );
     }
     private static void diagnostic(BlockIndex index, String stage) {
-        if (index != null && index.height() <= 32) {
-            LOG.info("REORG-BUILD height=" + index.height()
-                    + ", hash=" + index.hash().toDisplayHex() + ": " + stage);
-        }
+        // Per-block IBD diagnostic logging disabled for throughput.
     }
 
 

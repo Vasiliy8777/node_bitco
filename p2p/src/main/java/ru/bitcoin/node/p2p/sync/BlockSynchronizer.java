@@ -20,7 +20,7 @@ public final class BlockSynchronizer {
     private static final System.Logger log =
             System.getLogger(BlockSynchronizer.class.getName());
     private static final AtomicInteger DIAGNOSTIC_LOG_BUDGET =
-            new AtomicInteger(32);
+            new AtomicInteger(0);
 
     private final Peer peer;
 

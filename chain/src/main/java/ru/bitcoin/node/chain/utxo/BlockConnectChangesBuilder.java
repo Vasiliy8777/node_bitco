@@ -496,10 +496,7 @@ public final class BlockConnectChangesBuilder {
         return List.copyOf(result);
     }
     private static void diagnostic(long height, Block block, String stage) {
-        if (height <= 32) {
-            LOG.info("CONNECT-BUILD height=" + height
-                    + ", hash=" + block.header().hash().toDisplayHex() + ": " + stage);
-        }
+        // Per-block IBD diagnostic logging disabled for throughput.
     }
 
 

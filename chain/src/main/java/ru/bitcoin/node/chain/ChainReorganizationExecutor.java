@@ -167,12 +167,7 @@ public final class ChainReorganizationExecutor {
 
 
     private static void diagnostic(ReorganizationPlan plan, String stage) {
-        if (plan == null || plan.blocksToConnect().isEmpty()) return;
-        BlockIndex tip = plan.blocksToConnect().getLast();
-        if (tip != null && tip.height() <= 32) {
-            LOG.info("REORG prepare height=" + tip.height()
-                    + ", hash=" + tip.hash().toDisplayHex() + ": " + stage);
-        }
+        // Per-block IBD diagnostic logging disabled for throughput.
     }
 
     public void commit(PreparedChainReorganization prepared) {

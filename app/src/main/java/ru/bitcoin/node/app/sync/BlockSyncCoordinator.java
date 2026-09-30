@@ -49,6 +49,8 @@ public final class BlockSyncCoordinator {
     private static final int BLOCK_INDEX_MATERIALIZATION_CHUNK = 8192;
     private static final Duration DOWNLOAD_COMPLETION_POLL_INTERVAL =
             Duration.ofMillis(250);
+    private static final Duration DOWNLOAD_COMPLETION_DRAIN_INTERVAL = Duration.ZERO;
+    private static final int INITIAL_SYNC_CONNECT_BATCH = 64;
     private final int downloadWindow;
     private final BlockDownloadScheduler blockDownloadScheduler;
     private final NodeValidationService validationService;
@@ -531,58 +533,61 @@ public final class BlockSyncCoordinator {
                 }
             }
 
-            boolean processedAny = false;
-            while (nextToProcess < blocksToDownload.size()) {
-                BlockIndex index = blocksToDownload.get(nextToProcess);
-                AvailableBlock available = availableBlocks.remove(index.hash());
-                if (available == null) break;
+            // Drain completions that are already ready before touching the chain. This lets
+            // validation consume a useful contiguous batch instead of alternating one network
+            // completion with one RocksDB/chain-maintenance cycle.
+            while (session.pendingCount() > 0) {
+                Optional<CompletedBlockDownload> ready =
+                        session.pollCompleted(DOWNLOAD_COMPLETION_DRAIN_INTERVAL);
+                if (ready.isEmpty()) break;
+                storeCompleted(availableBlocks, ready.get());
+            }
 
-                Block block = available.block();
-                if (!block.hash().equals(index.hash())) {
+            boolean processedAny = false;
+            List<BlockIndex> connectIndexes = new ArrayList<>(INITIAL_SYNC_CONNECT_BATCH);
+            List<AvailableBlock> connectBlocks = new ArrayList<>(INITIAL_SYNC_CONNECT_BATCH);
+            int scan = nextToProcess;
+            while (scan < blocksToDownload.size() && connectBlocks.size() < INITIAL_SYNC_CONNECT_BATCH) {
+                BlockIndex index = blocksToDownload.get(scan);
+                AvailableBlock available = availableBlocks.get(index.hash());
+                if (available == null) break;
+                if (!available.block().hash().equals(index.hash())) {
                     throw new IllegalStateException(
                             "Available block does not match connect path: expected "
                                     + index.hash().toDisplayHex() + ", actual "
-                                    + block.hash().toDisplayHex());
+                                    + available.block().hash().toDisplayHex());
+                }
+                connectIndexes.add(index);
+                connectBlocks.add(available);
+                scan++;
+            }
+
+            if (!connectBlocks.isEmpty()) {
+                List<BlockProcessingResult> results = validationService.processInitialSyncBatch(
+                        connectBlocks.stream().map(AvailableBlock::block).toList());
+                if (results.size() != connectBlocks.size()) {
+                    throw new IllegalStateException("IBD batch result size does not match input size");
                 }
 
-                if (nextToProcess < 8) {
-                    log.log(
-                            System.Logger.Level.INFO,
-                            "IBD connect start: index={0}, height={1}, hash={2}",
-                            nextToProcess,
-                            index.height(),
-                            index.hash().toDisplayHex()
-                    );
-                }
+                for (int i = 0; i < connectBlocks.size(); i++) {
+                    BlockIndex index = connectIndexes.get(i);
+                    AvailableBlock available = connectBlocks.get(i);
+                    BlockProcessingResult processingResult = results.get(i);
+                    availableBlocks.remove(index.hash());
 
-                long connectStartedNanos = System.nanoTime();
-                BlockProcessingResult processingResult = validationService.processBlock(block);
+                    if (processingResult == BlockProcessingResult.UNKNOWN_PARENT) {
+                        throw new IllegalStateException(
+                                "Block has unknown parent: " + index.hash().toDisplayHex()
+                                        + " at height " + index.height());
+                    }
+                    if (processingResult == BlockProcessingResult.CONNECTED) {
+                        connectedBlockListener.onConnected(available.block(), available.sourcePeer());
+                    }
 
-                if (nextToProcess < 8) {
-                    long connectMillis = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(
-                            System.nanoTime() - connectStartedNanos);
-                    log.log(
-                            System.Logger.Level.INFO,
-                            "IBD connect done: index={0}, height={1}, result={2}, elapsedMs={3}",
-                            nextToProcess,
-                            index.height(),
-                            processingResult,
-                            connectMillis
-                    );
+                    nextToProcess = Math.incrementExact(nextToProcess);
+                    SyncProgressConsole.blocks(
+                            index.height(), targetHeight, index.header().timestamp().value());
                 }
-
-                if (processingResult == BlockProcessingResult.UNKNOWN_PARENT) {
-                    throw new IllegalStateException(
-                            "Block has unknown parent: " + index.hash().toDisplayHex()
-                                    + " at height " + index.height());
-                }
-                if (processingResult == BlockProcessingResult.CONNECTED) {
-                    connectedBlockListener.onConnected(block, available.sourcePeer());
-                }
-
-                nextToProcess = Math.incrementExact(nextToProcess);
-                SyncProgressConsole.blocks(
-                        index.height(), targetHeight, index.header().timestamp().value());
                 processedAny = true;
             }
 
@@ -661,34 +666,27 @@ public final class BlockSyncCoordinator {
                 continue;
             }
 
-            CompletedBlockDownload completed = completedOptional.get();
-            if (completed.index() < 8) {
-                log.log(
-                        System.Logger.Level.INFO,
-                        "IBD coordinator received completion: index={0}, hash={1}, nextToProcess={2}, pending={3}",
-                        completed.index(),
-                        completed.requestedHash().toDisplayHex(),
-                        nextToProcess,
-                        session.pendingCount()
-                );
-            }
-            Hash256 completedHash = completed.requestedHash();
-            Block completedBlock = completed.block();
-            if (!completedHash.equals(completedBlock.hash())) {
-                throw new IllegalStateException(
-                        "Completed block does not match requested hash: expected "
-                                + completedHash.toDisplayHex() + ", actual "
-                                + completedBlock.hash().toDisplayHex());
-            }
+            storeCompleted(availableBlocks, completedOptional.get());
+        }
+    }
 
-            AvailableBlock previous = availableBlocks.put(
-                    completedHash,
-                    new AvailableBlock(completedBlock, completed.sourcePeer()));
-            if (previous != null) {
-                throw new IllegalStateException(
-                        "Block body completed more than once: "
-                                + completedHash.toDisplayHex());
-            }
+    private static void storeCompleted(
+            Map<Hash256, AvailableBlock> availableBlocks,
+            CompletedBlockDownload completed
+    ) {
+        Hash256 completedHash = completed.requestedHash();
+        Block completedBlock = completed.block();
+        if (!completedHash.equals(completedBlock.hash())) {
+            throw new IllegalStateException(
+                    "Completed block does not match requested hash: expected "
+                            + completedHash.toDisplayHex() + ", actual "
+                            + completedBlock.hash().toDisplayHex());
+        }
+        AvailableBlock previous = availableBlocks.put(
+                completedHash, new AvailableBlock(completedBlock, completed.sourcePeer()));
+        if (previous != null) {
+            throw new IllegalStateException(
+                    "Block body completed more than once: " + completedHash.toDisplayHex());
         }
     }
 

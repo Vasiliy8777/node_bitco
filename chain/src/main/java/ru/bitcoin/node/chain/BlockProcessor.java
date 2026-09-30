@@ -199,17 +199,8 @@ public final class BlockProcessor {
             Block block,
             String stage
     ) {
-        if (height > IBD_DIAGNOSTIC_HEIGHT_LIMIT) {
-            return;
-        }
-
-        log.log(
-                System.Logger.Level.INFO,
-                "BLOCKPROC height={0}, hash={1}: {2}",
-                height,
-                block.hash().toDisplayHex(),
-                stage
-        );
+        // Detailed per-block IBD tracing is intentionally disabled in production.
+        // Keep the call sites cheap so diagnostics can be restored locally when needed.
     }
 
     private boolean isActiveChainBlock(BlockIndex candidate) {
