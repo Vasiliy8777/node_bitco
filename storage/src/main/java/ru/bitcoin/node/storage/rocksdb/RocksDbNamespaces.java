@@ -57,6 +57,57 @@ public final class RocksDbNamespaces {
     /** Legacy v1 prune-usage marker that collided with BLOCK_HEIGHT_INDEX. */
     public static final byte[] LEGACY_PRUNE_USAGE_VERSION_KEY = {BLOCK_HEIGHT_INDEX, 0x01};
 
+
+    /** Stable diagnostic name for the first-byte key namespace. */
+    public static String diagnosticName(byte namespace) {
+        return switch (Byte.toUnsignedInt(namespace)) {
+            case BLOCK_INDEX -> "blockIndex";
+            case CHAIN_STATE -> "chainState";
+            case UTXO -> "utxo";
+            case UNDO -> "undo";
+            case BLOCK -> "block";
+            case BLOCK_FAILURE -> "blockFailure";
+            case BLOCK_WORK_INDEX -> "blockWorkIndex";
+            case BLOCK_WORK_INDEX_VERSION -> "blockWorkIndexVersion";
+            case CHAINSTATE_REINDEX_STATE -> "chainstateReindexState";
+            case PRUNE_STATE -> "pruneState";
+            case FULL_REINDEX_STATE -> "fullReindexState";
+            case MEMPOOL -> "mempool";
+            case TX_INDEX -> "txIndex";
+            case TX_INDEX_STATE -> "txIndexState";
+            case BLOCK_AVAILABILITY -> "blockAvailability";
+            case BLOCK_VALIDATION_STATUS -> "blockValidationStatus";
+            case PRUNE_BLOCK_SIZE -> "pruneBlockSize";
+            case PRUNE_UNDO_SIZE -> "pruneUndoSize";
+            case BLOCK_HEIGHT_INDEX -> "blockHeightIndex";
+            case BLOCK_HEIGHT_INDEX_VERSION -> "blockHeightIndexVersion";
+            case PRUNE_USAGE_VERSION -> "pruneUsageVersion";
+            case BLOCK_VALIDATION_MIGRATION -> "blockValidationMigration";
+            case FULL_REINDEX_RAW_MEMBERSHIP -> "fullReindexRawMembership";
+            case FULL_REINDEX_RAW_EDGE -> "fullReindexRawEdge";
+            case FULL_REINDEX_RAW_QUEUE -> "fullReindexRawQueue";
+            case FULL_REINDEX_RAW_HEIGHT -> "fullReindexRawHeight";
+            case FULL_REINDEX_FAILED_BRANCH -> "fullReindexFailedBranch";
+            case COINSTATS_INDEX -> "coinstatsIndex";
+            case COINSTATS_INDEX_STATE -> "coinstatsIndexState";
+            case COINSTATS_TXOUT_COUNT -> "coinstatsTxoutCount";
+            case BLOCK_FILTER_INDEX -> "blockFilterIndex";
+            case BLOCK_FILTER_HEADER_INDEX -> "blockFilterHeaderIndex";
+            case BLOCK_FILTER_INDEX_STATE -> "blockFilterIndexState";
+            case TXO_SPENDER_INDEX -> "txoSpenderIndex";
+            case TXO_SPENDER_INDEX_STATE -> "txoSpenderIndexState";
+            case SNAPSHOT_UTXO_STAGING -> "snapshotUtxoStaging";
+            case SNAPSHOT_IMPORT_STATE -> "snapshotImportState";
+            case SNAPSHOT_CHAINSTATE -> "snapshotChainstate";
+            case ASSUMEUTXO_BACKGROUND_STATE -> "assumeutxoBackgroundState";
+            case ASSUMEUTXO_FINALIZATION_STATE -> "assumeutxoFinalizationState";
+            case MEMPOOL_FEE_DELTA -> "mempoolFeeDelta";
+            case BLOCK_SKIP_INDEX -> "blockSkipIndex";
+            case BLOCK_SKIP_INDEX_VERSION -> "blockSkipIndexVersion";
+            default -> String.format(java.util.Locale.ROOT, "0x%02x", Byte.toUnsignedInt(namespace));
+        };
+    }
+
     public static byte[] singletonKey(byte namespace) {
         return new byte[]{namespace};
     }

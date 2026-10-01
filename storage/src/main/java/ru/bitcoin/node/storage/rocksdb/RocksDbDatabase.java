@@ -26,15 +26,47 @@ public final class RocksDbDatabase
 
     private boolean closed;
 
+    private void initializeNamespaceTelemetry() {
+        for (int i = 0; i < 256; i++) {
+            namespaceGetCount[i] = new LongAdder();
+            namespaceGetNanos[i] = new LongAdder();
+        }
+    }
+
     // Lightweight cumulative I/O telemetry. LongAdder keeps the hot read path
     // contention-free enough for IBD while snapshots remain cheap.
     private final LongAdder getCount = new LongAdder();
     private final LongAdder getNanos = new LongAdder();
+    private final LongAdder[] namespaceGetCount = new LongAdder[256];
+    private final LongAdder[] namespaceGetNanos = new LongAdder[256];
     private final LongAdder writeBatchCount = new LongAdder();
     private final LongAdder writeBatchNanos = new LongAdder();
     private final LongAdder syncWriteBatchCount = new LongAdder();
     private final LongAdder walSyncCount = new LongAdder();
     private final LongAdder walSyncNanos = new LongAdder();
+
+    public record NamespaceIoStats(long[] gets, long[] getNanos) {
+        public NamespaceIoStats {
+            gets = gets.clone();
+            getNanos = getNanos.clone();
+        }
+
+        @Override public long[] gets() { return gets.clone(); }
+        @Override public long[] getNanos() { return getNanos.clone(); }
+
+        public long gets(byte namespace) { return gets[Byte.toUnsignedInt(namespace)]; }
+        public long getNanos(byte namespace) { return getNanos[Byte.toUnsignedInt(namespace)]; }
+
+        public NamespaceIoStats minus(NamespaceIoStats before) {
+            long[] deltaGets = new long[256];
+            long[] deltaNanos = new long[256];
+            for (int i = 0; i < 256; i++) {
+                deltaGets[i] = gets[i] - before.gets[i];
+                deltaNanos[i] = getNanos[i] - before.getNanos[i];
+            }
+            return new NamespaceIoStats(deltaGets, deltaNanos);
+        }
+    }
 
     public record IoStats(long gets, long getNanos, long writeBatches, long writeBatchNanos,
                           long syncWriteBatches, long walSyncs, long walSyncNanos) {
@@ -44,6 +76,16 @@ public final class RocksDbDatabase
                     syncWriteBatches - before.syncWriteBatches, walSyncs - before.walSyncs,
                     walSyncNanos - before.walSyncNanos);
         }
+    }
+
+    public NamespaceIoStats namespaceIoStats() {
+        long[] counts = new long[256];
+        long[] nanos = new long[256];
+        for (int i = 0; i < 256; i++) {
+            counts[i] = namespaceGetCount[i].sum();
+            nanos[i] = namespaceGetNanos[i].sum();
+        }
+        return new NamespaceIoStats(counts, nanos);
     }
 
     public IoStats ioStats() {
@@ -63,6 +105,8 @@ public final class RocksDbDatabase
                     "databasePath must not be null"
             );
         }
+
+        initializeNamespaceTelemetry();
 
         try {
 
@@ -134,6 +178,7 @@ public final class RocksDbDatabase
         }
 
         long started = System.nanoTime();
+        int namespace = key.length == 0 ? -1 : Byte.toUnsignedInt(key[0]);
         try {
             return database.get(
                     key
@@ -144,8 +189,13 @@ public final class RocksDbDatabase
                     e
             );
         } finally {
+            long elapsed = System.nanoTime() - started;
             getCount.increment();
-            getNanos.add(System.nanoTime() - started);
+            getNanos.add(elapsed);
+            if (namespace >= 0) {
+                namespaceGetCount[namespace].increment();
+                namespaceGetNanos[namespace].add(elapsed);
+            }
         }
     }
 

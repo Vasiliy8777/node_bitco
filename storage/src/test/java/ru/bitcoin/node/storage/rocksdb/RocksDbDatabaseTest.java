@@ -59,4 +59,22 @@ class RocksDbDatabaseTest {
         }
     }
 
+    @Test
+    void shouldTrackGetsByFirstByteNamespace() {
+        try (var db = new RocksDbDatabase(temporaryDirectory.resolve("namespace-telemetry"))) {
+            db.put(new byte[]{RocksDbNamespaces.BLOCK_INDEX, 0x01}, new byte[]{0x01});
+            db.put(new byte[]{RocksDbNamespaces.UTXO, 0x02}, new byte[]{0x02});
+
+            RocksDbDatabase.NamespaceIoStats before = db.namespaceIoStats();
+            db.get(new byte[]{RocksDbNamespaces.BLOCK_INDEX, 0x01});
+            db.get(new byte[]{RocksDbNamespaces.BLOCK_INDEX, 0x7f});
+            db.get(new byte[]{RocksDbNamespaces.UTXO, 0x02});
+            RocksDbDatabase.NamespaceIoStats delta = db.namespaceIoStats().minus(before);
+
+            assertEquals(2L, delta.gets(RocksDbNamespaces.BLOCK_INDEX));
+            assertEquals(1L, delta.gets(RocksDbNamespaces.UTXO));
+            assertEquals(0L, delta.gets(RocksDbNamespaces.BLOCK));
+            assertTrue(delta.getNanos(RocksDbNamespaces.BLOCK_INDEX) >= 0L);
+        }
+    }
 }

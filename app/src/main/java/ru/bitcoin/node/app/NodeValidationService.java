@@ -16,6 +16,7 @@ import ru.bitcoin.node.storage.block.*;
 import ru.bitcoin.node.storage.chain.RocksDbChainStateStore;
 import ru.bitcoin.node.storage.chain.RocksDbPruneStateStore;
 import ru.bitcoin.node.storage.rocksdb.RocksDbDatabase;
+import ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces;
 import ru.bitcoin.node.storage.mempool.RocksDbMempoolStore;
 import ru.bitcoin.node.storage.mempool.PersistedMempoolEntry;
 import ru.bitcoin.node.storage.txindex.RocksDbTxIndexStore;
@@ -41,6 +42,7 @@ public final class NodeValidationService implements AutoCloseable {
     private long ibdTelemetryPoolNanos;
     private long ibdTelemetryMaintenanceNanos;
     private RocksDbDatabase.IoStats ibdTelemetryDbBaseline;
+    private RocksDbDatabase.NamespaceIoStats ibdTelemetryNamespaceBaseline;
     private RocksDbUtxoStore.CacheStats ibdTelemetryCacheBaseline;
     private final ChainState chain;
     private final BlockIndexLookup lookup;
@@ -585,6 +587,7 @@ public final class NodeValidationService implements AutoCloseable {
 
         if (ibdTelemetryDbBaseline == null) {
             ibdTelemetryDbBaseline = dbBefore;
+            ibdTelemetryNamespaceBaseline = database.namespaceIoStats();
             ibdTelemetryCacheBaseline = cacheBefore;
             ibdTelemetryLastLogNanos = batchStarted;
         }
@@ -599,6 +602,7 @@ public final class NodeValidationService implements AutoCloseable {
         if (elapsed < IBD_TELEMETRY_INTERVAL_NANOS) return;
 
         RocksDbDatabase.IoStats db = database.ioStats().minus(ibdTelemetryDbBaseline);
+        RocksDbDatabase.NamespaceIoStats namespaceDb = database.namespaceIoStats().minus(ibdTelemetryNamespaceBaseline);
         RocksDbUtxoStore.CacheStats cacheNow = utxos.cacheStats();
         long hits = cacheNow.hits() - ibdTelemetryCacheBaseline.hits();
         long misses = cacheNow.misses() - ibdTelemetryCacheBaseline.misses();
@@ -623,6 +627,8 @@ public final class NodeValidationService implements AutoCloseable {
                 db.walSyncs(), db.walSyncNanos() / 1_000_000.0d,
                 hits, misses, hitRate, cacheNow.size(), cacheNow.capacity()));
 
+        LOG.log(System.Logger.Level.INFO, "IBD ROCKS GETS BY NS: " + formatNamespaceGets(namespaceDb));
+
         ibdTelemetryLastLogNanos = now;
         ibdTelemetryBlocks = 0;
         ibdTelemetryTransactions = 0;
@@ -630,7 +636,26 @@ public final class NodeValidationService implements AutoCloseable {
         ibdTelemetryPoolNanos = 0;
         ibdTelemetryMaintenanceNanos = 0;
         ibdTelemetryDbBaseline = database.ioStats();
+        ibdTelemetryNamespaceBaseline = database.namespaceIoStats();
         ibdTelemetryCacheBaseline = cacheNow;
+    }
+
+    private static String formatNamespaceGets(RocksDbDatabase.NamespaceIoStats stats) {
+        record Entry(int namespace, long gets, long nanos) {}
+        List<Entry> entries = new ArrayList<>();
+        long[] gets = stats.gets();
+        long[] nanos = stats.getNanos();
+        for (int i = 0; i < gets.length; i++) {
+            if (gets[i] > 0) entries.add(new Entry(i, gets[i], nanos[i]));
+        }
+        entries.sort(Comparator.comparingLong(Entry::gets).reversed());
+        StringJoiner result = new StringJoiner(", ", "[", "]");
+        for (Entry entry : entries) {
+            result.add(String.format(java.util.Locale.ROOT, "%s=%,d/%.1fms",
+                    RocksDbNamespaces.diagnosticName((byte) entry.namespace()),
+                    entry.gets(), entry.nanos() / 1_000_000.0d));
+        }
+        return result.toString();
     }
 
     public MempoolEntry admit(Transaction transaction) {
