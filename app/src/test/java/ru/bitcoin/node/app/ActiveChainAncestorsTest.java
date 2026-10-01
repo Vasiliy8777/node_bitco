@@ -2,6 +2,7 @@ package ru.bitcoin.node.app;
 
 import org.junit.jupiter.api.Test;
 import ru.bitcoin.node.chain.BlockIndex;
+import ru.bitcoin.node.chain.BlockIndexAncestorLookup;
 import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.protocol.block.GenesisBlockFactory;
 import ru.bitcoin.node.protocol.network.NetworkParametersRegistry;
@@ -28,6 +29,66 @@ class ActiveChainAncestorsTest {
         for (int i = 50; i < 100; i++) assertEquals(hash(i), cache.at(tip, i, lookup).hash());
         assertEquals(9950, reads.get());
         assertNull(cache.at(tip, 10_001, lookup));
+    }
+
+    @Test
+    void directTipExtensionPreservesHistoricalEntries() {
+        var map = new HashMap<Hash256, BlockIndex>();
+        BlockIndex tip = index(0, 0, hash(-1));
+        map.put(tip.hash(), tip);
+        for (int i = 1; i <= 100; i++) {
+            tip = index(i, i, tip.hash());
+            map.put(tip.hash(), tip);
+        }
+        var cache = new ActiveChainAncestors(128);
+        var reads = new AtomicInteger();
+        ru.bitcoin.node.chain.BlockIndexLookup lookup = hash -> { reads.incrementAndGet(); return map.get(hash); };
+
+        assertEquals(hash(50), cache.at(tip, 50, lookup).hash());
+        int afterWarmup = reads.get();
+
+        BlockIndex next = index(101, 101, tip.hash());
+        map.put(next.hash(), next);
+        assertEquals(hash(50), cache.at(next, 50, lookup).hash());
+        assertEquals(afterWarmup, reads.get(), "direct active-tip extension must retain historical ancestry cache");
+    }
+
+    @Test
+    void multiBlockTipExtensionUsesBranchSafeAncestorProofAndPreservesCache() {
+        var map = new HashMap<Hash256, BlockIndex>();
+        BlockIndex oldTip = index(0, 0, hash(-1));
+        map.put(oldTip.hash(), oldTip);
+        for (int i = 1; i <= 100; i++) {
+            oldTip = index(i, i, oldTip.hash());
+            map.put(oldTip.hash(), oldTip);
+        }
+        BlockIndex newTip = oldTip;
+        for (int i = 101; i <= 110; i++) {
+            newTip = index(i, i, newTip.hash());
+            map.put(newTip.hash(), newTip);
+        }
+
+        var cache = new ActiveChainAncestors(128);
+        var parentReads = new AtomicInteger();
+        var ancestorCalls = new AtomicInteger();
+        BlockIndexAncestorLookup lookup = new BlockIndexAncestorLookup() {
+            @Override public BlockIndex find(Hash256 hash) {
+                parentReads.incrementAndGet();
+                return map.get(hash);
+            }
+            @Override public BlockIndex ancestor(BlockIndex index, long targetHeight) {
+                ancestorCalls.incrementAndGet();
+                BlockIndex cursor = index;
+                while (cursor.height() > targetHeight) cursor = map.get(cursor.previousBlockHash());
+                return cursor.height() == targetHeight ? cursor : null;
+            }
+        };
+
+        assertEquals(hash(50), cache.at(oldTip, 50, lookup).hash());
+        int afterWarmup = parentReads.get();
+        assertEquals(hash(50), cache.at(newTip, 50, lookup).hash());
+        assertEquals(afterWarmup, parentReads.get(), "proven descendant tip must retain historical entries");
+        assertEquals(1, ancestorCalls.get(), "tip jump should require one branch-safe ancestry proof");
     }
 
     @Test
