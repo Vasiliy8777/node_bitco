@@ -62,7 +62,7 @@ class AssumeValidPolicyTest {
         BlockIndex genesis = block(null, 0, 0, indexes);
         BlockIndex cursor = genesis;
         BlockIndex assumed = null;
-        for (int height = 1; height <= 2017; height++) {
+        for (int height = 1; height <= 2018; height++) {
             cursor = block(cursor, height, height, indexes);
             if (height == 1000) assumed = cursor;
         }
@@ -96,6 +96,14 @@ class AssumeValidPolicyTest {
         assertFalse(policy.shouldVerifyScripts(genesis));
         assertEquals(2, ancestorCalls[0],
                 "assumed-valid and best-header ancestry must use BlockIndexAncestorLookup");
+
+        BlockIndex heightOne = indexes.values().stream()
+                .filter(index -> index.height() == 1)
+                .findFirst()
+                .orElseThrow();
+        assertFalse(policy.shouldVerifyScripts(heightOne));
+        assertEquals(2, ancestorCalls[0],
+                "consecutive IBD candidates inside the ancestry window must reuse the exact cached proof");
     }
 
     private static BlockIndex block(BlockIndex parent, long height, long nonce, Map<Hash256, BlockIndex> indexes) {

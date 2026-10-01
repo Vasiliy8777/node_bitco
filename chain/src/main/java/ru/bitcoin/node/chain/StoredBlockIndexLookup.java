@@ -12,6 +12,7 @@ public final class StoredBlockIndexLookup implements BlockIndexAncestorLookup {
 
     private final BlockIndexStore store;
     private final Map<Hash256, BlockIndex> cache;
+    private final Map<Hash256, Hash256> skipHashCache;
 
     public StoredBlockIndexLookup(BlockIndexStore store) {
         this(store, DEFAULT_CACHE_ENTRIES);
@@ -24,6 +25,12 @@ public final class StoredBlockIndexLookup implements BlockIndexAncestorLookup {
         this.cache = cacheEntries == 0 ? null : new LinkedHashMap<>(256, 0.75f, true) {
             @Override
             protected boolean removeEldestEntry(Map.Entry<Hash256, BlockIndex> eldest) {
+                return size() > cacheEntries;
+            }
+        };
+        this.skipHashCache = cacheEntries == 0 ? null : new LinkedHashMap<>(256, 0.75f, true) {
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<Hash256, Hash256> eldest) {
                 return size() > cacheEntries;
             }
         };
@@ -61,7 +68,7 @@ public final class StoredBlockIndexLookup implements BlockIndexAncestorLookup {
         while (current.height() > targetHeight) {
             long heightSkip = RocksDbBlockIndexStore.getSkipHeight(current.height());
             long heightSkipPrev = RocksDbBlockIndexStore.getSkipHeight(current.height() - 1);
-            Hash256 skipHash = rocks.findSkipHash(current.hash()).orElse(null);
+            Hash256 skipHash = findSkipHash(rocks, current.hash());
             boolean useSkip = skipHash != null && (heightSkip == targetHeight
                     || (heightSkip > targetHeight && !(heightSkipPrev < heightSkip - 2
                     && heightSkipPrev >= targetHeight)));
@@ -75,6 +82,23 @@ public final class StoredBlockIndexLookup implements BlockIndexAncestorLookup {
             current = next;
         }
         return current;
+    }
+
+    private Hash256 findSkipHash(RocksDbBlockIndexStore rocks, Hash256 blockHash) {
+        if (skipHashCache != null) {
+            synchronized (skipHashCache) {
+                Hash256 cached = skipHashCache.get(blockHash);
+                if (cached != null) return cached;
+            }
+        }
+        Hash256 loaded = rocks.findSkipHash(blockHash).orElse(null);
+        // As with BlockIndex, do not negative-cache: skip data may be populated later.
+        if (loaded != null && skipHashCache != null) {
+            synchronized (skipHashCache) {
+                skipHashCache.put(blockHash, loaded);
+            }
+        }
+        return loaded;
     }
 
     private BlockIndex linearAncestor(BlockIndex index, long targetHeight) {
