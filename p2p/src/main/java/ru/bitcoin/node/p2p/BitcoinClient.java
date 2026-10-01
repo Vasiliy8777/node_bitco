@@ -5,6 +5,8 @@ import ru.bitcoin.node.protocol.network.NetworkParameters;
 
 import java.io.IOException;
 import java.util.Objects;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 public final class BitcoinClient
         implements PeerConnector {
@@ -16,6 +18,7 @@ public final class BitcoinClient
     private final long localServices;
     private final boolean relay;
     private final PeerTransportPolicy transportPolicy;
+    private final Set<Peer> pendingConnections = ConcurrentHashMap.newKeySet();
 
     public BitcoinClient(
             NetworkParameters networkParameters
@@ -107,6 +110,7 @@ public final class BitcoinClient
         }
 
         Peer peer = newPeer(startHeight, connectionRelay);
+        pendingConnections.add(peer);
 
         try {
             if (policy == PeerTransportPolicy.V1_ONLY) {
@@ -125,7 +129,9 @@ public final class BitcoinClient
                     );
 
                     // BIP324 AUTO mode reconnects over a fresh TCP connection before downgrading to v1.
+                    pendingConnections.remove(peer);
                     peer = newPeer(startHeight, connectionRelay);
+                    pendingConnections.add(peer);
                     peer.markV2Fallback();
                     peer.connect(host, port);
                 }
@@ -139,10 +145,12 @@ public final class BitcoinClient
                 );
             }
 
+            pendingConnections.remove(peer);
             return peer;
 
         } catch (IOException | RuntimeException exception) {
 
+            pendingConnections.remove(peer);
             try {
                 peer.close();
             } catch (IOException closeException) {
@@ -152,6 +160,18 @@ public final class BitcoinClient
             }
 
             throw exception;
+        }
+    }
+
+
+    @Override
+    public void cancelPendingConnections() {
+        for (Peer peer : pendingConnections) {
+            try {
+                peer.close();
+            } catch (IOException ignored) {
+                // The connection attempt will observe the socket close.
+            }
         }
     }
 

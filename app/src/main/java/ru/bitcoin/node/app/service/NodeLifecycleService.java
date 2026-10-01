@@ -840,6 +840,13 @@ public final class NodeLifecycleService
         }
 
         /*
+         * Abort a peer that is still inside TCP/BIP324/VERSION connection
+         * establishment. Such a peer is not in PeerManager yet, so closing the
+         * manager alone cannot unblock the lifecycle worker.
+         */
+        outboundPeerManager.cancelPendingConnections();
+
+        /*
          * IMPORTANT:
          *
          * Stop the reconnect worker BEFORE PeerManager closes

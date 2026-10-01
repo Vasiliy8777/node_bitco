@@ -18,6 +18,9 @@ import java.util.function.BooleanSupplier;
 
 public final class OutboundPeerManager {
 
+    private static final System.Logger log =
+            System.getLogger(OutboundPeerManager.class.getName());
+
     private final PeerConnector peerConnector;
     private final PeerManager peerManager;
     private final PeerAddressManager addressManager;
@@ -25,6 +28,7 @@ public final class OutboundPeerManager {
     private final Supplier<Instant> clock;
     private final PeerDiscouragementManager discouragementManager;
     private final BooleanSupplier initialBlockDownload;
+    private volatile boolean connectionAttemptsCancelled;
 
     public OutboundPeerManager(
             BitcoinClient bitcoinClient,
@@ -205,6 +209,10 @@ public final class OutboundPeerManager {
 
         while (true) {
 
+            if (connectionAttemptsCancelled || Thread.currentThread().isInterrupted()) {
+                throw new IOException("Outbound peer connection cancelled");
+            }
+
             PeerAddress address =
                     selector.select(
                                     attempted,
@@ -242,6 +250,14 @@ public final class OutboundPeerManager {
                     now()
             );
 
+            log.log(
+                    System.Logger.Level.INFO,
+                    "Connecting outbound peer candidate {0}:{1} (attempted={2})",
+                    address.hostAddress(),
+                    address.port(),
+                    attempted.size()
+            );
+
             try {
 
                 Peer peer =
@@ -251,6 +267,15 @@ public final class OutboundPeerManager {
                                 startHeight,
                                 role
                         );
+
+                if (connectionAttemptsCancelled || Thread.currentThread().isInterrupted()) {
+                    try {
+                        peer.close();
+                    } catch (IOException ignored) {
+                        // Cancellation is the primary failure.
+                    }
+                    throw new IOException("Outbound peer connection cancelled");
+                }
 
                 if (!peer.isReady()) {
                     rejectPeer(
@@ -324,8 +349,25 @@ public final class OutboundPeerManager {
                 failure.addSuppressed(
                         exception
                 );
+
+                log.log(
+                        System.Logger.Level.DEBUG,
+                        "Outbound peer candidate {0}:{1} failed: {2}",
+                        address.hostAddress(),
+                        address.port(),
+                        exception.toString()
+                );
             }
         }
+    }
+
+    /**
+     * Permanently cancels connection establishment for this manager.
+     * Node shutdown is terminal, so no new outbound attempt may begin afterwards.
+     */
+    public void cancelPendingConnections() {
+        connectionAttemptsCancelled = true;
+        peerConnector.cancelPendingConnections();
     }
 
     /**

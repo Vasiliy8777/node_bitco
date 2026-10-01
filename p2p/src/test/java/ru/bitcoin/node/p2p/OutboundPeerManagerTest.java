@@ -996,4 +996,42 @@ class OutboundPeerManagerTest {
             return Optional.empty();
         }
     }
+
+    @Test
+    void shouldCancelPendingConnectorAndRejectFurtherConnectionAttempts() {
+        AtomicInteger cancellations = new AtomicInteger();
+
+        PeerConnector connector = new PeerConnector() {
+            @Override
+            public Peer connect(String host, int port, int startHeight) throws IOException {
+                throw new IOException("must not connect after cancellation");
+            }
+
+            @Override
+            public void cancelPendingConnections() {
+                cancellations.incrementAndGet();
+            }
+        };
+
+        PeerAddressManager addressManager = new PeerAddressManager();
+        PeerManager peerManager = new PeerManager();
+        OutboundPeerManager outbound = new OutboundPeerManager(
+                connector,
+                peerManager,
+                addressManager,
+                new OutboundPeerSelector(addressManager),
+                Instant::now
+        );
+
+        outbound.cancelPendingConnections();
+
+        IOException failure = assertThrows(
+                IOException.class,
+                () -> outbound.connectOneWithAddress(0, List.of())
+        );
+
+        assertEquals(1, cancellations.get());
+        assertEquals("Outbound peer connection cancelled", failure.getMessage());
+    }
+
 }

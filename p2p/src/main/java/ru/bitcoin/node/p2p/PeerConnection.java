@@ -160,6 +160,12 @@ public final class PeerConnection implements AutoCloseable {
                 new Socket();
 
         try {
+            /*
+             * Publish the socket before connect() so shutdown can close it and
+             * abort a blocking TCP connection attempt immediately.
+             */
+            socket = newSocket;
+
             newSocket.connect(
                     new InetSocketAddress(
                             host,
@@ -203,6 +209,9 @@ public final class PeerConnection implements AutoCloseable {
             reader = newReader;
 
         } catch (IOException | RuntimeException e) {
+            if (socket == newSocket) {
+                socket = null;
+            }
             try {
                 newSocket.close();
             } catch (IOException ignored) {
