@@ -153,10 +153,18 @@ class ActiveChainAncestorsTest {
 
         assertEquals(hash(51), cache.at(tip, 51, lookup).hash());
         assertEquals(2, ancestorCalls.get());
-        assertEquals(0, findCalls.get());
+        // Stage 24 recognizes the second consecutive historical miss as an ascending scan.
+        // With cache capacity 8 it prefetches at most 7 new entries (51..57), reserving
+        // one sparse-cache slot for the preceding anchor height 50. This avoids evicting the
+        // exact entry that detected the ascending scan.
+        // This is intentional bounded prefetch, not the old O(distance) walk from the tip.
+        assertEquals(6, findCalls.get());
 
+        int findsAfterPrefetch = findCalls.get();
         assertEquals(hash(50), cache.at(tip, 50, lookup).hash());
         assertEquals(2, ancestorCalls.get(), "exact cached height must remain a zero-read hit");
+        assertEquals(findsAfterPrefetch, findCalls.get(),
+                "exact cached height must not perform additional parent reads");
     }
 
     @Test
@@ -194,6 +202,54 @@ class ActiveChainAncestorsTest {
         assertEquals(hash(115), cache.at(observed, 115, lookup).hash());
         assertEquals(beforeRecentLookup, ancestorCalls.get(),
                 "sparse historical traffic must not punch holes in the recent active-chain window");
+    }
+
+    @Test
+    void ascendingHistoricalMissesPrefetchDenseSliceOnce() {
+        var map = new HashMap<Hash256, BlockIndex>();
+        BlockIndex tip = index(0, 0, hash(-1));
+        map.put(tip.hash(), tip);
+        for (int i = 1; i <= 10_000; i++) {
+            tip = index(i, i, tip.hash());
+            map.put(tip.hash(), tip);
+        }
+
+        var cache = new ActiveChainAncestors(128);
+        var findCalls = new AtomicInteger();
+        var ancestorCalls = new AtomicInteger();
+        BlockIndexAncestorLookup lookup = new BlockIndexAncestorLookup() {
+            @Override public BlockIndex find(Hash256 hash) {
+                findCalls.incrementAndGet();
+                return map.get(hash);
+            }
+
+            @Override public BlockIndex ancestor(BlockIndex index, long targetHeight) {
+                ancestorCalls.incrementAndGet();
+                BlockIndex cursor = index;
+                while (cursor.height() > targetHeight) cursor = map.get(cursor.previousBlockHash());
+                return cursor;
+            }
+        };
+
+        assertEquals(hash(50), cache.at(tip, 50, lookup).hash());
+        assertEquals(1, ancestorCalls.get());
+        assertEquals(0, findCalls.get());
+
+        // The second consecutive miss recognizes an ascending scan. With capacity 128,
+        // heights 51..177 are materialized in one bounded reverse walk while height 50 remains cached.
+        assertEquals(hash(51), cache.at(tip, 51, lookup).hash());
+        assertEquals(2, ancestorCalls.get());
+        assertEquals(126, findCalls.get());
+
+        int ancestorsAfterPrefetch = ancestorCalls.get();
+        int findsAfterPrefetch = findCalls.get();
+        for (int height = 52; height <= 177; height++) {
+            assertEquals(hash(height), cache.at(tip, height, lookup).hash());
+        }
+        assertEquals(ancestorsAfterPrefetch, ancestorCalls.get(),
+                "prefetched ascending slice must avoid repeated skip-ancestor walks");
+        assertEquals(findsAfterPrefetch, findCalls.get(),
+                "prefetched ascending slice must be served without parent reads");
     }
 
     private static Hash256 hash(int n) { return new Hash256(ByteBuffer.allocate(32).putInt(n).array()); }

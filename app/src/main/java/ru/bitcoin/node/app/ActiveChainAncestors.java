@@ -15,6 +15,7 @@ import java.util.*;
  * advances continuously while peers repeatedly ask about historical locator heights.</p>
  */
 final class ActiveChainAncestors {
+    private static final int ASCENDING_PREFETCH_ENTRIES = 4_096;
     private final int capacity;
 
     /*
@@ -34,6 +35,7 @@ final class ActiveChainAncestors {
     private final LinkedHashMap<Long, Boolean> sparseUsage = new LinkedHashMap<>(256, .75f, true);
     private Hash256 tipHash;
     private long tipHeight = -1L;
+    private long lastSparseMissHeight = -2L;
 
     ActiveChainAncestors() { this(65_536); }
 
@@ -68,10 +70,23 @@ final class ActiveChainAncestors {
         // polluted this bounded cache with thousands of one-shot intermediate heights,
         // evicting the useful locator/range entries that IBD repeatedly asks for.
         if (lookup instanceof BlockIndexAncestorLookup ancestorLookup) {
+            // Historical range consumers (headers/filter/RPC scans) normally ask for
+            // monotonically increasing heights. Resolving each height independently with
+            // skip pointers is branch-safe but still performs a fresh root-to-height walk.
+            // Detect the second consecutive miss and materialize a bounded dense slice once;
+            // the following ~4k ascending requests then become zero-read cache hits. Random
+            // one-shot historical queries keep the cheap single skip-ancestor lookup.
+            if (height == lastSparseMissHeight + 1L) {
+                BlockIndex ancestor = prefetchAscendingSlice(ancestorLookup, cursor, height);
+                lastSparseMissHeight = height;
+                return ancestor;
+            }
+
             BlockIndex ancestor = ancestorLookup.ancestor(cursor, height);
             if (ancestor == null || ancestor.height() != height)
                 throw new IllegalStateException("Missing active ancestor at height " + height);
             rememberSparse(ancestor);
+            lastSparseMissHeight = height;
             return ancestor;
         }
 
@@ -89,6 +104,33 @@ final class ActiveChainAncestors {
             rememberSparse(cursor);
         }
         return cursor;
+    }
+
+    private BlockIndex prefetchAscendingSlice(
+            BlockIndexAncestorLookup lookup,
+            BlockIndex cursor,
+            long requestedHeight
+    ) {
+        long ceilingHeight = Math.min(
+                cursor.height(),
+                requestedHeight + Math.min(Math.max(0L, (long) capacity - 2L), ASCENDING_PREFETCH_ENTRIES - 1L)
+        );
+        BlockIndex current = lookup.ancestor(cursor, ceilingHeight);
+        if (current == null || current.height() != ceilingHeight)
+            throw new IllegalStateException("Missing active ancestor at height " + ceilingHeight);
+
+        rememberSparse(current);
+        while (current.height() > requestedHeight) {
+            BlockIndex parent = Objects.requireNonNull(
+                    lookup.find(current.previousBlockHash()),
+                    "Missing active ancestor"
+            );
+            if (parent.height() != current.height() - 1L)
+                throw new IllegalStateException("Invalid active ancestor height");
+            current = parent;
+            rememberSparse(current);
+        }
+        return current;
     }
 
     private void reconcileTip(BlockIndex tip, BlockIndexLookup lookup) {
@@ -112,6 +154,7 @@ final class ActiveChainAncestors {
             hotHeights.clear();
             sparseHeights.clear();
             sparseUsage.clear();
+            lastSparseMissHeight = -2L;
         }
         tipHash = tip.hash();
         tipHeight = tip.height();
