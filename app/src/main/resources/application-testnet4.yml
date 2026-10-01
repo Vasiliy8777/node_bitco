@@ -1,8 +1,10 @@
 bitcoin:
   network: testnet4
-  data-directory: ${BITCOIN_DATA_DIRECTORY:K:/BitcoinJavaNode/testnet4}
+  data-directory: ${BITCOIN_DATA_DIRECTORY:K:/BitcoinJavaNode}
+
   p2p:
     port: 48333
     peers: ""
+
   rpc:
     port: 48332

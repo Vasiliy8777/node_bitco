@@ -1,6 +1,6 @@
 bitcoin:
   network: testnet
-  data-directory: ${BITCOIN_DATA_DIRECTORY:K:/BitcoinJavaNode/testnet-certification}
+  data-directory: ${BITCOIN_DATA_DIRECTORY:K:/BitcoinJavaNode}
 
   p2p:
     port: 18335
