@@ -9,6 +9,8 @@ import ru.bitcoin.node.storage.utxo.UtxoStore;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Optional;
 
@@ -76,6 +78,38 @@ public final class UtxoOverlay {
         originalStates.put(outPoint, original);
         currentStates.put(outPoint, original);
         return original;
+    }
+
+    /**
+     * Batch-prefetches persistent input state into this overlay. Present and
+     * absent results are both stable for the overlay lifetime. Already-touched
+     * OutPoints are deliberately skipped so a same-block created/spent output
+     * can never be overwritten by an older persistent prefetch result.
+     */
+    public void prefetch(
+            Collection<OutPoint> outPoints
+    ) {
+        if (outPoints == null) throw new IllegalArgumentException("outPoints must not be null");
+
+        LinkedHashSet<OutPoint> unresolved = new LinkedHashSet<>();
+        for (OutPoint outPoint : outPoints) {
+            validateOutPoint(outPoint);
+            if (!currentStates.containsKey(outPoint)) unresolved.add(outPoint);
+        }
+        if (unresolved.isEmpty()) return;
+
+        Map<OutPoint, Optional<StoredUtxo>> prefetched = baseStore.findAll(unresolved);
+        for (OutPoint outPoint : unresolved) {
+            // Defensive re-check keeps this method correct if its implementation
+            // ever becomes incremental. Today the overlay is single-threaded.
+            if (currentStates.containsKey(outPoint)) continue;
+            Optional<StoredUtxo> state = prefetched.get(outPoint);
+            if (state == null) {
+                throw new IllegalStateException("UTXO batch lookup omitted OutPoint: " + outPoint);
+            }
+            originalStates.put(outPoint, state);
+            currentStates.put(outPoint, state);
+        }
     }
 
     /**

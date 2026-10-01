@@ -512,6 +512,58 @@ class UtxoOverlayTest {
     }
 
 
+
+    @Test
+    void prefetchLoadsPresentAndAbsentInputsOnceAndServesOverlayReads() {
+        BatchCountingUtxoStore base = new BatchCountingUtxoStore();
+        OutPoint present = outPoint('5', 0);
+        OutPoint absent = outPoint('6', 1);
+        StoredUtxo coin = utxo(55_000L);
+        base.save(present, coin);
+
+        UtxoOverlay overlay = new UtxoOverlay(base);
+        overlay.prefetch(java.util.List.of(present, absent, present));
+
+        assertEquals(1, base.batchCalls);
+        assertEquals(0, base.findCalls, "Batch-capable store must not fall back to scalar reads");
+        assertEquals(coin, overlay.find(present).orElseThrow());
+        assertTrue(overlay.find(absent).isEmpty());
+        assertEquals(0, base.findCalls, "Prefetched present and absent states must stay in the overlay");
+    }
+
+    @Test
+    void prefetchMustNotOverwriteSameBlockCreatedState() {
+        BatchCountingUtxoStore base = new BatchCountingUtxoStore();
+        OutPoint point = outPoint('7', 0);
+        StoredUtxo created = utxo(66_000L);
+        UtxoOverlay overlay = new UtxoOverlay(base);
+
+        overlay.putKnownAbsent(point, created);
+        overlay.prefetch(java.util.List.of(point));
+
+        assertEquals(0, base.batchCalls, "Already-touched same-block output must not be prefetched from persistent state");
+        assertEquals(created, overlay.find(point).orElseThrow());
+    }
+
+    private static final class BatchCountingUtxoStore implements UtxoStore {
+        private final Map<OutPoint, StoredUtxo> entries = new HashMap<>();
+        private int findCalls;
+        private int batchCalls;
+
+        @Override public void save(OutPoint outPoint, StoredUtxo utxo) { entries.put(outPoint, utxo); }
+        @Override public Optional<StoredUtxo> find(OutPoint outPoint) {
+            findCalls++;
+            return Optional.ofNullable(entries.get(outPoint));
+        }
+        @Override public Map<OutPoint, Optional<StoredUtxo>> findAll(java.util.Collection<OutPoint> outPoints) {
+            batchCalls++;
+            Map<OutPoint, Optional<StoredUtxo>> result = new java.util.LinkedHashMap<>();
+            for (OutPoint point : outPoints) result.put(point, Optional.ofNullable(entries.get(point)));
+            return result;
+        }
+        @Override public void delete(OutPoint outPoint) { entries.remove(outPoint); }
+    }
+
     private static final class CountingUtxoStore implements UtxoStore {
         private final Map<OutPoint, StoredUtxo> entries = new HashMap<>();
         private int findCalls;

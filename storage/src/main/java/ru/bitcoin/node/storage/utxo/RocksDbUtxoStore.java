@@ -5,6 +5,9 @@ import ru.bitcoin.node.storage.rocksdb.RocksDbDatabase;
 import ru.bitcoin.node.storage.rocksdb.RocksDbWriteBatch;
 
 import java.util.Optional;
+import java.util.Collection;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Arrays;
 import java.util.TreeMap;
 import java.util.LinkedHashMap;
@@ -159,6 +162,48 @@ public final class RocksDbUtxoStore
         StoredUtxo restored = StoredUtxoSerializer.deserialize(value);
         cache(outPoint, restored);
         return Optional.of(restored);
+    }
+
+    @Override
+    public Map<OutPoint, Optional<StoredUtxo>> findAll(
+            Collection<OutPoint> outPoints
+    ) {
+        if (outPoints == null) throw new IllegalArgumentException("outPoints must not be null");
+
+        Map<OutPoint, Optional<StoredUtxo>> result = new LinkedHashMap<>();
+        List<OutPoint> misses = new ArrayList<>();
+        List<byte[]> keys = new ArrayList<>();
+
+        for (OutPoint outPoint : outPoints) {
+            if (outPoint == null) throw new IllegalArgumentException("outPoints must not contain null");
+            if (result.containsKey(outPoint)) continue;
+
+            StoredUtxo cached = cached(outPoint);
+            if (cached != null) {
+                result.put(outPoint, Optional.of(cached));
+            } else {
+                misses.add(outPoint);
+                keys.add(key(outPoint));
+                // Reserve insertion order. Filled after MultiGet.
+                result.put(outPoint, Optional.empty());
+            }
+        }
+
+        if (!keys.isEmpty()) {
+            List<byte[]> values = database.getAll(keys);
+            if (values.size() != misses.size()) {
+                throw new IllegalStateException("RocksDB MultiGet returned unexpected result count");
+            }
+            for (int i = 0; i < misses.size(); i++) {
+                byte[] value = values.get(i);
+                if (value == null) continue;
+                StoredUtxo restored = StoredUtxoSerializer.deserialize(value);
+                OutPoint outPoint = misses.get(i);
+                cache(outPoint, restored);
+                result.put(outPoint, Optional.of(restored));
+            }
+        }
+        return result;
     }
 
     @Override

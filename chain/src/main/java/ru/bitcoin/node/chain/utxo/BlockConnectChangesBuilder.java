@@ -20,6 +20,8 @@ import ru.bitcoin.node.storage.utxo.UtxoStore;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.LinkedHashSet;
+import java.util.Set;
 import java.util.logging.Logger;
 import java.util.concurrent.atomic.LongAdder;
 
@@ -216,6 +218,13 @@ public final class BlockConnectChangesBuilder {
         SignetBlockValidator.validate(block, networkParameters);
         diagnostic(blockHeight, block, "signet validation done");
         diagnosticSetupNanos.add(System.nanoTime() - phaseStarted);
+
+        // Stage 25: resolve the persistent portion of all block inputs in one
+        // storage batch before the transaction loop. The overlay still applies
+        // transactions strictly in block order, so same-block spends and all
+        // consensus/state transitions retain their original semantics.
+        prefetchBlockInputs(transactions, overlay);
+
         long sigOpsCost = 0;
 
         diagnostic(blockHeight, block, "transactions start count=" + transactions.size());
@@ -534,6 +543,19 @@ public final class BlockConnectChangesBuilder {
             }
         }
     }
+    private static void prefetchBlockInputs(
+            List<Transaction> transactions,
+            UtxoOverlay overlay
+    ) {
+        Set<OutPoint> inputs = new LinkedHashSet<>();
+        for (int transactionIndex = 1; transactionIndex < transactions.size(); transactionIndex++) {
+            for (TxIn input : transactions.get(transactionIndex).inputs()) {
+                inputs.add(input.previousOutput());
+            }
+        }
+        overlay.prefetch(inputs);
+    }
+
     private static List<InputConfirmation> buildInputConfirmations(
             Transaction transaction,
             UtxoOverlay overlay,

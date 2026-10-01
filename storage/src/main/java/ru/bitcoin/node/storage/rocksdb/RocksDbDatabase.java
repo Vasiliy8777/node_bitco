@@ -199,6 +199,42 @@ public final class RocksDbDatabase
         }
     }
 
+    /**
+     * Native RocksDB MultiGet. Telemetry keeps the historical meaning of
+     * getCount/namespaceGetCount as keys resolved rather than JNI calls made,
+     * so IBD diagnostics remain comparable before and after batching.
+     */
+    public List<byte[]> getAll(
+            List<byte[]> keys
+    ) {
+        ensureOpen();
+        if (keys == null) throw new IllegalArgumentException("keys must not be null");
+        if (keys.isEmpty()) return List.of();
+        for (byte[] key : keys) {
+            if (key == null) throw new IllegalArgumentException("keys must not contain null");
+        }
+
+        long started = System.nanoTime();
+        try {
+            return database.multiGetAsList(keys);
+        } catch (RocksDBException e) {
+            throw new IllegalStateException("Failed to batch-read RocksDB values", e);
+        } finally {
+            long elapsed = System.nanoTime() - started;
+            getCount.add(keys.size());
+            getNanos.add(elapsed);
+            long share = elapsed / keys.size();
+            long remainder = elapsed % keys.size();
+            for (int i = 0; i < keys.size(); i++) {
+                byte[] key = keys.get(i);
+                if (key.length == 0) continue;
+                int namespace = Byte.toUnsignedInt(key[0]);
+                namespaceGetCount[namespace].increment();
+                namespaceGetNanos[namespace].add(share + (remainder-- > 0 ? 1 : 0));
+            }
+        }
+    }
+
     public synchronized void delete(
             byte[] key
     ) {

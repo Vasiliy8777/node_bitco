@@ -353,6 +353,40 @@ class RocksDbUtxoStoreTest {
         }
     }
 
+
+    @Test
+    void shouldBatchFindPresentAndMissingUtxosWithNativeMultiGet() {
+        Path path = tempDirectory.resolve("multiget");
+        OutPoint first = testOutPoint(41);
+        OutPoint second = testOutPoint(42);
+        OutPoint missing = testOutPoint(43);
+        StoredUtxo firstCoin = testUtxo();
+        StoredUtxo secondCoin = new StoredUtxo(22_222L, new byte[]{0x52}, 850_100L, false);
+
+        try (RocksDbDatabase database = new RocksDbDatabase(path)) {
+            RocksDbUtxoStore store = new RocksDbUtxoStore(database, (byte) 0x03, 8);
+            store.save(first, firstCoin);
+            store.save(second, secondCoin);
+            store.clearReadCache();
+
+            RocksDbDatabase.IoStats before = database.ioStats();
+            var found = store.findAll(java.util.List.of(first, missing, second, first));
+            RocksDbDatabase.IoStats delta = database.ioStats().minus(before);
+
+            assertEquals(firstCoin, found.get(first).orElseThrow());
+            assertTrue(found.get(missing).isEmpty());
+            assertEquals(secondCoin, found.get(second).orElseThrow());
+            assertEquals(3, found.size());
+            assertEquals(3, delta.gets(), "Telemetry must count unique keys resolved by MultiGet");
+
+            // Positive results published by the batch read should hit the normal cache.
+            long getsAfterBatch = database.ioStats().gets();
+            assertEquals(firstCoin, store.find(first).orElseThrow());
+            assertEquals(secondCoin, store.find(second).orElseThrow());
+            assertEquals(getsAfterBatch, database.ioStats().gets());
+        }
+    }
+
     private static void assertModel(RocksDbUtxoStore store, java.util.Map<OutPoint, StoredUtxo> expected) {
         for (int index = 0; index < 256; index++) {
             var point = testOutPoint(index);
