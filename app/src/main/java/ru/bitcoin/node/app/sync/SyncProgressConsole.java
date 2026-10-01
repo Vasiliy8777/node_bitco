@@ -23,7 +23,10 @@ public final class SyncProgressConsole {
     private volatile long current;
     private volatile long target;
     private volatile long blockTimestampSeconds;
+    private volatile long blockRate;
 
+    private long lastBlockProgressCurrent = -1L;
+    private long lastBlockProgressNanos;
     private long sampledCurrent;
     private long sampledNanos;
     private int lastWidth;
@@ -55,9 +58,26 @@ public final class SyncProgressConsole {
         INSTANCE.phase = Phase.IDLE;
     }
 
-    private void publish(Phase newPhase, long newCurrent, long newTarget, long newBlockTimestampSeconds) {
+    private synchronized void publish(Phase newPhase, long newCurrent, long newTarget, long newBlockTimestampSeconds) {
+        long normalizedCurrent = Math.max(0L, newCurrent);
+        long now = System.nanoTime();
+
+        if (newPhase == Phase.BLOCKS) {
+            if (phase != Phase.BLOCKS || lastBlockProgressCurrent < 0L) {
+                lastBlockProgressCurrent = normalizedCurrent;
+                lastBlockProgressNanos = now;
+                blockRate = 0L;
+            } else if (normalizedCurrent > lastBlockProgressCurrent) {
+                long elapsed = Math.max(1L, now - lastBlockProgressNanos);
+                long delta = normalizedCurrent - lastBlockProgressCurrent;
+                blockRate = Math.max(1L, Math.round(delta * (double) SAMPLE_NANOS / elapsed));
+                lastBlockProgressCurrent = normalizedCurrent;
+                lastBlockProgressNanos = now;
+            }
+        }
+
         phase = newPhase;
-        current = Math.max(0L, newCurrent);
+        current = normalizedCurrent;
         target = Math.max(0L, newTarget);
         blockTimestampSeconds = newBlockTimestampSeconds;
         startOnce();
@@ -103,7 +123,9 @@ public final class SyncProgressConsole {
         long now = System.nanoTime();
         long elapsed = Math.max(1L, now - sampledNanos);
         long delta = Math.max(0L, snapshotCurrent - sampledCurrent);
-        long rate = Math.round(delta * (double) SAMPLE_NANOS / elapsed);
+        long rate = snapshotPhase == Phase.BLOCKS
+                ? blockRate
+                : Math.round(delta * (double) SAMPLE_NANOS / elapsed);
         double percent = snapshotTarget <= 0L
                 ? 0.0
                 : Math.min(100.0, snapshotCurrent * 100.0 / snapshotTarget);

@@ -607,9 +607,14 @@ public final class BlockSyncCoordinator {
                     }
 
                     nextToProcess = Math.incrementExact(nextToProcess);
-                    SyncProgressConsole.blocks(
-                            index.height(), targetHeight, index.header().timestamp().value());
                 }
+
+                // Publish one authoritative progress sample for the whole committed batch.
+                // Publishing every block here happens in a tight loop after validation and
+                // makes the one-second console sampler alternate between a spike and 0/s.
+                BlockIndex progressTip = connectIndexes.getLast();
+                SyncProgressConsole.blocks(
+                        progressTip.height(), targetHeight, progressTip.header().timestamp().value());
                 processedAny = true;
             }
 
