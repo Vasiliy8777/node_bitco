@@ -336,12 +336,14 @@ public class NodeConfiguration {
             PeerManager peerManager,
             BlockDownloadService blockDownloadService,
             BlockDownloadTimeoutPolicy timeoutPolicy,
-            NodeValidationService validationService
+            NodeValidationService validationService,
+            @Value("${bitcoin.p2p.max-blocks-in-flight-per-peer:32}") int maxBlocksInFlightPerPeer
     ) {
         BlockDownloadScheduler scheduler = new BlockDownloadScheduler(
                 peerManager,
                 blockDownloadService,
-                timeoutPolicy
+                timeoutPolicy,
+                maxBlocksInFlightPerPeer
         );
         validationService.attachBackgroundBlockDownloadScheduler(scheduler);
         return scheduler;

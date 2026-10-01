@@ -29,6 +29,21 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class NodeConfigurationTest {
 
+    @Test
+    void testnetProfileConfiguresDeeperBoundedDownloadPipeline() throws Exception {
+        try (var context = new AnnotationConfigApplicationContext()) {
+            var loader = new org.springframework.boot.env.YamlPropertySourceLoader();
+            for (var source : loader.load("testnet-profile",
+                    new org.springframework.core.io.ClassPathResource("application-testnet.yml"))) {
+                context.getEnvironment().getPropertySources().addLast(source);
+            }
+            context.getEnvironment().getPropertySources().addFirst(new MapPropertySource("test-data",
+                    Map.of("bitcoin.data-directory", directory.toString())));
+            context.register(NetworkConfiguration.class, NodeConfiguration.class);
+            context.refresh();
+            assertEquals(128, context.getBean(BlockDownloadScheduler.class).maxBlocksInFlightPerPeer());
+        }
+    }
     @TempDir
     Path directory;
 

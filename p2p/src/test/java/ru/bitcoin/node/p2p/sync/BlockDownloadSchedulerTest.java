@@ -1915,6 +1915,133 @@ class BlockDownloadSchedulerTest {
         }
     }
 
+    @Test
+    void completedRequestsKeepTheirIdentityAcrossStreamingBatches() throws Exception {
+        var blocks = blocks(96);
+        try (var peers = new PeerManager();
+             var connection = new PeerConnection(NetworkParametersRegistry.mainnet(), 5_000, 5_000);
+             var source = new Peer(connection, VersionMessage.DEFAULT_SERVICES, 0, true)) {
+            var scheduler = new BlockDownloadScheduler(peers, new BlockDownloadService(peers),
+                    new BlockDownloadTimeoutPolicy(Duration.ofMinutes(10)));
+            try (var session = scheduler.openSession()) {
+                for (int offset = 0; offset < blocks.size(); offset += 16) {
+                    var batch = blocks.subList(offset, offset + 16);
+                    session.submit(batch.stream().map(Block::hash).toList());
+                    // Complete out of order and consume later: queued completions still count as pending.
+                    for (var block : batch.reversed()) {
+                        assertTrue(scheduler.acceptBlock(source, block));
+                        assertFalse(scheduler.hasPendingBlock(block.hash()));
+                        assertTrue(scheduler.hasSubmittedBlock(block.hash()));
+                        assertFalse(scheduler.acceptBlock(source, block));
+                    }
+                    assertEquals(16, session.pendingCount());
+                    for (int index = offset + 15; index >= offset; index--) {
+                        var completed = session.awaitCompleted();
+                        assertEquals(blocks.get(index).hash(), completed.requestedHash());
+                        assertEquals(index, completed.index());
+                    }
+                    assertEquals(0, session.pendingCount());
+                    assertThrows(IllegalArgumentException.class, () -> session.submit(List.of(blocks.getFirst().hash())));
+                }
+                assertTrue(scheduler.hasSubmittedBlock(blocks.getFirst().hash()));
+            }
+            assertFalse(scheduler.hasSubmittedBlock(blocks.getFirst().hash()));
+        }
+    }
+    @Test
+    void deeperPipelineHonorsPerPeerAndSharedBudgetsAndRefillsOneSlot() throws Exception {
+        for (int peerCount : new int[]{1, 3}) {
+            var requested = new java.util.concurrent.LinkedBlockingQueue<BudgetRequest>();
+            var done = new java.util.concurrent.atomic.AtomicBoolean();
+            var sockets = new ArrayList<ServerSocket>();
+            var servers = new ArrayList<CompletableFuture<Void>>();
+            var streams = new ArrayList<CompletableFuture<PeerIo>>();
+            var blocks = blocks(300);
+            var byHash = new HashMap<Hash256, Block>();
+            blocks.forEach(block -> byHash.put(block.hash(), block));
+            try (var peers = new PeerManager()) {
+                try {
+                    for (int i = 0; i < peerCount; i++) {
+                        int owner = i;
+                        var server = new ServerSocket(0);
+                        sockets.add(server);
+                        var stream = new CompletableFuture<PeerIo>();
+                        streams.add(stream);
+                        servers.add(CompletableFuture.runAsync(() -> {
+                            try (var socket = server.accept()) {
+                                var io = peerIo(socket);
+                                completeHandshake(io);
+                                stream.complete(io);
+                                socket.setSoTimeout(100);
+                                while (!done.get()) {
+                                    try { requested.add(new BudgetRequest(owner, readRequestedBlockHash(io))); }
+                                    catch (SocketTimeoutException ignored) { }
+                                }
+                            } catch (Exception failure) {
+                                throw new RuntimeException(failure);
+                            }
+                        }));
+                        peers.add(connectPeer(server.getLocalPort()));
+                    }
+                    var scheduler = new BlockDownloadScheduler(peers, new BlockDownloadService(peers),
+                            new BlockDownloadTimeoutPolicy(Duration.ofMinutes(10)), 128);
+                    try (var session = scheduler.openSession()) {
+                        session.submit(blocks.stream().map(Block::hash).toList());
+                        int budget = Math.min(128 * peerCount, BlockDownloadScheduler.MAX_TOTAL_BLOCKS_IN_FLIGHT);
+                        int[] perPeer = new int[peerCount];
+                        var hashes = new HashSet<Hash256>();
+                        BudgetRequest first = null;
+                        for (int i = 0; i < budget; i++) {
+                            var request = requested.poll(5, TimeUnit.SECONDS);
+                            assertNotNull(request);
+                            if (request.hash().equals(blocks.getFirst().hash())) first = request;
+                            assertTrue(hashes.add(request.hash()));
+                            assertTrue(++perPeer[request.peer()] <= 128);
+                        }
+                        assertNull(requested.poll(200, TimeUnit.MILLISECONDS), "Request budget exceeded");
+                        for (int count : perPeer) assertTrue(count > 0, "Ready peer was starved");
+                        if (peerCount == 3) {
+                            // With 256 assignments, round-robin next selects peer 1. That peer
+                            // owns this failed request: its free slot must not go to a later block.
+                            var blockedHash = blocks.get(1).hash();
+                            var originalOwner = peers.readyPeers().get(1);
+                            assertSame(originalOwner, session.inFlightPeer(blockedHash).orElseThrow());
+                            assertTrue(session.retryBlock(blockedHash, originalOwner, new IOException("frontier stalled")));
+                            var rescue = requested.poll(5, TimeUnit.SECONDS);
+                            assertNotNull(rescue);
+                            assertEquals(blockedHash, rescue.hash(), "Later work consumed the frontier rescue slot");
+                            assertNotEquals(1, rescue.peer());
+                            assertNull(requested.poll(200, TimeUnit.MILLISECONDS));
+                        }
+                        sendBlock(streams.get(first.peer()).get(5, TimeUnit.SECONDS), byHash.get(first.hash()));
+                        assertEquals(first.hash(), session.awaitCompleted().requestedHash());
+                        var refill = requested.poll(5, TimeUnit.SECONDS);
+                        assertNotNull(refill, "Completion did not refill the pipeline");
+                        assertTrue(hashes.add(refill.hash()));
+                        assertNull(requested.poll(200, TimeUnit.MILLISECONDS), "One completion freed more than one slot");
+                    }
+                } finally {
+                    done.set(true);
+                    for (var server : sockets) server.close();
+                    for (var server : servers) server.get(5, TimeUnit.SECONDS);
+                }
+            }
+        }
+    }
+
+    @Test
+    void rejectsUnboundedPerPeerPipelineSettings() throws Exception {
+        try (var peers = new PeerManager()) {
+            var downloads = new BlockDownloadService(peers);
+            var timeout = new BlockDownloadTimeoutPolicy(Duration.ofMinutes(10));
+            for (int invalid : new int[]{-1, 0, 257, Integer.MAX_VALUE}) {
+                assertThrows(IllegalArgumentException.class,
+                        () -> new BlockDownloadScheduler(peers, downloads, timeout, invalid));
+            }
+            assertEquals(32, new BlockDownloadScheduler(peers, downloads, timeout).maxBlocksInFlightPerPeer());
+        }
+    }
+    private record BudgetRequest(int peer, Hash256 hash) { }
     private record PeerIo(
             BitcoinMessageStreamReader reader,
             BitcoinMessageEncoder encoder,

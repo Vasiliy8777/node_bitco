@@ -153,6 +153,57 @@ class BitcoinCoreMiningRoundTripTest {
         }
     }
 
+    /** Opt-in end-to-end IBD measurement against an isolated local Core peer. */
+    @Test
+    @EnabledIfSystemProperty(named = "ibd.benchmark.core", matches = "true")
+    void measuresInitialSyncFromCore() throws Exception {
+        Path binary = Path.of(System.getProperty("bitcoin.core.binary"));
+        cli = binary.resolveSibling(System.getProperty("os.name").startsWith("Windows") ? "bitcoin-cli.exe" : "bitcoin-cli");
+        coreData = Files.createDirectory(directory.resolve("core-ibd"));
+        rpcPort = port();
+        int p2pPort = port();
+        int count = Integer.getInteger("ibd.benchmark.blocks", 8192);
+        assertTrue(count > 0, "ibd.benchmark.blocks must be positive");
+        var process = new ProcessBuilder(binary.toString(), "-datadir=" + coreData, "-regtest", "-server",
+                "-rpcuser=test", "-rpcpassword=test-password", "-rpcport=" + rpcPort,
+                "-port=" + p2pPort, "-bind=127.0.0.1:" + p2pPort, "-connect=0", "-dnsseed=0", "-discover=0",
+                "-listenonion=0", "-natpmp=0", "-whitelist=noban@127.0.0.1")
+                .redirectErrorStream(true).redirectOutput(directory.resolve("core-ibd.log").toFile()).start();
+        try {
+            await(() -> {
+                try { command("getblockcount"); return true; } catch (Exception ignored) { return false; }
+            }, Duration.ofSeconds(20));
+            command("createwallet", "ibd");
+            String address = command("getnewaddress").strip();
+            for (int offset = 0; offset < count; offset += 512)
+                command("generatetoaddress", Integer.toString(Math.min(512, count - offset)), address);
+            try (var context = new AnnotationConfigApplicationContext()) {
+                context.getEnvironment().getPropertySources().addFirst(new MapPropertySource("core-ibd", Map.of(
+                        "bitcoin.data-directory", directory.resolve("java-ibd").toString(), "bitcoin.network", "regtest",
+                        "bitcoin.p2p.peers", "127.0.0.1:" + p2pPort, "bitcoin.p2p.listen", "false")));
+                context.register(NetworkConfiguration.class, NodeConfiguration.class);
+                context.refresh();
+                var lifecycle = context.getBean(NodeLifecycleService.class);
+                var validation = context.getBean(NodeValidationService.class);
+                try (var runner = new NodeLifecycleRunner(lifecycle)) {
+                    long started = System.nanoTime();
+                    runner.start();
+                    await(() -> validation.activeTip().height() == count, Duration.ofMinutes(3));
+                    double seconds = (System.nanoTime() - started) / 1_000_000_000.0;
+                    System.out.printf(Locale.ROOT, "IBD_CORE_BENCH blocks=%d seconds=%.3f blocks/s=%.1f%n",
+                            count, seconds, count / seconds);
+                    assertEquals(command("getbestblockhash").strip(), validation.activeTip().hash().toDisplayHex());
+                    assertTrue(lifecycle.failure().isEmpty());
+                }
+            }
+        } finally {
+            try { command("stop"); } catch (Exception ignored) { }
+            if (!process.waitFor(10, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                assertTrue(process.waitFor(10, TimeUnit.SECONDS));
+            }
+        }
+    }
     private String command(String... arguments) throws Exception {
         var command = new ArrayList<>(List.of(cli.toString(), "-datadir=" + coreData, chainOption, "-rpcuser=test",
                 "-rpcpassword=test-password", "-rpcport=" + rpcPort));

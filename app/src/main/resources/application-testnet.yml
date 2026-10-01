@@ -5,6 +5,7 @@ bitcoin:
   p2p:
     port: 18335
     peers: ""
+    max-blocks-in-flight-per-peer: 128
 
   rpc:
     port: 18336

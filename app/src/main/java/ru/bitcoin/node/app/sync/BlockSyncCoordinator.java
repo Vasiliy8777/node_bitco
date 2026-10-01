@@ -478,8 +478,27 @@ public final class BlockSyncCoordinator {
         Map<Hash256, AvailableBlock> availableBlocks = new HashMap<>();
         int nextToExpose = 0;
         int nextToProcess = 0;
+        long sampledAt = System.nanoTime();
+        int sampledProcessed = 0;
+        int receivedSinceSample = 0;
+        long validationNanos = 0;
 
         while (nextToProcess < blocksToDownload.size()) {
+            long now = System.nanoTime();
+            if (now - sampledAt >= java.util.concurrent.TimeUnit.SECONDS.toNanos(5)) {
+                BlockIndex frontier = blocksToDownload.get(nextToProcess);
+                log.log(System.Logger.Level.INFO,
+                        "IBD pipeline: intervalMs={0}, received={1}, processed={2}, buffered={3}, pending={4}, connectBatchMs={5}, frontierHeight={6}, frontierAvailable={7}, frontierPeer={8}",
+                        java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(now - sampledAt),
+                        receivedSinceSample, nextToProcess - sampledProcessed, availableBlocks.size(),
+                        session.pendingCount(), java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(validationNanos),
+                        frontier.height(), availableBlocks.containsKey(frontier.hash()), session.inFlightPeer(frontier.hash())
+                                .map(BlockSyncCoordinator::diagnosticPeerAddress).orElse("UNASSIGNED"));
+                sampledAt = now;
+                sampledProcessed = nextToProcess;
+                receivedSinceSample = 0;
+                validationNanos = 0;
+            }
             int horizonEnd = Math.min(
                     blocksToDownload.size(),
                     Math.addExact(nextToProcess, downloadWindow)
@@ -527,7 +546,7 @@ public final class BlockSyncCoordinator {
                             frontier.hash().toDisplayHex(),
                             session.pendingCount(),
                             session.inFlightPeer(frontier.hash())
-                                    .map(peer -> String.valueOf(peer.remoteAddress()))
+                                    .map(BlockSyncCoordinator::diagnosticPeerAddress)
                                     .orElse("UNASSIGNED")
                     );
                 }
@@ -541,6 +560,7 @@ public final class BlockSyncCoordinator {
                         session.pollCompleted(DOWNLOAD_COMPLETION_DRAIN_INTERVAL);
                 if (ready.isEmpty()) break;
                 storeCompleted(availableBlocks, ready.get());
+                receivedSinceSample++;
             }
 
             boolean processedAny = false;
@@ -563,8 +583,10 @@ public final class BlockSyncCoordinator {
             }
 
             if (!connectBlocks.isEmpty()) {
+                long validationStarted = System.nanoTime();
                 List<BlockProcessingResult> results = validationService.processInitialSyncBatch(
                         connectBlocks.stream().map(AvailableBlock::block).toList());
+                validationNanos += System.nanoTime() - validationStarted;
                 if (results.size() != connectBlocks.size()) {
                     throw new IllegalStateException("IBD batch result size does not match input size");
                 }
@@ -640,7 +662,7 @@ public final class BlockSyncCoordinator {
                         "Block download stall: height={0}, hash={1}, peer={2}, age={3}, timeout={4}, pending={5}",
                         blockedIndex.height(),
                         blockedIndex.hash().toDisplayHex(),
-                        timedOutPeer.remoteAddress(),
+                        diagnosticPeerAddress(timedOutPeer),
                         stallEvaluation.stallingAge(),
                         stallEvaluation.timeout(),
                         session.pendingCount()
@@ -676,7 +698,7 @@ public final class BlockSyncCoordinator {
                             "IBD frontier rescue: height={0}, hash={1}, previousPeer={2}, pending={3}",
                             blockedIndex.height(),
                             blockedIndex.hash().toDisplayHex(),
-                            timedOutPeer.remoteAddress(),
+                            diagnosticPeerAddress(timedOutPeer),
                             session.pendingCount()
                     );
                 }
@@ -693,9 +715,18 @@ public final class BlockSyncCoordinator {
             }
 
             storeCompleted(availableBlocks, completedOptional.get());
+            receivedSinceSample++;
         }
     }
 
+    /** A disconnect between owner lookup and logging must not abort synchronization. */
+    static String diagnosticPeerAddress(Peer peer) {
+        try {
+            return String.valueOf(peer.remoteAddress());
+        } catch (RuntimeException disconnected) {
+            return "<disconnected>";
+        }
+    }
     private static void storeCompleted(
             Map<Hash256, AvailableBlock> availableBlocks,
             CompletedBlockDownload completed

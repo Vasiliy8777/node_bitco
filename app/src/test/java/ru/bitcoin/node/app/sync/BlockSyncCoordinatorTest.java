@@ -65,6 +65,15 @@ class BlockSyncCoordinatorTest {
     private static final long REMOTE_NONCE =
             0x1112131415161718L;
 
+    @Test
+    void diagnosticAddressDoesNotFailForClosedPeer() throws Exception {
+        try (var connection = new PeerConnection(PARAMETERS, 5_000, 5_000);
+             var peer = new Peer(connection, VersionMessage.DEFAULT_SERVICES, 0, true)) {
+            peer.close();
+            assertThrows(IllegalStateException.class, peer::remoteAddress);
+            assertEquals("<disconnected>", BlockSyncCoordinator.diagnosticPeerAddress(peer));
+        }
+    }
     @TempDir
     Path directory;
 
@@ -6962,6 +6971,92 @@ class BlockSyncCoordinatorTest {
         );
     }
 
+    /** Loopback IBD benchmark with real framing, dispatcher, scheduler and durable validation. */
+    @Test
+    void measuresStreamingInitialSync() throws Exception {
+        int count = Integer.getInteger("ibd.benchmark.blocks", 4096);
+        assertTrue(count > 0, "ibd.benchmark.blocks must be positive");
+        var blocks = new ArrayList<Block>();
+        var indexes = new ArrayList<BlockIndex>();
+        var parent = BlockIndexFactory.createGenesis(GenesisBlockFactory.create(PARAMETERS).header());
+        for (int height = 1; height <= count; height++) {
+            var coinbase = ru.bitcoin.node.mining.coinbase.CoinbaseBuilder.build(height, PARAMETERS, 0,
+                    new byte[]{0x51}, new byte[]{0}, List.of());
+            var template = new Block(new BlockHeader(4, parent.hash(), coinbase.txId(),
+                    new UInt32(parent.header().timestamp().value() + 1), new UInt32(BITS), new UInt32(0)), List.of(coinbase));
+            var block = withValidPow(template, parent.hash(), coinbase.txId());
+            blocks.add(block);
+            parent = BlockIndexFactory.createChild(parent, block.header());
+            indexes.add(parent);
+        }
+        try (var database = new RocksDbDatabase(directory.resolve("streaming-benchmark"));
+             var socket = new ServerSocket(0);
+             var peers = new PeerManager()) {
+            var validation = new NodeValidationService(database, PARAMETERS, () -> TIME + 100_000L, new Mempool());
+            var indexStore = new RocksDbBlockIndexStore(database);
+            new ru.bitcoin.node.chain.storage.KnownHeaderStorage(database, indexStore,
+                    new RocksDbChainStateStore(database)).saveBatch(indexes, parent);
+            var release = new CountDownLatch(1);
+            long rttMillis = Long.getLong("ibd.benchmark.rttMillis", 0L);
+            var server = CompletableFuture.runAsync(() -> {
+                if (rttMillis == 0) runPeer(socket, blocks, release);
+                else runLatencyPeer(socket, blocks, release, rttMillis);
+            });
+            try {
+                var peer = connectPeer(socket.getLocalPort());
+                peers.add(peer);
+                var scheduler = new BlockDownloadScheduler(peers, new BlockDownloadService(peers),
+                        new BlockDownloadTimeoutPolicy(Duration.ofMinutes(10)),
+                        Integer.getInteger("ibd.benchmark.perPeer", 32));
+                var coordinator = new BlockSyncCoordinator(scheduler, validation, new HeaderChainState(parent),
+                        new StoredBlockIndexLookup(indexStore), new RocksDbBlockStore(database));
+                long started = System.nanoTime();
+                coordinator.synchronizeToTip();
+                double seconds = (System.nanoTime() - started) / 1_000_000_000.0;
+                System.out.printf(Locale.ROOT, "IBD_NETWORK_BENCH blocks=%d perPeer=%d rttMs=%d seconds=%.3f blocks/s=%.1f%n",
+                        count, scheduler.maxBlocksInFlightPerPeer(), rttMillis, seconds, count / seconds);
+                assertEquals(parent.hash(), validation.activeTip().hash());
+            } finally {
+                release.countDown();
+            }
+            server.get(10, TimeUnit.SECONDS);
+        }
+    }
+    /** Delays each response independently: one simulated RTT, not one sleep per block. */
+    private static void runLatencyPeer(ServerSocket server, List<Block> blocks,
+                                       CountDownLatch release, long rttMillis) {
+        try (var socket = server.accept();
+             var responses = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()) {
+            socket.setSoTimeout(10_000);
+            socket.setTcpNoDelay(true);
+            var reader = new BitcoinMessageStreamReader(new BitcoinMessageDecoder(PARAMETERS));
+            var encoder = new BitcoinMessageEncoder(PARAMETERS);
+            var input = new BufferedInputStream(socket.getInputStream());
+            var output = new BufferedOutputStream(socket.getOutputStream());
+            performHandshake(reader, encoder, input, output);
+            var remaining = new HashMap<Hash256, Block>();
+            for (var block : blocks) remaining.put(block.hash(), block);
+            var sent = new ArrayList<java.util.concurrent.ScheduledFuture<?>>();
+            while (!remaining.isEmpty()) {
+                var request = reader.read(input).orElseThrow();
+                assertEquals("getdata", request.command());
+                for (var vector : BitcoinMessages.decodeGetData(request).inventory()) {
+                    assertEquals(InventoryVector.MSG_WITNESS_BLOCK, vector.type());
+                    var block = remaining.remove(vector.hash());
+                    assertNotNull(block, "Unknown or duplicate request");
+                    sent.add(responses.schedule(() -> {
+                        output.write(encoder.encode(BitcoinMessages.block(new BlockMessage(block))));
+                        output.flush();
+                        return null;
+                    }, rttMillis, TimeUnit.MILLISECONDS));
+                }
+            }
+            for (var response : sent) response.get(10, TimeUnit.SECONDS);
+            assertTrue(release.await(10, TimeUnit.SECONDS));
+        } catch (Exception exception) {
+            throw new RuntimeException(exception);
+        }
+    }
     private static Block child(
             BlockIndex parent,
             int tag

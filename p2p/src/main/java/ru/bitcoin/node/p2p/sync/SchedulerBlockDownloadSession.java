@@ -30,14 +30,14 @@ public final class SchedulerBlockDownloadSession
 
     private final BlockDownloadTimeoutEvaluator timeoutEvaluator;
 
-    private final List<DownloadState> states =
-            new ArrayList<>();
+    // Keep only unfinished work; scanning completed history makes a long IBD quadratic.
+    private final Map<Hash256, DownloadState> states =
+            new LinkedHashMap<>();
 
     private final Set<Hash256> submittedHashes =
             new HashSet<>();
 
-    private final BlockInFlightTracker inFlightTracker =
-            new BlockInFlightTracker();
+    private final BlockInFlightTracker inFlightTracker;
 
     private final IdentityHashMap<
             CompletableFuture<DownloadResult>,
@@ -65,14 +65,16 @@ public final class SchedulerBlockDownloadSession
             BlockDownloadService blockDownloadService,
             BlockDownloadTimeoutPolicy timeoutPolicy
     ) {
-        this(peerManager, blockDownloadService, timeoutPolicy, ignored -> { });
+        this(peerManager, blockDownloadService, timeoutPolicy, ignored -> { },
+                BlockDownloadScheduler.MAX_BLOCKS_IN_FLIGHT_PER_PEER);
     }
 
     SchedulerBlockDownloadSession(
             PeerManager peerManager,
             BlockDownloadService blockDownloadService,
             BlockDownloadTimeoutPolicy timeoutPolicy,
-            java.util.function.Consumer<SchedulerBlockDownloadSession> closeListener
+            java.util.function.Consumer<SchedulerBlockDownloadSession> closeListener,
+            int maxBlocksInFlightPerPeer
     ) {
 
         this.peerManager =
@@ -92,6 +94,8 @@ public final class SchedulerBlockDownloadSession
                         timeoutPolicy,
                         "timeoutPolicy"
                 );
+
+        this.inFlightTracker = new BlockInFlightTracker(maxBlocksInFlightPerPeer);
 
         this.timeoutEvaluator =
                 new BlockDownloadTimeoutEvaluator(
@@ -175,7 +179,7 @@ public final class SchedulerBlockDownloadSession
         int index = nextIndex;
 
         for (PendingRequest request : requests) {
-            states.add(
+            states.put(request.blockHash(),
                     new DownloadState(
                             index,
                             request.blockHash(),
@@ -501,6 +505,7 @@ public final class SchedulerBlockDownloadSession
 
             state.completed =
                     true;
+            states.remove(state.blockHash);
 
             pendingCount =
                     Math.decrementExact(
@@ -617,13 +622,7 @@ public final class SchedulerBlockDownloadSession
     ) {
         Objects.requireNonNull(blockHash, "blockHash");
 
-        for (DownloadState state : states) {
-            if (!state.completed && state.blockHash.equals(blockHash)) {
-                return true;
-            }
-        }
-
-        return false;
+        return states.containsKey(blockHash);
     }
 
     /**
@@ -637,13 +636,7 @@ public final class SchedulerBlockDownloadSession
     ) {
         Objects.requireNonNull(blockHash, "blockHash");
 
-        for (DownloadState state : states) {
-            if (state.blockHash.equals(blockHash)) {
-                return true;
-            }
-        }
-
-        return false;
+        return submittedHashes.contains(blockHash);
     }
 
     @Override
@@ -706,16 +699,7 @@ public final class SchedulerBlockDownloadSession
             return false;
         }
 
-        DownloadState state = null;
-
-        for (DownloadState candidate : states) {
-            if (!candidate.completed
-                    && candidate.blockHash.equals(block.hash())) {
-
-                state = candidate;
-                break;
-            }
-        }
+        DownloadState state = states.get(block.hash());
 
         if (state == null) {
             return false;
@@ -772,6 +756,7 @@ public final class SchedulerBlockDownloadSession
 
             state.inFlight = false;
             state.completed = true;
+            states.remove(state.blockHash);
 
             externalCompletions.addLast(
                     new CompletedBlockDownload(
@@ -796,6 +781,7 @@ public final class SchedulerBlockDownloadSession
         } else {
 
             state.completed = true;
+            states.remove(state.blockHash);
 
             externalCompletions.addLast(
                     new CompletedBlockDownload(
@@ -841,152 +827,106 @@ public final class SchedulerBlockDownloadSession
             List<Peer> peers
     ) {
 
-        boolean assigned;
+        while (activeDownloads.size() < BlockDownloadScheduler.MAX_TOTAL_BLOCKS_IN_FLIGHT) {
+            Assignment assignment = nextAssignment(peers);
+            if (assignment == null) return;
+            int peerIndex = assignment.peerIndex();
+            Peer peer = peers.get(peerIndex);
+            DownloadState state = assignment.state();
+            state.inFlight =
+                    true;
 
-        do {
+            state.attemptedPeers.add(
+                    peer
+            );
 
-            assigned = false;
+            inFlightTracker.register(
+                    peer,
+                    state.blockHash
+            );
 
-            for (int offset = 0;
-                 offset < peers.size();
-                 offset++) {
+            CompletableFuture<DownloadResult> future;
 
-                int peerIndex =
-                        (nextPeerIndex + offset)
-                                % peers.size();
+            try {
 
-                Peer peer =
-                        peers.get(
-                                peerIndex
+                future =
+                        downloadAsync(
+                                peer,
+                                state
                         );
 
-                if (!peer.isReady()) {
-                    continue;
-                }
-
-                if (!inFlightTracker.canRegister(
-                        peer
-                )) {
-                    continue;
-                }
-
-                DownloadState state =
-                        findAssignableState(
-                                peer
-                        );
-
-                if (state == null) {
-                    continue;
-                }
-
-                state.inFlight =
-                        true;
-
-                state.attemptedPeers.add(
-                        peer
+                future.whenComplete(
+                        (ignoredResult, ignoredFailure) ->
+                                completionQueue.offer(future)
                 );
 
-                inFlightTracker.register(
+            } catch (RuntimeException exception) {
+
+                inFlightTracker.remove(
                         peer,
                         state.blockHash
                 );
 
-                CompletableFuture<DownloadResult> future;
+                state.inFlight =
+                        false;
 
-                try {
-
-                    future =
-                            downloadAsync(
-                                    peer,
-                                    state
-                            );
-
-                    future.whenComplete(
-                            (ignoredResult, ignoredFailure) ->
-                                    completionQueue.offer(future)
-                    );
-
-                } catch (RuntimeException exception) {
-
-                    inFlightTracker.remove(
-                            peer,
-                            state.blockHash
-                    );
-
-                    state.inFlight =
-                            false;
-
-                    state.attemptedPeers.remove(
-                            peer
-                    );
-
-                    throw exception;
-                }
-
-                activeDownloads.put(
-                        future,
-                        new ActiveDownload(
-                                peer,
-                                state
-                        )
+                state.attemptedPeers.remove(
+                        peer
                 );
 
-                if (state.index < FRONTIER_DIAGNOSTIC_STATE_LIMIT) {
-                    log.log(
-                            System.Logger.Level.INFO,
-                            "IBD scheduler assigned: index={0}, height={1}, hash={2}, peer={3}, active={4}, pending={5}",
-                            state.index,
-                            state.height,
-                            state.blockHash.toDisplayHex(),
-                            diagnosticPeerAddress(peer),
-                            activeDownloads.size(),
-                            pendingCount
-                    );
-                }
-
-                nextPeerIndex =
-                        (peerIndex + 1)
-                                % peers.size();
-
-                assigned = true;
-
-                break;
+                throw exception;
             }
 
-        } while (assigned);
+            activeDownloads.put(
+                    future,
+                    new ActiveDownload(
+                            peer,
+                            state
+                    )
+            );
+
+            if (state.index < FRONTIER_DIAGNOSTIC_STATE_LIMIT) {
+                log.log(
+                        System.Logger.Level.INFO,
+                        "IBD scheduler assigned: index={0}, height={1}, hash={2}, peer={3}, active={4}, pending={5}",
+                        state.index,
+                        state.height,
+                        state.blockHash.toDisplayHex(),
+                        diagnosticPeerAddress(peer),
+                        activeDownloads.size(),
+                        pendingCount
+                );
+            }
+
+            nextPeerIndex =
+                    (peerIndex + 1)
+                            % peers.size();
+
+        }
     }
 
-    private DownloadState findAssignableState(
-            Peer peer
-    ) {
-
-        for (DownloadState state :
-                states) {
-
-            if (state.completed
-                    || state.inFlight) {
-                continue;
-            }
-
-            if (state.attemptedPeers.contains(
-                    peer
-            )) {
-                continue;
-            }
-
-            if (!peerCanServe(
-                    peer,
-                    state
-            )) {
-                continue;
-            }
-
-            return state;
+    /** Choose the earliest serviceable request before choosing its peer. A retry must
+     * not lose the only free global slot to later work on its previous owner. */
+    private Assignment nextAssignment(List<Peer> peers) {
+        var eligible = new ArrayList<Integer>(peers.size());
+        for (int offset = 0; offset < peers.size(); offset++) {
+            int index = (nextPeerIndex + offset) % peers.size();
+            Peer peer = peers.get(index);
+            if (peer.isReady() && inFlightTracker.canRegister(peer)) eligible.add(index);
         }
-
+        if (eligible.isEmpty()) return null;
+        for (DownloadState state : states.values()) {
+            if (state.completed || state.inFlight) continue;
+            for (int index : eligible) {
+                Peer peer = peers.get(index);
+                if (!state.attemptedPeers.contains(peer) && peerCanServe(peer, state))
+                    return new Assignment(state, index);
+            }
+        }
         return null;
     }
 
+    private record Assignment(DownloadState state, int peerIndex) { }
     private static boolean peerCanServe(
             Peer peer,
             DownloadState state
@@ -1004,7 +944,7 @@ public final class SchedulerBlockDownloadSession
     private DownloadState firstIncomplete() {
 
         for (DownloadState state :
-                states) {
+                states.values()) {
 
             if (!state.completed) {
                 return state;

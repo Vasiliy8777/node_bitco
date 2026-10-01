@@ -19,9 +19,14 @@ public final class BlockDownloadScheduler {
                     250
             );
 
+    /** Default for callers that do not supply a pipeline limit. */
     public static final int MAX_BLOCKS_IN_FLIGHT_PER_PEER =
             BlockInFlightTracker
                     .DEFAULT_MAX_BLOCKS_PER_PEER;
+
+    /** Shared per-session ceiling, equivalent to eight default 32-block pipelines. */
+    public static final int MAX_TOTAL_BLOCKS_IN_FLIGHT = 256;
+    private final int maxBlocksInFlightPerPeer;
 
     private final PeerManager peerManager;
 
@@ -43,6 +48,15 @@ public final class BlockDownloadScheduler {
             BlockDownloadTimeoutPolicy timeoutPolicy
     ) {
 
+        this(peerManager, blockDownloadService, timeoutPolicy, MAX_BLOCKS_IN_FLIGHT_PER_PEER);
+    }
+
+    /** Configurable pipeline depth, bounded by the shared session request budget. */
+    public BlockDownloadScheduler(PeerManager peerManager, BlockDownloadService blockDownloadService,
+                                  BlockDownloadTimeoutPolicy timeoutPolicy, int maxBlocksInFlightPerPeer) {
+        if (maxBlocksInFlightPerPeer < 1 || maxBlocksInFlightPerPeer > MAX_TOTAL_BLOCKS_IN_FLIGHT)
+            throw new IllegalArgumentException("maxBlocksInFlightPerPeer must be between 1 and " + MAX_TOTAL_BLOCKS_IN_FLIGHT);
+        this.maxBlocksInFlightPerPeer = maxBlocksInFlightPerPeer;
         this.peerManager =
                 Objects.requireNonNull(
                         peerManager,
@@ -62,6 +76,8 @@ public final class BlockDownloadScheduler {
                 );
     }
 
+    public int maxBlocksInFlightPerPeer() { return maxBlocksInFlightPerPeer; }
+
     public BlockDownloadSession openSession() {
 
         SchedulerBlockDownloadSession session =
@@ -69,7 +85,8 @@ public final class BlockDownloadScheduler {
                         peerManager,
                         blockDownloadService,
                         timeoutPolicy,
-                        this::sessionClosed
+                        this::sessionClosed,
+                        maxBlocksInFlightPerPeer
                 );
 
         activeSessions.add(
