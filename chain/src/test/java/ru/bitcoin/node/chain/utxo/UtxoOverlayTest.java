@@ -472,6 +472,45 @@ class UtxoOverlayTest {
         assertEquals(1, overlay.changes().createdOutputs().size());
     }
 
+    @Test
+    void shouldCreateKnownAbsentOutputWithoutPersistentLookup() {
+        CountingUtxoStore base = new CountingUtxoStore();
+        OutPoint outPoint = outPoint('3', 0);
+        StoredUtxo created = utxo(34_567L);
+        UtxoOverlay overlay = new UtxoOverlay(base);
+
+        overlay.putKnownAbsent(outPoint, created);
+
+        assertEquals(0, base.findCalls,
+                "Known-absent output creation must not probe the persistent UTXO store");
+        assertEquals(created, overlay.find(outPoint).orElseThrow());
+        assertEquals(0, base.findCalls);
+        assertEquals(1, overlay.changes().createdOutputs().size());
+        assertEquals(outPoint, overlay.changes().createdOutputs().getFirst().outPoint());
+    }
+
+    @Test
+    void knownAbsentPutMustPreservePreviouslyObservedOriginalState() {
+        CountingUtxoStore base = new CountingUtxoStore();
+        OutPoint outPoint = outPoint('4', 0);
+        StoredUtxo original = utxo(45_000L);
+        StoredUtxo replacement = utxo(44_000L);
+        base.save(outPoint, original);
+        UtxoOverlay overlay = new UtxoOverlay(base);
+
+        assertEquals(original, overlay.find(outPoint).orElseThrow());
+        assertEquals(1, base.findCalls);
+
+        overlay.putKnownAbsent(outPoint, replacement);
+
+        assertEquals(1, base.findCalls,
+                "A repeated touch must reuse, not replace, the already-known original state");
+        UtxoChanges changes = overlay.changes();
+        assertTrue(changes.spentOutputs().isEmpty());
+        assertEquals(1, changes.createdOutputs().size());
+        assertEquals(replacement, changes.createdOutputs().getFirst().utxo());
+    }
+
 
     private static final class CountingUtxoStore implements UtxoStore {
         private final Map<OutPoint, StoredUtxo> entries = new HashMap<>();

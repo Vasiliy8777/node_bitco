@@ -140,6 +140,45 @@ public final class UtxoOverlay {
     }
 
     /**
+     * Adds an output whose persistent pre-state is already known to be absent.
+     *
+     * This is the no-read counterpart of {@link #put(OutPoint, StoredUtxo)}.
+     * It is valid only when the consensus layer has already established that an
+     * existing persistent UTXO cannot be overwritten (for example the Core-style
+     * post-BIP34 BIP30 fast path).  Avoiding snapshotOriginalState() here is
+     * important during IBD: almost every newly-created output is absent from the
+     * UTXO DB, so probing RocksDB once per output is pure negative-I/O.
+     *
+     * If the OutPoint has already been touched in this overlay, its real original
+     * state is retained.  This preserves same-block create/spend/recreate delta
+     * semantics and makes the method safe for repeated touches.
+     */
+    public void putKnownAbsent(
+            OutPoint outPoint,
+            StoredUtxo utxo
+    ) {
+        validateOutPoint(outPoint);
+
+        if (utxo == null) {
+            throw new IllegalArgumentException(
+                    "utxo must not be null"
+            );
+        }
+
+        if (!originalStates.containsKey(outPoint)) {
+            originalStates.put(
+                    outPoint,
+                    Optional.empty()
+            );
+        }
+
+        currentStates.put(
+                outPoint,
+                Optional.of(utxo)
+        );
+    }
+
+    /**
      * Формирует NET delta между persistent UTXO-set
      * до блока и итоговым состоянием после всех
      * транзакций блока.

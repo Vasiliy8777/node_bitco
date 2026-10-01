@@ -347,7 +347,8 @@ public final class BlockConnectChangesBuilder {
                     transaction,
                     blockHeight,
                     coinbase,
-                    overlay
+                    overlay,
+                    enforceBip30
             );
             diagnosticCreateOutputsNanos.add(System.nanoTime() - phaseStarted);
         }
@@ -450,7 +451,8 @@ public final class BlockConnectChangesBuilder {
             Transaction transaction,
             long blockHeight,
             boolean coinbase,
-            UtxoOverlay overlay
+            UtxoOverlay overlay,
+            boolean enforceBip30
     ) {
 
         List<TxOut> outputs =
@@ -484,10 +486,23 @@ public final class BlockConnectChangesBuilder {
                             coinbase
                     );
 
-            overlay.put(
-                    outPoint,
-                    utxo
-            );
+            if (enforceBip30) {
+                // validateBip30() already populated the overlay with the actual
+                // persistent pre-state, so normal put() reuses that snapshot.
+                overlay.put(
+                        outPoint,
+                        utxo
+                );
+            } else {
+                // Core-style BIP34/BIP30 fast path: the consensus layer has
+                // established that no persistent overwrite check is required.
+                // Do not turn every newly-created output into a negative RocksDB
+                // lookup merely to build the UTXO delta.
+                overlay.putKnownAbsent(
+                        outPoint,
+                        utxo
+                );
+            }
         }
     }
 
