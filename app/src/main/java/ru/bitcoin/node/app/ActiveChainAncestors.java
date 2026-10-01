@@ -43,6 +43,22 @@ final class ActiveChainAncestors {
 
         var cached = heights.ceilingEntry(height);
         BlockIndex cursor = cached == null ? tip : cached.getValue();
+
+        // Production lookup can prove ancestry with Core-style skip pointers.  On a cache
+        // miss, use that directly instead of walking every parent between cursor and the
+        // requested height.  The old linear walk both caused O(distance) RocksDB reads and
+        // polluted this bounded cache with thousands of one-shot intermediate heights,
+        // evicting the useful locator/range entries that IBD repeatedly asks for.
+        if (lookup instanceof BlockIndexAncestorLookup ancestorLookup) {
+            BlockIndex ancestor = ancestorLookup.ancestor(cursor, height);
+            if (ancestor == null || ancestor.height() != height)
+                throw new IllegalStateException("Missing active ancestor at height " + height);
+            remember(ancestor);
+            return ancestor;
+        }
+
+        // Generic lookups used by callers/tests without skip ancestry retain the original
+        // behavior.  Remembering the traversed path is useful for repeated nearby queries.
         remember(cursor);
         while (cursor.height() > height) {
             BlockIndex parent = Objects.requireNonNull(

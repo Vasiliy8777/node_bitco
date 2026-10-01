@@ -85,10 +85,23 @@ class ActiveChainAncestorsTest {
         };
 
         assertEquals(hash(50), cache.at(oldTip, 50, lookup).hash());
+
         int afterWarmup = parentReads.get();
+        int ancestorCallsAfterWarmup = ancestorCalls.get();
+
         assertEquals(hash(50), cache.at(newTip, 50, lookup).hash());
-        assertEquals(afterWarmup, parentReads.get(), "proven descendant tip must retain historical entries");
-        assertEquals(1, ancestorCalls.get(), "tip jump should require one branch-safe ancestry proof");
+
+        assertEquals(
+                afterWarmup,
+                parentReads.get(),
+                "proven descendant tip must retain historical entries"
+        );
+
+        assertEquals(
+                ancestorCallsAfterWarmup + 1,
+                ancestorCalls.get(),
+                "tip jump should require exactly one additional branch-safe ancestry proof"
+        );
     }
 
     @Test
@@ -102,6 +115,48 @@ class ActiveChainAncestorsTest {
         assertEquals(b, cache.at(bTip, 1, map::get));
         assertEquals(genesis, cache.at(genesis, 0, map::get));
         assertEquals(a, cache.at(aTip, 1, map::get));
+    }
+
+
+    @Test
+    void cacheMissUsesAncestorLookupWithoutLinearParentWalkOrCachePollution() {
+        var map = new HashMap<Hash256, BlockIndex>();
+        BlockIndex tip = index(0, 0, hash(-1));
+        map.put(tip.hash(), tip);
+        for (int i = 1; i <= 10_000; i++) {
+            tip = index(i, i, tip.hash());
+            map.put(tip.hash(), tip);
+        }
+
+        var cache = new ActiveChainAncestors(8);
+        var findCalls = new AtomicInteger();
+        var ancestorCalls = new AtomicInteger();
+        BlockIndexAncestorLookup lookup = new BlockIndexAncestorLookup() {
+            @Override public BlockIndex find(Hash256 hash) {
+                findCalls.incrementAndGet();
+                return map.get(hash);
+            }
+
+            @Override public BlockIndex ancestor(BlockIndex index, long targetHeight) {
+                ancestorCalls.incrementAndGet();
+                BlockIndex cursor = index;
+                // The fake lookup resolves directly so the test verifies that
+                // ActiveChainAncestors itself does not perform the linear walk.
+                while (cursor.height() > targetHeight) cursor = map.get(cursor.previousBlockHash());
+                return cursor.height() == targetHeight ? cursor : null;
+            }
+        };
+
+        assertEquals(hash(50), cache.at(tip, 50, lookup).hash());
+        assertEquals(1, ancestorCalls.get());
+        assertEquals(0, findCalls.get(), "cache miss must delegate to branch-safe ancestor lookup");
+
+        assertEquals(hash(51), cache.at(tip, 51, lookup).hash());
+        assertEquals(2, ancestorCalls.get());
+        assertEquals(0, findCalls.get());
+
+        assertEquals(hash(50), cache.at(tip, 50, lookup).hash());
+        assertEquals(2, ancestorCalls.get(), "exact cached height must remain a zero-read hit");
     }
 
     private static Hash256 hash(int n) { return new Hash256(ByteBuffer.allocate(32).putInt(n).array()); }
