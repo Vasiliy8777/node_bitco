@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicLong;
 
 public final class NodeLifecycleService
         implements NodeLifecycle {
@@ -62,6 +63,10 @@ public final class NodeLifecycleService
             NodeLifecycleState.NEW;
 
     private Throwable failure;
+
+    /* Highest startHeight advertised by any header-sync peer in this run. */
+    private final AtomicLong knownHeaderTargetHeight =
+            new AtomicLong();
     private final ru.bitcoin.node.app.sync.LiveChainSynchronizer liveSync;
 
     public boolean isMiningReady() {
@@ -432,7 +437,10 @@ public final class NodeLifecycleService
                 );
 
         final long initialHeight = syncInfrastructure.headerChainState().bestHeaderTip().height();
-        final long remoteTargetHeight = Math.max(initialHeight, peer.remoteVersion().startHeight());
+        final long advertisedHeight = Math.max(initialHeight, peer.remoteVersion().startHeight());
+        final long remoteTargetHeight = knownHeaderTargetHeight.updateAndGet(
+                previous -> Math.max(previous, advertisedHeight)
+        );
 
         SyncProgressConsole.headers(initialHeight, remoteTargetHeight);
 

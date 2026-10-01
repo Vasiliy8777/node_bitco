@@ -15,6 +15,9 @@ public final class NodeLifecycleRunner
     private final AtomicBoolean started =
             new AtomicBoolean();
 
+    private final AtomicBoolean closed =
+            new AtomicBoolean();
+
     private final long shutdownTimeoutMillis;
 
     private Thread worker;
@@ -92,6 +95,10 @@ public final class NodeLifecycleRunner
     public void close()
             throws IOException {
 
+        if (!closed.compareAndSet(false, true)) {
+            return;
+        }
+
         IOException closeFailure =
                 null;
 
@@ -114,6 +121,14 @@ public final class NodeLifecycleRunner
 
         if (currentWorker != null
                 && currentWorker != Thread.currentThread()) {
+
+            /*
+             * lifecycle.close() closes peers and schedulers, but the lifecycle
+             * worker can also be blocked in a socket connect or a timed future
+             * wait that is not owned by those resources. Interrupt it after the
+             * cooperative close so Ctrl+C is not bounded by network timeouts.
+             */
+            currentWorker.interrupt();
 
             try {
 

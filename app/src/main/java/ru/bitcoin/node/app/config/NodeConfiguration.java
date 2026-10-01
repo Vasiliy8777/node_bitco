@@ -384,7 +384,7 @@ public class NodeConfiguration {
             boolean listen,
             @Value("${bitcoin.p2p.port:0}")
             int listenPort,
-            @Value("${bitcoin.p2p.header-response-timeout-millis:10000}")
+            @Value("${bitcoin.p2p.header-response-timeout-millis:30000}")
             long headerTimeoutMillis,
             @Value("${bitcoin.mempool-checkpoint-interval-seconds:900}")
             long mempoolCheckpointIntervalSeconds

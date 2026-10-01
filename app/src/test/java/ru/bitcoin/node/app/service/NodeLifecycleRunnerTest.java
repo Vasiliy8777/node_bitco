@@ -206,6 +206,55 @@ class NodeLifecycleRunnerTest {
         );
     }
 
+
+    @Test
+    void shouldInterruptWorkerBlockedOutsideLifecycleResourcesDuringClose()
+            throws Exception {
+
+        CountDownLatch started = new CountDownLatch(1);
+        AtomicBoolean interrupted = new AtomicBoolean();
+
+        NodeLifecycle lifecycle = new NodeLifecycle() {
+            @Override
+            public void start() throws IOException {
+                started.countDown();
+                try {
+                    Thread.sleep(60_000L);
+                } catch (InterruptedException exception) {
+                    interrupted.set(true);
+                    Thread.currentThread().interrupt();
+                    throw new IOException("Interrupted", exception);
+                }
+            }
+
+            @Override
+            public NodeLifecycleState state() {
+                return NodeLifecycleState.STARTING;
+            }
+
+            @Override
+            public boolean isRunning() {
+                return false;
+            }
+
+            @Override
+            public void close() {
+                // Deliberately does not release start(): runner interruption must do it.
+            }
+        };
+
+        NodeLifecycleRunner runner = new NodeLifecycleRunner(lifecycle, 1_000);
+        runner.start();
+        assertTrue(started.await(1, TimeUnit.SECONDS));
+
+        runner.close();
+
+        assertTrue(interrupted.get());
+
+        // Spring may invoke destroy/close after SmartLifecycle.stop().
+        assertDoesNotThrow(runner::close);
+    }
+
     private static final class NoOpLifecycle
             implements NodeLifecycle {
 
