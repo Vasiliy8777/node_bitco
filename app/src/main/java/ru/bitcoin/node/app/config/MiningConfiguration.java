@@ -13,7 +13,6 @@ import ru.bitcoin.node.protocol.network.NetworkParameters;
 
 import java.net.InetSocketAddress;
 import java.io.IOException;
-import java.util.HexFormat;
 
 @Configuration
 @ConditionalOnProperty(name = "bitcoin.rpc.enabled", havingValue = "true")
@@ -26,7 +25,8 @@ public class MiningConfiguration {
                                        @Value("${bitcoin.rpc.port:8332}") int port,
                                        @Value("${bitcoin.rpc.user:bitcoin}") String user,
                                        @Value("${bitcoin.rpc.password:}") String password,
-                                       @Value("${bitcoin.mining.payout-script:}") String payout,
+                                       @Value("${bitcoin.mining.payout-address:}") String payoutAddress,
+                                       @Value("${bitcoin.mining.payout-script:}") String payoutScript,
                                        @Value("${bitcoin.mining.maximum-weight:3996000}") long maximumWeight,
                                        @Value("${bitcoin.mining.minimum-fee-sat-per-kvb:1000}") long minimumFee,
                                        @Value("${bitcoin.prune:0}") long pruneMiB,
@@ -34,7 +34,7 @@ public class MiningConfiguration {
                                        @Value("${bitcoin.p2p.peer-block-filters:false}") boolean peerBlockFilters,
                                        @Value("${bitcoin.p2p.v2-transport:true}") boolean v2Transport) throws IOException {
         var controller = new MiningController(validation, relay, parameters, lifecycle::isMiningReady,
-                HexFormat.of().parseHex(payout), maximumWeight, new FeeRate(minimumFee));
+                MiningPayoutResolver.resolve(payoutAddress, payoutScript, parameters), maximumWeight, new FeeRate(minimumFee));
         long services = pruneMiB > 0
                 ? ru.bitcoin.node.p2p.message.VersionMessage.NODE_WITNESS
                 | ru.bitcoin.node.p2p.message.VersionMessage.NODE_NETWORK_LIMITED

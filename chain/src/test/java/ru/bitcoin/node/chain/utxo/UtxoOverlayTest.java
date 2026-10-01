@@ -436,6 +436,64 @@ class UtxoOverlayTest {
         );
     }
 
+    @Test
+    void shouldMemoizePresentBaseLookupInsideOverlay() {
+        CountingUtxoStore base = new CountingUtxoStore();
+        OutPoint outPoint = outPoint('1', 0);
+        StoredUtxo utxo = utxo(12_345L);
+        base.save(outPoint, utxo);
+
+        UtxoOverlay overlay = new UtxoOverlay(base);
+
+        assertEquals(utxo, overlay.find(outPoint).orElseThrow());
+        assertEquals(utxo, overlay.find(outPoint).orElseThrow());
+        assertEquals(utxo, overlay.find(outPoint).orElseThrow());
+        assertEquals(1, base.findCalls,
+                "Repeated validation reads of the same UTXO must hit the overlay, not the base store");
+        assertTrue(overlay.changes().spentOutputs().isEmpty());
+        assertTrue(overlay.changes().createdOutputs().isEmpty());
+    }
+
+    @Test
+    void shouldMemoizeAbsentLookupAndReuseItWhenOutputIsCreated() {
+        CountingUtxoStore base = new CountingUtxoStore();
+        OutPoint outPoint = outPoint('2', 0);
+        UtxoOverlay overlay = new UtxoOverlay(base);
+
+        // BIP30-style existence check followed by creation of the same output.
+        assertTrue(overlay.find(outPoint).isEmpty());
+        assertTrue(overlay.find(outPoint).isEmpty());
+        StoredUtxo created = utxo(23_456L);
+        overlay.put(outPoint, created);
+
+        assertEquals(1, base.findCalls,
+                "An absent BIP30 lookup must not be repeated when put() snapshots the output");
+        assertEquals(created, overlay.find(outPoint).orElseThrow());
+        assertEquals(1, overlay.changes().createdOutputs().size());
+    }
+
+
+    private static final class CountingUtxoStore implements UtxoStore {
+        private final Map<OutPoint, StoredUtxo> entries = new HashMap<>();
+        private int findCalls;
+
+        @Override
+        public void save(OutPoint outPoint, StoredUtxo utxo) {
+            entries.put(outPoint, utxo);
+        }
+
+        @Override
+        public Optional<StoredUtxo> find(OutPoint outPoint) {
+            findCalls++;
+            return Optional.ofNullable(entries.get(outPoint));
+        }
+
+        @Override
+        public void delete(OutPoint outPoint) {
+            entries.remove(outPoint);
+        }
+    }
+
     private static final class InMemoryUtxoStore
             implements UtxoStore {
 

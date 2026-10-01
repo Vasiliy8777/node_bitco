@@ -20,4 +20,7 @@ bitcoin:
     password: bitcoin
 
   mining:
+    # Preferred: native SegWit address (bc1..., tb1..., bcrt1...). It is network-validated.
+    payout-address: ""
+    # Legacy/raw scriptPubKey fallback. payout-address takes precedence when configured.
     payout-script: "51"

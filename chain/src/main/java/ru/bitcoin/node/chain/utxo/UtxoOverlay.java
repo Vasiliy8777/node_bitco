@@ -55,7 +55,27 @@ public final class UtxoOverlay {
             return currentStates.get(outPoint);
         }
 
-        return baseStore.find(outPoint);
+        /*
+         * Read-through snapshot for the lifetime of this overlay.
+         *
+         * A single input is consulted several times while connecting a block
+         * (sigops, contextual input validation, BIP68 and script validation),
+         * and BIP30 checks an output before put() snapshots it.  Falling
+         * through to the persistent UTXO store on every one of those reads
+         * turns cache eviction into several RocksDB lookups for the same
+         * OutPoint.  The chainstate cannot change underneath a connect/reorg
+         * overlay, so both present and absent results are stable for the
+         * lifetime of this object and are safe to memoize here.
+         *
+         * Recording the value in originalStates as well is important: a
+         * later spend()/put() must retain the state that existed before the
+         * first mutation, while read-only entries simply cancel out in
+         * changes().
+         */
+        Optional<StoredUtxo> original = baseStore.find(outPoint);
+        originalStates.put(outPoint, original);
+        currentStates.put(outPoint, original);
+        return original;
     }
 
     /**

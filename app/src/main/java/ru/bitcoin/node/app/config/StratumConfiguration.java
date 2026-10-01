@@ -14,30 +14,30 @@ import ru.bitcoin.node.stratum.share.VarDiffConfig;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.net.InetSocketAddress;
-import java.util.HexFormat;
 
 @Configuration
 @ConditionalOnProperty(name = "bitcoin.stratum.enabled", havingValue = "true")
 public class StratumConfiguration {
     @Bean(destroyMethod = "close")
     public StratumServer stratumServer(NodeValidationService validation, NodeRelayService relay,
-            NodeLifecycleService lifecycle, NetworkParameters parameters, AdjustedTime time,
-            @Value("${bitcoin.stratum.bind:127.0.0.1}") String bind,
-            @Value("${bitcoin.stratum.port:3333}") int port,
-            @Value("${bitcoin.stratum.user:miner}") String user,
-            @Value("${bitcoin.stratum.password:}") String password,
-            @Value("${bitcoin.stratum.difficulty:65536}") BigDecimal difficulty,
-            @Value("${bitcoin.stratum.maximum-connections:64}") int maximumConnections,
-            @Value("${bitcoin.stratum.vardiff.enabled:false}") boolean varDiffEnabled,
-            @Value("${bitcoin.stratum.vardiff.minimum:1}") BigDecimal varDiffMinimum,
-            @Value("${bitcoin.stratum.vardiff.maximum:1000000000000}") BigDecimal varDiffMaximum,
-            @Value("${bitcoin.stratum.vardiff.target-seconds:15}") long targetSeconds,
-            @Value("${bitcoin.stratum.vardiff.retarget-seconds:60}") long retargetSeconds,
-            @Value("${bitcoin.mining.payout-script:}") String payout,
-            @Value("${bitcoin.mining.maximum-weight:3996000}") long maximumWeight,
-            @Value("${bitcoin.mining.minimum-fee-sat-per-kvb:1000}") long minimumFee) throws IOException {
+                                       NodeLifecycleService lifecycle, NetworkParameters parameters, AdjustedTime time,
+                                       @Value("${bitcoin.stratum.bind:127.0.0.1}") String bind,
+                                       @Value("${bitcoin.stratum.port:3333}") int port,
+                                       @Value("${bitcoin.stratum.user:miner}") String user,
+                                       @Value("${bitcoin.stratum.password:}") String password,
+                                       @Value("${bitcoin.stratum.difficulty:65536}") BigDecimal difficulty,
+                                       @Value("${bitcoin.stratum.maximum-connections:64}") int maximumConnections,
+                                       @Value("${bitcoin.stratum.vardiff.enabled:false}") boolean varDiffEnabled,
+                                       @Value("${bitcoin.stratum.vardiff.minimum:1}") BigDecimal varDiffMinimum,
+                                       @Value("${bitcoin.stratum.vardiff.maximum:1000000000000}") BigDecimal varDiffMaximum,
+                                       @Value("${bitcoin.stratum.vardiff.target-seconds:15}") long targetSeconds,
+                                       @Value("${bitcoin.stratum.vardiff.retarget-seconds:60}") long retargetSeconds,
+                                       @Value("${bitcoin.mining.payout-address:}") String payoutAddress,
+                                       @Value("${bitcoin.mining.payout-script:}") String payoutScript,
+                                       @Value("${bitcoin.mining.maximum-weight:3996000}") long maximumWeight,
+                                       @Value("${bitcoin.mining.minimum-fee-sat-per-kvb:1000}") long minimumFee) throws IOException {
         var backend = new StratumMiningBackend(validation, relay, parameters, time, lifecycle::isMiningReady,
-                HexFormat.of().parseHex(payout), maximumWeight, new FeeRate(minimumFee));
+                MiningPayoutResolver.resolve(payoutAddress, payoutScript, parameters), maximumWeight, new FeeRate(minimumFee));
         var varDiff = new VarDiffConfig(varDiffEnabled, varDiffMinimum, varDiffMaximum,
                 java.time.Duration.ofSeconds(targetSeconds), java.time.Duration.ofSeconds(retargetSeconds));
         return new StratumServer(new InetSocketAddress(bind, port), backend, user, password, difficulty, maximumConnections, varDiff);
