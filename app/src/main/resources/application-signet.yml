@@ -1,6 +1,6 @@
 bitcoin:
   network: signet
-  data-directory: ${BITCOIN_DATA_DIRECTORY:C:/bitcoin-java-node/signet}
+  data-directory: ${BITCOIN_DATA_DIRECTORY:K:/BitcoinJavaNode/signet}
 
   p2p:
     port: 38333

@@ -1,6 +1,6 @@
 bitcoin:
   network: regtest
-  data-directory: ${BITCOIN_DATA_DIRECTORY:C:/bitcoin-java-node/regtest}
+  data-directory: ${BITCOIN_DATA_DIRECTORY:K:/BitcoinJavaNode/regtest}
 
   p2p:
     port: 18455
