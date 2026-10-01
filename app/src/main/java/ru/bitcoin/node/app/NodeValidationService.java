@@ -32,6 +32,16 @@ import java.util.*;
  * the database lifetime and must not mutate these stores through another processor.
  */
 public final class NodeValidationService implements AutoCloseable {
+    private static final System.Logger LOG = System.getLogger(NodeValidationService.class.getName());
+    private static final long IBD_TELEMETRY_INTERVAL_NANOS = java.time.Duration.ofSeconds(5).toNanos();
+    private long ibdTelemetryLastLogNanos;
+    private long ibdTelemetryBlocks;
+    private long ibdTelemetryTransactions;
+    private long ibdTelemetryProcessorNanos;
+    private long ibdTelemetryPoolNanos;
+    private long ibdTelemetryMaintenanceNanos;
+    private RocksDbDatabase.IoStats ibdTelemetryDbBaseline;
+    private RocksDbUtxoStore.CacheStats ibdTelemetryCacheBaseline;
     private final ChainState chain;
     private final BlockIndexLookup lookup;
     private final RocksDbBlockStore blocks;
@@ -524,9 +534,15 @@ public final class NodeValidationService implements AutoCloseable {
         if (batch.isEmpty()) return List.of();
 
         synchronized (chain) {
-            // Reconcile once at the batch boundary. No external chain/mempool API can
-            // observe an intermediate tip while the chain monitor is held.
+            long batchStarted = System.nanoTime();
+            RocksDbDatabase.IoStats dbBefore = database.ioStats();
+            RocksDbUtxoStore.CacheStats cacheBefore = utxos.cacheStats();
+
+            long poolStarted = System.nanoTime();
             synchronizePool();
+            long poolNanos = System.nanoTime() - poolStarted;
+
+            long processorStarted = System.nanoTime();
             List<BlockProcessingResult> results = database.withDeferredSync(() -> {
                 List<BlockProcessingResult> processed = new ArrayList<>(batch.size());
                 for (Block block : batch) {
@@ -535,12 +551,12 @@ public final class NodeValidationService implements AutoCloseable {
                 }
                 return processed;
             });
+            long processorNanos = System.nanoTime() - processorStarted;
 
             boolean connectedAny = results.stream()
                     .anyMatch(result -> result == BlockProcessingResult.CONNECTED);
 
-            // The active tip is now durable for the whole batch. Bring mempool and
-            // derived indexes to that one final tip instead of repeating O(batch) work.
+            long maintenanceStarted = System.nanoTime();
             synchronizePool();
             if (connectedAny) {
                 if (txIndexEnabled) synchronizeTxIndex();
@@ -550,9 +566,71 @@ public final class NodeValidationService implements AutoCloseable {
                 blockPruner.prune(chain.activeTip(), assumeUtxoPruneCeiling());
                 initialBlockDownload.update(chain.activeTip());
             }
+            long maintenanceNanos = System.nanoTime() - maintenanceStarted;
+            poolNanos += maintenanceNanos; // includes the final pool reconciliation and maintenance boundary
 
+            recordInitialSyncTelemetry(batch, batchStarted, processorNanos, poolNanos,
+                    maintenanceNanos, dbBefore, cacheBefore);
             return List.copyOf(results);
         }
+    }
+
+    private void recordInitialSyncTelemetry(List<Block> batch, long batchStarted, long processorNanos,
+                                            long poolNanos, long maintenanceNanos,
+                                            RocksDbDatabase.IoStats dbBefore,
+                                            RocksDbUtxoStore.CacheStats cacheBefore) {
+        long now = System.nanoTime();
+        long transactions = 0;
+        for (Block block : batch) transactions += block.transactions().size();
+
+        if (ibdTelemetryDbBaseline == null) {
+            ibdTelemetryDbBaseline = dbBefore;
+            ibdTelemetryCacheBaseline = cacheBefore;
+            ibdTelemetryLastLogNanos = batchStarted;
+        }
+
+        ibdTelemetryBlocks += batch.size();
+        ibdTelemetryTransactions += transactions;
+        ibdTelemetryProcessorNanos += processorNanos;
+        ibdTelemetryPoolNanos += poolNanos;
+        ibdTelemetryMaintenanceNanos += maintenanceNanos;
+
+        long elapsed = now - ibdTelemetryLastLogNanos;
+        if (elapsed < IBD_TELEMETRY_INTERVAL_NANOS) return;
+
+        RocksDbDatabase.IoStats db = database.ioStats().minus(ibdTelemetryDbBaseline);
+        RocksDbUtxoStore.CacheStats cacheNow = utxos.cacheStats();
+        long hits = cacheNow.hits() - ibdTelemetryCacheBaseline.hits();
+        long misses = cacheNow.misses() - ibdTelemetryCacheBaseline.misses();
+        long cacheLookups = hits + misses;
+        double seconds = elapsed / 1_000_000_000.0d;
+        double blocksPerSecond = ibdTelemetryBlocks / seconds;
+        double txPerSecond = ibdTelemetryTransactions / seconds;
+        double hitRate = cacheLookups == 0 ? 0.0d : (100.0d * hits / cacheLookups);
+
+        LOG.log(System.Logger.Level.INFO, String.format(java.util.Locale.ROOT,
+                "IBD PERF: height=%,d blocks=%,d %.1f blk/s tx=%,d %.0f tx/s " +
+                        "processor=%.1fms/block pool+maint=%.1fms/block maint=%.1fms/block " +
+                        "rocks[get=%,d %.1fms, batches=%,d %.1fms, syncBatches=%,d, walSync=%,d %.1fms] " +
+                        "utxoCache[hits=%,d misses=%,d hit=%.1f%% size=%,d/%,d]",
+                chain.activeTip().height(), ibdTelemetryBlocks, blocksPerSecond,
+                ibdTelemetryTransactions, txPerSecond,
+                ibdTelemetryProcessorNanos / 1_000_000.0d / Math.max(1L, ibdTelemetryBlocks),
+                ibdTelemetryPoolNanos / 1_000_000.0d / Math.max(1L, ibdTelemetryBlocks),
+                ibdTelemetryMaintenanceNanos / 1_000_000.0d / Math.max(1L, ibdTelemetryBlocks),
+                db.gets(), db.getNanos() / 1_000_000.0d,
+                db.writeBatches(), db.writeBatchNanos() / 1_000_000.0d, db.syncWriteBatches(),
+                db.walSyncs(), db.walSyncNanos() / 1_000_000.0d,
+                hits, misses, hitRate, cacheNow.size(), cacheNow.capacity()));
+
+        ibdTelemetryLastLogNanos = now;
+        ibdTelemetryBlocks = 0;
+        ibdTelemetryTransactions = 0;
+        ibdTelemetryProcessorNanos = 0;
+        ibdTelemetryPoolNanos = 0;
+        ibdTelemetryMaintenanceNanos = 0;
+        ibdTelemetryDbBaseline = database.ioStats();
+        ibdTelemetryCacheBaseline = cacheNow;
     }
 
     public MempoolEntry admit(Transaction transaction) {

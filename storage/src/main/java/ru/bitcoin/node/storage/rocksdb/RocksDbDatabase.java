@@ -11,6 +11,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Supplier;
+import java.util.concurrent.atomic.LongAdder;
 
 public final class RocksDbDatabase
         implements AutoCloseable {
@@ -24,6 +25,31 @@ public final class RocksDbDatabase
     private final long[] namespaceVersions = new long[256];
 
     private boolean closed;
+
+    // Lightweight cumulative I/O telemetry. LongAdder keeps the hot read path
+    // contention-free enough for IBD while snapshots remain cheap.
+    private final LongAdder getCount = new LongAdder();
+    private final LongAdder getNanos = new LongAdder();
+    private final LongAdder writeBatchCount = new LongAdder();
+    private final LongAdder writeBatchNanos = new LongAdder();
+    private final LongAdder syncWriteBatchCount = new LongAdder();
+    private final LongAdder walSyncCount = new LongAdder();
+    private final LongAdder walSyncNanos = new LongAdder();
+
+    public record IoStats(long gets, long getNanos, long writeBatches, long writeBatchNanos,
+                          long syncWriteBatches, long walSyncs, long walSyncNanos) {
+        public IoStats minus(IoStats before) {
+            return new IoStats(gets - before.gets, getNanos - before.getNanos,
+                    writeBatches - before.writeBatches, writeBatchNanos - before.writeBatchNanos,
+                    syncWriteBatches - before.syncWriteBatches, walSyncs - before.walSyncs,
+                    walSyncNanos - before.walSyncNanos);
+        }
+    }
+
+    public IoStats ioStats() {
+        return new IoStats(getCount.sum(), getNanos.sum(), writeBatchCount.sum(),
+                writeBatchNanos.sum(), syncWriteBatchCount.sum(), walSyncCount.sum(), walSyncNanos.sum());
+    }
 
     /** Per-thread IBD durability scope. Atomic WriteBatches remain WAL-backed, but
      * intermediate writes do not force an fsync; the outermost scope performs one syncWal(). */
@@ -107,6 +133,7 @@ public final class RocksDbDatabase
             );
         }
 
+        long started = System.nanoTime();
         try {
             return database.get(
                     key
@@ -116,6 +143,9 @@ public final class RocksDbDatabase
                     "Failed to read RocksDB value",
                     e
             );
+        } finally {
+            getCount.increment();
+            getNanos.add(System.nanoTime() - started);
         }
     }
 
@@ -181,10 +211,14 @@ public final class RocksDbDatabase
 
     public synchronized void syncWal() {
         ensureOpen();
+        long started = System.nanoTime();
         try {
             database.syncWal();
         } catch (RocksDBException e) {
             throw new IllegalStateException("Failed to synchronize RocksDB WAL", e);
+        } finally {
+            walSyncCount.increment();
+            walSyncNanos.add(System.nanoTime() - started);
         }
     }
 
@@ -211,6 +245,7 @@ public final class RocksDbDatabase
             );
         }
 
+        long started = System.nanoTime();
         try (WriteOptions writeOptions =
                      new WriteOptions()
                              .setSync(sync)) {
@@ -230,6 +265,10 @@ public final class RocksDbDatabase
                     "Failed to write RocksDB batch",
                     e
             );
+        } finally {
+            writeBatchCount.increment();
+            writeBatchNanos.add(System.nanoTime() - started);
+            if (sync) syncWriteBatchCount.increment();
         }
     }
 
