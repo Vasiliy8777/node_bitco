@@ -21,10 +21,25 @@ import ru.bitcoin.node.storage.utxo.UtxoStore;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Logger;
+import java.util.concurrent.atomic.LongAdder;
 
 public final class BlockConnectChangesBuilder {
 
     private static final Logger LOG = Logger.getLogger(BlockConnectChangesBuilder.class.getName());
+
+    // Stage 21 IBD diagnostics. These counters are observational only and do not
+    // participate in consensus decisions. LongAdder keeps snapshot reads cheap.
+    private static final LongAdder diagnosticBlocks = new LongAdder();
+    private static final LongAdder diagnosticStructureNanos = new LongAdder();
+    private static final LongAdder diagnosticSetupNanos = new LongAdder();
+    private static final LongAdder diagnosticBip30Nanos = new LongAdder();
+    private static final LongAdder diagnosticFinalitySigOpsNanos = new LongAdder();
+    private static final LongAdder diagnosticContextInputsNanos = new LongAdder();
+    private static final LongAdder diagnosticSequenceLocksNanos = new LongAdder();
+    private static final LongAdder diagnosticScriptsNanos = new LongAdder();
+    private static final LongAdder diagnosticSpendInputsNanos = new LongAdder();
+    private static final LongAdder diagnosticCreateOutputsNanos = new LongAdder();
+    private static final LongAdder diagnosticRewardNanos = new LongAdder();
 
     private BlockConnectChangesBuilder() {
     }
@@ -164,13 +179,17 @@ public final class BlockConnectChangesBuilder {
          * - Merkle root;
          * - mutated Merkle tree.
          */
+        diagnosticBlocks.increment();
+        long phaseStarted = System.nanoTime();
         diagnostic(blockHeight, block, "structure start");
         BlockValidator.validateStructure(block);
+        diagnosticStructureNanos.add(System.nanoTime() - phaseStarted);
         diagnostic(blockHeight, block, "structure done");
 
         List<Transaction> transactions =
                 block.transactions();
 
+        phaseStarted = System.nanoTime();
         diagnostic(blockHeight, block, "BIP34 start");
         Bip34Validator.validate(transactions.get(0), blockHeight, networkParameters);
         diagnostic(blockHeight, block, "BIP34 done");
@@ -196,6 +215,7 @@ public final class BlockConnectChangesBuilder {
         diagnostic(blockHeight, block, "witness validation done");
         SignetBlockValidator.validate(block, networkParameters);
         diagnostic(blockHeight, block, "signet validation done");
+        diagnosticSetupNanos.add(System.nanoTime() - phaseStarted);
         long sigOpsCost = 0;
 
         diagnostic(blockHeight, block, "transactions start count=" + transactions.size());
@@ -212,14 +232,17 @@ public final class BlockConnectChangesBuilder {
              * текущей транзакцией.
              */
             if (enforceBip30) {
+                phaseStarted = System.nanoTime();
                 validateBip30(
                         transaction,
                         overlay
                 );
+                diagnosticBip30Nanos.add(System.nanoTime() - phaseStarted);
             }
             boolean coinbase =
                     transactionIndex == 0;
 
+            phaseStarted = System.nanoTime();
             TransactionFinality.validate(
                     transaction,
                     blockHeight,
@@ -229,15 +252,18 @@ public final class BlockConnectChangesBuilder {
             sigOpsCost = Math.addExact(sigOpsCost,
                     TransactionSigOpCost.calculate(transaction, utxoView, scriptVerifyFlags));
             BlockSigOpsValidator.validate(sigOpsCost);
+            diagnosticFinalitySigOpsNanos.add(System.nanoTime() - phaseStarted);
 
             if (!coinbase) {
 
+                phaseStarted = System.nanoTime();
                 TransactionContextResult contextResult =
                         ContextualTransactionValidator.validateInputs(
                                 transaction,
                                 blockHeight,
                                 utxoView
                         );
+                diagnosticContextInputsNanos.add(System.nanoTime() - phaseStarted);
 
                 /*
                  * ContextualTransactionValidator уже подтвердил,
@@ -248,6 +274,7 @@ public final class BlockConnectChangesBuilder {
                 if (blockHeight >= networkParameters.csvHeight()
                         && Integer.toUnsignedLong(transaction.version()) >= 2) {
 
+                    phaseStarted = System.nanoTime();
                     List<InputConfirmation> inputConfirmations =
                             buildInputConfirmations(
                                     transaction,
@@ -262,6 +289,7 @@ public final class BlockConnectChangesBuilder {
                             previousMedianTimePast,
                             networkParameters
                     );
+                    diagnosticSequenceLocksNanos.add(System.nanoTime() - phaseStarted);
                 }
 
                 /*
@@ -275,11 +303,13 @@ public final class BlockConnectChangesBuilder {
                  * право потратить соответствующий UTXO.
                  */
                 if (verifyScripts) {
+                    phaseStarted = System.nanoTime();
                     InputScriptValidator.validateAll(
                             transaction,
                             utxoView,
                             scriptVerifyFlags
                     );
+                    diagnosticScriptsNanos.add(System.nanoTime() - phaseStarted);
                 }
 
                 try {
@@ -299,32 +329,85 @@ public final class BlockConnectChangesBuilder {
                     );
                 }
 
+                phaseStarted = System.nanoTime();
                 TransactionUndo transactionUndo =
                         spendInputs(
                                 transaction,
                                 overlay
                         );
+                diagnosticSpendInputsNanos.add(System.nanoTime() - phaseStarted);
 
                 transactionUndos.add(
                         transactionUndo
                 );
             }
 
+            phaseStarted = System.nanoTime();
             createOutputs(
                     transaction,
                     blockHeight,
                     coinbase,
                     overlay
             );
+            diagnosticCreateOutputsNanos.add(System.nanoTime() - phaseStarted);
         }
         diagnostic(blockHeight, block, "transactions done");
         diagnostic(blockHeight, block, "coinbase reward start");
+        phaseStarted = System.nanoTime();
         CoinbaseValidator.validateReward(transactions.get(0), blockHeight, totalFees, networkParameters);
+        diagnosticRewardNanos.add(System.nanoTime() - phaseStarted);
         diagnostic(blockHeight, block, "coinbase reward done");
 
         return new BlockUndoData(
                 transactionUndos
         );
+    }
+
+    public static DiagnosticSnapshot diagnosticSnapshot() {
+        return new DiagnosticSnapshot(
+                diagnosticBlocks.sum(),
+                diagnosticStructureNanos.sum(),
+                diagnosticSetupNanos.sum(),
+                diagnosticBip30Nanos.sum(),
+                diagnosticFinalitySigOpsNanos.sum(),
+                diagnosticContextInputsNanos.sum(),
+                diagnosticSequenceLocksNanos.sum(),
+                diagnosticScriptsNanos.sum(),
+                diagnosticSpendInputsNanos.sum(),
+                diagnosticCreateOutputsNanos.sum(),
+                diagnosticRewardNanos.sum()
+        );
+    }
+
+    public record DiagnosticSnapshot(
+            long blocks,
+            long structureNanos,
+            long setupNanos,
+            long bip30Nanos,
+            long finalitySigOpsNanos,
+            long contextInputsNanos,
+            long sequenceLocksNanos,
+            long scriptsNanos,
+            long spendInputsNanos,
+            long createOutputsNanos,
+            long rewardNanos
+    ) {
+        public DiagnosticSnapshot minus(DiagnosticSnapshot baseline) {
+            if (baseline == null) throw new IllegalArgumentException("baseline must not be null");
+            return new DiagnosticSnapshot(
+                    blocks - baseline.blocks,
+                    structureNanos - baseline.structureNanos,
+                    setupNanos - baseline.setupNanos,
+                    bip30Nanos - baseline.bip30Nanos,
+                    finalitySigOpsNanos - baseline.finalitySigOpsNanos,
+                    contextInputsNanos - baseline.contextInputsNanos,
+                    sequenceLocksNanos - baseline.sequenceLocksNanos,
+                    scriptsNanos - baseline.scriptsNanos,
+                    spendInputsNanos - baseline.spendInputsNanos,
+                    createOutputsNanos - baseline.createOutputsNanos,
+                    rewardNanos - baseline.rewardNanos
+            );
+        }
     }
 
     private static TransactionUndo spendInputs(

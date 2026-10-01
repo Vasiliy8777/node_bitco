@@ -2,6 +2,7 @@ package ru.bitcoin.node.app;
 
 import ru.bitcoin.node.chain.*;
 import ru.bitcoin.node.chain.storage.*;
+import ru.bitcoin.node.chain.utxo.BlockConnectChangesBuilder;
 import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.consensus.time.AdjustedTime;
 import ru.bitcoin.node.consensus.transaction.*;
@@ -46,6 +47,7 @@ public final class NodeValidationService implements AutoCloseable {
     private RocksDbUtxoStore.CacheStats ibdTelemetryCacheBaseline;
     private StoredBlockIndexLookup.DiagnosticSnapshot ibdTelemetryBlockIndexBaseline;
     private BlockProcessor.DiagnosticSnapshot ibdTelemetryProcessorBaseline;
+    private BlockConnectChangesBuilder.DiagnosticSnapshot ibdTelemetryConnectBaseline;
     private final ChainState chain;
     private final StoredBlockIndexLookup lookup;
     private final RocksDbBlockStore blocks;
@@ -593,6 +595,7 @@ public final class NodeValidationService implements AutoCloseable {
             ibdTelemetryCacheBaseline = cacheBefore;
             ibdTelemetryBlockIndexBaseline = lookup.diagnosticSnapshot();
             ibdTelemetryProcessorBaseline = processor.diagnosticSnapshot();
+            ibdTelemetryConnectBaseline = BlockConnectChangesBuilder.diagnosticSnapshot();
             ibdTelemetryLastLogNanos = batchStarted;
         }
 
@@ -638,6 +641,8 @@ public final class NodeValidationService implements AutoCloseable {
                 + " sampleRate=1/128 callers=" + formatBlockIndexCallers(blockIndexDiagnostics));
         var processorDiagnostics = processor.diagnosticSnapshot().minus(ibdTelemetryProcessorBaseline);
         LOG.log(System.Logger.Level.INFO, formatProcessorDiagnostics(processorDiagnostics));
+        var connectDiagnostics = BlockConnectChangesBuilder.diagnosticSnapshot().minus(ibdTelemetryConnectBaseline);
+        LOG.log(System.Logger.Level.INFO, formatConnectDiagnostics(connectDiagnostics));
 
         ibdTelemetryLastLogNanos = now;
         ibdTelemetryBlocks = 0;
@@ -650,6 +655,32 @@ public final class NodeValidationService implements AutoCloseable {
         ibdTelemetryCacheBaseline = cacheNow;
         ibdTelemetryBlockIndexBaseline = lookup.diagnosticSnapshot();
         ibdTelemetryProcessorBaseline = processor.diagnosticSnapshot();
+        ibdTelemetryConnectBaseline = BlockConnectChangesBuilder.diagnosticSnapshot();
+    }
+
+    private static String formatConnectDiagnostics(BlockConnectChangesBuilder.DiagnosticSnapshot stats) {
+        long blocks = Math.max(1L, stats.blocks());
+        long totalNanos = stats.structureNanos() + stats.setupNanos() + stats.bip30Nanos()
+                + stats.finalitySigOpsNanos() + stats.contextInputsNanos() + stats.sequenceLocksNanos()
+                + stats.scriptsNanos() + stats.spendInputsNanos() + stats.createOutputsNanos()
+                + stats.rewardNanos();
+        return String.format(java.util.Locale.ROOT,
+                "IBD CONNECT PHASES: blocks=%,d measured=%.1fms %.3fms/block "
+                        + "structure=%.1f setup=%.1f bip30=%.1f finality+sigops=%.1f "
+                        + "contextInputs=%.1f sequenceLocks=%.1f scripts=%.1f "
+                        + "spendInputs=%.1f createOutputs=%.1f reward=%.1f",
+                stats.blocks(), totalNanos / 1_000_000.0d,
+                totalNanos / 1_000_000.0d / blocks,
+                stats.structureNanos() / 1_000_000.0d,
+                stats.setupNanos() / 1_000_000.0d,
+                stats.bip30Nanos() / 1_000_000.0d,
+                stats.finalitySigOpsNanos() / 1_000_000.0d,
+                stats.contextInputsNanos() / 1_000_000.0d,
+                stats.sequenceLocksNanos() / 1_000_000.0d,
+                stats.scriptsNanos() / 1_000_000.0d,
+                stats.spendInputsNanos() / 1_000_000.0d,
+                stats.createOutputsNanos() / 1_000_000.0d,
+                stats.rewardNanos() / 1_000_000.0d);
     }
 
     private static String formatProcessorDiagnostics(BlockProcessor.DiagnosticSnapshot stats) {
