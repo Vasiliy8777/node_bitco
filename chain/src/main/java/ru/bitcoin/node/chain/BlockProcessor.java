@@ -7,6 +7,7 @@ import ru.bitcoin.node.protocol.block.Block;
 import ru.bitcoin.node.protocol.network.NetworkParameters;
 
 import java.util.Objects;
+import java.util.concurrent.atomic.LongAdder;
 
 /**
  * Entry point for complete blocks. All callers must share the same ChainState
@@ -27,6 +28,16 @@ public final class BlockProcessor {
     private final AdjustedTime adjustedTime;
     private final BlockFailureManager failureManager;
     private final BlockFailureResolver failureResolver;
+
+    // IBD diagnostics only. LongAdder keeps the instrumentation cheap and also safe if
+    // callers outside the main IBD path ever invoke this processor concurrently.
+    private final LongAdder diagnosticProcessed = new LongAdder();
+    private final LongAdder diagnosticStructureKnownNanos = new LongAdder();
+    private final LongAdder diagnosticParentHeaderNanos = new LongAdder();
+    private final LongAdder diagnosticWitnessSignetNanos = new LongAdder();
+    private final LongAdder diagnosticPrepareUpdateNanos = new LongAdder();
+    private final LongAdder diagnosticReorgPrepareNanos = new LongAdder();
+    private final LongAdder diagnosticCommitNanos = new LongAdder();
 
     public BlockProcessor(
             ChainState chainState,
@@ -104,9 +115,12 @@ public final class BlockProcessor {
     public BlockProcessingResult process(Block block) {
         Objects.requireNonNull(block, "block");
         synchronized (chainState) {
+            diagnosticProcessed.increment();
+            long phaseStarted = System.nanoTime();
             // Even a known header can arrive with a different, invalid body.
             BlockValidator.validateStructure(block);
             BlockIndex known = lookup.find(block.hash());
+            diagnosticStructureKnownNanos.add(System.nanoTime() - phaseStarted);
             if (known != null && isActiveChainBlock(known)) {
                 ru.bitcoin.node.consensus.block.WitnessCommitmentValidator.validate(
                         block, known.height() >= parameters.segwitHeight());
@@ -119,6 +133,7 @@ public final class BlockProcessor {
                 return BlockProcessingResult.ALREADY_IN_ACTIVE_CHAIN;
             }
 
+            phaseStarted = System.nanoTime();
             BlockIndex parent = lookup.find(block.header().previousBlockHash());
             if (parent == null) {
                 return BlockProcessingResult.UNKNOWN_PARENT;
@@ -129,6 +144,7 @@ public final class BlockProcessor {
 
             ChainHeaderValidator.validate(
                     block.header(), parent, lookup, parameters, adjustedTime);
+            diagnosticParentHeaderNanos.add(System.nanoTime() - phaseStarted);
             logDiagnostic(diagnosticHeight, block, "header validation done");
 
             BlockIndex candidate = BlockIndexFactory.createChild(parent, block.header());
@@ -142,13 +158,17 @@ public final class BlockProcessor {
                                 .toDisplayHex()
                 );
             }
+            phaseStarted = System.nanoTime();
             ru.bitcoin.node.consensus.block.WitnessCommitmentValidator.validate(
                     block, candidate.height() >= parameters.segwitHeight());
             ru.bitcoin.node.consensus.block.SignetBlockValidator.validate(block, parameters);
+            diagnosticWitnessSignetNanos.add(System.nanoTime() - phaseStarted);
             logDiagnostic(candidate.height(), block, "witness+signet validation done");
 
             logDiagnostic(candidate.height(), block, "prepareUpdate start");
+            phaseStarted = System.nanoTime();
             ChainUpdate update = chainState.prepareUpdate(candidate, lookup);
+            diagnosticPrepareUpdateNanos.add(System.nanoTime() - phaseStarted);
             logDiagnostic(candidate.height(), block, "prepareUpdate done");
             if (update == null) {
                 // Side-chain/context-pending bodies still need their own durable storage commit.
@@ -162,6 +182,7 @@ public final class BlockProcessor {
             PreparedChainReorganization prepared;
             try {
                 logDiagnostic(candidate.height(), block, "reorg prepare start");
+                phaseStarted = System.nanoTime();
                 prepared = executor.prepare(update, block, invalidIndex -> {
                     // The observer receives the exact BlockIndex resolved by the prepare-phase
                     // overlay. It may not be durable yet during reindex or first connection.
@@ -173,6 +194,7 @@ public final class BlockProcessor {
                         failureManager.markFailed(invalidIndex);
                     }
                 });
+                diagnosticReorgPrepareNanos.add(System.nanoTime() - phaseStarted);
                 logDiagnostic(candidate.height(), block, "reorg prepare done");
             } catch (ru.bitcoin.node.consensus.block.BlockValidationException
                      | ru.bitcoin.node.consensus.transaction.TransactionValidationException
@@ -186,11 +208,48 @@ public final class BlockProcessor {
                 throw exception;
             }
             logDiagnostic(candidate.height(), block, "commit start");
+            phaseStarted = System.nanoTime();
             executor.commitWithStagedNewTipIndex(
                     prepared, batch -> storage.save(batch, block, candidate));
+            diagnosticCommitNanos.add(System.nanoTime() - phaseStarted);
             logDiagnostic(candidate.height(), block, "commit done");
 
             return BlockProcessingResult.CONNECTED;
+        }
+    }
+
+    public DiagnosticSnapshot diagnosticSnapshot() {
+        return new DiagnosticSnapshot(
+                diagnosticProcessed.sum(),
+                diagnosticStructureKnownNanos.sum(),
+                diagnosticParentHeaderNanos.sum(),
+                diagnosticWitnessSignetNanos.sum(),
+                diagnosticPrepareUpdateNanos.sum(),
+                diagnosticReorgPrepareNanos.sum(),
+                diagnosticCommitNanos.sum()
+        );
+    }
+
+    public record DiagnosticSnapshot(
+            long processed,
+            long structureKnownNanos,
+            long parentHeaderNanos,
+            long witnessSignetNanos,
+            long prepareUpdateNanos,
+            long reorgPrepareNanos,
+            long commitNanos
+    ) {
+        public DiagnosticSnapshot minus(DiagnosticSnapshot baseline) {
+            Objects.requireNonNull(baseline, "baseline");
+            return new DiagnosticSnapshot(
+                    processed - baseline.processed,
+                    structureKnownNanos - baseline.structureKnownNanos,
+                    parentHeaderNanos - baseline.parentHeaderNanos,
+                    witnessSignetNanos - baseline.witnessSignetNanos,
+                    prepareUpdateNanos - baseline.prepareUpdateNanos,
+                    reorgPrepareNanos - baseline.reorgPrepareNanos,
+                    commitNanos - baseline.commitNanos
+            );
         }
     }
 

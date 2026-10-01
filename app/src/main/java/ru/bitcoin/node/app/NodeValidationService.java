@@ -45,6 +45,7 @@ public final class NodeValidationService implements AutoCloseable {
     private RocksDbDatabase.NamespaceIoStats ibdTelemetryNamespaceBaseline;
     private RocksDbUtxoStore.CacheStats ibdTelemetryCacheBaseline;
     private StoredBlockIndexLookup.DiagnosticSnapshot ibdTelemetryBlockIndexBaseline;
+    private BlockProcessor.DiagnosticSnapshot ibdTelemetryProcessorBaseline;
     private final ChainState chain;
     private final StoredBlockIndexLookup lookup;
     private final RocksDbBlockStore blocks;
@@ -591,6 +592,7 @@ public final class NodeValidationService implements AutoCloseable {
             ibdTelemetryNamespaceBaseline = database.namespaceIoStats();
             ibdTelemetryCacheBaseline = cacheBefore;
             ibdTelemetryBlockIndexBaseline = lookup.diagnosticSnapshot();
+            ibdTelemetryProcessorBaseline = processor.diagnosticSnapshot();
             ibdTelemetryLastLogNanos = batchStarted;
         }
 
@@ -634,6 +636,8 @@ public final class NodeValidationService implements AutoCloseable {
         LOG.log(System.Logger.Level.INFO, "IBD BLOCKINDEX MISS SAMPLES: misses="
                 + String.format(java.util.Locale.ROOT, "%,d", blockIndexDiagnostics.persistentMisses())
                 + " sampleRate=1/128 callers=" + formatBlockIndexCallers(blockIndexDiagnostics));
+        var processorDiagnostics = processor.diagnosticSnapshot().minus(ibdTelemetryProcessorBaseline);
+        LOG.log(System.Logger.Level.INFO, formatProcessorDiagnostics(processorDiagnostics));
 
         ibdTelemetryLastLogNanos = now;
         ibdTelemetryBlocks = 0;
@@ -645,6 +649,25 @@ public final class NodeValidationService implements AutoCloseable {
         ibdTelemetryNamespaceBaseline = database.namespaceIoStats();
         ibdTelemetryCacheBaseline = cacheNow;
         ibdTelemetryBlockIndexBaseline = lookup.diagnosticSnapshot();
+        ibdTelemetryProcessorBaseline = processor.diagnosticSnapshot();
+    }
+
+    private static String formatProcessorDiagnostics(BlockProcessor.DiagnosticSnapshot stats) {
+        long blocks = Math.max(1L, stats.processed());
+        double measuredMs = (stats.structureKnownNanos() + stats.parentHeaderNanos()
+                + stats.witnessSignetNanos() + stats.prepareUpdateNanos()
+                + stats.reorgPrepareNanos() + stats.commitNanos()) / 1_000_000.0d;
+        return String.format(java.util.Locale.ROOT,
+                "IBD PROCESSOR PHASES: blocks=%,d measured=%.1fms %.3fms/block "
+                        + "structure+known=%.1fms parent+header=%.1fms witness+signet=%.1fms "
+                        + "prepareUpdate=%.1fms reorgPrepare=%.1fms commit=%.1fms",
+                stats.processed(), measuredMs, measuredMs / blocks,
+                stats.structureKnownNanos() / 1_000_000.0d,
+                stats.parentHeaderNanos() / 1_000_000.0d,
+                stats.witnessSignetNanos() / 1_000_000.0d,
+                stats.prepareUpdateNanos() / 1_000_000.0d,
+                stats.reorgPrepareNanos() / 1_000_000.0d,
+                stats.commitNanos() / 1_000_000.0d);
     }
 
     private static String formatBlockIndexCallers(StoredBlockIndexLookup.DiagnosticSnapshot stats) {
