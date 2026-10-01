@@ -18,8 +18,16 @@ public final class AssumeValidPolicy {
     public static final long ASSUME_VALID_DEPTH_SECONDS = 14L * 24L * 60L * 60L;
 
     private static final Hash256 ZERO_HASH = new Hash256(new byte[Hash256.LENGTH]);
-    /** Number of consecutive ancestry results retained per descendant tip. */
-    private static final int ANCESTRY_WINDOW = 4096;
+    /**
+     * Number of consecutive ancestry results retained per descendant tip.
+     *
+     * IBD advances monotonically while the two descendants used by assume-valid
+     * (the configured assume-valid block and the best header) are effectively
+     * stable. A small window caused a periodic expensive refill. Keep a much
+     * wider branch-specific proof window so that the refill cost is amortized
+     * over tens of thousands of connected blocks instead of a few thousand.
+     */
+    private static final int ANCESTRY_WINDOW = 65_536;
 
     private final BlockIndexLookup lookup;
     private final Supplier<BlockIndex> bestHeaderSupplier;
