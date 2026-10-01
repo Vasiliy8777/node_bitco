@@ -44,8 +44,9 @@ public final class NodeValidationService implements AutoCloseable {
     private RocksDbDatabase.IoStats ibdTelemetryDbBaseline;
     private RocksDbDatabase.NamespaceIoStats ibdTelemetryNamespaceBaseline;
     private RocksDbUtxoStore.CacheStats ibdTelemetryCacheBaseline;
+    private StoredBlockIndexLookup.DiagnosticSnapshot ibdTelemetryBlockIndexBaseline;
     private final ChainState chain;
-    private final BlockIndexLookup lookup;
+    private final StoredBlockIndexLookup lookup;
     private final RocksDbBlockStore blocks;
     private final UtxoView coins;
     private final BlockProcessor processor;
@@ -589,6 +590,7 @@ public final class NodeValidationService implements AutoCloseable {
             ibdTelemetryDbBaseline = dbBefore;
             ibdTelemetryNamespaceBaseline = database.namespaceIoStats();
             ibdTelemetryCacheBaseline = cacheBefore;
+            ibdTelemetryBlockIndexBaseline = lookup.diagnosticSnapshot();
             ibdTelemetryLastLogNanos = batchStarted;
         }
 
@@ -628,6 +630,10 @@ public final class NodeValidationService implements AutoCloseable {
                 hits, misses, hitRate, cacheNow.size(), cacheNow.capacity()));
 
         LOG.log(System.Logger.Level.INFO, "IBD ROCKS GETS BY NS: " + formatNamespaceGets(namespaceDb));
+        var blockIndexDiagnostics = lookup.diagnosticSnapshot().minus(ibdTelemetryBlockIndexBaseline);
+        LOG.log(System.Logger.Level.INFO, "IBD BLOCKINDEX MISS SAMPLES: misses="
+                + String.format(java.util.Locale.ROOT, "%,d", blockIndexDiagnostics.persistentMisses())
+                + " sampleRate=1/128 callers=" + formatBlockIndexCallers(blockIndexDiagnostics));
 
         ibdTelemetryLastLogNanos = now;
         ibdTelemetryBlocks = 0;
@@ -638,6 +644,19 @@ public final class NodeValidationService implements AutoCloseable {
         ibdTelemetryDbBaseline = database.ioStats();
         ibdTelemetryNamespaceBaseline = database.namespaceIoStats();
         ibdTelemetryCacheBaseline = cacheNow;
+        ibdTelemetryBlockIndexBaseline = lookup.diagnosticSnapshot();
+    }
+
+    private static String formatBlockIndexCallers(StoredBlockIndexLookup.DiagnosticSnapshot stats) {
+        var entries = new ArrayList<>(stats.samplesByCaller().entrySet());
+        entries.sort(Map.Entry.<String, Long>comparingByValue().reversed());
+        StringJoiner result = new StringJoiner(", ", "[", "]");
+        int limit = Math.min(12, entries.size());
+        for (int i = 0; i < limit; i++) {
+            var entry = entries.get(i);
+            result.add(entry.getKey() + "=" + String.format(java.util.Locale.ROOT, "%,d", entry.getValue()));
+        }
+        return result.toString();
     }
 
     private static String formatNamespaceGets(RocksDbDatabase.NamespaceIoStats stats) {

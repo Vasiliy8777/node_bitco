@@ -6,9 +6,18 @@ import ru.bitcoin.node.storage.block.RocksDbBlockIndexStore;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.LongAdder;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.Collectors;
 
 public final class StoredBlockIndexLookup implements BlockIndexAncestorLookup {
     private static final int DEFAULT_CACHE_ENTRIES = 131_072;
+    private static final int DIAGNOSTIC_SAMPLE_MASK = 127; // one persistent miss out of 128
+    private static final StackWalker DIAGNOSTIC_WALKER = StackWalker.getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE);
+
+    private final AtomicLong persistentMisses = new AtomicLong();
+    private final Map<String, LongAdder> persistentMissSamplesByCaller = new ConcurrentHashMap<>();
 
     private final BlockIndexStore store;
     private final Map<Hash256, BlockIndex> cache;
@@ -45,6 +54,8 @@ public final class StoredBlockIndexLookup implements BlockIndexAncestorLookup {
                 if (cached != null) return cached;
             }
         }
+        long currentMiss = persistentMisses.incrementAndGet();
+        if ((currentMiss & DIAGNOSTIC_SAMPLE_MASK) == 0L) samplePersistentMissCaller();
         BlockIndex loaded = store.find(hash).map(BlockIndexStorageMapper::fromStored).orElse(null);
         // Do not negative-cache: header sync can add a previously unknown hash.
         if (loaded != null && cache != null) {
@@ -82,6 +93,38 @@ public final class StoredBlockIndexLookup implements BlockIndexAncestorLookup {
             current = next;
         }
         return current;
+    }
+
+    /**
+     * Lightweight IBD diagnostic. Only one actual BlockIndex-store miss out of 128
+     * captures a stack, so attribution does not turn the hot path into a profiler.
+     * Values are samples, not estimated call counts.
+     */
+    public DiagnosticSnapshot diagnosticSnapshot() {
+        Map<String, Long> samples = persistentMissSamplesByCaller.entrySet().stream()
+                .collect(Collectors.toUnmodifiableMap(Map.Entry::getKey, entry -> entry.getValue().sum()));
+        return new DiagnosticSnapshot(persistentMisses.get(), samples);
+    }
+
+    private void samplePersistentMissCaller() {
+        String caller = DIAGNOSTIC_WALKER.walk(frames -> frames
+                .filter(frame -> frame.getDeclaringClass() != StoredBlockIndexLookup.class)
+                .findFirst()
+                .map(frame -> frame.getDeclaringClass().getSimpleName() + "." + frame.getMethodName())
+                .orElse("unknown"));
+        persistentMissSamplesByCaller.computeIfAbsent(caller, ignored -> new LongAdder()).increment();
+    }
+
+    public record DiagnosticSnapshot(long persistentMisses, Map<String, Long> samplesByCaller) {
+        public DiagnosticSnapshot minus(DiagnosticSnapshot baseline) {
+            if (baseline == null) return this;
+            Map<String, Long> delta = new java.util.HashMap<>();
+            for (Map.Entry<String, Long> entry : samplesByCaller.entrySet()) {
+                long value = entry.getValue() - baseline.samplesByCaller.getOrDefault(entry.getKey(), 0L);
+                if (value > 0) delta.put(entry.getKey(), value);
+            }
+            return new DiagnosticSnapshot(Math.max(0L, persistentMisses - baseline.persistentMisses), Map.copyOf(delta));
+        }
     }
 
     private Hash256 findSkipHash(RocksDbBlockIndexStore rocks, Hash256 blockHash) {
