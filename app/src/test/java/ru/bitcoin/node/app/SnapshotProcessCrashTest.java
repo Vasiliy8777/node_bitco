@@ -234,7 +234,16 @@ class SnapshotProcessCrashTest {
         }
 
         private static void pause(Path marker, int boundary) throws Exception {
-            Files.writeString(marker, Integer.toString(boundary));
+            // Publish the barrier only after its complete value is durable in a closed file.
+            // Files.writeString(marker, ...) creates/truncates the destination before writing
+            // its bytes, so the parent can otherwise observe an existing but empty marker.
+            Path temporary = marker.resolveSibling(marker.getFileName() + ".tmp");
+            Files.writeString(temporary, Integer.toString(boundary));
+            try {
+                Files.move(temporary, marker, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            } catch (AtomicMoveNotSupportedException unsupported) {
+                Files.move(temporary, marker, StandardCopyOption.REPLACE_EXISTING);
+            }
             System.in.read();
             throw new IllegalStateException("Parent must forcibly terminate worker");
         }

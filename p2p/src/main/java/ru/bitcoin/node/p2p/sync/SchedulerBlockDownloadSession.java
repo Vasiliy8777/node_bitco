@@ -1446,16 +1446,46 @@ public final class SchedulerBlockDownloadSession
         ownedState.failures.add(failure);
 
         /*
-         * The peer is deliberately kept READY. attemptedPeers already contains
-         * expectedPeer, therefore this block cannot immediately bounce back to
-         * the same connection and will be assigned to another eligible peer.
-         * Cancelling the scheduler future makes a late completion stale; the
-         * underlying dispatcher may still finish normally without owning the
-         * logical download anymore.
+         * Keep the current rescue round while at least one READY serviceable peer
+         * has not attempted this block yet.  This matters for adaptive stall
+         * handling: P1 -> P3 -> P2 must exhaust the distinct peers before an older
+         * peer is recycled.
+         *
+         * Only when every currently READY serviceable peer has already been tried do
+         * we roll the state into a new round.  That is the actual frontier=UNASSIGNED
+         * escape hatch: older peers become eligible again, while the peer that just
+         * stalled remains excluded so the request cannot bounce straight back to it.
+         *
+         * Capacity is intentionally ignored here.  An unattempted READY peer that is
+         * temporarily full still belongs to the current round; assignAvailable() will
+         * pick it as soon as one of its slots is released.
          */
+        List<Peer> peers = peerManager.readyPeers();
+        boolean hasReadyServiceablePeer = false;
+        boolean hasUnattemptedReadyServiceablePeer = false;
+
+        for (Peer peer : peers) {
+            if (!peer.isReady() || !peerCanServe(peer, ownedState)) {
+                continue;
+            }
+
+            hasReadyServiceablePeer = true;
+
+            if (!ownedState.attemptedPeers.contains(peer)) {
+                hasUnattemptedReadyServiceablePeer = true;
+                break;
+            }
+        }
+
+        if (hasReadyServiceablePeer && !hasUnattemptedReadyServiceablePeer) {
+            ownedState.attemptedPeers.clear();
+            ownedState.attemptedPeers.add(expectedPeer);
+        }
+
+        // Cancelling makes a late completion stale; the dispatcher may still finish
+        // normally, but it no longer owns the logical request.
         ownedFuture.cancel(true);
 
-        List<Peer> peers = peerManager.readyPeers();
         if (!peers.isEmpty()) {
             assignAvailable(peers);
         }

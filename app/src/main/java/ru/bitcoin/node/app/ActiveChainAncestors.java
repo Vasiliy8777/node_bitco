@@ -16,8 +16,22 @@ import java.util.*;
  */
 final class ActiveChainAncestors {
     private final int capacity;
-    private final NavigableMap<Long, BlockIndex> heights = new TreeMap<>();
-    private final LinkedHashMap<Long, Boolean> usage = new LinkedHashMap<>(256, .75f, true);
+
+    /*
+     * Two different access patterns must not evict each other.  During IBD the tip
+     * advances one block at a time and callers very frequently ask about recent
+     * active-chain heights.  Peer locators, RPC/index lookups and reorg probes also
+     * touch sparse historical heights.  A single LRU let those sparse reads punch
+     * holes in the recent 65k active-chain window, turning a later near-tip lookup
+     * into a fresh skip-pointer walk through RocksDB.
+     *
+     * hotHeights is therefore a strict rolling height window: historical touches do
+     * not affect its eviction order. sparseHeights keeps the old LRU behaviour for
+     * genuinely historical queries.
+     */
+    private final NavigableMap<Long, BlockIndex> hotHeights = new TreeMap<>();
+    private final NavigableMap<Long, BlockIndex> sparseHeights = new TreeMap<>();
+    private final LinkedHashMap<Long, Boolean> sparseUsage = new LinkedHashMap<>(256, .75f, true);
     private Hash256 tipHash;
     private long tipHeight = -1L;
 
@@ -35,14 +49,18 @@ final class ActiveChainAncestors {
 
         reconcileTip(tip, lookup);
 
-        var exact = heights.get(height);
+        BlockIndex exact = hotHeights.get(height);
+        if (exact != null) return exact;
+
+        exact = sparseHeights.get(height);
         if (exact != null) {
-            touch(height);
+            touchSparse(height);
             return exact;
         }
 
-        var cached = heights.ceilingEntry(height);
-        BlockIndex cursor = cached == null ? tip : cached.getValue();
+        Map.Entry<Long, BlockIndex> hotCeiling = hotHeights.ceilingEntry(height);
+        Map.Entry<Long, BlockIndex> sparseCeiling = sparseHeights.ceilingEntry(height);
+        BlockIndex cursor = nearestCeiling(hotCeiling, sparseCeiling, tip);
 
         // Production lookup can prove ancestry with Core-style skip pointers.  On a cache
         // miss, use that directly instead of walking every parent between cursor and the
@@ -53,13 +71,13 @@ final class ActiveChainAncestors {
             BlockIndex ancestor = ancestorLookup.ancestor(cursor, height);
             if (ancestor == null || ancestor.height() != height)
                 throw new IllegalStateException("Missing active ancestor at height " + height);
-            remember(ancestor);
+            rememberSparse(ancestor);
             return ancestor;
         }
 
         // Generic lookups used by callers/tests without skip ancestry retain the original
         // behavior.  Remembering the traversed path is useful for repeated nearby queries.
-        remember(cursor);
+        rememberSparse(cursor);
         while (cursor.height() > height) {
             BlockIndex parent = Objects.requireNonNull(
                     lookup.find(cursor.previousBlockHash()),
@@ -68,7 +86,7 @@ final class ActiveChainAncestors {
             if (parent.height() != cursor.height() - 1)
                 throw new IllegalStateException("Invalid active ancestor height");
             cursor = parent;
-            remember(cursor);
+            rememberSparse(cursor);
         }
         return cursor;
     }
@@ -91,25 +109,44 @@ final class ActiveChainAncestors {
         }
 
         if (!extendsPreviousTip) {
-            heights.clear();
-            usage.clear();
+            hotHeights.clear();
+            sparseHeights.clear();
+            sparseUsage.clear();
         }
         tipHash = tip.hash();
         tipHeight = tip.height();
-        remember(tip);
+        rememberHot(tip);
     }
 
-    private void touch(long height) {
-        usage.put(height, Boolean.TRUE);
+    private static BlockIndex nearestCeiling(
+            Map.Entry<Long, BlockIndex> hot,
+            Map.Entry<Long, BlockIndex> sparse,
+            BlockIndex tip
+    ) {
+        if (hot == null) return sparse == null ? tip : sparse.getValue();
+        if (sparse == null) return hot.getValue();
+        return hot.getKey() <= sparse.getKey() ? hot.getValue() : sparse.getValue();
     }
 
-    private void remember(BlockIndex index) {
-        heights.put(index.height(), index);
-        usage.put(index.height(), Boolean.TRUE);
-        if (usage.size() > capacity) {
-            Long eldest = usage.keySet().iterator().next();
-            usage.remove(eldest);
-            heights.remove(eldest);
+    private void rememberHot(BlockIndex index) {
+        hotHeights.put(index.height(), index);
+        while (hotHeights.size() > capacity) hotHeights.pollFirstEntry();
+    }
+
+    private void touchSparse(long height) {
+        sparseUsage.put(height, Boolean.TRUE);
+    }
+
+    private void rememberSparse(BlockIndex index) {
+        // Recent active-chain entries already live in the non-pollutable hot window.
+        // Avoid duplicating them in the historical LRU.
+        if (hotHeights.containsKey(index.height())) return;
+        sparseHeights.put(index.height(), index);
+        sparseUsage.put(index.height(), Boolean.TRUE);
+        if (sparseUsage.size() > capacity) {
+            Long eldest = sparseUsage.keySet().iterator().next();
+            sparseUsage.remove(eldest);
+            sparseHeights.remove(eldest);
         }
     }
 }

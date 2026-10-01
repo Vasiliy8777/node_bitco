@@ -2011,6 +2011,24 @@ class BlockDownloadSchedulerTest {
                             assertNotNull(rescue);
                             assertEquals(blockedHash, rescue.hash(), "Later work consumed the frontier rescue slot");
                             assertNotEquals(1, rescue.peer());
+
+                            // Rescue the same frontier a second time.  The previous
+                            // implementation accumulated attemptedPeers forever and
+                            // could leave the hash pending but UNASSIGNED after the
+                            // eligible set was exhausted.  A new rescue round must
+                            // make older peers eligible again while excluding only
+                            // the peer that just stalled.
+                            var secondOwner = peers.readyPeers().get(rescue.peer());
+                            assertSame(secondOwner, session.inFlightPeer(blockedHash).orElseThrow());
+                            assertTrue(session.retryBlock(blockedHash, secondOwner,
+                                    new IOException("frontier stalled again")));
+                            var secondRescue = requested.poll(5, TimeUnit.SECONDS);
+                            assertNotNull(secondRescue, "Repeated rescue left frontier UNASSIGNED");
+                            assertEquals(blockedHash, secondRescue.hash());
+                            assertNotEquals(rescue.peer(), secondRescue.peer(),
+                                    "Repeated rescue bounced straight back to the just-stalled peer");
+                            assertNotEquals(1, secondRescue.peer(),
+                                    "Rescue round recycled the original owner before exhausting the unattempted peer");
                             assertNull(requested.poll(200, TimeUnit.MILLISECONDS));
                         }
                         sendBlock(streams.get(first.peer()).get(5, TimeUnit.SECONDS), byHash.get(first.hash()));

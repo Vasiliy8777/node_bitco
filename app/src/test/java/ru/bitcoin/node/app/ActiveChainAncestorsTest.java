@@ -159,6 +159,43 @@ class ActiveChainAncestorsTest {
         assertEquals(2, ancestorCalls.get(), "exact cached height must remain a zero-read hit");
     }
 
+    @Test
+    void recentHotWindowIsNotEvictedBySparseHistoricalTraffic() {
+        var map = new HashMap<Hash256, BlockIndex>();
+        BlockIndex tip = index(0, 0, hash(-1));
+        map.put(tip.hash(), tip);
+        for (int i = 1; i <= 120; i++) {
+            tip = index(i, i, tip.hash());
+            map.put(tip.hash(), tip);
+        }
+
+        var cache = new ActiveChainAncestors(8);
+        var ancestorCalls = new AtomicInteger();
+        BlockIndexAncestorLookup lookup = new BlockIndexAncestorLookup() {
+            @Override public BlockIndex find(Hash256 hash) { return map.get(hash); }
+            @Override public BlockIndex ancestor(BlockIndex index, long targetHeight) {
+                ancestorCalls.incrementAndGet();
+                BlockIndex cursor = index;
+                while (cursor.height() > targetHeight) cursor = map.get(cursor.previousBlockHash());
+                return cursor;
+            }
+        };
+
+        // Advance the observed active tip one block at a time while deliberately
+        // churning the sparse historical LRU with unrelated old heights.
+        BlockIndex observed = map.get(hash(100));
+        cache.at(observed, 1, lookup);
+        for (int height = 101; height <= 120; height++) {
+            observed = map.get(hash(height));
+            cache.at(observed, 1 + ((height - 101) % 16), lookup);
+        }
+
+        int beforeRecentLookup = ancestorCalls.get();
+        assertEquals(hash(115), cache.at(observed, 115, lookup).hash());
+        assertEquals(beforeRecentLookup, ancestorCalls.get(),
+                "sparse historical traffic must not punch holes in the recent active-chain window");
+    }
+
     private static Hash256 hash(int n) { return new Hash256(ByteBuffer.allocate(32).putInt(n).array()); }
     private static BlockIndex index(int id, long height, Hash256 parent) {
         return new BlockIndex(hash(id), GenesisBlockFactory.create(NetworkParametersRegistry.regtest()).header(),
