@@ -96,6 +96,22 @@ public final class BlockConnectChangesBuilder {
             AncestorMedianTimePastResolver medianTimePastResolver,
             boolean verifyScripts
     ) {
+        return apply(block, blockHeight, lockTimeCutoff, previousMedianTimePast, overlay,
+                networkParameters, medianTimePastResolver, verifyScripts,
+                Bip30.shouldEnforce(blockHeight, block.header().hash(), networkParameters));
+    }
+
+    public static BlockUndoData apply(
+            Block block,
+            long blockHeight,
+            long lockTimeCutoff,
+            long previousMedianTimePast,
+            UtxoOverlay overlay,
+            NetworkParameters networkParameters,
+            AncestorMedianTimePastResolver medianTimePastResolver,
+            boolean verifyScripts,
+            boolean enforceBip30
+    ) {
         if (block == null) {
             throw new IllegalArgumentException(
                     "block must not be null"
@@ -169,12 +185,6 @@ public final class BlockConnectChangesBuilder {
 
         long totalFees = 0L;
 
-        boolean enforceBip30 =
-                Bip30.shouldEnforce(
-                        blockHeight,
-                        block.header().hash(),
-                        networkParameters
-                );
 
         diagnostic(blockHeight, block, "script flags start");
         int scriptVerifyFlags = ConsensusScriptFlags.forBlock(

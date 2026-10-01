@@ -97,4 +97,25 @@ class Bip30Test {
                 )
         );
     }
+
+    @Test
+    void shouldSkipBip30OnKnownTestnet3Bip34ChainBeforeSafetyLimit() {
+        assertFalse(Bip30.shouldEnforce(
+                207_500L, Hash256.fromDisplayHex("11".repeat(32)),
+                NetworkParametersRegistry.testnet(), true));
+    }
+
+    @Test
+    void shouldKeepBip30WhenTestnet3Bip34AncestryIsNotProven() {
+        assertTrue(Bip30.shouldEnforce(
+                207_500L, Hash256.fromDisplayHex("11".repeat(32)),
+                NetworkParametersRegistry.testnet(), false));
+    }
+
+    @Test
+    void shouldResumeBip30AtCoreSafetyLimit() {
+        assertTrue(Bip30.shouldEnforce(
+                Bip30.BIP34_IMPLIES_BIP30_LIMIT, Hash256.fromDisplayHex("11".repeat(32)),
+                NetworkParametersRegistry.testnet(), true));
+    }
 }

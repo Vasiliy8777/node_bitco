@@ -21,6 +21,6 @@ bitcoin:
 
   mining:
     # Preferred: native SegWit address (bc1..., tb1..., bcrt1...). It is network-validated.
-    payout-address: ""
+    payout-address: ${BITCOIN_MINING_PAYOUT_ADDRESS:}
     # Legacy/raw scriptPubKey fallback. payout-address takes precedence when configured.
     payout-script: "51"

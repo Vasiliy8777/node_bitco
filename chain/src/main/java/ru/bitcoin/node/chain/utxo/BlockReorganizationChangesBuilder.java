@@ -3,9 +3,11 @@ package ru.bitcoin.node.chain.utxo;
 import ru.bitcoin.node.chain.AncestorMedianTimePastResolver;
 import ru.bitcoin.node.chain.BlockIndex;
 import ru.bitcoin.node.chain.BlockIndexLookup;
+import ru.bitcoin.node.chain.BlockIndexAncestorLookup;
 import ru.bitcoin.node.chain.InvalidBlockObserver;
 import ru.bitcoin.node.chain.AssumeValidPolicy;
 import ru.bitcoin.node.consensus.block.BlockValidationException;
+import ru.bitcoin.node.consensus.block.Bip30;
 import ru.bitcoin.node.consensus.transaction.TransactionValidationException;
 import ru.bitcoin.node.script.ScriptExecutionException;
 import ru.bitcoin.node.common.types.Hash256;
@@ -200,6 +202,12 @@ public final class BlockReorganizationChangesBuilder {
                 boolean verifyScripts = assumeValidPolicy.shouldVerifyScripts(candidateIndex);
                 diagnostic(candidateIndex, "assumevalid done verifyScripts=" + verifyScripts);
                 diagnostic(candidateIndex, "connect apply start");
+                boolean enforceBip30 = Bip30.shouldEnforce(
+                        blockToConnect.height(),
+                        blockHash,
+                        networkParameters,
+                        isOnKnownBip34Chain(candidateIndex, blockIndexLookup, networkParameters)
+                );
                 undoData =
                         BlockConnectChangesBuilder.apply(
                                 blockToConnect.block(),
@@ -209,7 +217,8 @@ public final class BlockReorganizationChangesBuilder {
                                 overlay,
                                 networkParameters,
                                 medianTimePastResolver,
-                                verifyScripts
+                                verifyScripts,
+                                enforceBip30
                         );
                 diagnostic(candidateIndex, "connect apply done");
             } catch (BlockValidationException
@@ -235,6 +244,33 @@ public final class BlockReorganizationChangesBuilder {
                 overlay.changes(),
                 connectedUndo
         );
+    }
+
+    private static boolean isOnKnownBip34Chain(
+            BlockIndex candidateIndex,
+            BlockIndexLookup lookup,
+            NetworkParameters parameters
+    ) {
+        Hash256 expected = Bip30.knownBip34ActivationHash(parameters);
+        if (expected == null || candidateIndex.height() < parameters.bip34Height()) return false;
+
+        try {
+            BlockIndex activation;
+            if (lookup instanceof BlockIndexAncestorLookup ancestorLookup) {
+                activation = ancestorLookup.ancestor(candidateIndex, parameters.bip34Height());
+            } else {
+                activation = candidateIndex;
+                while (activation.height() > parameters.bip34Height()) {
+                    activation = lookup.find(activation.previousBlockHash());
+                    if (activation == null) return false;
+                }
+            }
+            return activation.height() == parameters.bip34Height()
+                    && activation.hash().equals(expected);
+        } catch (IllegalStateException incompleteIndex) {
+            // Fail safe: incomplete ancestry means explicit BIP30 checking stays enabled.
+            return false;
+        }
     }
     private static void diagnostic(BlockIndex index, String stage) {
         // Per-block IBD diagnostic logging disabled for throughput.
