@@ -83,6 +83,47 @@ class BlockIndexMedianTimePastResolverTest {
     }
 
     @Test
+    void usesAncestorLookupForDistantBip68CoinHeight() {
+        Map<Hash256, BlockIndex> indexes = new HashMap<>();
+        BlockIndex tip = block(null, 100);
+        indexes.put(tip.hash(), tip);
+        for (int i = 1; i <= 100; i++) {
+            tip = block(tip, 100 + i);
+            indexes.put(tip.hash(), tip);
+        }
+        BlockIndex candidate = block(tip, 10_000);
+
+        final int[] ancestorCalls = {0};
+        final int[] findCalls = {0};
+        BlockIndexAncestorLookup lookup = new BlockIndexAncestorLookup() {
+            @Override
+            public BlockIndex find(Hash256 hash) {
+                findCalls[0]++;
+                return indexes.get(hash);
+            }
+
+            @Override
+            public BlockIndex ancestor(BlockIndex index, long targetHeight) {
+                ancestorCalls[0]++;
+                BlockIndex current = index;
+                while (current.height() > targetHeight) {
+                    current = indexes.get(current.previousBlockHash());
+                    if (current == null) throw new IllegalStateException("missing test ancestor");
+                }
+                return current;
+            }
+        };
+
+        var resolver = new BlockIndexMedianTimePastResolver(candidate, lookup);
+        resolver.resolvePreviousMedianTimePast(11);
+
+        assertEquals(1, ancestorCalls[0],
+                "Distant BIP68 lookup must use the branch-safe ancestor API");
+        assertTrue(findCalls[0] <= 10,
+                "Only the 11-block MTP window should require ordinary parent lookups");
+    }
+
+    @Test
     void requiresCandidateAndLookup() {
         assertThrows(IllegalArgumentException.class, () -> new BlockIndexMedianTimePastResolver(null, hash -> null));
         assertThrows(IllegalArgumentException.class, () -> new BlockIndexMedianTimePastResolver(block(null, 100), null));

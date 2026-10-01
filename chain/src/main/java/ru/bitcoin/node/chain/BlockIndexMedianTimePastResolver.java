@@ -118,16 +118,37 @@ public final class BlockIndexMedianTimePastResolver implements ru.bitcoin.node.c
             );
         }
 
-        BlockIndex current =
-                candidateBlock;
+        /*
+         * BIP68 may ask for the MTP of a coin that is hundreds of thousands of
+         * blocks behind the candidate.  Walking parent-by-parent turns one
+         * time-based sequence-lock input into O(chain height) RocksDB reads.
+         *
+         * Production StoredBlockIndexLookup already has Bitcoin-style skip
+         * pointers, and prepare-phase reorg lookups preserve that capability.
+         * Use it whenever available; keep the strict linear fallback for small
+         * in-memory/test lookups that only implement BlockIndexLookup.
+         */
+        if (blockIndexLookup instanceof BlockIndexAncestorLookup ancestorLookup) {
+            BlockIndex ancestor = ancestorLookup.ancestor(candidateBlock, targetHeight);
+            if (ancestor == null) {
+                throw new IllegalStateException(
+                        "Missing ancestor while resolving BIP68 median time past at height "
+                                + targetHeight
+                );
+            }
+            if (ancestor.height() != targetHeight) {
+                throw new IllegalStateException(
+                        "BlockIndex ancestor lookup returned invalid height. Expected "
+                                + targetHeight + ", actual " + ancestor.height()
+                );
+            }
+            return ancestor;
+        }
 
-        while (current.height()
-                > targetHeight) {
+        BlockIndex current = candidateBlock;
 
-            BlockIndex parent =
-                    blockIndexLookup.find(
-                            current.previousBlockHash()
-                    );
+        while (current.height() > targetHeight) {
+            BlockIndex parent = blockIndexLookup.find(current.previousBlockHash());
 
             if (parent == null) {
                 throw new IllegalStateException(
@@ -146,9 +167,7 @@ public final class BlockIndexMedianTimePastResolver implements ru.bitcoin.node.c
                 throw new IllegalStateException("BlockIndex lookup returned an unrelated ancestor");
             }
 
-            if (parent.height()
-                    != current.height() - 1L) {
-
+            if (parent.height() != current.height() - 1L) {
                 throw new IllegalStateException(
                         "Invalid BlockIndex height linkage. "
                                 + "Current height: "
