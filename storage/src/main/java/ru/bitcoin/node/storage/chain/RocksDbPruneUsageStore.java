@@ -1,6 +1,7 @@
 package ru.bitcoin.node.storage.chain;
 
 import ru.bitcoin.node.common.types.Hash256;
+import ru.bitcoin.node.storage.rocksdb.FlatFileRecordStore;
 import ru.bitcoin.node.storage.rocksdb.RocksDbDatabase;
 import ru.bitcoin.node.storage.rocksdb.RocksDbWriteBatch;
 import ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces;
@@ -68,7 +69,7 @@ public final class RocksDbPruneUsageStore {
                     throw new IllegalStateException("Invalid payload key length in prune usage migration");
                 byte[] sizeKey = key.clone();
                 sizeKey[0] = sizePrefix;
-                batch[0].put(sizeKey, encodeSize(value.length));
+                batch[0].put(sizeKey, encodeSize(payloadSize(payloadPrefix, value)));
                 if (++count[0] == 4096) {
                     database.write(batch[0]);
                     batch[0].close();
@@ -79,6 +80,24 @@ public final class RocksDbPruneUsageStore {
             if (count[0] != 0) database.write(batch[0]);
         } finally {
             batch[0].close();
+        }
+    }
+
+    private long payloadSize(byte payloadPrefix, byte[] storedValue) {
+        // Stage 26 changed the old payload namespaces to compact 16-byte flat-file positions.
+        // Migration must therefore rebuild prune usage from the referenced payload length, not
+        // from the metadata value length.  A genuine pre-Stage-26 payload remains supported.
+        if (storedValue.length != 16) return storedValue.length;
+        try {
+            FlatFileRecordStore.Position position = FlatFileRecordStore.Position.deserialize(storedValue);
+            String filePrefix = payloadPrefix == BLOCK_PREFIX ? "blk" : "rev";
+            FlatFileRecordStore store = new FlatFileRecordStore(
+                    database.externalDataRoot().resolve("blocks"), filePrefix, database.networkMagic());
+            // Validate that the 16-byte value really points at one of our flat-file records.
+            store.read(position);
+            return position.payloadLength();
+        } catch (RuntimeException notFlatFileMetadata) {
+            return storedValue.length;
         }
     }
 

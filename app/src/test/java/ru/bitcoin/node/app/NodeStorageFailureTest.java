@@ -136,8 +136,17 @@ class NodeStorageFailureTest {
              var db = new RocksDbDatabase(path);
              var actual = NodeProcessCrashTest.service(db)) {
             NodeProcessCrashTest.assertState(reference, actual);
-            assertContentsEqual(contents(referenceDb), contents(db));
-            assertEquals(NetworkParametersRegistry.regtest().genesisBlockHash(),
+            // Flat-file payloads are append-only. A failed RocksDB commit may leave an
+            // unreachable blk/rev record, so a successful retry can legitimately publish
+            // a different file offset than a clean reference database. Compare every
+            // non-payload RocksDB key byte-for-byte and verify the block body semantically.
+            assertContentsEqual(contentsWithoutFlatFilePositions(referenceDb),
+                    contentsWithoutFlatFilePositions(db));
+            var genesisHash = NetworkParametersRegistry.regtest().genesisBlockHash();
+            assertArrayEquals(
+                    ru.bitcoin.node.protocol.serialization.BlockSerializer.serialize(reference.findBlock(genesisHash).orElseThrow()),
+                    ru.bitcoin.node.protocol.serialization.BlockSerializer.serialize(actual.findBlock(genesisHash).orElseThrow()));
+            assertEquals(genesisHash,
                     new RocksDbChainStateStore(db).loadBestHeaderTipHash().orElseThrow());
         }
     }
@@ -292,6 +301,21 @@ class NodeStorageFailureTest {
             assertTrue(new ru.bitcoin.node.storage.undo.RocksDbUndoStore(db).find(newTip).isPresent());
         }
     }
+    private static List<String> contentsWithoutFlatFilePositions(RocksDbDatabase db) {
+        var result = new ArrayList<String>();
+        var hex = HexFormat.of();
+        for (int i = 0; i < 256; i++) {
+            // 0x04 = undo position, 0x05 = block position. Their offsets are physical
+            // append locations and are intentionally not transactional with RocksDB.
+            if (i == 0x04 || i == 0x05) continue;
+            db.visitPrefixAscending((byte) i, (key, value) -> {
+                result.add(hex.formatHex(key) + ":" + hex.formatHex(value));
+                return true;
+            });
+        }
+        return result;
+    }
+
     private static List<String> contents(RocksDbDatabase db) {
         var result = new ArrayList<String>();
         var hex = HexFormat.of();

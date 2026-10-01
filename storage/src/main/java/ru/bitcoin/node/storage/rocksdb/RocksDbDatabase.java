@@ -22,6 +22,8 @@ public final class RocksDbDatabase
 
     private final Options options;
     private final RocksDB database;
+    private final Path databasePath;
+    private final long networkMagic;
     private final long[] namespaceVersions = new long[256];
 
     private boolean closed;
@@ -100,6 +102,13 @@ public final class RocksDbDatabase
     public RocksDbDatabase(
             Path databasePath
     ) {
+        this(databasePath, 0xD9B4BEF9L);
+    }
+
+    public RocksDbDatabase(
+            Path databasePath,
+            long networkMagic
+    ) {
         if (databasePath == null) {
             throw new IllegalArgumentException(
                     "databasePath must not be null"
@@ -107,11 +116,13 @@ public final class RocksDbDatabase
         }
 
         initializeNamespaceTelemetry();
+        this.databasePath = databasePath.toAbsolutePath().normalize();
+        this.networkMagic = networkMagic;
 
         try {
 
             Files.createDirectories(
-                    databasePath
+                    this.databasePath
             );
 
             options =
@@ -121,7 +132,7 @@ public final class RocksDbDatabase
             database =
                     RocksDB.open(
                             options,
-                            databasePath.toString()
+                            this.databasePath.toString()
                     );
 
         } catch (IOException | RocksDBException exception) {
@@ -132,6 +143,29 @@ public final class RocksDbDatabase
                     exception
             );
         }
+    }
+
+
+    /** Physical RocksDB directory. Large immutable payload stores derive their sibling data directory from it. */
+    public Path databasePath() {
+        return databasePath;
+    }
+
+    public long networkMagic() { return networkMagic; }
+
+    /**
+     * Root for non-RocksDB node data. Production opens RocksDB as <network>/chainstate,
+     * so block files live in <network>/blocks. Tests using arbitrary DB names get an
+     * isolated sibling directory instead of writing inside an open RocksDB directory.
+     */
+    public Path externalDataRoot() {
+        Path name = databasePath.getFileName();
+        if (name != null && "chainstate".equalsIgnoreCase(name.toString())) {
+            Path parent = databasePath.getParent();
+            return parent == null ? databasePath.resolveSibling("data") : parent;
+        }
+        String suffix = name == null ? "node-data" : name + ".data";
+        return databasePath.resolveSibling(suffix);
     }
 
     public synchronized void put(

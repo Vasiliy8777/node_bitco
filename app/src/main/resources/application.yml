@@ -3,6 +3,9 @@ spring:
     default: testnet
 
 bitcoin:
+  # Root for all persistent node data. Each network gets its own subdirectory.
+  data-directory: "K:/BitcoinJavaNode"
+
   node:
     auto-start: true
 

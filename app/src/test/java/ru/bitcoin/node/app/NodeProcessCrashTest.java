@@ -81,8 +81,9 @@ class NodeProcessCrashTest {
             }
         }
 
-        awaitLockFileRelease(data);
-        try (var db = new RocksDbDatabase(data);
+        Path chainstate = springChainstatePath(data);
+        awaitLockFileRelease(chainstate);
+        try (var db = new RocksDbDatabase(chainstate, NetworkParametersRegistry.regtest().magic());
              var actual = service(db);
              var referenceDb = new RocksDbDatabase(directory.resolve("reference"));
              var reference = service(referenceDb)) {
@@ -167,6 +168,12 @@ class NodeProcessCrashTest {
         new ru.bitcoin.node.chain.ChainstateConsistencyChecker(db, NetworkParametersRegistry.regtest(),
                 ru.bitcoin.node.chain.ChainstateConsistencyChecker.DEFAULT_REORG_SAFETY_DEPTH).verify();
         return new NodeValidationService(db, NetworkParametersRegistry.regtest(), () -> 1_800_000_000L, new Mempool());
+    }
+
+    private static Path springChainstatePath(Path dataDirectory) {
+        // CrashWorker boots the real Spring configuration, which stores regtest
+        // chainstate at <bitcoin.data-directory>/regtest/chainstate.
+        return dataDirectory.resolve("regtest").resolve("chainstate");
     }
 
     static void awaitLockFileRelease(Path data) throws Exception {

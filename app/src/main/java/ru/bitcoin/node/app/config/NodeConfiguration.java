@@ -52,12 +52,11 @@ public class NodeConfiguration {
 
     @Bean(destroyMethod = "close")
     public RocksDbDatabase chainDatabase(
-            @Value("${bitcoin.data-directory}")
-            String path
+            @Value("${bitcoin.data-directory}") String path,
+            NetworkParameters parameters
     ) {
-        return new RocksDbDatabase(
-                Path.of(path)
-        );
+        Path networkRoot = networkDataDirectory(Path.of(path), parameters);
+        return new RocksDbDatabase(networkRoot.resolve("chainstate"), parameters.magic());
     }
 
     @Bean
@@ -187,7 +186,7 @@ public class NodeConfiguration {
             @Value("${bitcoin.data-directory}") String dataDirectory,
             NetworkParameters parameters
     ) {
-        return new PeerAddressManagerStore(Path.of(dataDirectory), parameters.magic());
+        return new PeerAddressManagerStore(networkDataDirectory(Path.of(dataDirectory), parameters), parameters.magic());
     }
 
     @Bean
@@ -263,10 +262,11 @@ public class NodeConfiguration {
     }
 
     @Bean(destroyMethod = "close")
-    public PeerManager peerManager(@Value("${bitcoin.data-directory}") String dataDirectory) {
+    public PeerManager peerManager(@Value("${bitcoin.data-directory}") String dataDirectory,
+                                   NetworkParameters parameters) {
         return new PeerManager(
                 new PeerDiscouragementManager(),
-                new PeerBanManager(Path.of(dataDirectory))
+                new PeerBanManager(networkDataDirectory(Path.of(dataDirectory), parameters))
         );
     }
 
@@ -546,4 +546,16 @@ public class NodeConfiguration {
         }
         return Duration.ofSeconds(seconds);
     }
+
+    private static Path networkDataDirectory(Path root, NetworkParameters parameters) {
+        String network = switch (parameters.network()) {
+            case MAINNET -> "mainnet";
+            case TESTNET -> "testnet3";
+            case TESTNET4 -> "testnet4";
+            case SIGNET -> "signet";
+            case REGTEST -> "regtest";
+        };
+        return root.toAbsolutePath().normalize().resolve(network);
+    }
+
 }

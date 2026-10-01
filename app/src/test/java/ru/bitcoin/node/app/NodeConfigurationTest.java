@@ -298,7 +298,7 @@ class NodeConfigurationTest {
     private void verifySnapshotStartup(boolean invalid, boolean copying) {
         var params = ru.bitcoin.node.protocol.network.NetworkParametersRegistry.regtest();
         ru.bitcoin.node.common.types.Hash256 minedHash;
-        try (var db = new ru.bitcoin.node.storage.rocksdb.RocksDbDatabase(directory);
+        try (var db = new ru.bitcoin.node.storage.rocksdb.RocksDbDatabase(snapshotChainstatePath(), params.magic());
              var node = new NodeValidationService(db, params, () -> 1_800_000_000L,
                      new ru.bitcoin.node.mempool.Mempool())) {
             var template = node.createMiningTemplate(new byte[]{0x51}, new byte[0], 4_000_000,
@@ -310,7 +310,7 @@ class NodeConfigurationTest {
         }
         byte staging = ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.SNAPSHOT_UTXO_STAGING;
         byte canonical = ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.UTXO;
-        try (var db = new ru.bitcoin.node.storage.rocksdb.RocksDbDatabase(directory)) {
+        try (var db = new ru.bitcoin.node.storage.rocksdb.RocksDbDatabase(snapshotChainstatePath(), params.magic())) {
             if (invalid) {
                 db.put(new byte[]{staging, 99}, new byte[]{42});
             } else {
@@ -361,6 +361,14 @@ class NodeConfigurationTest {
             }
         }
     }
+
+    private Path snapshotChainstatePath() {
+        // NodeConfiguration stores each network below bitcoin.data-directory and keeps
+        // RocksDB in <network>/chainstate.  Build the fixture in the same physical
+        // database that the Spring context will reopen.
+        return directory.resolve("regtest").resolve("chainstate");
+    }
+
     private AnnotationConfigApplicationContext createContext(
             Map<String, Object> overrides
     ) {
