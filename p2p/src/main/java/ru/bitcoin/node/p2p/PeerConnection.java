@@ -32,13 +32,13 @@ import java.util.concurrent.locks.ReentrantLock;
 public final class PeerConnection implements AutoCloseable {
 
     public static final int DEFAULT_CONNECT_TIMEOUT_MILLIS =
-            10_000;
+            4_000;
 
     public static final int DEFAULT_READ_TIMEOUT_MILLIS =
             30_000;
 
     public static final int DEFAULT_WRITE_TIMEOUT_MILLIS = 10_000;
-    public static final int DEFAULT_V2_HANDSHAKE_TIMEOUT_MILLIS = 5_000;
+    public static final int DEFAULT_V2_HANDSHAKE_TIMEOUT_MILLIS = 3_000;
     private static final ScheduledThreadPoolExecutor WRITE_DEADLINES = createWriteDeadlines();
 
     private static ScheduledThreadPoolExecutor createWriteDeadlines() {

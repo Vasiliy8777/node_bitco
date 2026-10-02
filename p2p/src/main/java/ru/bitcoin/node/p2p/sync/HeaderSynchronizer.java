@@ -24,8 +24,11 @@ public final class HeaderSynchronizer {
                     30
             );
 
+    private static final Duration INITIAL_RESPONSE_TIMEOUT = Duration.ofSeconds(6);
+
     private final Peer peer;
     private final Duration responseTimeout;
+    private boolean receivedHeadersResponse;
 
     public HeaderSynchronizer(
             Peer peer
@@ -112,10 +115,16 @@ public final class HeaderSynchronizer {
                     )
             );
 
-            return completedHeaders(
+            Duration effectiveTimeout = receivedHeadersResponse
+                    ? responseTimeout
+                    : min(responseTimeout, INITIAL_RESPONSE_TIMEOUT);
+
+            HeadersMessage headers = completedHeaders(
                     future,
-                    responseTimeout
+                    effectiveTimeout
             );
+            receivedHeadersResponse = true;
+            return headers;
 
         } finally {
 
@@ -123,6 +132,10 @@ public final class HeaderSynchronizer {
                     future
             );
         }
+    }
+
+    private static Duration min(Duration left, Duration right) {
+        return left.compareTo(right) <= 0 ? left : right;
     }
 
     private static HeadersMessage completedHeaders(
