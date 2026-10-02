@@ -13,6 +13,14 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.ArrayList;
+import java.util.concurrent.CompletionService;
+import java.util.concurrent.ExecutorCompletionService;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 import java.util.function.BooleanSupplier;
 
@@ -153,6 +161,117 @@ public final class OutboundPeerManager {
                 startHeight,
                 excludedAddresses
         ).peer();
+    }
+
+
+    /**
+     * Header-IBD connection race. Candidate addresses are reserved serially through the
+     * normal AddrMan selector, then connect/handshake runs concurrently. The first fully
+     * READY eligible peer wins; all later successful racers are immediately removed/closed.
+     */
+    public OutboundPeerConnection connectHeaderPeerRace(
+            int startHeight,
+            List<PeerAddress> excludedAddresses,
+            int width
+    ) throws IOException {
+        if (width < 1) throw new IllegalArgumentException("width must be positive");
+        Objects.requireNonNull(excludedAddresses, "excludedAddresses");
+
+        Set<PeerAddress> reserved = new java.util.LinkedHashSet<>(excludedAddresses);
+        Set<PeerNetGroup> groups = new java.util.LinkedHashSet<>();
+        List<PeerAddress> candidates = new ArrayList<>(width);
+
+        while (candidates.size() < width) {
+            PeerAddress candidate = selector.select(reserved, groups).orElse(null);
+            if (candidate == null) {
+                // Diversity is preferred, not mandatory: fill remaining lanes from other addresses.
+                candidate = selector.select(reserved, Set.of()).orElse(null);
+            }
+            if (candidate == null) break;
+            reserved.add(candidate);
+            if (containsEndpoint(excludedAddresses, candidate)) continue;
+            if (candidate.isDirectSocketAddress()
+                    && (discouragementManager.isDiscouraged(candidate.address())
+                    || peerManager.banManager().isBanned(candidate.address()))) continue;
+            candidates.add(candidate);
+            if (PeerNetGroup.isDiversifiable(candidate)) groups.add(PeerNetGroup.of(candidate));
+        }
+
+        if (candidates.isEmpty()) {
+            return connectOneWithAddress(startHeight, excludedAddresses);
+        }
+
+        log.log(System.Logger.Level.INFO,
+                "HEADER PEER RACE starting lanes={0} candidates={1}",
+                candidates.size(), candidates);
+
+        ExecutorService executor = Executors.newFixedThreadPool(candidates.size(), task -> {
+            Thread thread = new Thread(task, "bitcoin-header-peer-race");
+            thread.setDaemon(true);
+            return thread;
+        });
+        CompletionService<OutboundPeerConnection> completion = new ExecutorCompletionService<>(executor);
+        AtomicBoolean winnerClaimed = new AtomicBoolean();
+        List<Future<OutboundPeerConnection>> futures = new ArrayList<>();
+        IOException aggregate = new IOException("No header peer race candidate completed handshake");
+
+        try {
+            for (PeerAddress candidate : candidates) {
+                addressManager.markAttempt(candidate, now());
+                futures.add(completion.submit(() -> {
+                    OutboundPeerConnection connection = connectReservedCandidate(startHeight, candidate);
+                    if (winnerClaimed.compareAndSet(false, true)) return connection;
+                    peerManager.remove(connection.peer());
+                    try { connection.peer().close(); } catch (IOException ignored) { }
+                    throw new IOException("Header peer race lost after successful handshake: " + candidate);
+                }));
+            }
+
+            for (int i = 0; i < candidates.size(); i++) {
+                try {
+                    OutboundPeerConnection winner = completion.take().get();
+                    log.log(System.Logger.Level.INFO,
+                            "HEADER PEER RACE winner={0} advertisedHeight={1} transport={2}",
+                            winner.address(), winner.peer().remoteVersion().startHeight(),
+                            winner.peer().isV2Transport() ? "v2" : "v1");
+                    return winner;
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IOException("Interrupted while racing header peers", interrupted);
+                } catch (ExecutionException failed) {
+                    Throwable cause = failed.getCause();
+                    aggregate.addSuppressed(cause instanceof Exception e ? e : new IOException(cause));
+                }
+            }
+            throw aggregate;
+        } finally {
+            for (Future<?> future : futures) future.cancel(true);
+            executor.shutdownNow();
+        }
+    }
+
+    private OutboundPeerConnection connectReservedCandidate(int startHeight, PeerAddress address) throws IOException {
+        Peer peer = peerConnector.connectManaged(address.hostAddress(), address.port(), startHeight, PeerConnectionRole.FULL_RELAY);
+        if (!peer.isReady()) {
+            IOException failure = new IOException("BitcoinClient returned non-ready peer " + address);
+            rejectPeer(peer, failure, failure.getMessage());
+            throw failure;
+        }
+        String ineligible = longLivedOutboundIneligibilityReason(
+                peer.remoteVersion(), startHeight, initialBlockDownload.getAsBoolean());
+        if (ineligible != null) {
+            IOException failure = new IOException("Ineligible header race peer " + address + ": " + ineligible);
+            rejectPeer(peer, failure, failure.getMessage());
+            throw failure;
+        }
+        addressManager.markSuccess(address, now());
+        try {
+            peerManager.add(peer, PeerConnectionRole.FULL_RELAY);
+        } catch (RuntimeException failure) {
+            try { peer.close(); } catch (IOException closeFailure) { failure.addSuppressed(closeFailure); }
+            throw failure;
+        }
+        return new OutboundPeerConnection(peer, address, PeerConnectionRole.FULL_RELAY);
     }
 
     public OutboundPeerConnection connectOneWithAddress(
@@ -604,5 +723,18 @@ public final class OutboundPeerManager {
                 clock.get(),
                 "clock returned null"
         );
+    }
+
+    private static boolean containsEndpoint(
+            List<PeerAddress> excludedAddresses,
+            PeerAddress candidate
+    ) {
+        for (PeerAddress excluded : excludedAddresses) {
+            if (excluded.port() == candidate.port()
+                    && excluded.hostAddress().equalsIgnoreCase(candidate.hostAddress())) {
+                return true;
+            }
+        }
+        return false;
     }
 }

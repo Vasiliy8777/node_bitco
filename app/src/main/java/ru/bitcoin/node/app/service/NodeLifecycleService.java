@@ -495,9 +495,10 @@ public final class NodeLifecycleService
 
                 connection =
                         outboundPeerManager
-                                .connectOneWithAddress(
+                                .connectHeaderPeerRace(
                                         startHeight,
-                                        failedAddresses
+                                        failedAddresses,
+                                        4
                                 );
 
             } catch (IOException connectFailure) {
