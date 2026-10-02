@@ -3236,17 +3236,8 @@ class BlockSyncCoordinatorTest {
                             stalledServer.getLocalPort()
                     );
 
-            Peer healthyPeer =
-                    connectPeer(
-                            healthyServer.getLocalPort()
-                    );
-
             peerManager.add(
                     stalledPeer
-            );
-
-            peerManager.add(
-                    healthyPeer
             );
 
             BlockDownloadService blockDownloadService =
@@ -3372,6 +3363,26 @@ class BlockSyncCoordinatorTest {
             assertTrue(
                     stalledPeer.isReady(),
                     "Frontier rescue must not disconnect P1"
+            );
+
+            /*
+             * Reproduce the production race: when frontier rescue fires, the
+             * outbound supervisor may still be establishing the replacement.
+             * P1 therefore remains the only READY peer for a short interval.
+             * The rescued B1 must stay pending instead of becoming terminal.
+             */
+            Thread.sleep(300L);
+            assertFalse(
+                    synchronization.isDone(),
+                    "Rescued frontier became terminal before a replacement peer arrived"
+            );
+
+            Peer healthyPeer =
+                    connectPeer(
+                            healthyServer.getLocalPort()
+                    );
+            peerManager.add(
+                    healthyPeer
             );
 
             /*

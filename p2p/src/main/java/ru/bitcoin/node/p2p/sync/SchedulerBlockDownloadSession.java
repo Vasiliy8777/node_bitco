@@ -301,17 +301,27 @@ public final class SchedulerBlockDownloadSession
                      */
                     waitForReadyPeer = true;
 
+                } else if (failedState.awaitingAlternativePeer) {
+
+                    /*
+                     * A request-scoped frontier rescue deliberately excludes the peer
+                     * that just stalled.  OutboundPeerSupervisor may still be connecting
+                     * a replacement while that old peer remains READY for other work.
+                     *
+                     * Do not mistake "READY peers exist, but none is eligible for this
+                     * rescued block yet" for terminal exhaustion. Keep the logical
+                     * request pending and give the peer pool time to change.
+                     */
+                    waitForReadyPeer = true;
+
                 } else {
 
                     /*
-                     * READY peers still genuinely exist.
-                     *
-                     * assignAvailable() has already had an opportunity to assign the
-                     * incomplete work. If nothing is active now, the available peers
-                     * have been exhausted for this block (for example they returned
-                     * NOTFOUND).
-                     *
-                     * Preserve terminal failure for that case.
+                     * READY peers still genuinely exist and this state is not waiting
+                     * for a post-rescue replacement. assignAvailable() has already had
+                     * an opportunity to assign the incomplete work, so all currently
+                     * eligible peers have been exhausted (for example they returned
+                     * NOTFOUND). Preserve terminal failure for that case.
                      */
                     throw buildFailure(
                             failedState
@@ -835,6 +845,7 @@ public final class SchedulerBlockDownloadSession
             DownloadState state = assignment.state();
             state.inFlight =
                     true;
+            state.awaitingAlternativePeer = false;
 
             state.attemptedPeers.add(
                     peer
@@ -1066,6 +1077,13 @@ public final class SchedulerBlockDownloadSession
                 new ArrayList<>();
 
         private boolean inFlight;
+        /*
+         * True only after request-scoped frontier rescue released this block from a
+         * stalling owner.  While true, an old READY-but-already-attempted peer must
+         * not make pollCompleted() declare terminal exhaustion before the outbound
+         * supervisor has a chance to install a replacement peer.
+         */
+        private boolean awaitingAlternativePeer;
         private boolean completed;
 
         private DownloadState(
@@ -1443,6 +1461,7 @@ public final class SchedulerBlockDownloadSession
         activeDownloads.remove(ownedFuture);
         inFlightTracker.remove(expectedPeer, blockHash);
         ownedState.inFlight = false;
+        ownedState.awaitingAlternativePeer = true;
         ownedState.failures.add(failure);
 
         /*
