@@ -2056,7 +2056,7 @@ class BlockDownloadSchedulerTest {
                 assertThrows(IllegalArgumentException.class,
                         () -> new BlockDownloadScheduler(peers, downloads, timeout, invalid));
             }
-            assertEquals(32, new BlockDownloadScheduler(peers, downloads, timeout).maxBlocksInFlightPerPeer());
+            assertEquals(16, new BlockDownloadScheduler(peers, downloads, timeout).maxBlocksInFlightPerPeer());
         }
     }
     private record BudgetRequest(int peer, Hash256 hash) { }

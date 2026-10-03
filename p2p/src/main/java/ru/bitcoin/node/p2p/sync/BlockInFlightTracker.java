@@ -25,7 +25,7 @@ public final class BlockInFlightTracker {
      * before validation becomes expensive. Keep a bounded window, but allow
      * 32 concurrent IBD block requests per READY peer.
      */
-    public static final int DEFAULT_MAX_BLOCKS_PER_PEER = 32;
+    public static final int DEFAULT_MAX_BLOCKS_PER_PEER = 16;
 
     private final int maxBlocksPerPeer;
     private final LongSupplier nanoTime;

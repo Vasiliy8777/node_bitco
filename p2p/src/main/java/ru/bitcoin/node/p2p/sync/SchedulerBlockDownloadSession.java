@@ -52,6 +52,7 @@ public final class SchedulerBlockDownloadSession
     private final BlockingQueue<CompletableFuture<DownloadResult>>
             completionQueue = new LinkedBlockingQueue<>();
 
+    private final IdentityHashMap<Peer, PeerBlockDownloadState> peerStates = new IdentityHashMap<>();
     private int nextIndex;
     private int pendingCount;
     private int nextPeerIndex;
@@ -459,9 +460,8 @@ public final class SchedulerBlockDownloadSession
 
             if (result.failure() != null) {
 
-                state.failures.add(
-                        result.failure()
-                );
+                state.failures.add(result.failure());
+                peerStates.computeIfAbsent(peer, PeerBlockDownloadState::new).failed(System.nanoTime());
 
                 List<Peer> peers =
                         peerManager.readyPeers();
@@ -505,6 +505,9 @@ public final class SchedulerBlockDownloadSession
 
                 return Optional.empty();
             }
+
+            peerStates.computeIfAbsent(peer, PeerBlockDownloadState::new)
+                    .completed(state.height, System.nanoTime() - state.assignedAtNanos);
 
             if (state.completed) {
                 throw new IllegalStateException(
@@ -843,8 +846,10 @@ public final class SchedulerBlockDownloadSession
             int peerIndex = assignment.peerIndex();
             Peer peer = peers.get(peerIndex);
             DownloadState state = assignment.state();
-            state.inFlight =
-                    true;
+            state.inFlight = true;
+            state.assignedAtNanos = System.nanoTime();
+            peerStates.computeIfAbsent(peer, PeerBlockDownloadState::new)
+                    .assigned(state.assignedAtNanos);
             state.awaitingAlternativePeer = false;
 
             state.attemptedPeers.add(
@@ -919,20 +924,19 @@ public final class SchedulerBlockDownloadSession
     /** Choose the earliest serviceable request before choosing its peer. A retry must
      * not lose the only free global slot to later work on its previous owner. */
     private Assignment nextAssignment(List<Peer> peers) {
-        var eligible = new ArrayList<Integer>(peers.size());
-        for (int offset = 0; offset < peers.size(); offset++) {
-            int index = (nextPeerIndex + offset) % peers.size();
-            Peer peer = peers.get(index);
-            if (peer.isReady() && inFlightTracker.canRegister(peer)) eligible.add(index);
-        }
-        if (eligible.isEmpty()) return null;
+        long now = System.nanoTime();
         for (DownloadState state : states.values()) {
             if (state.completed || state.inFlight) continue;
-            for (int index : eligible) {
-                Peer peer = peers.get(index);
-                if (!state.attemptedPeers.contains(peer) && peerCanServe(peer, state))
-                    return new Assignment(state, index);
+            int bestIndex = -1; long bestScore = Long.MAX_VALUE;
+            for (int i=0;i<peers.size();i++) {
+                Peer peer=peers.get(i);
+                if (!peer.isReady() || !inFlightTracker.canRegister(peer) || state.attemptedPeers.contains(peer)) continue;
+                PeerBlockDownloadState ps=peerStates.computeIfAbsent(peer, PeerBlockDownloadState::new);
+                if (!ps.canServe(state.height, now) || !peerCanServe(peer,state)) continue;
+                long score=ps.score(inFlightTracker.count(peer));
+                if(score<bestScore){bestScore=score;bestIndex=i;}
             }
+            if(bestIndex>=0) return new Assignment(state,bestIndex);
         }
         return null;
     }
@@ -1077,6 +1081,7 @@ public final class SchedulerBlockDownloadSession
                 new ArrayList<>();
 
         private boolean inFlight;
+        private long assignedAtNanos;
         /*
          * True only after request-scoped frontier rescue released this block from a
          * stalling owner.  While true, an old READY-but-already-attempted peer must
@@ -1388,6 +1393,8 @@ public final class SchedulerBlockDownloadSession
             Peer peer =
                     peerEvaluation.peer();
 
+            peerStates.computeIfAbsent(peer, PeerBlockDownloadState::new)
+                    .stall(System.nanoTime(), Duration.ofSeconds(2));
             IOException failure =
                     new IOException(
                             "Peer block download timed out after "

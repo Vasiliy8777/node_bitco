@@ -548,15 +548,18 @@ public final class NodeValidationService implements AutoCloseable {
             synchronizePool();
             long poolNanos = System.nanoTime() - poolStarted;
 
+            // Core-style CoinsTip semantics: connect blocks against a process-visible
+            // write-back chainstate and let cache pressure/time decide durable checkpoints.
+            // A crash reopens the last complete checkpoint; active in-memory ChainState is
+            // never advertised as durable by the database itself.
+            database.enableChainstateWriteBack();
             long processorStarted = System.nanoTime();
-            List<BlockProcessingResult> results = database.withDeferredSync(() -> {
-                List<BlockProcessingResult> processed = new ArrayList<>(batch.size());
-                for (Block block : batch) {
-                    Objects.requireNonNull(block, "batch block");
-                    processed.add(processor.process(block));
-                }
-                return processed;
-            });
+            List<BlockProcessingResult> results = new ArrayList<>(batch.size());
+            for (Block block : batch) {
+                Objects.requireNonNull(block, "batch block");
+                results.add(processor.process(block));
+            }
+            database.flushChainstateIfNeeded();
             long processorNanos = System.nanoTime() - processorStarted;
 
             boolean connectedAny = results.stream()
@@ -571,6 +574,10 @@ public final class NodeValidationService implements AutoCloseable {
                 if (blockFilterIndexEnabled) synchronizeBlockFilterIndex();
                 blockPruner.prune(chain.activeTip(), assumeUtxoPruneCeiling());
                 initialBlockDownload.update(chain.activeTip());
+                if (!initialBlockDownload.isInitialBlockDownload()) {
+                    database.forceFlushChainstate();
+                    database.disableChainstateWriteBack(false);
+                }
             }
             long maintenanceNanos = System.nanoTime() - maintenanceStarted;
             poolNanos += maintenanceNanos; // includes the final pool reconciliation and maintenance boundary
@@ -1709,6 +1716,8 @@ public final class NodeValidationService implements AutoCloseable {
 
     @Override
     public synchronized void close() {
+        database.forceFlushChainstate();
+        database.disableChainstateWriteBack(false);
         backgroundValidationStop = true;
         Thread worker = backgroundValidationThread;
         if (worker != null) worker.interrupt();

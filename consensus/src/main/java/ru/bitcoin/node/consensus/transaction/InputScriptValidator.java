@@ -515,17 +515,21 @@ public final class InputScriptValidator {
             );
         }
 
-        for (int inputIndex = 0;
-             inputIndex < transaction.inputs().size();
-             inputIndex++) {
-
-            validate(
-                    transaction,
-                    inputIndex,
-                    utxoView,
-                    scriptVerifyFlags
-            );
+        // Snapshot every referenced coin before dispatch. Workers never touch a mutable
+        // chain/overlay view; this mirrors Core's CScriptCheck queue separation.
+        java.util.Map<ru.bitcoin.node.protocol.transaction.OutPoint, UtxoEntry> snapshot = new java.util.HashMap<>();
+        for (var input : transaction.inputs()) {
+            UtxoEntry coin = utxoView.find(input.previousOutput()).orElseThrow(
+                    () -> new TransactionValidationException("Missing or already spent UTXO for script validation: " + input.previousOutput()));
+            snapshot.put(input.previousOutput(), coin);
         }
+        UtxoView immutableView = point -> java.util.Optional.ofNullable(snapshot.get(point));
+        java.util.List<Runnable> checks = new java.util.ArrayList<>(transaction.inputs().size());
+        for (int inputIndex = 0; inputIndex < transaction.inputs().size(); inputIndex++) {
+            final int index = inputIndex;
+            checks.add(() -> validate(transaction, index, immutableView, scriptVerifyFlags));
+        }
+        ScriptCheckQueue.run(checks);
     }
 
 }

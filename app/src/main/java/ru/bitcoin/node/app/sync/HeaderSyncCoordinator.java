@@ -44,11 +44,7 @@ public final class HeaderSyncCoordinator {
                         "headerChainState"
                 );
 
-        this.blockLocatorBuilder =
-                Objects.requireNonNull(
-                        blockLocatorBuilder,
-                        "blockLocatorBuilder"
-                );
+        this.blockLocatorBuilder = Objects.requireNonNull(blockLocatorBuilder, "blockLocatorBuilder");
     }
 
     /** Collecting compatibility API; use the batch overload for full-history synchronization. */
@@ -80,8 +76,7 @@ public final class HeaderSyncCoordinator {
         Objects.requireNonNull(onValidatedHeader, "onValidatedHeader");
         long processedCount = 0;
 
-        BlockIndex cursor =
-                headerChainState.bestHeaderTip();
+        BlockIndex cursor = headerChainState.bestHeaderTip();
 
         while (true) {
 

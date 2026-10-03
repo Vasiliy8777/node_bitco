@@ -99,6 +99,16 @@ public final class RocksDbDatabase
      * intermediate writes do not force an fsync; the outermost scope performs one syncWal(). */
     private final ThreadLocal<Integer> deferredSyncDepth = ThreadLocal.withInitial(() -> 0);
 
+    // Core-style chainstate write-back cache. While enabled, consensus/index mutations
+    // remain process-visible through read-your-writes and are checkpointed atomically
+    // by pressure/time policy. A crash rolls back to the last complete checkpoint.
+    private RocksDbWriteBatch chainstateWriteBack;
+    private boolean chainstateWriteBackEnabled;
+    private long chainstateWriteBackStartedNanos;
+    private static final long WRITE_BACK_MAX_BYTES = 64L * 1024L * 1024L;
+    private static final int WRITE_BACK_MAX_OPERATIONS = 250_000;
+    private static final long WRITE_BACK_MAX_AGE_NANOS = java.time.Duration.ofSeconds(30).toNanos();
+
     public RocksDbDatabase(
             Path databasePath
     ) {
@@ -187,10 +197,13 @@ public final class RocksDbDatabase
         }
 
         try {
-            database.put(
-                    key,
-                    value
-            );
+            if (chainstateWriteBackEnabled || chainstateWriteBack != null) {
+                ensureWriteBack().put(key, value);
+                if (key.length > 0) namespaceVersions[Byte.toUnsignedInt(key[0])]++;
+                flushChainstateIfNeeded();
+                return;
+            }
+            database.put(key, value);
             if (key.length > 0) namespaceVersions[Byte.toUnsignedInt(key[0])]++;
         } catch (RocksDBException e) {
             throw new IllegalStateException(
@@ -200,7 +213,7 @@ public final class RocksDbDatabase
         }
     }
 
-    public byte[] get(
+    public synchronized byte[] get(
             byte[] key
     ) {
         ensureOpen();
@@ -214,9 +227,11 @@ public final class RocksDbDatabase
         long started = System.nanoTime();
         int namespace = key.length == 0 ? -1 : Byte.toUnsignedInt(key[0]);
         try {
-            return database.get(
-                    key
-            );
+            if (chainstateWriteBack != null) {
+                var pending = chainstateWriteBack.pendingValue(key);
+                if (pending.touched()) return pending.value();
+            }
+            return database.get(key);
         } catch (RocksDBException e) {
             throw new IllegalStateException(
                     "Failed to read RocksDB value",
@@ -238,7 +253,7 @@ public final class RocksDbDatabase
      * getCount/namespaceGetCount as keys resolved rather than JNI calls made,
      * so IBD diagnostics remain comparable before and after batching.
      */
-    public List<byte[]> getAll(
+    public synchronized List<byte[]> getAll(
             List<byte[]> keys
     ) {
         ensureOpen();
@@ -250,7 +265,20 @@ public final class RocksDbDatabase
 
         long started = System.nanoTime();
         try {
-            return database.multiGetAsList(keys);
+            if (chainstateWriteBack == null) return database.multiGetAsList(keys);
+            java.util.List<byte[]> result = new java.util.ArrayList<>(java.util.Collections.nCopies(keys.size(), null));
+            java.util.List<byte[]> unresolved = new java.util.ArrayList<>();
+            java.util.List<Integer> positions = new java.util.ArrayList<>();
+            for (int i = 0; i < keys.size(); i++) {
+                var pending = chainstateWriteBack.pendingValue(keys.get(i));
+                if (pending.touched()) result.set(i, pending.value());
+                else { unresolved.add(keys.get(i)); positions.add(i); }
+            }
+            if (!unresolved.isEmpty()) {
+                var loaded = database.multiGetAsList(unresolved);
+                for (int i = 0; i < loaded.size(); i++) result.set(positions.get(i), loaded.get(i));
+            }
+            return result;
         } catch (RocksDBException e) {
             throw new IllegalStateException("Failed to batch-read RocksDB values", e);
         } finally {
@@ -281,9 +309,13 @@ public final class RocksDbDatabase
         }
 
         try {
-            database.delete(
-                    key
-            );
+            if (chainstateWriteBackEnabled || chainstateWriteBack != null) {
+                ensureWriteBack().delete(key);
+                if (key.length > 0) namespaceVersions[Byte.toUnsignedInt(key[0])]++;
+                flushChainstateIfNeeded();
+                return;
+            }
+            database.delete(key);
             if (key.length > 0) namespaceVersions[Byte.toUnsignedInt(key[0])]++;
         } catch (RocksDBException e) {
             throw new IllegalStateException(
@@ -329,6 +361,50 @@ public final class RocksDbDatabase
         }
     }
 
+    public synchronized void enableChainstateWriteBack() {
+        ensureOpen();
+        chainstateWriteBackEnabled = true;
+        ensureWriteBack();
+    }
+
+    public synchronized void disableChainstateWriteBack(boolean flush) {
+        chainstateWriteBackEnabled = false;
+        if (flush) forceFlushChainstate();
+    }
+
+    public synchronized boolean chainstateWriteBackEnabled() { return chainstateWriteBackEnabled; }
+
+    public synchronized void flushChainstateIfNeeded() {
+        if (chainstateWriteBack == null || chainstateWriteBack.operationCount() == 0) return;
+        long age = System.nanoTime() - chainstateWriteBackStartedNanos;
+        if (chainstateWriteBack.estimatedBytes() >= WRITE_BACK_MAX_BYTES
+                || chainstateWriteBack.operationCount() >= WRITE_BACK_MAX_OPERATIONS
+                || age >= WRITE_BACK_MAX_AGE_NANOS) forceFlushChainstate();
+    }
+
+    public synchronized void forceFlushChainstate() {
+        if (chainstateWriteBack == null) return;
+        RocksDbWriteBatch batch = chainstateWriteBack;
+        chainstateWriteBack = null;
+        if (batch.operationCount() == 0) { batch.close(); return; }
+        long started = System.nanoTime();
+        try (batch; WriteOptions options = new WriteOptions().setSync(true)) {
+            database.write(options, batch.nativeBatch());
+            writeBatchCount.increment(); syncWriteBatchCount.increment();
+        } catch (RocksDBException e) {
+            throw new IllegalStateException("Failed to flush chainstate write-back cache", e);
+        } finally { writeBatchNanos.add(System.nanoTime() - started); }
+        if (chainstateWriteBackEnabled) ensureWriteBack();
+    }
+
+    private RocksDbWriteBatch ensureWriteBack() {
+        if (chainstateWriteBack == null) {
+            chainstateWriteBack = new RocksDbWriteBatch();
+            chainstateWriteBackStartedNanos = System.nanoTime();
+        }
+        return chainstateWriteBack;
+    }
+
     public synchronized void syncWal() {
         ensureOpen();
         long started = System.nanoTime();
@@ -360,9 +436,14 @@ public final class RocksDbDatabase
         ensureOpen();
 
         if (batch == null) {
-            throw new IllegalArgumentException(
-                    "batch must not be null"
-            );
+            throw new IllegalArgumentException("batch must not be null");
+        }
+        if (chainstateWriteBackEnabled || chainstateWriteBack != null) {
+            ensureWriteBack().appendFrom(batch);
+            var prefixes = batch.changedPrefixes();
+            for (int prefix = prefixes.nextSetBit(0); prefix >= 0; prefix = prefixes.nextSetBit(prefix + 1)) namespaceVersions[prefix]++;
+            flushChainstateIfNeeded();
+            return;
         }
 
         long started = System.nanoTime();
@@ -616,9 +697,11 @@ public final class RocksDbDatabase
     }
 
     @Override
-    public void close() {
+    public synchronized void close() {
 
         if (!closed) {
+            forceFlushChainstate();
+            chainstateWriteBackEnabled = false;
             closed = true;
 
             database.close();
