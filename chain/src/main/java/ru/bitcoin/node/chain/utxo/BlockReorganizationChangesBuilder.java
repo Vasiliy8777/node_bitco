@@ -6,6 +6,7 @@ import ru.bitcoin.node.chain.BlockIndexLookup;
 import ru.bitcoin.node.chain.BlockIndexAncestorLookup;
 import ru.bitcoin.node.chain.InvalidBlockObserver;
 import ru.bitcoin.node.chain.AssumeValidPolicy;
+import ru.bitcoin.node.chain.Bip34AncestryCache;
 import ru.bitcoin.node.consensus.block.BlockValidationException;
 import ru.bitcoin.node.consensus.block.Bip30;
 import ru.bitcoin.node.consensus.transaction.TransactionValidationException;
@@ -65,6 +66,20 @@ public final class BlockReorganizationChangesBuilder {
             BlockIndexLookup blockIndexLookup,
             InvalidBlockObserver invalidBlockObserver,
             AssumeValidPolicy assumeValidPolicy
+    ) {
+        return build(disconnectBlocks, connectBlocks, utxoStore, networkParameters, blockIndexLookup,
+                invalidBlockObserver, assumeValidPolicy, null);
+    }
+
+    public static BlockReorganizationChanges build(
+            List<BlockToDisconnect> disconnectBlocks,
+            List<BlockToConnect> connectBlocks,
+            UtxoStore utxoStore,
+            NetworkParameters networkParameters,
+            BlockIndexLookup blockIndexLookup,
+            InvalidBlockObserver invalidBlockObserver,
+            AssumeValidPolicy assumeValidPolicy,
+            Bip34AncestryCache bip34AncestryCache
     ) {
         if (disconnectBlocks == null) {
             throw new IllegalArgumentException(
@@ -206,7 +221,14 @@ public final class BlockReorganizationChangesBuilder {
                         blockToConnect.height(),
                         blockHash,
                         networkParameters,
-                        isOnKnownBip34Chain(candidateIndex, blockIndexLookup, networkParameters)
+                        shouldProbeKnownBip34Chain(blockToConnect.height(), networkParameters)
+                                && (bip34AncestryCache != null
+                                ? bip34AncestryCache.prove(
+                                candidateIndex,
+                                () -> isOnKnownBip34Chain(
+                                        candidateIndex, blockIndexLookup, networkParameters))
+                                : isOnKnownBip34Chain(
+                                candidateIndex, blockIndexLookup, networkParameters))
                 );
                 undoData =
                         BlockConnectChangesBuilder.apply(
@@ -244,6 +266,12 @@ public final class BlockReorganizationChangesBuilder {
                 overlay.changes(),
                 connectedUndo
         );
+    }
+
+    private static boolean shouldProbeKnownBip34Chain(long height, NetworkParameters parameters) {
+        return Bip30.knownBip34ActivationHash(parameters) != null
+                && height >= parameters.bip34Height()
+                && height < Bip30.BIP34_IMPLIES_BIP30_LIMIT;
     }
 
     private static boolean isOnKnownBip34Chain(

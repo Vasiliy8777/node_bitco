@@ -47,6 +47,7 @@ public final class NodeValidationService implements AutoCloseable {
     private RocksDbUtxoStore.CacheStats ibdTelemetryCacheBaseline;
     private StoredBlockIndexLookup.DiagnosticSnapshot ibdTelemetryBlockIndexBaseline;
     private BlockProcessor.DiagnosticSnapshot ibdTelemetryProcessorBaseline;
+    private Bip34AncestryCache.DiagnosticSnapshot ibdTelemetryBip34Baseline;
     private BlockConnectChangesBuilder.DiagnosticSnapshot ibdTelemetryConnectBaseline;
     private final ChainState chain;
     private final StoredBlockIndexLookup lookup;
@@ -602,6 +603,7 @@ public final class NodeValidationService implements AutoCloseable {
             ibdTelemetryCacheBaseline = cacheBefore;
             ibdTelemetryBlockIndexBaseline = lookup.diagnosticSnapshot();
             ibdTelemetryProcessorBaseline = processor.diagnosticSnapshot();
+            ibdTelemetryBip34Baseline = processor.bip34AncestryDiagnosticSnapshot();
             ibdTelemetryConnectBaseline = BlockConnectChangesBuilder.diagnosticSnapshot();
             ibdTelemetryLastLogNanos = batchStarted;
         }
@@ -648,6 +650,10 @@ public final class NodeValidationService implements AutoCloseable {
                 + " sampleRate=1/128 callers=" + formatBlockIndexCallers(blockIndexDiagnostics));
         var processorDiagnostics = processor.diagnosticSnapshot().minus(ibdTelemetryProcessorBaseline);
         LOG.log(System.Logger.Level.INFO, formatProcessorDiagnostics(processorDiagnostics));
+        var bip34Diagnostics = processor.bip34AncestryDiagnosticSnapshot().minus(ibdTelemetryBip34Baseline);
+        LOG.log(System.Logger.Level.INFO, String.format(java.util.Locale.ROOT,
+                "IBD BIP34 ANCESTRY: fullProofs=%,d inherited=%,d",
+                bip34Diagnostics.fullProofs(), bip34Diagnostics.inheritedProofs()));
         var connectDiagnostics = BlockConnectChangesBuilder.diagnosticSnapshot().minus(ibdTelemetryConnectBaseline);
         LOG.log(System.Logger.Level.INFO, formatConnectDiagnostics(connectDiagnostics));
 
@@ -662,6 +668,7 @@ public final class NodeValidationService implements AutoCloseable {
         ibdTelemetryCacheBaseline = cacheNow;
         ibdTelemetryBlockIndexBaseline = lookup.diagnosticSnapshot();
         ibdTelemetryProcessorBaseline = processor.diagnosticSnapshot();
+        ibdTelemetryBip34Baseline = processor.bip34AncestryDiagnosticSnapshot();
         ibdTelemetryConnectBaseline = BlockConnectChangesBuilder.diagnosticSnapshot();
     }
 

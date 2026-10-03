@@ -656,6 +656,37 @@ public final class BlockSyncCoordinator {
             );
 
             stallTracker.update(stallingPeer.orElse(null));
+
+            /*
+             * A transport failure is already stronger evidence than the stall timer.
+             * If the exact ordered frontier is still owned by a peer that is no longer
+             * READY, release only that request immediately so another READY peer can
+             * take it.  Do not fail/release the peer's other requests here: their normal
+             * completion/timeout path remains authoritative and avoids the old mass-release
+             * race that caused IBD hangs.
+             */
+            if (stallingPeer.isPresent() && !stallingPeer.get().isReady()) {
+                Peer disconnectedOwner = stallingPeer.get();
+                BlockIndex blockedIndex = blocksToDownload.get(nextToProcess);
+                boolean rescued = session.retryBlock(
+                        blockedIndex.hash(),
+                        disconnectedOwner,
+                        new IOException("Frontier owner disconnected before block completion")
+                );
+                if (rescued) {
+                    log.log(
+                            System.Logger.Level.INFO,
+                            "IBD frontier disconnect rescue: height={0}, hash={1}, previousPeer={2}, pending={3}",
+                            blockedIndex.height(),
+                            blockedIndex.hash().toDisplayHex(),
+                            diagnosticPeerAddress(disconnectedOwner),
+                            session.pendingCount()
+                    );
+                    stallTracker.clear(disconnectedOwner);
+                    continue;
+                }
+            }
+
             BlockDownloadStallTimeoutEvaluator.Evaluation stallEvaluation =
                     stallTimeoutEvaluator.evaluate();
 

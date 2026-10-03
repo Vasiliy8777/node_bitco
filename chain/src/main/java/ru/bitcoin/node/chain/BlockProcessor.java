@@ -218,6 +218,10 @@ public final class BlockProcessor {
         }
     }
 
+    public Bip34AncestryCache.DiagnosticSnapshot bip34AncestryDiagnosticSnapshot() {
+        return executor.bip34AncestryDiagnosticSnapshot();
+    }
+
     public DiagnosticSnapshot diagnosticSnapshot() {
         return new DiagnosticSnapshot(
                 diagnosticProcessed.sum(),

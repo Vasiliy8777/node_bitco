@@ -28,6 +28,7 @@ public final class ChainReorganizationExecutor {
     private final NetworkParameters networkParameters;
     private final InvalidBlockObserver invalidBlockObserver;
     private final AssumeValidPolicy assumeValidPolicy;
+    private final Bip34AncestryCache bip34AncestryCache = new Bip34AncestryCache();
 
     public ChainReorganizationExecutor(
             BlockStore blockStore,
@@ -118,6 +119,10 @@ public final class ChainReorganizationExecutor {
         this.assumeValidPolicy = java.util.Objects.requireNonNull(assumeValidPolicy, "assumeValidPolicy");
     }
 
+    public Bip34AncestryCache.DiagnosticSnapshot bip34AncestryDiagnosticSnapshot() {
+        return bip34AncestryCache.diagnosticSnapshot();
+    }
+
     public void execute(ChainUpdate update) {
         PreparedChainReorganization prepared = prepare(update);
         commit(prepared);
@@ -147,7 +152,7 @@ public final class ChainReorganizationExecutor {
         diagnostic(plan, "preparation lookup done");
         BlockReorganizationChanges changes = BlockReorganizationChangesBuilder.build(
                 disconnectBlocks, connectBlocks, utxoStore, networkParameters,
-                preparationLookup, preparationInvalidBlockObserver, assumeValidPolicy);
+                preparationLookup, preparationInvalidBlockObserver, assumeValidPolicy, bip34AncestryCache);
         diagnostic(plan, "changes build done");
         return new PreparedChainReorganization(update, changes);
     }
@@ -161,7 +166,7 @@ public final class ChainReorganizationExecutor {
         BlockIndexLookup preparationLookup = preparationLookup(plan);
         BlockReorganizationChanges changes = BlockReorganizationChangesBuilder.build(
                 disconnectBlocks, connectBlocks, utxoStore, networkParameters,
-                preparationLookup, invalidBlockObserver, assumeValidPolicy);
+                preparationLookup, invalidBlockObserver, assumeValidPolicy, bip34AncestryCache);
         return new PreparedChainReorganization(update, changes);
     }
 
