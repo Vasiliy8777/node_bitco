@@ -33,7 +33,8 @@ public final class BlockSyncCoordinator {
      * It is intentionally independent from the per-peer
      * in-flight request limit.
      */
-    private static final int DEFAULT_DOWNLOAD_WINDOW = 4096;
+    private static final int DEFAULT_DOWNLOAD_WINDOW = 1024;
+    private static final int DEFAULT_REFILL_LOW_WATERMARK = 512;
 
     /*
      * Block-index materialization is deliberately larger than the logical
@@ -43,7 +44,7 @@ public final class BlockSyncCoordinator {
      * chunk even though that height is already inside the logical horizon.
      *
      * 32768 BlockIndex references/objects remain bounded for IBD while giving
-     * the 4096-block download window ample look-ahead. Small test windows also
+     * the 1024-block download window ample look-ahead. Small test windows also
      * retain true sliding behaviour because short paths fit in one chunk.
      */
     private static final int BLOCK_INDEX_MATERIALIZATION_CHUNK = 32768;
@@ -499,10 +500,28 @@ public final class BlockSyncCoordinator {
                 receivedSinceSample = 0;
                 validationNanos = 0;
             }
-            int horizonEnd = Math.min(
-                    blocksToDownload.size(),
-                    Math.addExact(nextToProcess, downloadWindow)
-            );
+            /*
+             * Shared sliding body cache.  The first pass exposes a complete
+             * download window.  For the production 1024-block IBD window we
+             * then refill in roughly half-window chunks instead of submitting
+             * one new network request after every connected block.
+             *
+             * Small/custom windows keep the old continuously-sliding behaviour
+             * because tests and bounded callers use them to model exact horizon
+             * semantics.
+             */
+            int refillLowWatermark = downloadWindow >= DEFAULT_DOWNLOAD_WINDOW
+                    ? Math.min(DEFAULT_REFILL_LOW_WATERMARK, downloadWindow / 2)
+                    : Math.max(0, downloadWindow - 1);
+            int exposedAhead = Math.max(0, nextToExpose - nextToProcess);
+            boolean refill = nextToExpose == 0 || exposedAhead <= refillLowWatermark;
+            int horizonEnd = nextToExpose;
+            if (refill) {
+                horizonEnd = Math.min(
+                        blocksToDownload.size(),
+                        Math.addExact(nextToProcess, downloadWindow)
+                );
+            }
 
             List<BlockDownloadRequest> missingToSubmit = new ArrayList<>();
             while (nextToExpose < horizonEnd) {

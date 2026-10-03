@@ -2001,6 +2001,25 @@ class BlockDownloadSchedulerTest {
                         assertNull(requested.poll(200, TimeUnit.MILLISECONDS), "Request budget exceeded");
                         for (int count : perPeer) assertTrue(count > 0, "Ready peer was starved");
                         if (peerCount == 3) {
+                            /*
+                             * The ordered-progress reserve must not be concentrated on
+                             * one peer.  Losing any one connection may therefore remove
+                             * only a minority of the first 32 bodies, not the whole
+                             * frontier run.
+                             */
+                            var ready = peers.readyPeers();
+                            int[] frontierOwners = new int[ready.size()];
+                            for (int i = 0; i < 32; i++) {
+                                var owner = session.inFlightPeer(blocks.get(i).hash()).orElseThrow();
+                                int ownerIndex = ready.indexOf(owner);
+                                assertTrue(ownerIndex >= 0);
+                                frontierOwners[ownerIndex]++;
+                            }
+                            int minFrontier = Arrays.stream(frontierOwners).min().orElseThrow();
+                            int maxFrontier = Arrays.stream(frontierOwners).max().orElseThrow();
+                            assertTrue(maxFrontier - minFrontier <= 1,
+                                    "Critical frontier reserve was concentrated on one peer: "
+                                            + Arrays.toString(frontierOwners));
                             // With 256 assignments, round-robin next selects peer 1. That peer
                             // owns this failed request: its free slot must not go to a later block.
                             var blockedHash = blocks.get(1).hash();

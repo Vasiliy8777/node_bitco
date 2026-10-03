@@ -17,6 +17,14 @@ public final class SchedulerBlockDownloadSession
             System.getLogger(SchedulerBlockDownloadSession.class.getName());
 
     private static final int FRONTIER_DIAGNOSTIC_STATE_LIMIT = 0;
+    /*
+     * The earliest part of the shared sliding cache is the ordered-progress
+     * critical path. Spread these requests across READY peers by current
+     * ownership count before latency scoring. This prevents a newly connected
+     * peer with an optimistic/default latency estimate from owning a large
+     * contiguous frontier run and pinning the whole chain if it disappears.
+     */
+    private static final int FRONTIER_PRIORITY_SPAN = 32;
 
     private final PeerManager peerManager;
     private final BlockDownloadService blockDownloadService;
@@ -961,18 +969,56 @@ public final class SchedulerBlockDownloadSession
      * not lose the only free global slot to later work on its previous owner. */
     private Assignment nextAssignment(List<Peer> peers) {
         long now = System.nanoTime();
+        DownloadState frontier = firstIncomplete();
+        int frontierLimit = frontier == null
+                ? Integer.MIN_VALUE
+                : Math.addExact(frontier.index, FRONTIER_PRIORITY_SPAN);
+
         for (DownloadState state : states.values()) {
             if (state.completed || state.inFlight) continue;
-            int bestIndex = -1; long bestScore = Long.MAX_VALUE;
-            for (int i=0;i<peers.size();i++) {
-                Peer peer=peers.get(i);
-                if (!peer.isReady() || !inFlightTracker.canRegister(peer) || state.attemptedPeers.contains(peer)) continue;
-                PeerBlockDownloadState ps=peerStates.computeIfAbsent(peer, PeerBlockDownloadState::new);
-                if (!ps.canServe(state.height, now) || !peerCanServe(peer,state)) continue;
-                long score=ps.score(inFlightTracker.count(peer));
-                if(score<bestScore){bestScore=score;bestIndex=i;}
+
+            boolean frontierPriority = state.index < frontierLimit;
+            int bestIndex = -1;
+            int bestOwned = Integer.MAX_VALUE;
+            long bestScore = Long.MAX_VALUE;
+
+            for (int i = 0; i < peers.size(); i++) {
+                Peer peer = peers.get(i);
+                if (!peer.isReady()
+                        || !inFlightTracker.canRegister(peer)
+                        || state.attemptedPeers.contains(peer)) {
+                    continue;
+                }
+
+                PeerBlockDownloadState ps =
+                        peerStates.computeIfAbsent(peer, PeerBlockDownloadState::new);
+                if (!ps.canServe(state.height, now) || !peerCanServe(peer, state)) {
+                    continue;
+                }
+
+                int owned = inFlightTracker.count(peer);
+                long score = ps.score(owned);
+
+                /*
+                 * For the 32-block critical frontier reserve, distribution is
+                 * more important than an unproven latency advantage.  Minimise
+                 * current ownership first and use the existing EWMA score only
+                 * as the tie-breaker.  Outside the reserve, preserve the normal
+                 * latency/load scheduler unchanged.
+                 */
+                if (frontierPriority) {
+                    if (owned < bestOwned || (owned == bestOwned && score < bestScore)) {
+                        bestOwned = owned;
+                        bestScore = score;
+                        bestIndex = i;
+                    }
+                } else if (score < bestScore) {
+                    bestScore = score;
+                    bestIndex = i;
+                }
             }
-            if(bestIndex>=0) return new Assignment(state,bestIndex);
+
+            if (bestIndex >= 0) return new Assignment(state, bestIndex);
         }
         return null;
     }
