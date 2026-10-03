@@ -32,6 +32,27 @@ public final class ReorganizationPlanner {
             );
         }
 
+        /*
+         * Fast path for the overwhelmingly common IBD case: the new best block is
+         * the direct child of the current active tip.  The generic planner would
+         * otherwise ask CommonAncestorFinder to resolve newTip -> currentTip through
+         * BlockIndexAncestorLookup and then walk the same edge again while building
+         * blocksToConnect.  With the RocksDB lookup that means an unnecessary
+         * blockSkipIndex read (plus parent lookup) for every connected IBD block.
+         *
+         * Parent hash + adjacent height prove the complete transition here; no chain
+         * history is being skipped.  Reorganizations, side branches and height jumps
+         * continue through the branch-safe generic planner below unchanged.
+         */
+        if (newTip.height() == currentTip.height() + 1L
+                && newTip.previousBlockHash().equals(currentTip.hash())) {
+            return new ReorganizationPlan(
+                    currentTip,
+                    List.of(),
+                    List.of(newTip)
+            );
+        }
+
         BlockIndex commonAncestor =
                 CommonAncestorFinder.find(
                         currentTip,

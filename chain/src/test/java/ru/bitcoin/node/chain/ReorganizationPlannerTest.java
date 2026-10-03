@@ -7,6 +7,7 @@ import ru.bitcoin.node.protocol.block.BlockHeader;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -138,6 +139,29 @@ class ReorganizationPlannerTest {
                         .get(2)
                         .hash()
         );
+    }
+
+
+    @Test
+    void directTipExtensionMustNotTouchBlockIndexLookup() {
+        BlockIndex genesis = BlockIndexFactory.createGenesis(genesisHeader());
+        BlockIndex next = child(genesis, 1);
+        AtomicInteger lookupCalls = new AtomicInteger();
+
+        ReorganizationPlan plan = ReorganizationPlanner.plan(
+                genesis,
+                next,
+                hash -> {
+                    lookupCalls.incrementAndGet();
+                    throw new AssertionError("Direct tip extension must not query block-index storage");
+                }
+        );
+
+        assertEquals(genesis.hash(), plan.commonAncestor().hash());
+        assertEquals(0, plan.blocksToDisconnect().size());
+        assertEquals(1, plan.blocksToConnect().size());
+        assertEquals(next.hash(), plan.blocksToConnect().get(0).hash());
+        assertEquals(0, lookupCalls.get());
     }
 
     @Test
