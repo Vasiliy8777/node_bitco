@@ -251,27 +251,124 @@ public final class OutboundPeerManager {
     }
 
     private OutboundPeerConnection connectReservedCandidate(int startHeight, PeerAddress address) throws IOException {
-        Peer peer = peerConnector.connectManaged(address.hostAddress(), address.port(), startHeight, PeerConnectionRole.FULL_RELAY);
-        if (!peer.isReady()) {
-            IOException failure = new IOException("BitcoinClient returned non-ready peer " + address);
-            rejectPeer(peer, failure, failure.getMessage());
-            throw failure;
+        return connectReservedPersistentCandidate(
+                startHeight,
+                address,
+                PeerConnectionRole.FULL_RELAY
+        );
+    }
+
+    /**
+     * Selects one address for a persistent outbound slot without opening a socket.
+     * The supervisor serializes only this short reservation step and then performs
+     * the expensive network handshake concurrently in the slot worker.
+     */
+    PeerAddress selectPersistentCandidate(
+            List<PeerAddress> excludedAddresses,
+            Set<PeerNetGroup> excludedNetGroups
+    ) throws IOException {
+        Objects.requireNonNull(excludedAddresses, "excludedAddresses");
+        Objects.requireNonNull(excludedNetGroups, "excludedNetGroups");
+
+        Set<PeerAddress> attempted = new java.util.LinkedHashSet<>(excludedAddresses);
+
+        while (true) {
+            if (connectionAttemptsCancelled || Thread.currentThread().isInterrupted()) {
+                throw new IOException("Outbound peer connection cancelled");
+            }
+
+            PeerAddress address = selector.select(attempted, excludedNetGroups).orElse(null);
+            if (address == null && !excludedNetGroups.isEmpty()) {
+                // Netgroup diversity is preferred, not a hard availability filter.
+                address = selector.select(attempted, Set.of()).orElse(null);
+            }
+            if (address == null) {
+                throw new IOException("No known peer addresses available for outbound reservation");
+            }
+
+            attempted.add(address);
+            if (address.isDirectSocketAddress()
+                    && (discouragementManager.isDiscouraged(address.address())
+                    || peerManager.banManager().isBanned(address.address()))) {
+                continue;
+            }
+            return address;
         }
-        String ineligible = longLivedOutboundIneligibilityReason(
-                peer.remoteVersion(), startHeight, initialBlockDownload.getAsBoolean());
-        if (ineligible != null) {
-            IOException failure = new IOException("Ineligible header race peer " + address + ": " + ineligible);
-            rejectPeer(peer, failure, failure.getMessage());
-            throw failure;
+    }
+
+    /** Connects exactly the address already reserved by OutboundPeerSupervisor. */
+    OutboundPeerConnection connectReservedPersistentCandidate(
+            int startHeight,
+            PeerAddress address,
+            PeerConnectionRole role
+    ) throws IOException {
+        if (startHeight < 0) {
+            throw new IllegalArgumentException("startHeight must not be negative");
         }
-        addressManager.markSuccess(address, now());
+        Objects.requireNonNull(address, "address");
+        Objects.requireNonNull(role, "role");
+        if (!role.persistentOutbound()) {
+            throw new IllegalArgumentException("role must be a persistent outbound role");
+        }
+        if (connectionAttemptsCancelled || Thread.currentThread().isInterrupted()) {
+            throw new IOException("Outbound peer connection cancelled");
+        }
+
+        addressManager.markAttempt(address, now());
+        long startedNanos = System.nanoTime();
+        log.log(System.Logger.Level.INFO,
+                "Connecting reserved outbound peer candidate {0}:{1}, role={2}",
+                address.hostAddress(), address.port(), role);
+
+        Peer peer = null;
         try {
-            peerManager.add(peer, PeerConnectionRole.FULL_RELAY);
-        } catch (RuntimeException failure) {
-            try { peer.close(); } catch (IOException closeFailure) { failure.addSuppressed(closeFailure); }
+            peer = peerConnector.connectManaged(
+                    address.hostAddress(), address.port(), startHeight, role);
+
+            if (connectionAttemptsCancelled || Thread.currentThread().isInterrupted()) {
+                try { peer.close(); } catch (IOException ignored) { }
+                throw new IOException("Outbound peer connection cancelled");
+            }
+            if (!peer.isReady()) {
+                IOException failure = new IOException("BitcoinClient returned non-ready peer " + address);
+                rejectPeer(peer, failure, failure.getMessage());
+                throw failure;
+            }
+
+            String ineligible = longLivedOutboundIneligibilityReason(
+                    peer.remoteVersion(), startHeight, initialBlockDownload.getAsBoolean());
+            if (ineligible != null) {
+                IOException failure = new IOException(
+                        "Ineligible long-lived outbound peer " + address + ": " + ineligible);
+                rejectPeer(peer, failure, failure.getMessage());
+                throw failure;
+            }
+
+            addressManager.markSuccess(address, now());
+            try {
+                peerManager.add(peer, role);
+            } catch (RuntimeException failure) {
+                try { peer.close(); } catch (IOException closeFailure) { failure.addSuppressed(closeFailure); }
+                throw failure;
+            }
+
+            long elapsedMillis = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(
+                    System.nanoTime() - startedNanos);
+            log.log(System.Logger.Level.INFO,
+                    "Outbound peer READY {0}:{1}, role={2}, transport={3}, advertisedHeight={4}, handshakeMs={5}",
+                    address.hostAddress(), address.port(), role,
+                    peer.isV2Transport() ? "v2" : "v1",
+                    peer.remoteVersion().startHeight(), elapsedMillis);
+
+            return new OutboundPeerConnection(peer, address, role);
+        } catch (IOException | RuntimeException failure) {
+            long elapsedMillis = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(
+                    System.nanoTime() - startedNanos);
+            log.log(System.Logger.Level.WARNING,
+                    "Outbound peer candidate failed {0}:{1}, role={2}, elapsedMs={3}: {4}",
+                    address.hostAddress(), address.port(), role, elapsedMillis, failure.toString());
             throw failure;
         }
-        return new OutboundPeerConnection(peer, address, PeerConnectionRole.FULL_RELAY);
     }
 
     public OutboundPeerConnection connectOneWithAddress(

@@ -3,6 +3,7 @@ package ru.bitcoin.node.p2p;
 import org.junit.jupiter.api.Test;
 import ru.bitcoin.node.p2p.address.PeerAddress;
 import ru.bitcoin.node.p2p.address.PeerAddressManager;
+import ru.bitcoin.node.p2p.address.OutboundPeerSelector;
 import ru.bitcoin.node.p2p.codec.BitcoinMessageDecoder;
 import ru.bitcoin.node.p2p.codec.BitcoinMessageEncoder;
 import ru.bitcoin.node.p2p.codec.BitcoinMessageStreamReader;
@@ -21,6 +22,11 @@ import java.net.Socket;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.ArrayDeque;
+import java.util.Arrays;
+import java.util.Optional;
+import java.util.Queue;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -519,6 +525,89 @@ class OutboundPeerSupervisorTest {
 
 
     @Test
+    void shouldEstablishDifferentEmptySlotsInParallel() throws Exception {
+        try (ServerSocket initialServer = new ServerSocket(0);
+             ServerSocket slowServer = new ServerSocket(0);
+             ServerSocket fastServer = new ServerSocket(0)) {
+
+            CompletableFuture<Socket> initialAccepted =
+                    CompletableFuture.supplyAsync(() -> acceptAndHandshakeOnce(initialServer));
+
+            CompletableFuture<Void> slowSocketAccepted = new CompletableFuture<>();
+            CompletableFuture<Void> releaseSlowHandshake = new CompletableFuture<>();
+            CompletableFuture<Socket> slowAccepted = CompletableFuture.supplyAsync(() -> {
+                try {
+                    Socket socket = slowServer.accept();
+                    slowSocketAccepted.complete(null);
+                    releaseSlowHandshake.get(5, TimeUnit.SECONDS);
+                    performHandshake(socket, 101);
+                    return socket;
+                } catch (Exception exception) {
+                    throw new RuntimeException(exception);
+                }
+            });
+            CompletableFuture<Socket> fastAccepted =
+                    CompletableFuture.supplyAsync(() -> acceptAndHandshakeOnce(fastServer));
+
+            PeerAddress initialAddress = new PeerAddress(
+                    InetAddress.getByName("127.0.0.1"), initialServer.getLocalPort(), 0L);
+            PeerAddress slowAddress = new PeerAddress(
+                    InetAddress.getByName("127.0.0.1"), slowServer.getLocalPort(), 0L);
+            PeerAddress fastAddress = new PeerAddress(
+                    InetAddress.getByName("127.0.0.1"), fastServer.getLocalPort(), 0L);
+
+            PeerAddressManager addressManager = new PeerAddressManager();
+            Instant now = Instant.now();
+            addressManager.add(initialAddress, now);
+            addressManager.add(slowAddress, now);
+            addressManager.add(fastAddress, now);
+
+            PeerManager peerManager = new PeerManager();
+            OutboundPeerManager initialOutbound = new OutboundPeerManager(
+                    new BitcoinClient(PARAMETERS), peerManager, addressManager,
+                    new DeterministicOutboundPeerSelector(addressManager, initialAddress),
+                    Instant::now);
+            OutboundPeerConnection initial = initialOutbound.connectOneWithAddress(100, List.of());
+
+            OutboundPeerManager supervisorOutbound = new OutboundPeerManager(
+                    new BitcoinClient(PARAMETERS), peerManager, addressManager,
+                    new DeterministicOutboundPeerSelector(addressManager, slowAddress, fastAddress),
+                    Instant::now);
+            OutboundPeerSupervisor supervisor = new OutboundPeerSupervisor(
+                    supervisorOutbound, () -> 101, 3,
+                    Duration.ofMillis(25), Duration.ofMillis(100));
+
+            Socket initialSocket = null;
+            Socket fastSocket = null;
+            Socket slowSocket = null;
+            try {
+                supervisor.start(initial);
+                initialSocket = initialAccepted.get(5, TimeUnit.SECONDS);
+                slowSocketAccepted.get(5, TimeUnit.SECONDS);
+
+                // The fast slot must reach READY while the other slot is still
+                // deliberately blocked inside its network handshake.
+                fastSocket = fastAccepted.get(2, TimeUnit.SECONDS);
+                waitUntil(() -> peerManager.readyPeers().size() >= 2, Duration.ofSeconds(2));
+                assertFalse(releaseSlowHandshake.isDone());
+
+                releaseSlowHandshake.complete(null);
+                slowSocket = slowAccepted.get(5, TimeUnit.SECONDS);
+                waitUntil(() -> supervisor.activeConnectionCount() == 3, Duration.ofSeconds(5));
+                assertEquals(3, peerManager.readyPeers().size());
+            } finally {
+                releaseSlowHandshake.complete(null);
+                supervisor.close();
+                peerManager.close();
+                if (initialSocket != null) initialSocket.close();
+                if (fastSocket != null) fastSocket.close();
+                if (slowSocket != null) slowSocket.close();
+            }
+        }
+    }
+
+
+    @Test
     void shouldMaintainSeparateFullRelayAndBlockRelayOnlySlots()
             throws Exception {
 
@@ -946,4 +1035,25 @@ class OutboundPeerSupervisorTest {
         boolean evaluate()
                 throws Exception;
     }
+    private static final class DeterministicOutboundPeerSelector extends OutboundPeerSelector {
+        private final Queue<PeerAddress> addresses;
+
+        private DeterministicOutboundPeerSelector(
+                PeerAddressManager addressManager, PeerAddress... addresses) {
+            super(addressManager);
+            this.addresses = new ArrayDeque<>(Arrays.asList(addresses));
+        }
+
+        @Override
+        public synchronized Optional<PeerAddress> select(Set<PeerAddress> excludedAddresses) {
+            while (!addresses.isEmpty()) {
+                PeerAddress candidate = addresses.remove();
+                if (!excludedAddresses.contains(candidate)) {
+                    return Optional.of(candidate);
+                }
+            }
+            return Optional.empty();
+        }
+    }
+
 }

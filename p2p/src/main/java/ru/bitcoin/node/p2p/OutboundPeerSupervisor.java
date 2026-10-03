@@ -21,8 +21,8 @@ import java.util.function.IntSupplier;
  * single socket reader for every Peer.
  *
  * <p>Each outbound slot is supervised independently. When a peer closes, only
- * that slot is reconnected. Connection establishment is serialized so two
- * empty slots cannot select the same address concurrently.
+ * that slot is reconnected. Candidate reservation is serialized to keep endpoint
+ * and netgroup selection unique, while network establishment runs concurrently.
  */
 public final class OutboundPeerSupervisor implements AutoCloseable {
 
@@ -67,8 +67,18 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
     private final Object monitor =
             new Object();
 
+    /*
+     * Serializes only AddrMan candidate reservation. Network establishment must
+     * never run under this lock: every empty outbound slot connects in parallel.
+     */
     private final Object connectLock =
             new Object();
+
+    private final Set<PeerAddress> connectingAddresses =
+            new LinkedHashSet<>();
+
+    private final Set<PeerNetGroup> connectingNetGroups =
+            new LinkedHashSet<>();
 
     private final AtomicBoolean started =
             new AtomicBoolean();
@@ -333,25 +343,20 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
                     continue;
                 }
 
-                boolean processed;
+                if (stopping) {
+                    return;
+                }
 
                 /*
-                 * Serialize connection establishment with persistent
-                 * outbound slots. This prevents simultaneous socket
-                 * establishment from racing through AddrMan state.
+                 * Feeler I/O must not block persistent slot reservations. AddrMan
+                 * itself owns its state synchronization; persistent endpoint
+                 * uniqueness is enforced by the reservation sets above.
                  */
-                synchronized (connectLock) {
-
-                    if (stopping) {
-                        return;
-                    }
-
-                    processed =
-                            outboundPeerManager
-                                    .tryTriedCollisionFeeler(
-                                            startHeight
-                                    );
-                }
+                boolean processed =
+                        outboundPeerManager
+                                .tryTriedCollisionFeeler(
+                                        startHeight
+                                );
 
                 if (processed) {
 
@@ -576,37 +581,70 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
     private OutboundPeerConnection connectForSlot(Slot slot, int attempt)
             throws IOException {
 
+        final int startHeight;
+        final PeerAddress reservedAddress;
+
         synchronized (connectLock) {
             if (stopping || !isSlotEmpty(slot)) {
                 return null;
             }
 
-            int startHeight = startHeightSupplier.getAsInt();
+            startHeight = startHeightSupplier.getAsInt();
             if (startHeight < 0) {
                 throw new IllegalStateException(
                         "startHeightSupplier returned negative height: " + startHeight
                 );
             }
 
-            List<PeerAddress> excludedAddresses = occupiedAddresses(slot);
-            Set<PeerNetGroup> excludedNetGroups = occupiedNetGroups(slot);
+            List<PeerAddress> occupied = occupiedAddresses(slot);
+            Set<PeerNetGroup> occupiedGroups = occupiedNetGroups(slot);
+
+            LinkedHashSet<PeerAddress> excludedAddresses = new LinkedHashSet<>(occupied);
+            excludedAddresses.addAll(connectingAddresses);
+
+            LinkedHashSet<PeerNetGroup> excludedNetGroups = new LinkedHashSet<>(occupiedGroups);
+            excludedNetGroups.addAll(connectingNetGroups);
+
+            reservedAddress = outboundPeerManager.selectPersistentCandidate(
+                    List.copyOf(excludedAddresses),
+                    Set.copyOf(excludedNetGroups)
+            );
+
+            connectingAddresses.add(reservedAddress);
+            if (PeerNetGroup.isDiversifiable(reservedAddress)) {
+                connectingNetGroups.add(PeerNetGroup.of(reservedAddress));
+            }
 
             log.log(
                     System.Logger.Level.INFO,
-                    "Outbound reconnect attempt #{0} for slot {1}, startHeight={2}, excludedAddresses={3}, excludedNetGroups={4}",
-                    attempt,
-                    slot.index,
-                    startHeight,
-                    excludedAddresses.size(),
-                    excludedNetGroups.size()
+                    "Outbound slot {0} reserved candidate {1}, role={2}, attempt={3}, connecting={4}, active={5}",
+                    slot.index, reservedAddress, slot.role, attempt,
+                    connectingAddresses.size(), activeConnectionCount()
             );
+        }
 
-            return outboundPeerManager.connectOneWithAddress(
+        try {
+            // Deliberately outside connectLock: TCP + transport + VERSION/VERACK
+            // for different slots must proceed concurrently.
+            return outboundPeerManager.connectReservedPersistentCandidate(
                     startHeight,
-                    excludedAddresses,
-                    excludedNetGroups,
+                    reservedAddress,
                     slot.role
             );
+        } finally {
+            synchronized (connectLock) {
+                connectingAddresses.remove(reservedAddress);
+                rebuildConnectingNetGroups();
+            }
+        }
+    }
+
+    private void rebuildConnectingNetGroups() {
+        connectingNetGroups.clear();
+        for (PeerAddress address : connectingAddresses) {
+            if (PeerNetGroup.isDiversifiable(address)) {
+                connectingNetGroups.add(PeerNetGroup.of(address));
+            }
         }
     }
 
