@@ -57,6 +57,9 @@ public final class SchedulerBlockDownloadSession
     private int pendingCount;
     private int nextPeerIndex;
 
+    private static final long PEER_DIAGNOSTIC_INTERVAL_NANOS = TimeUnit.SECONDS.toNanos(5);
+    private long nextPeerDiagnosticNanos;
+
     private boolean closed;
     private final java.util.function.Consumer<SchedulerBlockDownloadSession> closeListener;
     private final Deque<CompletedBlockDownload> externalCompletions = new ArrayDeque<>();
@@ -901,6 +904,8 @@ public final class SchedulerBlockDownloadSession
                     )
             );
 
+            maybeLogPeerDistribution(peers);
+
             if (state.index < FRONTIER_DIAGNOSTIC_STATE_LIMIT) {
                 log.log(
                         System.Logger.Level.INFO,
@@ -919,6 +924,37 @@ public final class SchedulerBlockDownloadSession
                             % peers.size();
 
         }
+    }
+
+    private void maybeLogPeerDistribution(List<Peer> peers) {
+        long now = System.nanoTime();
+        if (now < nextPeerDiagnosticNanos) return;
+        nextPeerDiagnosticNanos = now + PEER_DIAGNOSTIC_INTERVAL_NANOS;
+        StringBuilder details = new StringBuilder();
+        int eligible = 0;
+        int downloading = 0;
+        for (Peer peer : peers) {
+            if (!peer.isReady()) continue;
+            PeerBlockDownloadState peerState = peerStates.computeIfAbsent(peer, PeerBlockDownloadState::new);
+            int inFlight = inFlightTracker.count(peer);
+            if (inFlight > 0) downloading++;
+            if (peerState.canServe(null, now)) eligible++;
+            if (details.length() > 0) details.append("; ");
+            details.append(diagnosticPeerAddress(peer))
+                    .append(" role=").append(diagnosticPeerRole(peer))
+                    .append(" inFlight=").append(inFlight)
+                    .append(" ok=").append(peerState.completedBlocks())
+                    .append(" fail=").append(peerState.failedBlocks())
+                    .append(" latencyMs=").append(TimeUnit.NANOSECONDS.toMillis(peerState.latencyEwmaNanos()));
+        }
+        log.log(System.Logger.Level.INFO,
+                "IBD BLOCK PEERS: ready={0}, eligible={1}, downloading={2}, active={3}, pending={4}: {5}",
+                peers.size(), eligible, downloading, activeDownloads.size(), pendingCount, details);
+    }
+
+    private String diagnosticPeerRole(Peer peer) {
+        try { return peerManager.roleOf(peer).name(); }
+        catch (RuntimeException ignored) { return "UNMANAGED"; }
     }
 
     /** Choose the earliest serviceable request before choosing its peer. A retry must
@@ -1470,6 +1506,8 @@ public final class SchedulerBlockDownloadSession
         ownedState.inFlight = false;
         ownedState.awaitingAlternativePeer = true;
         ownedState.failures.add(failure);
+        peerStates.computeIfAbsent(expectedPeer, PeerBlockDownloadState::new)
+                .stall(System.nanoTime(), Duration.ofSeconds(2));
 
         /*
          * Keep the current rescue round while at least one READY serviceable peer

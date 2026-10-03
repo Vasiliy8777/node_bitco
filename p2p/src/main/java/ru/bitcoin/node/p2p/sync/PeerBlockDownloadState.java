@@ -86,4 +86,8 @@ public final class PeerBlockDownloadState {
     public long pausedUntilNanos() {
         return pausedUntilNanos;
     }
+
+    public long completedBlocks() { return completedBlocks; }
+    public long failedBlocks() { return failedBlocks; }
+    public long latencyEwmaNanos() { return latencyEwmaNanos; }
 }

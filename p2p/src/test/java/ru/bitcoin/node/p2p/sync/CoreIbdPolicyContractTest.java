@@ -7,6 +7,6 @@ import static org.junit.jupiter.api.Assertions.*;
 class CoreIbdPolicyContractTest {
     @Test
     void usesCorePerPeerTransitLimit() {
-        assertEquals(16, BlockInFlightTracker.DEFAULT_MAX_BLOCKS_PER_PEER);
+        assertEquals(32, BlockInFlightTracker.DEFAULT_MAX_BLOCKS_PER_PEER);
     }
 }

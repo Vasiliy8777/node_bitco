@@ -700,11 +700,13 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
                     return false;
                 }
 
-                if (PeerNetGroup.isDiversifiable(candidateAddress)
-                        && PeerNetGroup.isDiversifiable(otherAddress)
-                        && PeerNetGroup.of(otherAddress).equals(PeerNetGroup.of(candidateAddress))) {
-                    return false;
-                }
+                /*
+                 * Netgroup diversity is a selection preference, not an
+                 * installation requirement. selectPersistentCandidate() already
+                 * prefers another netgroup. If the available address pool cannot
+                 * satisfy that preference, keeping a fully handshaken READY peer
+                 * is better than throwing it away and leaving the slot empty.
+                 */
             }
 
             slot.connection = newConnection;
