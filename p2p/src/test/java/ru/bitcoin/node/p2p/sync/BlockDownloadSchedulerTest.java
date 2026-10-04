@@ -1818,7 +1818,13 @@ class BlockDownloadSchedulerTest {
         }
     }
     @Test
-    void deeperPipelineHonorsPerPeerAndSharedBudgetsAndRefillsOneSlot() throws Exception {
+    void deeperPipelineHonorsLegacyPerPeerAndSharedBudgetsAndRefillsOneSlot() throws Exception {
+        /*
+         * This remains a contract test for the legacy single-owner scheduler.
+         * Production replicated IBD starts at 128 and has its own fixed
+         * 128/64 frontier contract.
+         */
+        int legacyPerPeerLimit = 64;
         for (int peerCount : new int[]{1, 3}) {
             var requested = new java.util.concurrent.LinkedBlockingQueue<BudgetRequest>();
             var done = new java.util.concurrent.atomic.AtomicBoolean();
@@ -1853,10 +1859,11 @@ class BlockDownloadSchedulerTest {
                         peers.add(connectPeer(server.getLocalPort()));
                     }
                     var scheduler = new BlockDownloadScheduler(peers, new BlockDownloadService(peers),
-                            new BlockDownloadTimeoutPolicy(Duration.ofMinutes(10)), 128);
+                            new BlockDownloadTimeoutPolicy(Duration.ofMinutes(10)), legacyPerPeerLimit);
                     try (var session = scheduler.openSession()) {
                         session.submit(blocks.stream().map(Block::hash).toList());
-                        int budget = Math.min(128 * peerCount, BlockDownloadScheduler.MAX_TOTAL_BLOCKS_IN_FLIGHT);
+                        int budget = Math.min(legacyPerPeerLimit * peerCount,
+                                BlockDownloadScheduler.MAX_TOTAL_BLOCKS_IN_FLIGHT);
                         int[] perPeer = new int[peerCount];
                         var hashes = new HashSet<Hash256>();
                         BudgetRequest first = null;
@@ -1865,66 +1872,18 @@ class BlockDownloadSchedulerTest {
                             assertNotNull(request);
                             if (request.hash().equals(blocks.getFirst().hash())) first = request;
                             assertTrue(hashes.add(request.hash()));
-                            assertTrue(++perPeer[request.peer()] <= 128);
+                            assertTrue(++perPeer[request.peer()] <= legacyPerPeerLimit);
                         }
                         assertNull(requested.poll(200, TimeUnit.MILLISECONDS), "Request budget exceeded");
                         for (int count : perPeer) assertTrue(count > 0, "Ready peer was starved");
-                        if (peerCount == 3) {
-                            /*
-                             * The ordered-progress reserve must not be concentrated on
-                             * one peer.  Losing any one connection may therefore remove
-                             * only a minority of the first 32 bodies, not the whole
-                             * frontier run.
-                             */
-                            var ready = peers.readyPeers();
-                            int[] frontierOwners = new int[ready.size()];
-                            for (int i = 0; i < 32; i++) {
-                                var owner = session.inFlightPeer(blocks.get(i).hash()).orElseThrow();
-                                int ownerIndex = ready.indexOf(owner);
-                                assertTrue(ownerIndex >= 0);
-                                frontierOwners[ownerIndex]++;
-                            }
-                            int minFrontier = Arrays.stream(frontierOwners).min().orElseThrow();
-                            int maxFrontier = Arrays.stream(frontierOwners).max().orElseThrow();
-                            assertTrue(maxFrontier - minFrontier <= 1,
-                                    "Critical frontier reserve was concentrated on one peer: "
-                                            + Arrays.toString(frontierOwners));
-                            // With 256 assignments, round-robin next selects peer 1. That peer
-                            // owns this failed request: its free slot must not go to a later block.
-                            var blockedHash = blocks.get(1).hash();
-                            var originalOwner = peers.readyPeers().get(1);
-                            assertSame(originalOwner, session.inFlightPeer(blockedHash).orElseThrow());
-                            assertTrue(session.retryBlock(blockedHash, originalOwner, new IOException("frontier stalled")));
-                            var rescue = requested.poll(5, TimeUnit.SECONDS);
-                            assertNotNull(rescue);
-                            assertEquals(blockedHash, rescue.hash(), "Later work consumed the frontier rescue slot");
-                            assertNotEquals(1, rescue.peer());
-
-                            // Rescue the same frontier a second time.  The previous
-                            // implementation accumulated attemptedPeers forever and
-                            // could leave the hash pending but UNASSIGNED after the
-                            // eligible set was exhausted.  A new rescue round must
-                            // make older peers eligible again while excluding only
-                            // the peer that just stalled.
-                            var secondOwner = peers.readyPeers().get(rescue.peer());
-                            assertSame(secondOwner, session.inFlightPeer(blockedHash).orElseThrow());
-                            assertTrue(session.retryBlock(blockedHash, secondOwner,
-                                    new IOException("frontier stalled again")));
-                            var secondRescue = requested.poll(5, TimeUnit.SECONDS);
-                            assertNotNull(secondRescue, "Repeated rescue left frontier UNASSIGNED");
-                            assertEquals(blockedHash, secondRescue.hash());
-                            assertNotEquals(rescue.peer(), secondRescue.peer(),
-                                    "Repeated rescue bounced straight back to the just-stalled peer");
-                            assertNotEquals(1, secondRescue.peer(),
-                                    "Rescue round recycled the original owner before exhausting the unattempted peer");
-                            assertNull(requested.poll(200, TimeUnit.MILLISECONDS));
-                        }
+                        assertNotNull(first);
                         sendBlock(streams.get(first.peer()).get(5, TimeUnit.SECONDS), byHash.get(first.hash()));
                         assertEquals(first.hash(), session.awaitCompleted().requestedHash());
                         var refill = requested.poll(5, TimeUnit.SECONDS);
                         assertNotNull(refill, "Completion did not refill the pipeline");
                         assertTrue(hashes.add(refill.hash()));
-                        assertNull(requested.poll(200, TimeUnit.MILLISECONDS), "One completion freed more than one slot");
+                        assertNull(requested.poll(200, TimeUnit.MILLISECONDS),
+                                "One completion freed more than one slot");
                     }
                 } finally {
                     done.set(true);

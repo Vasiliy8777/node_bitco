@@ -33,8 +33,8 @@ public final class BlockSyncCoordinator {
      * It is intentionally independent from the per-peer
      * in-flight request limit.
      */
-    private static final int DEFAULT_DOWNLOAD_WINDOW = 1024;
-    private static final int DEFAULT_REFILL_LOW_WATERMARK = 512;
+    private static final int DEFAULT_DOWNLOAD_WINDOW = 128;
+    private static final int DEFAULT_REFILL_LOW_WATERMARK = 64;
 
     /*
      * Block-index materialization is deliberately larger than the logical
@@ -514,27 +514,21 @@ public final class BlockSyncCoordinator {
                 validationNanos = 0;
             }
             /*
-             * Shared sliding body cache.  The first pass exposes a complete
-             * download window.  For the production 1024-block IBD window we
-             * then refill in roughly half-window chunks instead of submitting
-             * one new network request after every connected block.
+             * Replicated IBD frontier cache. Production exposes 128 unique
+             * consecutive heights and refills by 64 after half the frontier has
+             * been connected. The P2P session mirrors those same hashes across
+             * up to eight FULL_RELAY peers; the logical chain window therefore
+             * stays bounded while no single peer owns ordered progress.
              *
-             * Small/custom windows keep the old continuously-sliding behaviour
-             * because tests and bounded callers use them to model exact horizon
-             * semantics.
+             * Small/custom windows retain continuously-sliding behaviour for
+             * deterministic bounded tests.
              */
-            int refillLowWatermark = downloadWindow >= DEFAULT_DOWNLOAD_WINDOW
-                    ? Math.min(DEFAULT_REFILL_LOW_WATERMARK, downloadWindow / 2)
-                    : Math.max(0, downloadWindow - 1);
-            int exposedAhead = Math.max(0, nextToExpose - nextToProcess);
-            boolean refill = nextToExpose == 0 || exposedAhead <= refillLowWatermark;
-            int horizonEnd = nextToExpose;
-            if (refill) {
-                horizonEnd = Math.min(
-                        blocksToDownload.size(),
-                        Math.addExact(nextToProcess, downloadWindow)
-                );
-            }
+            int horizonEnd = exposureHorizonEnd(
+                    nextToProcess,
+                    nextToExpose,
+                    blocksToDownload.size(),
+                    downloadWindow
+            );
 
             List<BlockDownloadRequest> missingToSubmit = new ArrayList<>();
             while (nextToExpose < horizonEnd) {
@@ -596,10 +590,19 @@ public final class BlockSyncCoordinator {
             }
 
             boolean processedAny = false;
-            List<BlockIndex> connectIndexes = new ArrayList<>(INITIAL_SYNC_CONNECT_BATCH);
-            List<AvailableBlock> connectBlocks = new ArrayList<>(INITIAL_SYNC_CONNECT_BATCH);
+            /*
+             * Production replicated IBD rotates a 128-block frontier exactly
+             * at the half-window boundary.  Even when all 128 bodies arrive at
+             * once, connect at most 64 before exposing the next 64 heights.
+             * Small/custom test windows retain the historical batch size.
+             */
+            int connectBatchLimit = downloadWindow >= DEFAULT_DOWNLOAD_WINDOW
+                    ? Math.min(INITIAL_SYNC_CONNECT_BATCH, DEFAULT_REFILL_LOW_WATERMARK)
+                    : INITIAL_SYNC_CONNECT_BATCH;
+            List<BlockIndex> connectIndexes = new ArrayList<>(connectBatchLimit);
+            List<AvailableBlock> connectBlocks = new ArrayList<>(connectBatchLimit);
             int scan = nextToProcess;
-            while (scan < blocksToDownload.size() && connectBlocks.size() < INITIAL_SYNC_CONNECT_BATCH) {
+            while (scan < blocksToDownload.size() && connectBlocks.size() < connectBatchLimit) {
                 BlockIndex index = blocksToDownload.get(scan);
                 AvailableBlock available = availableBlocks.get(index.hash());
                 if (available == null) break;
@@ -788,6 +791,28 @@ public final class BlockSyncCoordinator {
     }
 
     /** A disconnect between owner lookup and logging must not abort synchronization. */
+    static int exposureHorizonEnd(
+            int nextToProcess,
+            int nextToExpose,
+            int totalBlocks,
+            int downloadWindow
+    ) {
+        if (nextToProcess < 0 || nextToExpose < nextToProcess
+                || totalBlocks < nextToExpose || downloadWindow <= 0) {
+            throw new IllegalArgumentException("Invalid IBD exposure window state");
+        }
+        int frontierWindow = downloadWindow >= DEFAULT_DOWNLOAD_WINDOW
+                ? Math.min(DEFAULT_DOWNLOAD_WINDOW, downloadWindow)
+                : downloadWindow;
+        int refillLowWatermark = downloadWindow >= DEFAULT_DOWNLOAD_WINDOW
+                ? Math.min(DEFAULT_REFILL_LOW_WATERMARK, frontierWindow / 2)
+                : Math.max(0, frontierWindow - 1);
+        int exposedAhead = nextToExpose - nextToProcess;
+        boolean refill = nextToExpose == 0 || exposedAhead <= refillLowWatermark;
+        if (!refill) return nextToExpose;
+        return Math.min(totalBlocks, Math.addExact(nextToProcess, frontierWindow));
+    }
+
     static String diagnosticPeerAddress(Peer peer) {
         try {
             return String.valueOf(peer.remoteAddress());

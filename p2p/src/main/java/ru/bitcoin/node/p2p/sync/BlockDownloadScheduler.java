@@ -39,7 +39,7 @@ public final class BlockDownloadScheduler {
      * (currently BIP152) can satisfy the same logical download instead of
      * creating a second, independent block-download lifecycle.
      */
-    private final Set<SchedulerBlockDownloadSession> activeSessions =
+    private final Set<BlockDownloadSession> activeSessions =
             ConcurrentHashMap.newKeySet();
 
     public BlockDownloadScheduler(
@@ -80,14 +80,22 @@ public final class BlockDownloadScheduler {
 
     public BlockDownloadSession openSession() {
 
-        SchedulerBlockDownloadSession session =
-                new SchedulerBlockDownloadSession(
-                        peerManager,
-                        blockDownloadService,
-                        timeoutPolicy,
-                        this::sessionClosed,
-                        maxBlocksInFlightPerPeer
-                );
+        BlockDownloadSession session;
+        if (maxBlocksInFlightPerPeer >= ReplicatedFrontierBlockDownloadSession.CACHE_BLOCKS_PER_PEER) {
+            session = new ReplicatedFrontierBlockDownloadSession(
+                    peerManager,
+                    blockDownloadService,
+                    this::sessionClosed
+            );
+        } else {
+            session = new SchedulerBlockDownloadSession(
+                    peerManager,
+                    blockDownloadService,
+                    timeoutPolicy,
+                    ignored -> sessionClosed(ignored),
+                    maxBlocksInFlightPerPeer
+            );
+        }
 
         activeSessions.add(
                 session
@@ -108,10 +116,11 @@ public final class BlockDownloadScheduler {
         Objects.requireNonNull(sourcePeer, "sourcePeer");
         Objects.requireNonNull(block, "block");
 
-        for (SchedulerBlockDownloadSession session : activeSessions) {
-            if (session.acceptExternalBlock(sourcePeer, block)) {
-                return true;
-            }
+        for (BlockDownloadSession session : activeSessions) {
+            if (session instanceof SchedulerBlockDownloadSession scheduler
+                    && scheduler.acceptExternalBlock(sourcePeer, block)) return true;
+            if (session instanceof ReplicatedFrontierBlockDownloadSession replicated
+                    && replicated.acceptExternalBlock(sourcePeer, block)) return true;
         }
 
         return false;
@@ -127,10 +136,11 @@ public final class BlockDownloadScheduler {
     ) {
         Objects.requireNonNull(blockHash, "blockHash");
 
-        for (SchedulerBlockDownloadSession session : activeSessions) {
-            if (session.hasPendingBlock(blockHash)) {
-                return true;
-            }
+        for (BlockDownloadSession session : activeSessions) {
+            if (session instanceof SchedulerBlockDownloadSession scheduler
+                    && scheduler.hasPendingBlock(blockHash)) return true;
+            if (session instanceof ReplicatedFrontierBlockDownloadSession replicated
+                    && replicated.hasPendingBlock(blockHash)) return true;
         }
 
         return false;
@@ -146,17 +156,18 @@ public final class BlockDownloadScheduler {
     ) {
         Objects.requireNonNull(blockHash, "blockHash");
 
-        for (SchedulerBlockDownloadSession session : activeSessions) {
-            if (session.hasSubmittedBlock(blockHash)) {
-                return true;
-            }
+        for (BlockDownloadSession session : activeSessions) {
+            if (session instanceof SchedulerBlockDownloadSession scheduler
+                    && scheduler.hasSubmittedBlock(blockHash)) return true;
+            if (session instanceof ReplicatedFrontierBlockDownloadSession replicated
+                    && replicated.hasSubmittedBlock(blockHash)) return true;
         }
 
         return false;
     }
 
     private void sessionClosed(
-            SchedulerBlockDownloadSession session
+            BlockDownloadSession session
     ) {
         activeSessions.remove(
                 session

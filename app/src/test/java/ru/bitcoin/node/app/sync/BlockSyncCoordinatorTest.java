@@ -7178,4 +7178,16 @@ class BlockSyncCoordinatorTest {
                 "Could not construct regtest header"
         );
     }
+    @Test
+    void productionMaterializedWindowExposesOnly128AndRefillsAt64() {
+        int total = 1024;
+        int configuredWindow = 1024;
+
+        assertEquals(128, BlockSyncCoordinator.exposureHorizonEnd(0, 0, total, configuredWindow));
+        assertEquals(128, BlockSyncCoordinator.exposureHorizonEnd(63, 128, total, configuredWindow));
+        assertEquals(192, BlockSyncCoordinator.exposureHorizonEnd(64, 128, total, configuredWindow));
+        assertEquals(256, BlockSyncCoordinator.exposureHorizonEnd(128, 192, total, configuredWindow));
+    }
+
+
 }
