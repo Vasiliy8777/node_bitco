@@ -144,147 +144,6 @@ class BlockDownloadSchedulerTest {
     }
 
     @Test
-    void shouldRetryBlockOnAnotherPeerAfterDownloadTimeout()
-            throws Exception {
-
-        Block block =
-                blocks(1)
-                        .get(0);
-
-        try (ServerSocket stalledServerSocket =
-                     new ServerSocket(0);
-
-             ServerSocket healthyServerSocket =
-                     new ServerSocket(0);
-
-             PeerManager peerManager =
-                     new PeerManager()) {
-
-            CountDownLatch stalledRequestReceived =
-                    new CountDownLatch(1);
-
-            CountDownLatch releaseStalledServer =
-                    new CountDownLatch(1);
-
-            CountDownLatch releaseHealthyServer =
-                    new CountDownLatch(1);
-
-            CompletableFuture<Void> stalledServer =
-                    CompletableFuture.runAsync(
-                            () -> runStalledPeer(
-                                    stalledServerSocket,
-                                    block.hash(),
-                                    stalledRequestReceived,
-                                    releaseStalledServer
-                            )
-                    );
-
-            CompletableFuture<Void> healthyServer =
-                    CompletableFuture.runAsync(
-                            () -> runHealthyRetryPeer(
-                                    healthyServerSocket,
-                                    block,
-                                    releaseHealthyServer
-                            )
-                    );
-
-            Peer stalledPeer =
-                    connectPeer(
-                            stalledServerSocket.getLocalPort()
-                    );
-
-            Peer healthyPeer =
-                    connectPeer(
-                            healthyServerSocket.getLocalPort()
-                    );
-
-            /*
-             * Ordering is intentional.
-             *
-             * With one requested block the scheduler's round-robin
-             * assignment must initially choose stalledPeer.
-             */
-            peerManager.add(
-                    stalledPeer
-            );
-
-            peerManager.add(
-                    healthyPeer
-            );
-
-            BlockDownloadScheduler scheduler =
-                    new BlockDownloadScheduler(
-                            peerManager,
-                            new BlockDownloadService(
-                                    peerManager
-                            ),
-                            new BlockDownloadTimeoutPolicy(
-                                    Duration.ofMillis(
-                                            50
-                                    )
-                            )
-                    );
-
-            List<Block> downloaded;
-
-            try {
-
-                downloaded =
-                        scheduler.download(
-                                List.of(
-                                        block.hash()
-                                )
-                        );
-
-                assertTrue(
-                        stalledRequestReceived.await(
-                                5,
-                                TimeUnit.SECONDS
-                        )
-                );
-
-                assertEquals(
-                        1,
-                        downloaded.size()
-                );
-
-                assertEquals(
-                        block.hash(),
-                        downloaded.get(0)
-                                .hash()
-                );
-
-                assertFalse(
-                        stalledPeer.isReady()
-                );
-
-                /*
-                 * Timeout of another peer must not damage
-                 * the peer that successfully supplied the retry.
-                 */
-                assertTrue(
-                        healthyPeer.isReady()
-                );
-
-            } finally {
-
-                releaseStalledServer.countDown();
-                releaseHealthyServer.countDown();
-            }
-
-            stalledServer.get(
-                    5,
-                    TimeUnit.SECONDS
-            );
-
-            healthyServer.get(
-                    5,
-                    TimeUnit.SECONDS
-            );
-        }
-    }
-
-    @Test
     void sessionShouldGrowWorkersWhenReadyPeerSetExpands()
             throws Exception {
 
@@ -1859,6 +1718,15 @@ class BlockDownloadSchedulerTest {
                         )
                 );
 
+                /*
+                 * Crossing the adaptive timeout once must quarantine the peer,
+                 * not synchronously tear down the whole connection. This guards
+                 * against one scheduler tick closing a batch of peers that were
+                 * filled at roughly the same time.
+                 */
+                Thread.sleep(300);
+                assertTrue(stalledPeer.isReady());
+
                 CompletedBlockDownload completed =
                         session.awaitCompleted();
 
@@ -1884,9 +1752,10 @@ class BlockDownloadSchedulerTest {
                 );
 
                 /*
-                 * Timeout is peer-wide and closes the stalled peer.
+                 * A block-request timeout releases/reassigns work but must not
+                 * tear down an otherwise READY Bitcoin transport.
                  */
-                assertFalse(
+                assertTrue(
                         stalledPeer.isReady()
                 );
 

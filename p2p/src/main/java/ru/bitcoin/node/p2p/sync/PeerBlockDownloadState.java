@@ -17,6 +17,8 @@ public final class PeerBlockDownloadState {
     private long pausedUntilNanos;
     private long completedBlocks;
     private long failedBlocks;
+    private long timeoutProbeCompletedBlocks = -1;
+    private long timeoutProbeStartedNanos;
     private long latencyEwmaNanos = Duration.ofMillis(250).toNanos();
 
     public PeerBlockDownloadState(Peer peer) {
@@ -52,6 +54,8 @@ public final class PeerBlockDownloadState {
         completedBlocks++;
         downloadingSinceNanos = 0;
         stallingSinceNanos = 0;
+        timeoutProbeCompletedBlocks = -1;
+        timeoutProbeStartedNanos = 0;
         if (height != null) lastCommonHeight = Math.max(lastCommonHeight, height);
         latencyEwmaNanos = (latencyEwmaNanos * 7 + Math.max(1, latency)) / 8;
     }
@@ -66,6 +70,31 @@ public final class PeerBlockDownloadState {
         if (stallingSinceNanos == 0) stallingSinceNanos = now;
         pausedUntilNanos = Math.max(pausedUntilNanos, now + cooldown.toNanos());
     }
+
+
+    /**
+     * Two-stage timeout confirmation. The first timeout only quarantines the peer.
+     * A peer is disconnectable only if it makes no successful block progress for
+     * the entire confirmation grace period.
+     */
+    public boolean confirmDownloadTimeout(long now, Duration grace) {
+        Objects.requireNonNull(grace, "grace");
+        if (timeoutProbeStartedNanos == 0) {
+            timeoutProbeStartedNanos = now;
+            timeoutProbeCompletedBlocks = completedBlocks;
+            stall(now, grace);
+            return false;
+        }
+        if (completedBlocks != timeoutProbeCompletedBlocks) {
+            timeoutProbeStartedNanos = 0;
+            timeoutProbeCompletedBlocks = -1;
+            stallingSinceNanos = 0;
+            return false;
+        }
+        return now - timeoutProbeStartedNanos >= grace.toNanos();
+    }
+
+    public boolean timeoutProbeActive() { return timeoutProbeStartedNanos != 0; }
 
     public long score(int inFlight) {
         return latencyEwmaNanos * (long) (inFlight + 1) + failedBlocks * Duration.ofMillis(100).toNanos();

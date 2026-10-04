@@ -488,13 +488,26 @@ public final class BlockSyncCoordinator {
             long now = System.nanoTime();
             if (now - sampledAt >= java.util.concurrent.TimeUnit.SECONDS.toNanos(5)) {
                 BlockIndex frontier = blocksToDownload.get(nextToProcess);
+                int processedSinceSample = nextToProcess - sampledProcessed;
+                boolean frontierAvailable = availableBlocks.containsKey(frontier.hash());
+                String frontierPeer = session.inFlightPeer(frontier.hash())
+                        .map(BlockSyncCoordinator::diagnosticPeerAddress).orElse("UNASSIGNED");
                 log.log(System.Logger.Level.INFO,
                         "IBD pipeline: intervalMs={0}, received={1}, processed={2}, buffered={3}, pending={4}, connectBatchMs={5}, frontierHeight={6}, frontierAvailable={7}, frontierPeer={8}",
                         java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(now - sampledAt),
-                        receivedSinceSample, nextToProcess - sampledProcessed, availableBlocks.size(),
+                        receivedSinceSample, processedSinceSample, availableBlocks.size(),
                         session.pendingCount(), java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(validationNanos),
-                        frontier.height(), availableBlocks.containsKey(frontier.hash()), session.inFlightPeer(frontier.hash())
-                                .map(BlockSyncCoordinator::diagnosticPeerAddress).orElse("UNASSIGNED"));
+                        frontier.height(), frontierAvailable, frontierPeer);
+                if (processedSinceSample == 0) {
+                    String zeroCause = !frontierAvailable
+                            ? (receivedSinceSample == 0 ? "NETWORK_OR_FRONTIER_STARVATION" : "FRONTIER_GAP_WITH_BUFFERED_DOWNLOADS")
+                            : (validationNanos > 0 ? "VALIDATION_OR_STORAGE" : "ORDERED_PIPELINE_WAIT");
+                    log.log(System.Logger.Level.WARNING,
+                            "IBD ZERO-RATE DIAG: cause={0}, received={1}, buffered={2}, pending={3}, frontierHeight={4}, frontierAvailable={5}, frontierPeer={6}, connectBatchMs={7}",
+                            zeroCause, receivedSinceSample, availableBlocks.size(), session.pendingCount(),
+                            frontier.height(), frontierAvailable, frontierPeer,
+                            java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(validationNanos));
+                }
                 sampledAt = now;
                 sampledProcessed = nextToProcess;
                 receivedSinceSample = 0;

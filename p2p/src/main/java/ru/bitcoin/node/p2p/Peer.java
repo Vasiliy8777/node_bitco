@@ -1074,11 +1074,18 @@ public final class Peer implements AutoCloseable {
     @Override
     public void close()
             throws IOException {
+        close(new PeerCloseException(
+                PeerCloseReason.LOCAL_CLOSE,
+                "Peer.close",
+                "Peer closed"
+        ));
+    }
 
-        IOException closedFailure =
-                new IOException(
-                        "Peer closed"
-                );
+    /** Close this peer while preserving the local shutdown reason for supervisors/diagnostics. */
+    public void close(IOException closedFailure)
+            throws IOException {
+
+        java.util.Objects.requireNonNull(closedFailure, "closedFailure");
 
         List<PeerCloseListener> listeners;
 

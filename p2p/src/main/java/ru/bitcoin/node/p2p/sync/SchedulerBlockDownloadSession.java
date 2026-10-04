@@ -34,6 +34,8 @@ public final class SchedulerBlockDownloadSession
                     250
             );
 
+    private static final Duration TIMEOUT_CONFIRMATION_GRACE = Duration.ofSeconds(2);
+
     private final BlockDownloadTimeoutPolicy timeoutPolicy;
 
     private final BlockDownloadTimeoutEvaluator timeoutEvaluator;
@@ -1475,36 +1477,41 @@ public final class SchedulerBlockDownloadSession
             Peer peer =
                     peerEvaluation.peer();
 
-            peerStates.computeIfAbsent(peer, PeerBlockDownloadState::new)
-                    .stall(System.nanoTime(), Duration.ofSeconds(2));
+            long now = System.nanoTime();
+            PeerBlockDownloadState peerState =
+                    peerStates.computeIfAbsent(peer, PeerBlockDownloadState::new);
+
+            if (!peerState.confirmDownloadTimeout(now, TIMEOUT_CONFIRMATION_GRACE)) {
+                log.log(System.Logger.Level.WARNING,
+                        "IBD peer timeout probation: peer={0}, age={1}, timeout={2}, grace={3}ms; "
+                                + "new assignments paused while existing requests may still prove progress",
+                        diagnosticPeerAddress(peer), evaluation.downloadingAge(), evaluation.timeout(),
+                        TIMEOUT_CONFIRMATION_GRACE.toMillis());
+                continue;
+            }
+
             IOException failure =
                     new IOException(
-                            "Peer block download timed out after "
+                            "Confirmed peer block download timeout after "
                                     + evaluation.downloadingAge()
-                                    + " (timeout "
-                                    + evaluation.timeout()
-                                    + ")"
+                                    + " (timeout " + evaluation.timeout()
+                                    + ", confirmation grace " + TIMEOUT_CONFIRMATION_GRACE + ")"
                     );
 
-            released =
-                    Math.addExact(
-                            released,
-                            failPeerDownloads(
-                                    peer,
-                                    failure
-                            )
-                    );
+            /*
+             * A block-request timeout is not proof that the Bitcoin transport is dead.
+             * Release this peer's outstanding block ownership and penalize/cool it down,
+             * but keep a READY TCP peer connected. The managed reader remains the single
+             * authority that closes a peer on EOF/transport failure. This prevents an
+             * overloaded or temporarily slow peer from causing pool-wide reconnect churn.
+             */
+            released = Math.addExact(released, failPeerDownloads(peer, failure));
+            peerState.stall(now, Duration.ofSeconds(2));
 
-            try {
-
-                peer.close();
-
-            } catch (IOException closeException) {
-
-                failure.addSuppressed(
-                        closeException
-                );
-            }
+            log.log(System.Logger.Level.WARNING,
+                    "IBD peer block timeout confirmed: peer={0}, released={1}; "
+                            + "keeping READY transport connected and cooling scheduler assignments",
+                    diagnosticPeerAddress(peer), released);
         }
 
         return released;

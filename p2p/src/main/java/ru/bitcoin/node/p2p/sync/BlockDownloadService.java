@@ -3,6 +3,12 @@ package ru.bitcoin.node.p2p.sync;
 import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.p2p.Peer;
 import ru.bitcoin.node.p2p.PeerManager;
+import ru.bitcoin.node.p2p.PeerCloseException;
+import ru.bitcoin.node.p2p.PeerCloseReason;
+
+import java.io.EOFException;
+import java.net.SocketException;
+import java.nio.channels.ClosedChannelException;
 import ru.bitcoin.node.protocol.block.Block;
 
 import java.io.IOException;
@@ -117,7 +123,9 @@ public final class BlockDownloadService {
             }
 
             if (cause instanceof IOException ioException) {
-                closeAndRemove(peer, ioException);
+                if (isFatalTransportFailure(peer, ioException)) {
+                    closeAndRemove(peer, ioException, classifyTransportFailure(ioException));
+                }
                 result.completeExceptionally(ioException);
                 return;
             }
@@ -129,7 +137,9 @@ public final class BlockDownloadService {
 
             IOException ioException =
                     new IOException("Block download failed", cause);
-            closeAndRemove(peer, ioException);
+            if (!peer.isReady()) {
+                closeAndRemove(peer, ioException, PeerCloseReason.LOCAL_REQUEST_FAILURE);
+            }
             result.completeExceptionally(ioException);
         });
 
@@ -148,14 +158,42 @@ public final class BlockDownloadService {
         return result;
     }
 
-    private void closeAndRemove(Peer peer, IOException failure) {
+    private void closeAndRemove(Peer peer, IOException failure, PeerCloseReason reason) {
         try {
-            peer.close();
+            peer.close(new PeerCloseException(
+                    reason,
+                    "BlockDownloadService",
+                    "Closing peer after fatal block transport failure: " + failure,
+                    failure
+            ));
         } catch (IOException closeException) {
             failure.addSuppressed(closeException);
         } finally {
             peerManager.remove(peer);
         }
+    }
+
+    private static boolean isFatalTransportFailure(Peer peer, IOException failure) {
+        if (!peer.isReady()) return true;
+        Throwable current = failure;
+        while (current != null) {
+            if (current instanceof EOFException
+                    || current instanceof SocketException
+                    || current instanceof ClosedChannelException) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    private static PeerCloseReason classifyTransportFailure(IOException failure) {
+        Throwable current = failure;
+        while (current != null) {
+            if (current instanceof EOFException) return PeerCloseReason.REMOTE_EOF;
+            current = current.getCause();
+        }
+        return PeerCloseReason.TRANSPORT_READ_FAILURE;
     }
 
     private static Throwable unwrap(Throwable failure) {
@@ -206,34 +244,10 @@ public final class BlockDownloadService {
             throw exception;
 
         } catch (IOException exception) {
-
-            /*
-             * Transport/protocol failure makes this peer
-             * unavailable for subsequent downloads.
-             */
-            try {
-                peer.close();
-            } catch (IOException closeException) {
-                exception.addSuppressed(
-                        closeException
-                );
-            } finally {
-                /*
-                 * The background reader owns the original CLOSED transition.
-                 * Its dispatcher is failed before Peer close-listeners are
-                 * notified, so this download thread can wake up while the
-                 * PeerManager close callback is still pending.
-                 *
-                 * Remove synchronously here as well. PeerManager.remove() is
-                 * idempotent, therefore the eventual close callback remains
-                 * safe. This guarantees that a failed download never returns
-                 * or retries with a CLOSED peer still exposed by the manager.
-                 */
-                peerManager.remove(
-                        peer
-                );
+            /* A request-scoped IOException is not automatically a dead TCP peer. */
+            if (isFatalTransportFailure(peer, exception)) {
+                closeAndRemove(peer, exception, classifyTransportFailure(exception));
             }
-
             throw exception;
         }
     }

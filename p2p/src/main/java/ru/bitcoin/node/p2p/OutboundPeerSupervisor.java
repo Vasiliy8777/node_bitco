@@ -10,6 +10,8 @@ import java.util.List;
 import java.util.Objects;
 import java.util.LinkedHashSet;
 import java.util.Set;
+import java.util.EnumMap;
+import java.io.EOFException;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.IntSupplier;
@@ -87,6 +89,10 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
             new ArrayList<>();
 
     private volatile boolean stopping;
+
+    private final EnumMap<PeerCloseReason, Long> closeReasonCounts =
+            new EnumMap<>(PeerCloseReason.class);
+    private long successfulReplacements;
 
     /*
      * Dedicated worker for short-lived feeler connections.
@@ -549,12 +555,11 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
                     return;
                 }
 
+                synchronized (monitor) { successfulReplacements++; }
                 log.log(
                         System.Logger.Level.INFO,
-                        "Outbound peer reconnected successfully for slot {0} on attempt #{1}: {2}",
-                        slot.index,
-                        attempt,
-                        newConnection.address()
+                        "Outbound peer reconnected successfully for slot {0} on attempt #{1}: {2}; {3}",
+                        slot.index, attempt, newConnection.address(), poolDiagnostics()
                 );
                 return;
 
@@ -571,6 +576,12 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
                         exception.toString()
                 );
 
+                /*
+                 * Back off after every failed replacement attempt. Empty slots are
+                 * independent and reconnect in parallel, so a per-slot backoff does not
+                 * serialize pool recovery and prevents reconnect storms against a weak
+                 * AddrMan candidate set.
+                 */
                 delayBeforeNextAttempt = delayBeforeNextAttempt.isZero()
                         ? initialBackoff
                         : nextBackoff(delayBeforeNextAttempt);
@@ -743,22 +754,44 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
         }
 
         if (currentConnectionClosed) {
-            if (cause == null) {
-                log.log(
-                        System.Logger.Level.WARNING,
-                        "Outbound peer disconnected from slot {0}: {1}",
-                        slot.index,
-                        closedConnection.address()
-                );
-            } else {
-                log.log(
-                        System.Logger.Level.WARNING,
-                        "Outbound peer disconnected from slot {0}: {1}; cause: {2}",
-                        slot.index,
-                        closedConnection.address(),
-                        cause.toString()
-                );
+            PeerCloseReason reason = classifyCloseReason(cause);
+            synchronized (monitor) {
+                closeReasonCounts.merge(reason, 1L, Long::sum);
             }
+            String origin = cause instanceof PeerCloseException peerClose
+                    ? peerClose.origin() : "transport/reader";
+            log.log(
+                    System.Logger.Level.WARNING,
+                    "Outbound peer disconnected from slot {0}: {1}; reason={2}; origin={3}; cause={4}; {5}",
+                    slot.index, closedConnection.address(), reason, origin,
+                    cause == null ? "<none>" : cause.toString(), poolDiagnostics()
+            );
+        }
+    }
+
+    private PeerCloseReason classifyCloseReason(Throwable cause) {
+        if (cause instanceof PeerCloseException peerClose) return peerClose.reason();
+        Throwable current = cause;
+        while (current != null) {
+            if (current instanceof EOFException) return PeerCloseReason.REMOTE_EOF;
+            current = current.getCause();
+        }
+        return cause == null ? PeerCloseReason.LOCAL_CLOSE : PeerCloseReason.TRANSPORT_READ_FAILURE;
+    }
+
+    private String poolDiagnostics() {
+        int connecting;
+        synchronized (connectLock) { connecting = connectingAddresses.size(); }
+        synchronized (monitor) {
+            int active = 0;
+            for (Slot candidate : slots) if (candidate.connection != null) active++;
+            int target = slots.size();
+            return "PEER POOL target=" + target
+                    + " active=" + active
+                    + " connecting=" + connecting
+                    + " empty=" + Math.max(0, target - active - connecting)
+                    + " replacements=" + successfulReplacements
+                    + " closes=" + closeReasonCounts;
         }
     }
 

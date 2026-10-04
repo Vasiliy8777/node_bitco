@@ -38,6 +38,9 @@ public final class NodeLifecycleService
                     new byte[Hash256.LENGTH]
             );
 
+    private static final Duration HEADER_RACE_RETRY_BACKOFF =
+            Duration.ofSeconds(1);
+
     private final NodeValidationService validationService;
     private final NodeSyncInfrastructure syncInfrastructure;
 
@@ -507,7 +510,31 @@ public final class NodeLifecycleService
                         connectFailure
                 );
 
-                throw failure;
+                if (isStoppingOrStopped()) {
+                    throw connectFailure;
+                }
+
+                /*
+                 * An exhausted race means only that this particular set of
+                 * candidates failed right now. It is not a terminal IBD
+                 * condition. AddrMan keeps attempt history and the next race
+                 * can select a different/recovered endpoint. A genuinely empty
+                 * AddrMan remains terminal so regtest/misconfiguration fails
+                 * fast instead of spinning forever.
+                 */
+                if (isNoKnownHeaderPeerFailure(connectFailure)) {
+                    throw failure;
+                }
+
+                log.warn(
+                        "HEADER PEER RACE exhausted at bestHeaderHeight={}; retrying in {} ms: {}",
+                        syncInfrastructure.headerChainState().bestHeaderTip().height(),
+                        HEADER_RACE_RETRY_BACKOFF.toMillis(),
+                        connectFailure.toString()
+                );
+
+                waitForHeaderRaceRetry();
+                continue;
             }
 
             Peer peer =
@@ -564,6 +591,38 @@ public final class NodeLifecycleService
                 );
                 handleHeaderSyncPeerFailure(connection, peer, failedAddresses, failure, syncFailure);
             }
+        }
+    }
+
+
+    private static boolean isNoKnownHeaderPeerFailure(Throwable failure) {
+        if (failure == null) {
+            return false;
+        }
+        String message = failure.getMessage();
+        if (message != null && message.contains("No known peer addresses available")) {
+            return true;
+        }
+        if (isNoKnownHeaderPeerFailure(failure.getCause())) {
+            return true;
+        }
+        for (Throwable suppressed : failure.getSuppressed()) {
+            if (isNoKnownHeaderPeerFailure(suppressed)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void waitForHeaderRaceRetry() throws IOException {
+        try {
+            Thread.sleep(HEADER_RACE_RETRY_BACKOFF.toMillis());
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IOException(
+                    "Interrupted while waiting to retry header peer race",
+                    interrupted
+            );
         }
     }
 
