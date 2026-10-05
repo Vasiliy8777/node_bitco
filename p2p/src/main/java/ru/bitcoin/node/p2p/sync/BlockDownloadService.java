@@ -158,6 +158,43 @@ public final class BlockDownloadService {
         return result;
     }
 
+
+    /** Batch variant: one GETDATA per peer while preserving request-scoped failure semantics. */
+    public java.util.Map<Hash256, CompletableFuture<Block>> downloadBatchAsync(
+            Peer peer, List<Hash256> blockHashes
+    ) {
+        Objects.requireNonNull(peer, "peer");
+        Objects.requireNonNull(blockHashes, "blockHashes");
+        if (!peer.isReady()) {
+            java.util.LinkedHashMap<Hash256, CompletableFuture<Block>> failed = new java.util.LinkedHashMap<>();
+            IOException cause = new IOException("Peer is not ready for replicated block batch");
+            for (Hash256 hash : blockHashes) failed.put(hash, CompletableFuture.failedFuture(cause));
+            return failed;
+        }
+        java.util.Map<Hash256, CompletableFuture<Block>> network =
+                new BlockSynchronizer(peer).downloadBatchAsync(blockHashes);
+        java.util.LinkedHashMap<Hash256, CompletableFuture<Block>> results = new java.util.LinkedHashMap<>();
+        java.util.concurrent.atomic.AtomicBoolean fatalClosed = new java.util.concurrent.atomic.AtomicBoolean();
+        network.forEach((hash, upstream) -> {
+            CompletableFuture<Block> result = new CompletableFuture<>();
+            upstream.whenComplete((block, failure) -> {
+                if (failure == null) { result.complete(block); return; }
+                Throwable cause = unwrap(failure);
+                if (cause instanceof java.util.concurrent.CancellationException) { result.cancel(false); return; }
+                if (cause instanceof IOException io) {
+                    if (isFatalTransportFailure(peer, io) && fatalClosed.compareAndSet(false, true))
+                        closeAndRemove(peer, io, classifyTransportFailure(io));
+                    result.completeExceptionally(io);
+                    return;
+                }
+                result.completeExceptionally(cause);
+            });
+            result.whenComplete((b, f) -> { if (result.isCancelled()) upstream.cancel(false); });
+            results.put(hash, result);
+        });
+        return java.util.Collections.unmodifiableMap(results);
+    }
+
     private void closeAndRemove(Peer peer, IOException failure, PeerCloseReason reason) {
         try {
             peer.close(new PeerCloseException(

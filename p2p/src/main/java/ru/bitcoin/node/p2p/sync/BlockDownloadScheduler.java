@@ -85,6 +85,7 @@ public final class BlockDownloadScheduler {
             session = new ReplicatedFrontierBlockDownloadSession(
                     peerManager,
                     blockDownloadService,
+                    timeoutPolicy,
                     this::sessionClosed
             );
         } else {

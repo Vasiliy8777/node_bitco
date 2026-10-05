@@ -142,6 +142,59 @@ public final class BlockSynchronizer {
         return result;
     }
 
+
+    /**
+     * Registers a set of block waits first and then sends one GETDATA carrying
+     * all hashes. This is the wire-efficient path used by replicated IBD.
+     */
+    public java.util.Map<Hash256, CompletableFuture<Block>> downloadBatchAsync(
+            List<Hash256> blockHashes
+    ) {
+        Objects.requireNonNull(blockHashes, "blockHashes");
+        if (blockHashes.isEmpty()) return java.util.Map.of();
+
+        PeerMessageDispatcher dispatcher = peer.messageDispatcher();
+        java.util.LinkedHashMap<Hash256, CompletableFuture<Block>> results = new java.util.LinkedHashMap<>();
+        java.util.ArrayList<InventoryVector> inventory = new java.util.ArrayList<>();
+
+        try {
+            for (Hash256 hash : blockHashes) {
+                Objects.requireNonNull(hash, "blockHash");
+                CompletableFuture<Block> source = dispatcher.registerBlock(hash);
+                CompletableFuture<Block> result = new CompletableFuture<>();
+                results.put(hash, result);
+
+                source.whenComplete((block, failure) -> {
+                    if (failure == null) result.complete(block);
+                    else {
+                        Throwable cause = unwrapCompletionFailure(failure);
+                        if (cause instanceof IOException) result.completeExceptionally(cause);
+                        else if (cause instanceof RuntimeException runtimeException) result.completeExceptionally(runtimeException);
+                        else result.completeExceptionally(new IOException("Block download failed", cause));
+                    }
+                });
+                result.whenComplete((ignoredBlock, ignoredFailure) -> dispatcher.unregisterBlock(hash, source));
+                if (!source.isDone()) {
+                    inventory.add(new InventoryVector(InventoryVector.MSG_WITNESS_BLOCK, hash));
+                }
+            }
+
+            if (!inventory.isEmpty()) {
+                peer.send(BitcoinMessages.getData(new GetDataMessage(inventory)));
+            }
+        } catch (Throwable failure) {
+            for (CompletableFuture<Block> result : results.values()) {
+                if (!result.isDone()) result.completeExceptionally(failure);
+            }
+            // Keep the returned map total: callers reserve every requested hash
+            // before network I/O and must be able to release every reservation.
+            for (Hash256 hash : blockHashes) {
+                results.computeIfAbsent(hash, ignored -> CompletableFuture.failedFuture(failure));
+            }
+        }
+        return java.util.Collections.unmodifiableMap(results);
+    }
+
     private static Throwable unwrapCompletionFailure(Throwable failure) {
         Throwable current = failure;
         while ((current instanceof CompletionException
