@@ -211,6 +211,11 @@ public final class BlockProcessor {
             phaseStarted = System.nanoTime();
             executor.commitWithStagedNewTipIndex(
                     prepared, batch -> storage.save(batch, block, candidate));
+            // The child was constructed and committed in this thread. Publish it to the
+            // in-memory lookup immediately so block N+1 never has to reload parent N.
+            if (lookup instanceof StoredBlockIndexLookup storedLookup) {
+                storedLookup.rememberCommitted(candidate);
+            }
             diagnosticCommitNanos.add(System.nanoTime() - phaseStarted);
             logDiagnostic(candidate.height(), block, "commit done");
 

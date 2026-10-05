@@ -257,4 +257,23 @@ class ActiveChainAncestorsTest {
         return new BlockIndex(hash(id), GenesisBlockFactory.create(NetworkParametersRegistry.regtest()).header(),
                 height, parent, BigInteger.valueOf(height + 1));
     }
+    @Test
+    void committedLinearTipsAreImmediatelyAvailableWithoutLookupReads() {
+        var cache = new ActiveChainAncestors(16);
+        var reads = new AtomicInteger();
+        ru.bitcoin.node.chain.BlockIndexLookup lookup = hash -> { reads.incrementAndGet(); return null; };
+
+        BlockIndex tip = index(0, 0, hash(-1));
+        cache.rememberCommitted(tip);
+        for (int height = 1; height <= 10; height++) {
+            tip = index(height, height, tip.hash());
+            cache.rememberCommitted(tip);
+        }
+
+        for (int height = 0; height <= 10; height++) {
+            assertEquals(hash(height), cache.at(tip, height, lookup).hash());
+        }
+        assertEquals(0, reads.get(), "committed linear ancestry must stay entirely in RAM");
+    }
+
 }

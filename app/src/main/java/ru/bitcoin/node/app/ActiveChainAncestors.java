@@ -44,6 +44,33 @@ final class ActiveChainAncestors {
         this.capacity = capacity;
     }
 
+    /** Records a successfully committed linear-Ibd tip without any storage lookup. */
+    void rememberCommitted(BlockIndex index) {
+        Objects.requireNonNull(index, "index");
+        if (tipHash != null && index.height() == tipHeight + 1L
+                && index.previousBlockHash().equals(tipHash)) {
+            tipHash = index.hash();
+            tipHeight = index.height();
+            rememberHot(index);
+            return;
+        }
+        if (tipHash == null || index.hash().equals(tipHash)) {
+            tipHash = index.hash();
+            tipHeight = index.height();
+            rememberHot(index);
+            return;
+        }
+        // A non-linear transition is a reorg/rollback boundary. Do not retain ancestry
+        // from the old branch; the next lookup will rebuild only what is actually active.
+        hotHeights.clear();
+        sparseHeights.clear();
+        sparseUsage.clear();
+        lastSparseMissHeight = -2L;
+        tipHash = index.hash();
+        tipHeight = index.height();
+        rememberHot(index);
+    }
+
     BlockIndex at(BlockIndex tip, long height, BlockIndexLookup lookup) {
         Objects.requireNonNull(tip, "tip");
         Objects.requireNonNull(lookup, "lookup");

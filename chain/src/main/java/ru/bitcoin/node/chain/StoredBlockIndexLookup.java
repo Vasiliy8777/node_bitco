@@ -45,6 +45,18 @@ public final class StoredBlockIndexLookup implements BlockIndexAncestorLookup {
         };
     }
 
+    /**
+     * Publishes an index that has already passed the chain transition commit.
+     * Linear IBD creates the child in memory; retaining it here prevents the next
+     * block from immediately reading its parent back from RocksDB.
+     */
+    public void rememberCommitted(BlockIndex index) {
+        if (index == null || cache == null) return;
+        synchronized (cache) {
+            cache.put(index.hash(), index);
+        }
+    }
+
     @Override
     public BlockIndex find(Hash256 hash) {
         if (hash == null) throw new IllegalArgumentException("hash must not be null");

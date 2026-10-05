@@ -32,12 +32,14 @@ public final class RocksDbUtxoStore
     private volatile byte prefix;
 
     /*
-     * Positive-only bounded read cache. Missing coins are deliberately not cached:
-     * an outpoint that is absent now may legally be created by a later block. Keeping
-     * only positive entries makes invalidation simple and consensus-safe.
+     * Bounded chainstate read cache. Both present and absent states are cached.
+     * Absence is safe because every mutation through this store publishes the new
+     * state after commit: save/created replaces the tombstone, spend/delete installs
+     * one, and namespace switches clear the cache. This avoids repeated RocksDB reads
+     * for the same missing/BIP30-probed OutPoint during linear IBD.
      */
     private final int readCacheCapacity;
-    private final Map<OutPoint, StoredUtxo> readCache;
+    private final Map<OutPoint, Optional<StoredUtxo>> readCache;
     private long cacheHits;
     private long cacheMisses;
 
@@ -64,7 +66,7 @@ public final class RocksDbUtxoStore
         this.readCacheCapacity = readCacheCapacity;
         this.readCache = readCacheCapacity == 0 ? null : new LinkedHashMap<>(1024, 0.75f, true) {
             @Override
-            protected boolean removeEldestEntry(Map.Entry<OutPoint, StoredUtxo> eldest) {
+            protected boolean removeEldestEntry(Map.Entry<OutPoint, Optional<StoredUtxo>> eldest) {
                 return size() > RocksDbUtxoStore.this.readCacheCapacity;
             }
         };
@@ -93,15 +95,25 @@ public final class RocksDbUtxoStore
         if (readCache != null) readCache.clear();
     }
 
-    private synchronized StoredUtxo cached(OutPoint outPoint) {
-        if (readCache == null) return null;
-        StoredUtxo value = readCache.get(outPoint);
-        if (value != null) cacheHits++; else cacheMisses++;
-        return value;
+    private synchronized Optional<StoredUtxo> cached(OutPoint outPoint) {
+        if (readCache == null || !readCache.containsKey(outPoint)) {
+            cacheMisses++;
+            return null;
+        }
+        cacheHits++;
+        return readCache.get(outPoint);
     }
 
-    private synchronized void cache(OutPoint outPoint, StoredUtxo utxo) {
+    private synchronized void cache(OutPoint outPoint, Optional<StoredUtxo> utxo) {
         if (readCache != null) readCache.put(outPoint, utxo);
+    }
+
+    private synchronized void cachePresent(OutPoint outPoint, StoredUtxo utxo) {
+        cache(outPoint, Optional.of(utxo));
+    }
+
+    private synchronized void cacheAbsent(OutPoint outPoint) {
+        cache(outPoint, Optional.empty());
     }
 
     private synchronized void invalidate(OutPoint outPoint) {
@@ -112,8 +124,8 @@ public final class RocksDbUtxoStore
     public void applyCommittedChanges(UtxoChanges changes) {
         if (changes == null || readCache == null) return;
         synchronized (this) {
-            for (OutPoint spent : changes.spentOutputs()) readCache.remove(spent);
-            for (CreatedUtxo created : changes.createdOutputs()) readCache.put(created.outPoint(), created.utxo());
+            for (OutPoint spent : changes.spentOutputs()) readCache.put(spent, Optional.empty());
+            for (CreatedUtxo created : changes.createdOutputs()) readCache.put(created.outPoint(), Optional.of(created.utxo()));
         }
     }
 
@@ -140,7 +152,7 @@ public final class RocksDbUtxoStore
                         utxo
                 )
         );
-        cache(outPoint, utxo);
+        cachePresent(outPoint, utxo);
     }
 
     @Override
@@ -153,14 +165,17 @@ public final class RocksDbUtxoStore
             );
         }
 
-        StoredUtxo cached = cached(outPoint);
-        if (cached != null) return Optional.of(cached);
+        Optional<StoredUtxo> cached = cached(outPoint);
+        if (cached != null) return cached;
 
         byte[] value = database.get(key(outPoint));
-        if (value == null) return Optional.empty();
+        if (value == null) {
+            cacheAbsent(outPoint);
+            return Optional.empty();
+        }
 
         StoredUtxo restored = StoredUtxoSerializer.deserialize(value);
-        cache(outPoint, restored);
+        cachePresent(outPoint, restored);
         return Optional.of(restored);
     }
 
@@ -178,9 +193,9 @@ public final class RocksDbUtxoStore
             if (outPoint == null) throw new IllegalArgumentException("outPoints must not contain null");
             if (result.containsKey(outPoint)) continue;
 
-            StoredUtxo cached = cached(outPoint);
+            Optional<StoredUtxo> cached = cached(outPoint);
             if (cached != null) {
-                result.put(outPoint, Optional.of(cached));
+                result.put(outPoint, cached);
             } else {
                 misses.add(outPoint);
                 keys.add(key(outPoint));
@@ -196,10 +211,13 @@ public final class RocksDbUtxoStore
             }
             for (int i = 0; i < misses.size(); i++) {
                 byte[] value = values.get(i);
-                if (value == null) continue;
-                StoredUtxo restored = StoredUtxoSerializer.deserialize(value);
                 OutPoint outPoint = misses.get(i);
-                cache(outPoint, restored);
+                if (value == null) {
+                    cacheAbsent(outPoint);
+                    continue;
+                }
+                StoredUtxo restored = StoredUtxoSerializer.deserialize(value);
+                cachePresent(outPoint, restored);
                 result.put(outPoint, Optional.of(restored));
             }
         }
@@ -219,7 +237,7 @@ public final class RocksDbUtxoStore
         database.delete(
                 key(outPoint)
         );
-        invalidate(outPoint);
+        cacheAbsent(outPoint);
     }
 
     private byte[] key(
@@ -310,6 +328,7 @@ public final class RocksDbUtxoStore
                         utxo
                 )
         );
+        // Staged batch is not visible until the atomic transition commits.
         invalidate(outPoint);
     }
 
@@ -332,6 +351,7 @@ public final class RocksDbUtxoStore
         batch.delete(
                 key(outPoint)
         );
+        // Do not publish speculative absence before the batch commit.
         invalidate(outPoint);
     }
     /** Removes the complete persistent namespace in the caller's atomic batch. */

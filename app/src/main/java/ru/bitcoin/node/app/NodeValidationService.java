@@ -519,6 +519,7 @@ public final class NodeValidationService implements AutoCloseable {
             // and every later API call retries synchronization before exposing the pool.
             synchronizePool();
             if (result == BlockProcessingResult.CONNECTED) {
+                activeAncestors.rememberCommitted(chain.activeTip());
                 if (txIndexEnabled) synchronizeTxIndex();
                 if (txOutSpenderIndexEnabled) synchronizeTxOutSpenderIndex();
                 if (coinStatsIndexEnabled) synchronizeCoinStatsIndex();
@@ -554,11 +555,22 @@ public final class NodeValidationService implements AutoCloseable {
             // A crash reopens the last complete checkpoint; active in-memory ChainState is
             // never advertised as durable by the database itself.
             database.enableChainstateWriteBack();
+
+            // The complete ordered batch is already in RAM. Resolve all old-chain inputs in
+            // one MultiGet before ConnectBlock starts. Outputs created by an earlier block in
+            // this same batch replace any cached absence at that block's successful commit.
+            // This turns per-block random RocksDB reads into a first-touch batch prefetch.
+            prefetchInitialSyncInputs(batch);
+
             long processorStarted = System.nanoTime();
             List<BlockProcessingResult> results = new ArrayList<>(batch.size());
             for (Block block : batch) {
                 Objects.requireNonNull(block, "batch block");
-                results.add(processor.process(block));
+                BlockProcessingResult result = processor.process(block);
+                results.add(result);
+                if (result == BlockProcessingResult.CONNECTED) {
+                    activeAncestors.rememberCommitted(chain.activeTip());
+                }
             }
             database.flushChainstateIfNeeded();
             long processorNanos = System.nanoTime() - processorStarted;
@@ -587,6 +599,18 @@ public final class NodeValidationService implements AutoCloseable {
                     maintenanceNanos, dbBefore, cacheBefore);
             return List.copyOf(results);
         }
+    }
+
+    private void prefetchInitialSyncInputs(List<Block> batch) {
+        LinkedHashSet<OutPoint> inputs = new LinkedHashSet<>();
+        for (Block block : batch) {
+            Objects.requireNonNull(block, "batch block");
+            for (Transaction transaction : block.transactions()) {
+                if (transaction.isCoinbase()) continue;
+                transaction.inputs().forEach(input -> inputs.add(input.previousOutput()));
+            }
+        }
+        if (!inputs.isEmpty()) utxos.findAll(inputs);
     }
 
     private void recordInitialSyncTelemetry(List<Block> batch, long batchStarted, long processorNanos,

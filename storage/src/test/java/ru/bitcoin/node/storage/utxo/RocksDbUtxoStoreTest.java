@@ -543,4 +543,48 @@ class RocksDbUtxoStoreTest {
         }
     }
 
+    @Test
+    void cachesMissingCoinAndCommittedCreationReplacesTombstone() {
+        try (var database = new RocksDbDatabase(tempDirectory.resolve("negative-cache"))) {
+            var store = new RocksDbUtxoStore(database, (byte) 0x03, 8);
+            var point = testOutPoint(777);
+            var coin = testUtxo();
+
+            assertTrue(store.find(point).isEmpty());
+            long missesAfterFirstRead = store.cacheStats().misses();
+            assertTrue(store.find(point).isEmpty());
+            assertEquals(missesAfterFirstRead, store.cacheStats().misses(),
+                    "second missing lookup must be served by the RAM tombstone");
+
+            try (var batch = new ru.bitcoin.node.storage.rocksdb.RocksDbWriteBatch()) {
+                store.save(batch, point, coin);
+                database.write(batch);
+                store.applyCommittedChanges(new UtxoChanges(java.util.List.of(),
+                        java.util.List.of(new CreatedUtxo(point, coin))));
+            }
+            assertEquals(coin, store.find(point).orElseThrow(),
+                    "successful commit must replace cached absence with the created coin");
+        }
+    }
+
+    @Test
+    void committedSpendLeavesRamTombstoneInsteadOfRereadingDatabase() {
+        try (var database = new RocksDbDatabase(tempDirectory.resolve("spent-tombstone"))) {
+            var store = new RocksDbUtxoStore(database, (byte) 0x03, 8);
+            var point = testOutPoint(778);
+            var coin = testUtxo();
+            store.save(point, coin);
+
+            try (var batch = new ru.bitcoin.node.storage.rocksdb.RocksDbWriteBatch()) {
+                store.delete(batch, point);
+                database.write(batch);
+                store.applyCommittedChanges(new UtxoChanges(java.util.List.of(point), java.util.List.of()));
+            }
+            assertTrue(store.find(point).isEmpty());
+            long misses = store.cacheStats().misses();
+            assertTrue(store.find(point).isEmpty());
+            assertEquals(misses, store.cacheStats().misses());
+        }
+    }
+
 }
