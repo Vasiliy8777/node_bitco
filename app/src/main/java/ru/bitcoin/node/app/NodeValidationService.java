@@ -456,6 +456,10 @@ public final class NodeValidationService implements AutoCloseable {
                         failureResolver
                 );
         chain = new ChainInitializer(database, parameters).initialize();
+        // The persisted selected chain already excludes known failed ancestry.
+        // Seed the validation resolver as well as the download resolver so its
+        // first historical child does not walk all parents back to genesis.
+        failureResolver.seedKnownValid(chain.activeTip());
         initialBlockDownload = new InitialBlockDownloadState(parameters, time::currentTimeSeconds);
         var storage = new RocksDbChainTransitionStorage(database, utxos, undos, indexes, tips);
         reorganizationExecutor = new ChainReorganizationExecutor(
@@ -505,7 +509,7 @@ public final class NodeValidationService implements AutoCloseable {
             if (txOutSpenderIndexEnabled) synchronizeTxOutSpenderIndex();
             if (coinStatsIndexEnabled) synchronizeCoinStatsIndex();
             if (blockFilterIndexEnabled) synchronizeBlockFilterIndex();
-            blockPruner.prune(chain.activeTip(), assumeUtxoPruneCeiling());
+            if (blockPruner.automatic()) blockPruner.prune(chain.activeTip(), assumeUtxoPruneCeiling());
             initialBlockDownload.update(chain.activeTip());
         }
         ensureBackgroundValidationWorker();
@@ -524,7 +528,7 @@ public final class NodeValidationService implements AutoCloseable {
                 if (txOutSpenderIndexEnabled) synchronizeTxOutSpenderIndex();
                 if (coinStatsIndexEnabled) synchronizeCoinStatsIndex();
                 if (blockFilterIndexEnabled) synchronizeBlockFilterIndex();
-                blockPruner.prune(chain.activeTip(), assumeUtxoPruneCeiling());
+                if (blockPruner.automatic()) blockPruner.prune(chain.activeTip(), assumeUtxoPruneCeiling());
                 initialBlockDownload.update(chain.activeTip());
             }
             return result;
@@ -585,7 +589,7 @@ public final class NodeValidationService implements AutoCloseable {
                 if (txOutSpenderIndexEnabled) synchronizeTxOutSpenderIndex();
                 if (coinStatsIndexEnabled) synchronizeCoinStatsIndex();
                 if (blockFilterIndexEnabled) synchronizeBlockFilterIndex();
-                blockPruner.prune(chain.activeTip(), assumeUtxoPruneCeiling());
+                if (blockPruner.automatic()) blockPruner.prune(chain.activeTip(), assumeUtxoPruneCeiling());
                 initialBlockDownload.update(chain.activeTip());
                 if (!initialBlockDownload.isInitialBlockDownload()) {
                     database.forceFlushChainstate();
@@ -602,15 +606,30 @@ public final class NodeValidationService implements AutoCloseable {
     }
 
     private void prefetchInitialSyncInputs(List<Block> batch) {
+        var inputs = initialSyncExternalInputs(batch);
+        if (!inputs.isEmpty()) utxos.findAll(inputs);
+    }
+
+    // Prefetch is only a read hint, never an alternative source of coins. Inputs
+    // produced earlier in this ordered run will be resolved by ConnectBlock's
+    // committed UTXO updates instead of querying their absence in the old DB.
+    static Set<OutPoint> initialSyncExternalInputs(List<Block> batch) {
         LinkedHashSet<OutPoint> inputs = new LinkedHashSet<>();
+        Map<Hash256, Integer> earlierOutputs = new HashMap<>();
         for (Block block : batch) {
             Objects.requireNonNull(block, "batch block");
             for (Transaction transaction : block.transactions()) {
-                if (transaction.isCoinbase()) continue;
-                transaction.inputs().forEach(input -> inputs.add(input.previousOutput()));
+                if (!transaction.isCoinbase()) {
+                    for (var input : transaction.inputs()) {
+                        OutPoint outPoint = input.previousOutput();
+                        Integer outputs = earlierOutputs.get(outPoint.transactionId());
+                        if (outputs == null || outPoint.outputIndex().value() >= outputs) inputs.add(outPoint);
+                    }
+                }
+                earlierOutputs.put(transaction.txId(), transaction.outputs().size());
             }
         }
-        if (!inputs.isEmpty()) utxos.findAll(inputs);
+        return inputs;
     }
 
     private void recordInitialSyncTelemetry(List<Block> batch, long batchStarted, long processorNanos,
@@ -1398,6 +1417,28 @@ public final class NodeValidationService implements AutoCloseable {
         chain.notifyAll();
     }
 
+    public boolean downloadInitialBlockDownload() {
+        return initialBlockDownload.isInitialBlockDownload();
+    }
+
+    public boolean downloadHasMinimumChainWork() {
+        return chain.activeTip().chainWork().compareTo(parameters.minimumChainWork()) >= 0;
+    }
+
+    public BlockIndex downloadSnapshotBase() {
+        var snapshot = snapshotChainStateStore.load();
+        if (snapshot.isEmpty()) return null;
+        var background = assumeUtxoBackgroundValidator.state();
+        if (background != null && background.status() == ru.bitcoin.node.storage.utxo.RocksDbAssumeUtxoBackgroundStore.Status.VALIDATED)
+            return null;
+        return lookup.find(snapshot.get().snapshotBaseHash());
+    }
+
+    /** Immutable committed tip snapshot for network scheduling; does not wait for a validation batch. */
+    public BlockIndex downloadTip() {
+        return chain.activeTip();
+    }
+
     public BlockIndex activeTip() {
         synchronized (chain) {
             return chain.activeTip();
@@ -1721,8 +1762,8 @@ public final class NodeValidationService implements AutoCloseable {
                     AssumeUtxoBackgroundValidator.Step step;
                     synchronized (chain) {
                         step = assumeUtxoBackgroundValidator.step();
-                        if (step == AssumeUtxoBackgroundValidator.Step.ADVANCED
-                                || step == AssumeUtxoBackgroundValidator.Step.VALIDATED)
+                        if (blockPruner.automatic() && (step == AssumeUtxoBackgroundValidator.Step.ADVANCED
+                                || step == AssumeUtxoBackgroundValidator.Step.VALIDATED))
                             blockPruner.prune(chain.activeTip(), assumeUtxoPruneCeiling());
                     }
                     if (step == AssumeUtxoBackgroundValidator.Step.INACTIVE

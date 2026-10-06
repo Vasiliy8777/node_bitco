@@ -20,6 +20,40 @@ import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class NodeValidationServiceTest {
+    @Test
+    void batchPrefetchSkipsEarlierOutputsButRetainsMissingAndForwardReferences() {
+        var fund = new OutPoint(Hash256.fromDisplayHex("12".repeat(32)), new UInt32(0));
+        var parent = spend(fund, 90_000);
+        var parentOutput = new OutPoint(parent.txId(), new UInt32(0));
+        var child = spend(parentOutput, 80_000);
+        var missing = new OutPoint(parent.txId(), new UInt32(99));
+        var invalidChild = spend(missing, 70_000);
+        var header = GenesisBlockFactory.create(PARAMS).header();
+        assertEquals(Set.of(fund, missing), NodeValidationService.initialSyncExternalInputs(
+                List.of(new Block(header, List.of(parent, child)), new Block(header, List.of(invalidChild)))));
+        assertEquals(Set.of(fund, parentOutput), NodeValidationService.initialSyncExternalInputs(
+                List.of(new Block(header, List.of(child, parent)))));
+    }
+
+    @Test
+    void prefetchedBatchConnectsDependentTransactionsAndRejectsDoubleSpend() {
+        try (var db = new RocksDbDatabase(directory)) {
+            var service = new NodeValidationService(db, PARAMS, () -> 1_800_000_000L, new Mempool());
+            var fund = new OutPoint(Hash256.fromDisplayHex("13".repeat(32)), new UInt32(0));
+            var coins = new RocksDbUtxoStore(db);
+            coins.save(fund, new StoredUtxo(100_000, SCRIPT, 0, false));
+            var parent = spend(fund, 90_000);
+            var child = spend(new OutPoint(parent.txId(), new UInt32(0)), 80_000);
+            var first = block(service.activeTip(), 1, List.of(parent, child));
+            assertEquals(List.of(BlockProcessingResult.CONNECTED), service.processInitialSyncBatch(List.of(first)));
+            assertTrue(coins.find(new OutPoint(child.txId(), new UInt32(0))).isPresent());
+            assertTrue(coins.find(fund).isEmpty());
+            var second = block(service.activeTip(), 2, List.of(spend(fund, 70_000)));
+            assertThrows(RuntimeException.class, () -> service.processInitialSyncBatch(List.of(second)));
+            assertEquals(first.hash(), service.activeTip().hash());
+        }
+    }
+
     @TempDir
     Path directory;
     private static final NetworkParameters PARAMS = NetworkParametersRegistry.regtest();

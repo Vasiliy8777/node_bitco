@@ -23,11 +23,10 @@ public final class AssumeValidPolicy {
      *
      * IBD advances monotonically while the two descendants used by assume-valid
      * (the configured assume-valid block and the best header) are effectively
-     * stable. A small window caused a periodic expensive refill. Keep a much
-     * wider branch-specific proof window so that the refill cost is amortized
-     * over tens of thousands of connected blocks instead of a few thousand.
+     * stable. Bound each refill so that cold block-index reads cannot delay
+     * the first block connection for minutes while holding the chain lock.
      */
-    private static final int ANCESTRY_WINDOW = 65_536;
+    private static final int ANCESTRY_WINDOW = 128;
 
     private final BlockIndexLookup lookup;
     private final Supplier<BlockIndex> bestHeaderSupplier;
@@ -95,12 +94,13 @@ public final class AssumeValidPolicy {
         }
 
         long highHeight = Math.min(descendant.height(), targetHeight + ANCESTRY_WINDOW - 1L);
-        BlockIndex cursor = ancestorLookup.ancestor(descendant, highHeight);
+        BlockIndex cursor = ancestorLookup.ancestor(descendant, highHeight, AssumeValidPolicy::checkInterrupted);
         if (cursor == null) return null;
 
         Map<Long, Hash256> hashes = new HashMap<>(ANCESTRY_WINDOW * 2);
         hashes.put(cursor.height(), cursor.hash());
         while (cursor.height() > targetHeight) {
+            checkInterrupted();
             cursor = lookup.find(cursor.previousBlockHash());
             if (cursor == null) {
                 throw new IllegalStateException("Missing ancestry while filling assume-valid window");
@@ -113,6 +113,12 @@ public final class AssumeValidPolicy {
     }
 
     private record AncestryWindow(long lowHeight, long highHeight, Map<Long, Hash256> hashesByHeight) {
+    }
+
+    private static void checkInterrupted() {
+        if (Thread.currentThread().isInterrupted()) {
+            throw new java.util.concurrent.CancellationException("Interrupted assume-valid ancestry lookup");
+        }
     }
 
     private boolean isAncestor(BlockIndex ancestor, BlockIndex descendant) {
@@ -140,6 +146,7 @@ public final class AssumeValidPolicy {
 
         BlockIndex cursor = descendant;
         while (cursor.height() > ancestor.height()) {
+            checkInterrupted();
             cursor = lookup.find(cursor.previousBlockHash());
             if (cursor == null) return false;
         }

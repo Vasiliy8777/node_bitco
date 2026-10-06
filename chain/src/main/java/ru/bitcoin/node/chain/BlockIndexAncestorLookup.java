@@ -5,4 +5,11 @@ package ru.bitcoin.node.chain;
  */
 public interface BlockIndexAncestorLookup extends BlockIndexLookup {
     BlockIndex ancestor(BlockIndex index, long targetHeight);
+
+    default BlockIndex ancestor(BlockIndex index, long targetHeight, Runnable checkpoint) {
+        checkpoint.run();
+        BlockIndex result = ancestor(index, targetHeight);
+        checkpoint.run();
+        return result;
+    }
 }

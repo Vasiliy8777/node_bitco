@@ -46,6 +46,17 @@ public final class PeerMessageDispatcher {
      * pending request maps, so registration and terminal failure are atomic.
      */
     private IOException terminalFailure;
+    private final java.util.Set<CompletableFuture<Block>> coreBlockRequests = new java.util.HashSet<>();
+
+    /** Core keeps block NOTFOUND inventories in-flight until delivery or timeout. */
+    public synchronized CompletableFuture<Block> registerCoreBlock(Hash256 hash) {
+        var future = registerBlock(hash);
+        coreBlockRequests.add(future);
+        future.whenComplete((block, failure) -> {
+            synchronized (this) { coreBlockRequests.remove(future); }
+        });
+        return future;
+    }
 
     public PeerMessageDispatcher(
             Peer peer
@@ -75,6 +86,7 @@ public final class PeerMessageDispatcher {
                 blockHash,
                 future
         );
+        coreBlockRequests.remove(future);
     }
 
     public synchronized CompletableFuture<HeadersMessage>
@@ -259,6 +271,8 @@ public final class PeerMessageDispatcher {
             );
         }
 
+        if (!headers.isEmpty()) peer.noteBlockAnnouncement(headers.headers().getLast().hash());
+
         CompletableFuture<HeadersMessage> future;
 
         synchronized (this) {
@@ -383,6 +397,10 @@ public final class PeerMessageDispatcher {
             CompletableFuture<Block> future;
 
             synchronized (this) {
+                if (coreBlockRequests.contains(pendingBlocks.get(vector.hash()))) {
+                    handled = true;
+                    continue;
+                }
                 future =
                         pendingBlocks.remove(
                                 vector.hash()

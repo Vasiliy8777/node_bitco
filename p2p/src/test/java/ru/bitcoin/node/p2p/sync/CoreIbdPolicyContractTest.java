@@ -2,41 +2,51 @@ package ru.bitcoin.node.p2p.sync;
 
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class CoreIbdPolicyContractTest {
+
+    @Test
+    void usesCoreHeaderResponseDeadline() {
+        assertEquals(java.time.Duration.ofMinutes(2), HeaderSynchronizer.DEFAULT_RESPONSE_TIMEOUT);
+    }
+
+    @Test
+    void usesCoreDownloadTimeoutWithParallelPeerAllowance() {
+        var policy = new BlockDownloadTimeoutPolicy(java.time.Duration.ofMinutes(10));
+        assertEquals(java.time.Duration.ofMinutes(10), policy.timeout(0));
+        assertEquals(java.time.Duration.ofMinutes(15), policy.timeout(1));
+        assertEquals(java.time.Duration.ofMinutes(55), policy.timeout(9));
+    }
+
+    @Test
+    void refusesNonCorePerPeerPipelineDepth() throws Exception {
+        try (var peers = new ru.bitcoin.node.p2p.PeerManager()) {
+            org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                    () -> new BlockDownloadScheduler(peers, new BlockDownloadService(peers),
+                            new BlockDownloadTimeoutPolicy(java.time.Duration.ofMinutes(10)), 17));
+        }
+    }
+
     @Test
     void usesCorePerPeerTransitLimit() {
-        assertEquals(32, BlockInFlightTracker.DEFAULT_MAX_BLOCKS_PER_PEER);
+        assertEquals(16, BlockInFlightTracker.DEFAULT_MAX_BLOCKS_PER_PEER);
     }
 
     @Test
-    void replicatedFrontierUsesEightEqual128BlockCaches() {
-        assertEquals(128, ReplicatedFrontierBlockDownloadSession.CACHE_BLOCKS_PER_PEER);
-        assertEquals(8, ReplicatedFrontierBlockDownloadSession.MAX_CACHE_PEERS);
-        assertEquals(1024,
-                ReplicatedFrontierBlockDownloadSession.CACHE_BLOCKS_PER_PEER
-                        * ReplicatedFrontierBlockDownloadSession.MAX_CACHE_PEERS);
-    }
-
-    @Test
-    void replicatedFrontierRejectsMoreThan128UnfinishedLogicalBlocks() throws Exception {
+    void schedulerUsesCoreStyleSessionInsteadOfReplicatedFrontier() throws Exception {
         try (var peers = new ru.bitcoin.node.p2p.PeerManager()) {
             var scheduler = new BlockDownloadScheduler(
                     peers,
                     new BlockDownloadService(peers),
                     new BlockDownloadTimeoutPolicy(java.time.Duration.ofMinutes(10)),
-                    ReplicatedFrontierBlockDownloadSession.CACHE_BLOCKS_PER_PEER);
+                    16);
             try (var session = scheduler.openSession()) {
-                java.util.List<ru.bitcoin.node.common.types.Hash256> hashes = new java.util.ArrayList<>();
-                for (int i = 0; i < 129; i++) {
-                    byte[] bytes = new byte[32];
-                    bytes[0] = (byte) i;
-                    bytes[1] = (byte) (i >>> 8);
-                    hashes.add(new ru.bitcoin.node.common.types.Hash256(bytes));
-                }
-                assertThrows(java.io.IOException.class, () -> session.submit(hashes));
-                assertEquals(0, session.pendingCount());
+                assertEquals(
+                        SchedulerBlockDownloadSession.class,
+                        session.getClass(),
+                        "production IBD must use the Core-style per-peer scheduler, not replicated frontier"
+                );
             }
         }
     }

@@ -65,6 +65,63 @@ class BlockSyncCoordinatorTest {
     private static final long REMOTE_NONCE =
             0x1112131415161718L;
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(ints = {0, 1024, 4096})
+    void refillsSlidingWindowBeforeConnectingTheRestOfAnAlreadyDownloadedRun(int inputsPerBlock) throws Exception {
+        var indexes = preparationIndexes(128);
+        var validation = org.mockito.Mockito.mock(NodeValidationService.class);
+        var tip = new java.util.concurrent.atomic.AtomicReference<>(indexes.getFirst());
+        org.mockito.Mockito.when(validation.activeTip()).thenAnswer(call -> tip.get());
+        var scheduler = org.mockito.Mockito.mock(BlockDownloadScheduler.class);
+        var session = org.mockito.Mockito.mock(BlockDownloadSession.class);
+        org.mockito.Mockito.when(scheduler.openSession()).thenReturn(session);
+        var pending = new java.util.concurrent.atomic.AtomicInteger();
+        var sourcePeer = org.mockito.Mockito.mock(Peer.class);
+        var transaction = org.mockito.Mockito.mock(Transaction.class);
+        org.mockito.Mockito.when(transaction.inputs()).thenReturn(
+                Collections.nCopies(inputsPerBlock, org.mockito.Mockito.mock(TxIn.class)));
+        var exposed = java.util.concurrent.ConcurrentHashMap.<Long>newKeySet();
+        var queue = new java.util.concurrent.LinkedBlockingQueue<CompletedBlockDownload>();
+        org.mockito.Mockito.when(session.pendingCount()).thenAnswer(call -> pending.get());
+        org.mockito.Mockito.doAnswer(call -> {
+            List<BlockDownloadRequest> requests = call.getArgument(0);
+            pending.addAndGet(requests.size());
+            for (var request : requests) {
+                exposed.add(request.height());
+                var index = indexes.get(Math.toIntExact(request.height()));
+                queue.add(new CompletedBlockDownload(Math.toIntExact(request.height() - 1), request.blockHash(),
+                        new Block(index.header(), inputsPerBlock == 0 ? List.of() : List.of(transaction)), sourcePeer));
+            }
+            return null;
+        }).when(session).submitRequests(org.mockito.ArgumentMatchers.anyList());
+        org.mockito.Mockito.when(session.pollCompleted(org.mockito.ArgumentMatchers.any())).thenAnswer(call -> {
+            var completed = queue.poll(1, TimeUnit.MILLISECONDS);
+            if (completed != null) pending.decrementAndGet();
+            return Optional.ofNullable(completed);
+        });
+        org.mockito.Mockito.when(validation.processInitialSyncBatch(org.mockito.ArgumentMatchers.anyList()))
+                .thenAnswer(call -> {
+                    List<Block> batch = call.getArgument(0);
+                    assertTrue(batch.size() <= 32, "A long connect step monopolized the moving download window");
+                    if (inputsPerBlock > 0) {
+                        assertTrue(batch.size() <= Math.max(1, 2048 / inputsPerBlock),
+                                "Cold UTXO work must yield between whole blocks; an oversized block must still connect");
+                    }
+                    long firstHeight = tip.get().height() + 1;
+                    if (firstHeight > 32) {
+                        assertTrue(exposed.contains(Math.min(128, firstHeight + 63)),
+                                "The new window tail must be requested before the next connect step");
+                    }
+                    tip.set(indexes.get(Math.toIntExact(tip.get().height() + batch.size())));
+                    return Collections.nCopies(batch.size(), BlockProcessingResult.CONNECTED);
+                });
+        var coordinator = new BlockSyncCoordinator(scheduler, validation, new HeaderChainState(indexes.getLast()),
+                preparationLookup(indexes, ignored -> {}),
+                org.mockito.Mockito.mock(ru.bitcoin.node.storage.block.BlockStore.class), 64);
+        coordinator.synchronizeToTip();
+        assertEquals(indexes.getLast().hash(), tip.get().hash());
+    }
+
     @Test
     void diagnosticAddressDoesNotFailForClosedPeer() throws Exception {
         try (var connection = new PeerConnection(PARAMETERS, 5_000, 5_000);
@@ -76,6 +133,85 @@ class BlockSyncCoordinatorTest {
     }
     @TempDir
     Path directory;
+
+    @Test
+    void submitsFirstWindowBeforeReadingRestOfMaterializationChunk() throws Exception {
+        var indexes = preparationIndexes(2048);
+        var validation = org.mockito.Mockito.mock(NodeValidationService.class);
+        org.mockito.Mockito.when(validation.activeTip()).thenReturn(indexes.getFirst());
+        var scheduler = org.mockito.Mockito.mock(BlockDownloadScheduler.class);
+        var session = org.mockito.Mockito.mock(BlockDownloadSession.class);
+        org.mockito.Mockito.when(scheduler.openSession()).thenReturn(session);
+        var reads = new java.util.concurrent.atomic.AtomicInteger();
+        var lookup = preparationLookup(indexes, index -> {
+            assertTrue(index.height() <= 1025, "Read future chunk before first request");
+            reads.incrementAndGet();
+        });
+        var stopAfterSubmission = new IOException("first request observed");
+        org.mockito.Mockito.doAnswer(call -> {
+            List<BlockDownloadRequest> requests = call.getArgument(0);
+            assertEquals(1024, requests.size());
+            assertEquals(1L, requests.getFirst().height());
+            assertEquals(1024L, requests.getLast().height());
+            assertTrue(reads.get() <= 1024);
+            throw stopAfterSubmission;
+        }).when(session).submitRequests(org.mockito.ArgumentMatchers.anyList());
+        var coordinator = new BlockSyncCoordinator(scheduler, validation,
+                new HeaderChainState(indexes.getLast()), lookup,
+                org.mockito.Mockito.mock(ru.bitcoin.node.storage.block.BlockStore.class));
+        assertSame(stopAfterSubmission, assertThrows(IOException.class, coordinator::synchronizeToTip));
+    }
+
+    @Test
+    void cancellationStopsIndexPreparationBeforeRemainingDatabaseReads() throws Exception {
+        var indexes = preparationIndexes(2048);
+        var validation = org.mockito.Mockito.mock(NodeValidationService.class);
+        org.mockito.Mockito.when(validation.activeTip()).thenReturn(indexes.getFirst());
+        var scheduler = org.mockito.Mockito.mock(BlockDownloadScheduler.class);
+        var session = org.mockito.Mockito.mock(BlockDownloadSession.class);
+        org.mockito.Mockito.when(scheduler.openSession()).thenReturn(session);
+        var reference = new java.util.concurrent.atomic.AtomicReference<BlockSyncCoordinator>();
+        var reads = new java.util.concurrent.atomic.AtomicInteger();
+        var lookup = preparationLookup(indexes, index -> {
+            if (reads.incrementAndGet() == 8) reference.get().cancel();
+        });
+        var coordinator = new BlockSyncCoordinator(scheduler, validation,
+                new HeaderChainState(indexes.getLast()), lookup,
+                org.mockito.Mockito.mock(ru.bitcoin.node.storage.block.BlockStore.class));
+        reference.set(coordinator);
+        assertThrows(IOException.class, coordinator::synchronizeToTip);
+        assertEquals(8, reads.get(), "Cancellation continued reading the materialized path");
+        org.mockito.Mockito.verify(session, org.mockito.Mockito.never())
+                .submitRequests(org.mockito.ArgumentMatchers.anyList());
+    }
+
+    private static List<BlockIndex> preparationIndexes(int count) {
+        var indexes = new ArrayList<BlockIndex>();
+        var parent = BlockIndexFactory.createGenesis(GenesisBlockFactory.create(PARAMETERS).header());
+        indexes.add(parent);
+        for (int i = 1; i <= count; i++) {
+            parent = BlockIndexFactory.createChild(parent, new BlockHeader(4, parent.hash(), parent.hash(),
+                    new UInt32(parent.header().timestamp().value() + 1), new UInt32(BITS), new UInt32(i)));
+            indexes.add(parent);
+        }
+        return indexes;
+    }
+
+    private static BlockIndexAncestorLookup preparationLookup(List<BlockIndex> indexes,
+            java.util.function.Consumer<BlockIndex> onRead) {
+        var byHash = new HashMap<Hash256, BlockIndex>();
+        indexes.forEach(index -> byHash.put(index.hash(), index));
+        return new BlockIndexAncestorLookup() {
+            public BlockIndex find(Hash256 hash) {
+                var index = byHash.get(hash);
+                onRead.accept(index);
+                return index;
+            }
+            public BlockIndex ancestor(BlockIndex index, long height) {
+                return indexes.get(Math.toIntExact(height));
+            }
+        };
+    }
 
     @Test
     void shouldDownloadAndConnectLinearBestHeaderChain()
@@ -1819,7 +1955,8 @@ class BlockSyncCoordinatorTest {
                             peerManager,
                             blockDownloadService,
                             new BlockDownloadTimeoutPolicy(
-                                    Duration.ofMinutes(10))
+                                    Duration.ofMinutes(10)),
+                            1 // Force independent owners for this transport/failover scenario.
                     );
 
             List<Block> downloaded =
@@ -1974,7 +2111,8 @@ class BlockSyncCoordinatorTest {
                             peerManager,
                             blockDownloadService,
                             new BlockDownloadTimeoutPolicy(
-                                    Duration.ofMinutes(10))
+                                    Duration.ofMinutes(10)),
+                            1 // Force independent owners for this transport/failover scenario.
                     );
 
             List<Block> downloaded =
@@ -2033,151 +2171,28 @@ class BlockSyncCoordinatorTest {
     }
 
     @Test
-    void shouldFailAfterAllPeersReportBlockNotFound()
-            throws Exception {
-
-        Block genesisBlock =
-                GenesisBlockFactory.create(
-                        PARAMETERS
-                );
-
-        BlockIndex genesis =
-                BlockIndexFactory.createGenesis(
-                        genesisBlock.header()
-                );
-
-        Block block =
-                child(
-                        genesis,
-                        101
-                );
-
-        try (ServerSocket firstServer =
-                     new ServerSocket(0);
-
-             ServerSocket secondServer =
-                     new ServerSocket(0);
-
-             PeerManager peerManager =
-                     new PeerManager()) {
-
-            CountDownLatch releaseNotFoundPeers =
-                    new CountDownLatch(1);
-
-            CompletableFuture<Void> firstServerFuture =
-                    CompletableFuture.runAsync(
-                            () -> runNotFoundBlockPeer(
-                                    firstServer,
-                                    block.hash(),
-                                    0x3132333435363738L,
-                                    releaseNotFoundPeers
-                            )
-                    );
-
-            CompletableFuture<Void> secondServerFuture =
-                    CompletableFuture.runAsync(
-                            () -> runNotFoundBlockPeer(
-                                    secondServer,
-                                    block.hash(),
-                                    0x4142434445464748L,
-                                    releaseNotFoundPeers
-                            )
-                    );
-
-            Peer firstPeer =
-                    connectPeer(
-                            firstServer.getLocalPort()
-                    );
-
-            Peer secondPeer =
-                    connectPeer(
-                            secondServer.getLocalPort()
-                    );
-
-            peerManager.add(
-                    firstPeer
-            );
-
-            peerManager.add(
-                    secondPeer
-            );
-
-            BlockDownloadService blockDownloadService =
-                    new BlockDownloadService(
-                            peerManager
-                    );
-
-            BlockDownloadScheduler scheduler =
-                    new BlockDownloadScheduler(
-                            peerManager,
-                            blockDownloadService,
-                            new BlockDownloadTimeoutPolicy(
-                                    Duration.ofMinutes(10))
-                    );
-
-            IOException exception =
-                    assertThrows(
-                            IOException.class,
-                            () -> scheduler.download(
-                                    List.of(
-                                            block.hash()
-                                    )
-                            )
-                    );
-
-            assertTrue(
-                    exception.getMessage()
-                            .contains(
-                                    block.hash()
-                                            .toDisplayHex()
-                            )
-            );
-
-            /*
-             * The block was attempted against both peers.
-             * Both failures must be preserved for diagnostics.
-             */
-            assertEquals(
-                    2,
-                    exception.getSuppressed().length
-            );
-
-            assertInstanceOf(
-                    BlockNotFoundException.class,
-                    exception.getSuppressed()[0]
-            );
-
-            assertInstanceOf(
-                    BlockNotFoundException.class,
-                    exception.getSuppressed()[1]
-            );
-
-            /*
-             * NOTFOUND is a valid protocol response.
-             * Neither peer should be disconnected.
-             */
-            assertTrue(
-                    firstPeer.isReady()
-            );
-
-            assertTrue(
-                    secondPeer.isReady()
-            );
-
-            releaseNotFoundPeers.countDown();
-
-            firstServerFuture.get(
-                    5,
-                    TimeUnit.SECONDS
-            );
-
-            secondServerFuture.get(
-                    5,
-                    TimeUnit.SECONDS
-            );
+    void blockNotFoundDoesNotExhaustSchedulerOrCloseHealthyPeer() throws Exception {
+        var block = child(BlockIndexFactory.createGenesis(GenesisBlockFactory.create(PARAMETERS).header()), 101);
+        var release = new CountDownLatch(1);
+        try (var socket = new ServerSocket(0); var peers = new PeerManager()) {
+            var remote = CompletableFuture.runAsync(() ->
+                    runNotFoundBlockPeer(socket, block.hash(), 0x3132333435363738L, release));
+            try {
+                var peer = connectPeer(socket.getLocalPort());
+                peers.add(peer);
+                var scheduler = new BlockDownloadScheduler(peers, new BlockDownloadService(peers),
+                        new BlockDownloadTimeoutPolicy(Duration.ofMinutes(10)));
+                try (var session = scheduler.openSession()) {
+                    session.submit(List.of(block.hash()));
+                    assertTrue(session.pollCompleted(Duration.ofMillis(200)).isEmpty());
+                    assertEquals(1, session.pendingCount());
+                    assertEquals(peer, session.inFlightPeer(block.hash()).orElseThrow());
+                    assertTrue(peer.isReady());
+                }
+            } finally { release.countDown(); }
+            remote.get(5, TimeUnit.SECONDS);
         }
     }
-
     @Test
     void shouldSlideDownloadWindowForwardAfterProcessingEarlierBlock()
             throws Exception {
@@ -2467,6 +2482,8 @@ class BlockSyncCoordinatorTest {
              ServerSocket secondServer =
                      new ServerSocket(0);
 
+             IdleWindowPeer idlePeer = new IdleWindowPeer();
+
              PeerManager peerManager =
                      new PeerManager()) {
 
@@ -2590,7 +2607,8 @@ class BlockSyncCoordinatorTest {
                                     Duration.ofMinutes(
                                             10
                                     )
-                            )
+                            ),
+                            1 // B1 and B2 must have separate owners in this stall fixture.
                     );
 
             BlockDownloadStallTracker stallTracker =
@@ -2631,6 +2649,9 @@ class BlockSyncCoordinatorTest {
                     ),
                     "Initial download window was not fully requested"
             );
+
+            assertFalse(stallTracker.isStalling(), "Busy peers cannot start a Core window stall");
+            peerManager.add(idlePeer.peer);
 
             /*
              * Coordinator is now blocked:
@@ -2792,6 +2813,8 @@ class BlockSyncCoordinatorTest {
              ServerSocket secondServer =
                      new ServerSocket(0);
 
+             IdleWindowPeer idlePeer = new IdleWindowPeer();
+
              PeerManager peerManager =
                      new PeerManager()) {
 
@@ -2929,7 +2952,8 @@ class BlockSyncCoordinatorTest {
                                     Duration.ofMinutes(
                                             10
                                     )
-                            )
+                            ),
+                            1 // B1 and B2 must have separate owners in this stall fixture.
                     );
 
             BlockDownloadStallTracker stallTracker =
@@ -2976,6 +3000,9 @@ class BlockSyncCoordinatorTest {
                     ),
                     "Initial B1/B2 requests were not received"
             );
+
+            assertFalse(stallTracker.isStalling(), "Busy peers cannot start a Core window stall");
+            peerManager.add(idlePeer.peer);
 
             /*
              * Initial window:
@@ -3068,7 +3095,7 @@ class BlockSyncCoordinatorTest {
     }
 
     @Test
-    void shouldReleaseStalledFrontierAndRetryOnAnotherPeerWithoutDisconnect()
+    void shouldDisconnectWindowStallerAndRetryOnIdlePeer()
             throws Exception {
 
         Block genesisBlock =
@@ -3313,6 +3340,11 @@ class BlockSyncCoordinatorTest {
                     "P1 did not receive the initial B1 request"
             );
 
+            // Core needs an idle peer whose next request is blocked by the full window.
+            assertFalse(stallTracker.isStalling());
+            Peer healthyPeer = connectPeer(healthyServer.getLocalPort());
+            peerManager.add(healthyPeer);
+
             /*
              * Connect path:
              *
@@ -3349,41 +3381,9 @@ class BlockSyncCoordinatorTest {
                             .toNanos()
             );
 
-            /*
-             * Stage 8 stall recovery is request-scoped. The adaptive timeout
-             * transition is the deterministic barrier proving that the rescue
-             * path has executed; check P1 BEFORE the fake server is released.
-             */
-            awaitCondition(
-                    () -> stallTimeoutPolicy.timeout()
-                            .equals(Duration.ofSeconds(4)),
-                    "Stall timeout policy was not increased from 2 seconds to 4 seconds"
-            );
-
-            assertTrue(
-                    stalledPeer.isReady(),
-                    "Frontier rescue must not disconnect P1"
-            );
-
-            /*
-             * Reproduce the production race: when frontier rescue fires, the
-             * outbound supervisor may still be establishing the replacement.
-             * P1 therefore remains the only READY peer for a short interval.
-             * The rescued B1 must stay pending instead of becoming terminal.
-             */
-            Thread.sleep(300L);
-            assertFalse(
-                    synchronization.isDone(),
-                    "Rescued frontier became terminal before a replacement peer arrived"
-            );
-
-            Peer healthyPeer =
-                    connectPeer(
-                            healthyServer.getLocalPort()
-                    );
-            peerManager.add(
-                    healthyPeer
-            );
+            awaitCondition(() -> stallTimeoutPolicy.timeout().equals(Duration.ofSeconds(4)),
+                    "Stall timeout policy was not increased from 2 seconds to 4 seconds");
+            assertFalse(stalledPeer.isReady(), "Core disconnects the window staller");
 
             /*
              * The property under test is now proved. Close the deliberately
@@ -3436,18 +3436,8 @@ class BlockSyncCoordinatorTest {
                     healthyPeer.isReady()
             );
 
-            /*
-             * Backoff is increased only because an actual
-             * stall timeout was handled:
-             *
-             * 2 s -> 4 s.
-             */
-            assertEquals(
-                    Duration.ofSeconds(
-                            4
-                    ),
-                    stallTimeoutPolicy.timeout()
-            );
+            // Two connected blocks decay the increased Core timeout back to 2s.
+            assertEquals(Duration.ofSeconds(2), stallTimeoutPolicy.timeout());
 
             assertFalse(
                     stallTracker.isStalling()
@@ -3657,10 +3647,8 @@ class BlockSyncCoordinatorTest {
             );
 
             /*
-             * Keep P2 connected but outside the scheduler initially. This makes
-             * the Stage 8 retry deterministic: after P1 has attempted B1, P3 is
-             * the only eligible READY peer. P2 is admitted only after the second
-             * request-scoped rescue.
+             * Keep P2 outside the scheduler until P3 owns the first retry.
+             * P3 initially provides the idle-peer evidence for the P1 stall.
              */
             peerManager.add(
                     thirdPeer
@@ -3748,10 +3736,8 @@ class BlockSyncCoordinatorTest {
             );
 
             /*
-             * Stage 8 handles a frontier timeout without penalizing the
-             * whole connection. Wait for the adaptive timeout transition;
-             * this is also the synchronization barrier proving that the
-             * first stall timeout was handled.
+             * Core disconnects the staller and doubles the shared timeout.
+             * The timeout transition is the synchronization barrier.
              */
             awaitCondition(
                     () -> stallTimeoutPolicy.timeout()
@@ -3766,9 +3752,9 @@ class BlockSyncCoordinatorTest {
                     stallTimeoutPolicy.timeout()
             );
 
-            assertTrue(
+            assertFalse(
                     firstPeer.isReady(),
-                    "P1 must remain READY after request-scoped stall recovery"
+                    "Core disconnects the first window staller"
             );
 
             /*
@@ -3789,30 +3775,9 @@ class BlockSyncCoordinatorTest {
                     "B1 was not reassigned to P3"
             );
 
-            waitForStallingPeer(
-                    stallTracker,
-                    thirdPeer
-            );
-
-            assertSame(
-                    thirdPeer,
-                    stallTracker.stallingPeer()
-            );
-
-            /*
-             * Admit P2 while P3 still owns B1, not after P3 is rescued.
-             *
-             * Once retryBlock() releases the last active assignment, the
-             * scheduler is allowed to conclude immediately that all currently
-             * READY peers have been exhausted. Adding P2 only after observing
-             * the 4 -> 8 second timeout transition therefore races that terminal
-             * exhaustion path. At this point P3 already owns B1, so adding P2
-             * cannot steal the current attempt; it only makes P2 available for
-             * the deterministic retry after P3 times out.
-             */
-            peerManager.add(
-                    secondPeer
-            );
+            peerManager.add(secondPeer);
+            waitForStallingPeer(stallTracker, thirdPeer);
+            assertSame(thirdPeer, stallTracker.stallingPeer());
 
             long thirdStallStartedAt =
                     stallTracker.stallingSinceNanos();
@@ -3864,8 +3829,7 @@ class BlockSyncCoordinatorTest {
             );
 
             /*
-             * Crossing the current threshold releases only P3's B1
-             * assignment. The connection itself remains usable.
+             * Crossing the threshold disconnects P3 and releases its requests.
              */
             awaitCondition(
                     () -> stallTimeoutPolicy.timeout()
@@ -3875,9 +3839,9 @@ class BlockSyncCoordinatorTest {
                     "Second stall timeout was not handled"
             );
 
-            assertTrue(
+            assertFalse(
                     thirdPeer.isReady(),
-                    "P3 must remain READY after request-scoped stall recovery"
+                    "Core disconnects the second window staller"
             );
 
             /*
@@ -3898,10 +3862,7 @@ class BlockSyncCoordinatorTest {
             );
 
             /*
-             * Both request-scoped rescues have now been proved while P1/P3
-             * remained READY. P2 was admitted while P3 still owned B1, so when
-             * the second rescue runs it is already the only eligible peer that
-             * has not attempted the frontier block.
+             * Both stalled connections are closed. P2 receives the retry.
              */
 
             /*
@@ -3921,29 +3882,10 @@ class BlockSyncCoordinatorTest {
                     "B1 was not reassigned to recovery peer P2"
             );
 
-            /*
-             * P1 and P3 intentionally remained READY through both Stage 8
-             * request-scoped rescues. They are no longer part of what this
-             * test needs to exercise, so retire them explicitly before P2 is
-             * allowed to answer B1. Otherwise the round-robin scheduler is
-             * free to assign the newly exposed B2 to either still-READY peer,
-             * making the old "P2 must receive B2" assertion nondeterministic.
-             */
-            assertTrue(
-                    firstPeer.isReady(),
-                    "P1 must still be READY before the test retires it"
-            );
-
-            assertTrue(
-                    thirdPeer.isReady(),
-                    "P3 must still be READY before the test retires it"
-            );
-
+            assertFalse(firstPeer.isReady());
+            assertFalse(thirdPeer.isReady());
             releaseFirstPeer.countDown();
             releaseThirdPeer.countDown();
-
-            firstPeer.close();
-            thirdPeer.close();
 
             allowSecondPeerResponse.countDown();
 
@@ -3981,7 +3923,7 @@ class BlockSyncCoordinatorTest {
             );
 
             assertEquals(
-                    Duration.ofSeconds(8),
+                    Duration.ofSeconds(5),
                     stallTimeoutPolicy.timeout()
             );
 
@@ -4005,6 +3947,41 @@ class BlockSyncCoordinatorTest {
                     5,
                     TimeUnit.SECONDS
             );
+        }
+    }
+
+    /** A ready peer with no in-flight blocks, required by Core's stall predicate. */
+    private static final class IdleWindowPeer implements AutoCloseable {
+        private final ServerSocket server = new ServerSocket(0);
+        private final CompletableFuture<Socket> accepted = new CompletableFuture<>();
+        private final CompletableFuture<Void> worker;
+        private final Peer peer;
+
+        private IdleWindowPeer() throws Exception {
+            worker = CompletableFuture.runAsync(() -> {
+                try (Socket socket = server.accept()) {
+                    accepted.complete(socket);
+                    var reader = new BitcoinMessageStreamReader(new BitcoinMessageDecoder(PARAMETERS));
+                    var encoder = new BitcoinMessageEncoder(PARAMETERS);
+                    var input = new BufferedInputStream(socket.getInputStream());
+                    var output = new BufferedOutputStream(socket.getOutputStream());
+                    performHandshake(reader, encoder, input, output);
+                    while (reader.read(input).isPresent()) { }
+                } catch (java.io.IOException ignored) {
+                    // Closing the fixture interrupts the reader.
+                } catch (Exception failure) {
+                    throw new RuntimeException(failure);
+                }
+            });
+            peer = connectPeer(server.getLocalPort());
+        }
+
+        @Override
+        public void close() throws Exception {
+            peer.close();
+            accepted.get(5, TimeUnit.SECONDS).close();
+            server.close();
+            worker.get(5, TimeUnit.SECONDS);
         }
     }
 
@@ -4062,7 +4039,7 @@ class BlockSyncCoordinatorTest {
             requestReceived.countDown();
 
             /*
-             * Never return the requested block. Stage 8 releases only
+             * Never return the requested block. The coordinator releases
              * this request, so keep the connection alive until the test
              * has proved reassignment and explicitly releases the peer.
              */
@@ -4267,7 +4244,7 @@ class BlockSyncCoordinatorTest {
             requestReceived.countDown();
 
             /*
-             * Deliberately send no block. Stage 8 must release the
+             * Deliberately send no block. The coordinator must release the
              * stalled request without closing the peer connection.
              */
             assertTrue(
@@ -5207,52 +5184,8 @@ class BlockSyncCoordinatorTest {
                     remoteNonce
             );
 
-            /*
-             * B1 and B3 are both assigned to this peer.
-             *
-             * Their download tasks execute concurrently, therefore
-             * PeerConnection guarantees complete-message serialization
-             * but does not guarantee which getdata reaches the wire first.
-             *
-             * Both requests must be present; their wire order is
-             * intentionally irrelevant.
-             */
-            Hash256 firstRequest =
-                    readRequestedBlockHash(
-                            reader,
-                            input
-                    );
-
-            Hash256 secondRequest =
-                    readRequestedBlockHash(
-                            reader,
-                            input
-                    );
-
-            assertNotEquals(
-                    firstRequest,
-                    secondRequest
-            );
-
-            assertEquals(
-                    Set.of(
-                            firstBlock.hash(),
-                            thirdBlock.hash()
-                    ),
-                    Set.of(
-                            firstRequest,
-                            secondRequest
-                    )
-            );
-
-            /*
-             * At this point B3 has definitely been requested while
-             * the slow peer still holds B2.
-             *
-             * This is the actual work-conserving property being tested.
-             */
-            block3Requested.countDown();
-
+            // Answer B1 to free one transit slot while P2 continues to hold B2.
+            assertRequestedBlock(reader, input, firstBlock.hash());
             output.write(
                     encoder.encode(
                             BitcoinMessages.block(
@@ -5262,6 +5195,10 @@ class BlockSyncCoordinatorTest {
                             )
                     )
             );
+
+            output.flush();
+            assertRequestedBlock(reader, input, thirdBlock.hash());
+            block3Requested.countDown();
 
             output.write(
                     encoder.encode(
@@ -6394,7 +6331,8 @@ class BlockSyncCoordinatorTest {
                             peerManager,
                             blockDownloadService,
                             new BlockDownloadTimeoutPolicy(
-                                    Duration.ofMinutes(10))
+                                    Duration.ofMinutes(10)),
+                            1 // Force independent owners for this transport/failover scenario.
                     );
 
             List<Block> downloaded =
@@ -6982,6 +6920,91 @@ class BlockSyncCoordinatorTest {
         );
     }
 
+    @Test
+    void keepsNetworkPipelineMovingDuringBlockedValidationBatch() throws Exception {
+        var blocks = new ArrayList<Block>();
+        var indexes = new ArrayList<BlockIndex>();
+        var tip = BlockIndexFactory.createGenesis(GenesisBlockFactory.create(PARAMETERS).header());
+        for (int height = 1; height <= 18; height++) {
+            var coinbase = ru.bitcoin.node.mining.coinbase.CoinbaseBuilder.build(height, PARAMETERS, 0,
+                    new byte[]{0x51}, new byte[]{0}, List.of());
+            var template = new Block(new BlockHeader(4, tip.hash(), coinbase.txId(),
+                    new UInt32(tip.header().timestamp().value() + 1), new UInt32(BITS), new UInt32(0)), List.of(coinbase));
+            var block = withValidPow(template, tip.hash(), coinbase.txId());
+            blocks.add(block);
+            tip = BlockIndexFactory.createChild(tip, block.header());
+            indexes.add(tip);
+        }
+        var enteredValidation = new CountDownLatch(1);
+        var releaseValidation = new CountDownLatch(1);
+        var refilledWhileValidating = new CountDownLatch(1);
+        var releasePeer = new CountDownLatch(1);
+        try (var database = new RocksDbDatabase(directory.resolve("validation-network-independence"));
+             var socket = new ServerSocket(0); var peers = new PeerManager()) {
+            var validation = org.mockito.Mockito.spy(
+                    new NodeValidationService(database, PARAMETERS, () -> TIME + 100_000L, new Mempool()));
+            var firstBatch = new java.util.concurrent.atomic.AtomicBoolean(true);
+            org.mockito.Mockito.doAnswer(invocation -> {
+                if (firstBatch.compareAndSet(true, false)) {
+                    enteredValidation.countDown();
+                    assertTrue(releaseValidation.await(10, TimeUnit.SECONDS));
+                }
+                return invocation.callRealMethod();
+            }).when(validation).processInitialSyncBatch(org.mockito.ArgumentMatchers.anyList());
+            var store = new RocksDbBlockIndexStore(database);
+            new ru.bitcoin.node.chain.storage.KnownHeaderStorage(database, store,
+                    new RocksDbChainStateStore(database)).saveBatch(indexes, tip);
+            var remote = CompletableFuture.runAsync(() -> {
+                try (var connection = socket.accept()) {
+                    connection.setSoTimeout(10_000);
+                    var reader = new BitcoinMessageStreamReader(new BitcoinMessageDecoder(PARAMETERS));
+                    var encoder = new BitcoinMessageEncoder(PARAMETERS);
+                    var input = new BufferedInputStream(connection.getInputStream());
+                    var output = new BufferedOutputStream(connection.getOutputStream());
+                    performHandshake(reader, encoder, input, output);
+                    var initial = new HashSet<Hash256>();
+                    for (int i = 0; i < 16; i++) initial.add(readRequestedBlockHash(reader, input));
+                    assertEquals(new HashSet<>(blocks.subList(0, 16).stream().map(Block::hash).toList()), initial);
+                    output.write(encoder.encode(BitcoinMessages.block(new BlockMessage(blocks.getFirst()))));
+                    output.flush();
+                    assertRequestedBlock(reader, input, blocks.get(16).hash());
+                    assertTrue(enteredValidation.await(5, TimeUnit.SECONDS));
+                    output.write(encoder.encode(BitcoinMessages.block(new BlockMessage(blocks.get(1)))));
+                    output.flush();
+                    assertRequestedBlock(reader, input, blocks.get(17).hash());
+                    refilledWhileValidating.countDown();
+                    for (int i = 2; i < blocks.size(); i++)
+                        output.write(encoder.encode(BitcoinMessages.block(new BlockMessage(blocks.get(i)))));
+                    output.flush();
+                    assertTrue(releasePeer.await(10, TimeUnit.SECONDS));
+                } catch (Exception exception) { throw new RuntimeException(exception); }
+            });
+            BlockSyncCoordinator coordinator = null;
+            try {
+                peers.add(connectPeer(socket.getLocalPort()));
+                var scheduler = new BlockDownloadScheduler(peers, new BlockDownloadService(peers),
+                        new BlockDownloadTimeoutPolicy(Duration.ofMinutes(10)));
+                coordinator = new BlockSyncCoordinator(scheduler, validation, new HeaderChainState(tip),
+                        new StoredBlockIndexLookup(store), new RocksDbBlockStore(database));
+                var runningCoordinator = coordinator;
+                var sync = CompletableFuture.runAsync(() -> {
+                    try { runningCoordinator.synchronizeToTip(); }
+                    catch (IOException exception) { throw new RuntimeException(exception); }
+                });
+                assertTrue(refilledWhileValidating.await(5, TimeUnit.SECONDS),
+                        "block 18 was not requested while validation of block 1 was blocked");
+                releaseValidation.countDown();
+                sync.get(10, TimeUnit.SECONDS);
+                assertEquals(tip.hash(), validation.activeTip().hash());
+            } finally {
+                releaseValidation.countDown();
+                releasePeer.countDown();
+                if (coordinator != null) coordinator.cancel();
+            }
+            remote.get(10, TimeUnit.SECONDS);
+        }
+    }
+
     /** Loopback IBD benchmark with real framing, dispatcher, scheduler and durable validation. */
     @Test
     void measuresStreamingInitialSync() throws Exception {
@@ -7018,7 +7041,7 @@ class BlockSyncCoordinatorTest {
                 peers.add(peer);
                 var scheduler = new BlockDownloadScheduler(peers, new BlockDownloadService(peers),
                         new BlockDownloadTimeoutPolicy(Duration.ofMinutes(10)),
-                        Integer.getInteger("ibd.benchmark.perPeer", 32));
+                        Integer.getInteger("ibd.benchmark.perPeer", 16));
                 var coordinator = new BlockSyncCoordinator(scheduler, validation, new HeaderChainState(parent),
                         new StoredBlockIndexLookup(indexStore), new RocksDbBlockStore(database));
                 long started = System.nanoTime();
@@ -7179,14 +7202,14 @@ class BlockSyncCoordinatorTest {
         );
     }
     @Test
-    void productionMaterializedWindowExposesOnly128AndRefillsAt64() {
+    void productionDownloadWindowSlidesContinuouslyAcross1024Blocks() {
         int total = 1024;
         int configuredWindow = 1024;
 
-        assertEquals(128, BlockSyncCoordinator.exposureHorizonEnd(0, 0, total, configuredWindow));
-        assertEquals(128, BlockSyncCoordinator.exposureHorizonEnd(63, 128, total, configuredWindow));
-        assertEquals(192, BlockSyncCoordinator.exposureHorizonEnd(64, 128, total, configuredWindow));
-        assertEquals(256, BlockSyncCoordinator.exposureHorizonEnd(128, 192, total, configuredWindow));
+        assertEquals(1024, BlockSyncCoordinator.exposureHorizonEnd(0, 0, total, configuredWindow));
+        assertEquals(1024, BlockSyncCoordinator.exposureHorizonEnd(63, 128, total, configuredWindow));
+        assertEquals(1024, BlockSyncCoordinator.exposureHorizonEnd(64, 128, total, configuredWindow));
+        assertEquals(1024, BlockSyncCoordinator.exposureHorizonEnd(128, 192, total, configuredWindow));
     }
 
 

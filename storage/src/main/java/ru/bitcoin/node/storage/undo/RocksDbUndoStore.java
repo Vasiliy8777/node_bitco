@@ -12,7 +12,7 @@ import java.util.Optional;
 public final class RocksDbUndoStore implements UndoStore {
     private static final byte UNDO_PREFIX=0x04; private static final int HASH_SIZE=32;
     private final RocksDbDatabase database; private final FlatFileRecordStore files;
-    public RocksDbUndoStore(RocksDbDatabase database){ if(database==null)throw new IllegalArgumentException("database must not be null"); this.database=database; this.files=new FlatFileRecordStore(database.externalDataRoot().resolve("blocks"),"rev",database.networkMagic()); }
+    public RocksDbUndoStore(RocksDbDatabase database){ if(database==null)throw new IllegalArgumentException("database must not be null"); this.database=database; this.files=database.payloadFiles("rev"); }
     @Override public void save(Hash256 hash,BlockUndoData data){ if(hash==null)throw new IllegalArgumentException("blockHash must not be null"); if(data==null)throw new IllegalArgumentException("undoData must not be null"); try(var batch=new RocksDbWriteBatch()){save(batch,hash,data);database.write(batch);} }
     @Override public Optional<BlockUndoData> find(Hash256 hash){ if(hash==null)throw new IllegalArgumentException("blockHash must not be null"); byte[] m=database.get(key(hash)); return m==null?Optional.empty():Optional.of(BlockUndoDataSerializer.deserialize(files.read(FlatFileRecordStore.Position.deserialize(m)))); }
     public long serializedSize(Hash256 hash){if(hash==null)throw new IllegalArgumentException("blockHash must not be null");return new RocksDbPruneUsageStore(database).undoSize(hash);}

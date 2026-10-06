@@ -177,6 +177,7 @@ class BitcoinCoreMiningRoundTripTest {
             String address = command("getnewaddress").strip();
             for (int offset = 0; offset < count; offset += 512)
                 command("generatetoaddress", Integer.toString(Math.min(512, count - offset)), address);
+            measureReferenceCoreIbd(binary, p2pPort, count);
             try (var context = new AnnotationConfigApplicationContext()) {
                 context.getEnvironment().getPropertySources().addFirst(new MapPropertySource("core-ibd", Map.of(
                         "bitcoin.data-directory", directory.resolve("java-ibd").toString(), "bitcoin.network", "regtest",
@@ -204,9 +205,46 @@ class BitcoinCoreMiningRoundTripTest {
             }
         }
     }
+    private void measureReferenceCoreIbd(Path binary, int sourcePort, int count) throws Exception {
+        Path referenceData = Files.createDirectory(directory.resolve("core-ibd-reference"));
+        int referenceRpcPort = port();
+        var process = new ProcessBuilder(binary.toString(), "-datadir=" + referenceData, "-regtest", "-server",
+                "-rpcuser=test", "-rpcpassword=test-password", "-rpcport=" + referenceRpcPort,
+                "-listen=0", "-connect=0", "-dnsseed=0", "-discover=0", "-listenonion=0", "-natpmp=0")
+                .redirectErrorStream(true).redirectOutput(directory.resolve("core-ibd-reference.log").toFile()).start();
+        try {
+            await(() -> {
+                try { rpcCommand(referenceData, referenceRpcPort, "getblockcount"); return true; }
+                catch (Exception ignored) { return false; }
+            }, Duration.ofSeconds(20));
+            assertEquals("0", rpcCommand(referenceData, referenceRpcPort, "getblockcount").strip());
+            long started = System.nanoTime();
+            rpcCommand(referenceData, referenceRpcPort, "addnode", "127.0.0.1:" + sourcePort, "onetry");
+            await(() -> {
+                try { return Integer.parseInt(rpcCommand(referenceData, referenceRpcPort, "getblockcount").strip()) == count; }
+                catch (Exception ignored) { return false; }
+            }, Duration.ofMinutes(3));
+            double seconds = (System.nanoTime() - started) / 1_000_000_000.0;
+            System.out.printf(Locale.ROOT, "IBD_REFERENCE_CORE_BENCH blocks=%d seconds=%.3f blocks/s=%.1f%n",
+                    count, seconds, count / seconds);
+            assertEquals(command("getbestblockhash").strip(),
+                    rpcCommand(referenceData, referenceRpcPort, "getbestblockhash").strip());
+        } finally {
+            try { rpcCommand(referenceData, referenceRpcPort, "stop"); } catch (Exception ignored) { }
+            if (!process.waitFor(10, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                assertTrue(process.waitFor(10, TimeUnit.SECONDS));
+            }
+        }
+    }
+
     private String command(String... arguments) throws Exception {
-        var command = new ArrayList<>(List.of(cli.toString(), "-datadir=" + coreData, chainOption, "-rpcuser=test",
-                "-rpcpassword=test-password", "-rpcport=" + rpcPort));
+        return rpcCommand(coreData, rpcPort, arguments);
+    }
+
+    private String rpcCommand(Path data, int port, String... arguments) throws Exception {
+        var command = new ArrayList<>(List.of(cli.toString(), "-datadir=" + data, chainOption, "-rpcuser=test",
+                "-rpcpassword=test-password", "-rpcport=" + port));
         command.addAll(List.of(arguments));
         Path outputFile = Files.createTempFile(directory, "core-rpc-", ".txt");
         var process = new ProcessBuilder(command).redirectErrorStream(true).redirectOutput(outputFile.toFile()).start();

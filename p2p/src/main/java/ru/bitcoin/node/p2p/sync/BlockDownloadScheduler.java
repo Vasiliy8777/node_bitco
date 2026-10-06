@@ -24,9 +24,16 @@ public final class BlockDownloadScheduler {
             BlockInFlightTracker
                     .DEFAULT_MAX_BLOCKS_PER_PEER;
 
-    /** Shared per-session ceiling, equivalent to eight default 32-block pipelines. */
-    public static final int MAX_TOTAL_BLOCKS_IN_FLIGHT = 256;
+    /** Shared per-session ceiling, bounded by the Core download window. */
+    public static final int MAX_TOTAL_BLOCKS_IN_FLIGHT = 1024;
+    private volatile BlockDownloadPeerPolicy peerPolicy = BlockDownloadPeerPolicy.SERVICES_ONLY;
+
+    public void peerPolicy(BlockDownloadPeerPolicy policy) {
+        peerPolicy = Objects.requireNonNull(policy);
+    }
+
     private final int maxBlocksInFlightPerPeer;
+    private final BlockInFlightTracker inFlightTracker;
 
     private final PeerManager peerManager;
 
@@ -51,12 +58,13 @@ public final class BlockDownloadScheduler {
         this(peerManager, blockDownloadService, timeoutPolicy, MAX_BLOCKS_IN_FLIGHT_PER_PEER);
     }
 
-    /** Configurable pipeline depth, bounded by the shared session request budget. */
+    /** Configurable pipeline depth, bounded by the Core per-peer limit. */
     public BlockDownloadScheduler(PeerManager peerManager, BlockDownloadService blockDownloadService,
                                   BlockDownloadTimeoutPolicy timeoutPolicy, int maxBlocksInFlightPerPeer) {
-        if (maxBlocksInFlightPerPeer < 1 || maxBlocksInFlightPerPeer > MAX_TOTAL_BLOCKS_IN_FLIGHT)
-            throw new IllegalArgumentException("maxBlocksInFlightPerPeer must be between 1 and " + MAX_TOTAL_BLOCKS_IN_FLIGHT);
+        if (maxBlocksInFlightPerPeer < 1 || maxBlocksInFlightPerPeer > MAX_BLOCKS_IN_FLIGHT_PER_PEER)
+            throw new IllegalArgumentException("maxBlocksInFlightPerPeer must be between 1 and " + MAX_BLOCKS_IN_FLIGHT_PER_PEER);
         this.maxBlocksInFlightPerPeer = maxBlocksInFlightPerPeer;
+        this.inFlightTracker = new BlockInFlightTracker(maxBlocksInFlightPerPeer);
         this.peerManager =
                 Objects.requireNonNull(
                         peerManager,
@@ -80,23 +88,18 @@ public final class BlockDownloadScheduler {
 
     public BlockDownloadSession openSession() {
 
-        BlockDownloadSession session;
-        if (maxBlocksInFlightPerPeer >= ReplicatedFrontierBlockDownloadSession.CACHE_BLOCKS_PER_PEER) {
-            session = new ReplicatedFrontierBlockDownloadSession(
-                    peerManager,
-                    blockDownloadService,
-                    timeoutPolicy,
-                    this::sessionClosed
-            );
-        } else {
-            session = new SchedulerBlockDownloadSession(
-                    peerManager,
-                    blockDownloadService,
-                    timeoutPolicy,
-                    ignored -> sessionClosed(ignored),
-                    maxBlocksInFlightPerPeer
-            );
-        }
+        // Bitcoin Core-style IBD: one global moving window, with each block
+        // owned by exactly one peer at a time and a bounded per-peer in-flight queue.
+        // ReplicatedFrontierBlockDownloadSession is deliberately not used by production.
+        BlockDownloadSession session = new SchedulerBlockDownloadSession(
+                peerManager,
+                blockDownloadService,
+                timeoutPolicy,
+                ignored -> sessionClosed(ignored),
+                inFlightTracker
+        );
+
+        ((SchedulerBlockDownloadSession) session).peerPolicy(peerPolicy);
 
         activeSessions.add(
                 session
@@ -120,8 +123,6 @@ public final class BlockDownloadScheduler {
         for (BlockDownloadSession session : activeSessions) {
             if (session instanceof SchedulerBlockDownloadSession scheduler
                     && scheduler.acceptExternalBlock(sourcePeer, block)) return true;
-            if (session instanceof ReplicatedFrontierBlockDownloadSession replicated
-                    && replicated.acceptExternalBlock(sourcePeer, block)) return true;
         }
 
         return false;
@@ -140,8 +141,6 @@ public final class BlockDownloadScheduler {
         for (BlockDownloadSession session : activeSessions) {
             if (session instanceof SchedulerBlockDownloadSession scheduler
                     && scheduler.hasPendingBlock(blockHash)) return true;
-            if (session instanceof ReplicatedFrontierBlockDownloadSession replicated
-                    && replicated.hasPendingBlock(blockHash)) return true;
         }
 
         return false;
@@ -160,8 +159,6 @@ public final class BlockDownloadScheduler {
         for (BlockDownloadSession session : activeSessions) {
             if (session instanceof SchedulerBlockDownloadSession scheduler
                     && scheduler.hasSubmittedBlock(blockHash)) return true;
-            if (session instanceof ReplicatedFrontierBlockDownloadSession replicated
-                    && replicated.hasSubmittedBlock(blockHash)) return true;
         }
 
         return false;

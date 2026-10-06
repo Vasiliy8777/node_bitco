@@ -5,6 +5,8 @@ spring:
 bitcoin:
   # Root for all persistent node data. Each network gets its own subdirectory.
   data-directory: "K:/BitcoinJavaNode"
+  # Native SST cache; separate from the Java UTXO and chainstate write-back caches.
+  rocksdb-block-cache-mib: 128
 
   node:
     auto-start: true

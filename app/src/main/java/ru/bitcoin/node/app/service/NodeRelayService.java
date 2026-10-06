@@ -240,6 +240,12 @@ public final class NodeRelayService implements AutoCloseable {
             case "getdata" -> queueGetData(peer, BitcoinMessages.decodeGetData(message));
             case "getheaders" -> {
                 var request = GetHeadersMessageCodec.decode(message.payload());
+                // Core returns an empty response below minimum chainwork. A
+                // historical IBD tip must not scan/serve a low-work active prefix.
+                if (!validation.downloadHasMinimumChainWork()) {
+                    send(peer, BitcoinMessages.headers(new HeadersMessage(List.of())));
+                    break;
+                }
                 var headers = validation.headers(request.locatorHashes(), request.stopHash());
                 send(peer, BitcoinMessages.headers(new HeadersMessage(headers)));
                 BlockAnnouncementState state = blockAnnouncements.get(peer);
@@ -790,6 +796,10 @@ public final class NodeRelayService implements AutoCloseable {
      */
     public void relayConnectedBlock(Block block, Peer source) {
         Objects.requireNonNull(block, "block");
+        // Core's UpdatedBlockTip does not relay inventory during IBD. Feeding
+        // every historical block into bounded send queues disconnects useful
+        // download peers and spends I/O rebuilding announcement header paths.
+        if (validation.downloadInitialBlockDownload()) return;
         synchronized (announcedBlocks) {
             if (announcedBlocks.putIfAbsent(block.hash(), Boolean.TRUE) != null) return;
             while (announcedBlocks.size() > MAX_RECENT_BLOCK_ANNOUNCEMENTS) {
@@ -918,7 +928,9 @@ public final class NodeRelayService implements AutoCloseable {
         long minimumRelay = validation.minimumRelayFeeRate();
 
         for (Peer peer : peers.readyPeers()) {
-            if (!peers.roleOf(peer).relaysTransactions()) {
+            // readyPeers() is a snapshot. The peer may be removed concurrently
+            // before role lookup (for example when a header-sync race loser closes).
+            if (!peers.hasRole(peer, ru.bitcoin.node.p2p.PeerConnectionRole.FULL_RELAY)) {
                 continue;
             }
 

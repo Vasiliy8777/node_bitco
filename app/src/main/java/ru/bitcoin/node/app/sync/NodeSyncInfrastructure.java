@@ -20,6 +20,7 @@ public final class NodeSyncInfrastructure {
     private final HeaderChainState headerChainState;
     private final HeaderSyncService headerSyncService;
     private final BlockLocatorBuilder blockLocatorBuilder;
+    private final BlockFailureResolver failureResolver;
 
     public NodeSyncInfrastructure(
             RocksDbDatabase database,
@@ -77,7 +78,7 @@ public final class NodeSyncInfrastructure {
                                         )
                         );
 
-        BlockFailureResolver failureResolver =
+        this.failureResolver =
                 new BlockFailureResolver(
                         blockIndexLookup,
                         new RocksDbBlockFailureStore(database)
@@ -143,5 +144,9 @@ public final class NodeSyncInfrastructure {
 
     public BlockLocatorBuilder blockLocatorBuilder() {
         return blockLocatorBuilder;
+    }
+
+    public boolean downloadBlockFailed(BlockIndex index) {
+        return failureResolver.isFailed(index);
     }
 }

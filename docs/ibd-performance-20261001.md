@@ -1,5 +1,10 @@
 # Скорость синхронизации блоков — 1 октября 2026
 
+> Historical report: the 32/128-request settings below have been superseded.
+> Current production policy uses at most 16 requests per peer. See
+> [the October 6 Core policy comparison](ibd-core-policy-20261006.md).
+
+
 ## Исправление
 
 `SchedulerBlockDownloadSession` хранил все `DownloadState` до закрытия сессии.

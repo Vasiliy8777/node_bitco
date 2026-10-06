@@ -17,14 +17,11 @@ public final class SchedulerBlockDownloadSession
             System.getLogger(SchedulerBlockDownloadSession.class.getName());
 
     private static final int FRONTIER_DIAGNOSTIC_STATE_LIMIT = 0;
-    /*
-     * The earliest part of the shared sliding cache is the ordered-progress
-     * critical path. Spread these requests across READY peers by current
-     * ownership count before latency scoring. This prevents a newly connected
-     * peer with an optimistic/default latency estimate from owning a large
-     * contiguous frontier run and pinning the whole chain if it disappears.
-     */
-    private static final int FRONTIER_PRIORITY_SPAN = 32;
+    private BlockDownloadPeerPolicy peerPolicy = BlockDownloadPeerPolicy.SERVICES_ONLY;
+
+    synchronized void peerPolicy(BlockDownloadPeerPolicy policy) {
+        peerPolicy = Objects.requireNonNull(policy);
+    }
 
     private final PeerManager peerManager;
     private final BlockDownloadService blockDownloadService;
@@ -34,7 +31,6 @@ public final class SchedulerBlockDownloadSession
                     250
             );
 
-    private static final Duration TIMEOUT_CONFIRMATION_GRACE = Duration.ofSeconds(2);
 
     private final BlockDownloadTimeoutPolicy timeoutPolicy;
 
@@ -90,6 +86,14 @@ public final class SchedulerBlockDownloadSession
             java.util.function.Consumer<SchedulerBlockDownloadSession> closeListener,
             int maxBlocksInFlightPerPeer
     ) {
+        this(peerManager, blockDownloadService, timeoutPolicy, closeListener,
+                new BlockInFlightTracker(maxBlocksInFlightPerPeer));
+    }
+
+    SchedulerBlockDownloadSession(PeerManager peerManager, BlockDownloadService blockDownloadService,
+            BlockDownloadTimeoutPolicy timeoutPolicy,
+            java.util.function.Consumer<SchedulerBlockDownloadSession> closeListener,
+            BlockInFlightTracker inFlightTracker) {
 
         this.peerManager =
                 Objects.requireNonNull(
@@ -109,7 +113,7 @@ public final class SchedulerBlockDownloadSession
                         "timeoutPolicy"
                 );
 
-        this.inFlightTracker = new BlockInFlightTracker(maxBlocksInFlightPerPeer);
+        this.inFlightTracker = Objects.requireNonNull(inFlightTracker);
 
         this.timeoutEvaluator =
                 new BlockDownloadTimeoutEvaluator(
@@ -315,16 +319,19 @@ public final class SchedulerBlockDownloadSession
                      */
                     waitForReadyPeer = true;
 
-                } else if (failedState.awaitingAlternativePeer) {
+                } else if (failedState.awaitingAlternativePeer
+                        || currentReadyPeers.stream().anyMatch(peer -> !failedState.attemptedPeers.contains(peer))
+                        || inFlightTracker.peerForBlock(failedState.blockHash) != null) {
 
                     /*
                      * A request-scoped frontier rescue deliberately excludes the peer
                      * that just stalled.  OutboundPeerSupervisor may still be connecting
                      * a replacement while that old peer remains READY for other work.
                      *
-                     * Do not mistake "READY peers exist, but none is eligible for this
-                     * rescued block yet" for terminal exhaustion. Keep the logical
-                     * request pending and give the peer pool time to change.
+                     * A new READY peer can still be proving block availability through
+                     * HEADERS, or its slots/hash can be owned by another session.
+                     * Only peers that actually failed this request are exhausted.
+                     * Keep pending work until availability or ownership changes.
                      */
                     waitForReadyPeer = true;
 
@@ -474,6 +481,7 @@ public final class SchedulerBlockDownloadSession
             if (result.failure() != null) {
 
                 state.failures.add(result.failure());
+                state.awaitingAlternativePeer = !peer.isReady();
                 peerStates.computeIfAbsent(peer, PeerBlockDownloadState::new).failed(System.nanoTime());
 
                 List<Peer> peers =
@@ -689,6 +697,12 @@ public final class SchedulerBlockDownloadSession
                             activeDownloads.keySet()
                     );
 
+            for (var entry : activeDownloads.entrySet()) {
+                entry.getKey().cancel(true);
+                ActiveDownload active = entry.getValue();
+                inFlightTracker.remove(active.peer(), active.state().blockHash);
+                active.state().inFlight = false;
+            }
             activeDownloads.clear();
 
         }
@@ -853,12 +867,14 @@ public final class SchedulerBlockDownloadSession
             List<Peer> peers
     ) {
 
+        peerPolicy.refresh(peers);
         while (activeDownloads.size() < BlockDownloadScheduler.MAX_TOTAL_BLOCKS_IN_FLIGHT) {
             Assignment assignment = nextAssignment(peers);
             if (assignment == null) return;
             int peerIndex = assignment.peerIndex();
             Peer peer = peers.get(peerIndex);
             DownloadState state = assignment.state();
+            if (!inFlightTracker.tryRegister(peer, state.blockHash)) continue;
             state.inFlight = true;
             state.assignedAtNanos = System.nanoTime();
             peerStates.computeIfAbsent(peer, PeerBlockDownloadState::new)
@@ -867,11 +883,6 @@ public final class SchedulerBlockDownloadSession
 
             state.attemptedPeers.add(
                     peer
-            );
-
-            inFlightTracker.register(
-                    peer,
-                    state.blockHash
             );
 
             CompletableFuture<DownloadResult> future;
@@ -930,8 +941,7 @@ public final class SchedulerBlockDownloadSession
             }
 
             nextPeerIndex =
-                    (peerIndex + 1)
-                            % peers.size();
+                    inFlightTracker.canRegister(peer) ? peerIndex : (peerIndex + 1) % peers.size();
 
         }
     }
@@ -967,77 +977,29 @@ public final class SchedulerBlockDownloadSession
         catch (RuntimeException ignored) { return "UNMANAGED"; }
     }
 
-    /** Choose the earliest serviceable request before choosing its peer. A retry must
-     * not lose the only free global slot to later work on its previous owner. */
+    /** Fill each peer's queue with its earliest eligible requests, as in Core SendMessages. */
     private Assignment nextAssignment(List<Peer> peers) {
-        long now = System.nanoTime();
-        DownloadState frontier = firstIncomplete();
-        int frontierLimit = frontier == null
-                ? Integer.MIN_VALUE
-                : Math.addExact(frontier.index, FRONTIER_PRIORITY_SPAN);
-
-        for (DownloadState state : states.values()) {
-            if (state.completed || state.inFlight) continue;
-
-            boolean frontierPriority = state.index < frontierLimit;
-            int bestIndex = -1;
-            int bestOwned = Integer.MAX_VALUE;
-            long bestScore = Long.MAX_VALUE;
-
-            for (int i = 0; i < peers.size(); i++) {
-                Peer peer = peers.get(i);
-                if (!peer.isReady()
-                        || !inFlightTracker.canRegister(peer)
-                        || state.attemptedPeers.contains(peer)) {
-                    continue;
-                }
-
-                PeerBlockDownloadState ps =
-                        peerStates.computeIfAbsent(peer, PeerBlockDownloadState::new);
-                if (!ps.canServe(state.height, now) || !peerCanServe(peer, state)) {
-                    continue;
-                }
-
-                int owned = inFlightTracker.count(peer);
-                long score = ps.score(owned);
-
-                /*
-                 * For the 32-block critical frontier reserve, distribution is
-                 * more important than an unproven latency advantage.  Minimise
-                 * current ownership first and use the existing EWMA score only
-                 * as the tie-breaker.  Outside the reserve, preserve the normal
-                 * latency/load scheduler unchanged.
-                 */
-                if (frontierPriority) {
-                    if (owned < bestOwned || (owned == bestOwned && score < bestScore)) {
-                        bestOwned = owned;
-                        bestScore = score;
-                        bestIndex = i;
-                    }
-                } else if (score < bestScore) {
-                    bestScore = score;
-                    bestIndex = i;
-                }
+        // Core's SendMessages fills the currently visited peer's queue before
+        // visiting another peer. No latency scoring or frontier replication.
+        for (int offset = 0; offset < peers.size(); offset++) {
+            int peerIndex = (nextPeerIndex + offset) % peers.size();
+            Peer peer = peers.get(peerIndex);
+            if (!peer.isReady() || !inFlightTracker.canRegister(peer)) continue;
+            for (DownloadState state : states.values()) {
+                if (!state.completed && !state.inFlight && inFlightTracker.peerForBlock(state.blockHash) == null
+                        && !state.attemptedPeers.contains(peer)
+                        && peerCanServe(peer, state)) return new Assignment(state, peerIndex);
             }
-
-            if (bestIndex >= 0) return new Assignment(state, bestIndex);
         }
         return null;
     }
 
     private record Assignment(DownloadState state, int peerIndex) { }
-    private static boolean peerCanServe(
+    private boolean peerCanServe(
             Peer peer,
             DownloadState state
     ) {
-        if (state.height == null) {
-            return true;
-        }
-
-        return ru.bitcoin.node.p2p.LimitedHistoryPeerPolicy.canServeBlockHeight(
-                peer.remoteVersion(),
-                state.height
-        );
+        return peerPolicy.canDownload(peer, state.blockHash, state.height);
     }
 
     private DownloadState firstIncomplete() {
@@ -1057,9 +1019,8 @@ public final class SchedulerBlockDownloadSession
             Peer peer,
             DownloadState state
     ) {
-        return blockDownloadService
-                .downloadAsync(peer, state.blockHash)
-                .handle((block, failure) -> {
+        var transport = blockDownloadService.downloadAsync(peer, state.blockHash, true);
+        var result = transport.handle((block, failure) -> {
                     if (failure == null) {
                         return DownloadResult.success(peer, state, block);
                     }
@@ -1078,6 +1039,10 @@ public final class SchedulerBlockDownloadSession
 
                     return DownloadResult.failure(peer, state, ioFailure);
                 });
+        result.whenComplete((ignored, failure) -> {
+            if (result.isCancelled()) transport.cancel(true);
+        });
+        return result;
     }
 
     private static Throwable unwrapCompletionFailure(Throwable failure) {
@@ -1345,10 +1310,13 @@ public final class SchedulerBlockDownloadSession
          * Every removed hash immediately becomes eligible
          * for assignment to another peer.
          */
-        Set<Hash256> removedBlocks =
-                inFlightTracker.removeAll(
-                        peer
-                );
+        Set<Hash256> removedBlocks = new HashSet<>();
+        for (var future : futures) {
+            var active = activeDownloads.get(future);
+            future.cancel(true); // Unregister transport before publishing a free hash/slot.
+            inFlightTracker.remove(peer, active.state().blockHash);
+            removedBlocks.add(active.state().blockHash);
+        }
 
         int released = 0;
 
@@ -1384,6 +1352,8 @@ public final class SchedulerBlockDownloadSession
              */
             state.inFlight =
                     false;
+
+            state.awaitingAlternativePeer = true;
 
             state.failures.add(
                     failure
@@ -1477,41 +1447,21 @@ public final class SchedulerBlockDownloadSession
             Peer peer =
                     peerEvaluation.peer();
 
-            long now = System.nanoTime();
-            PeerBlockDownloadState peerState =
-                    peerStates.computeIfAbsent(peer, PeerBlockDownloadState::new);
-
-            if (!peerState.confirmDownloadTimeout(now, TIMEOUT_CONFIRMATION_GRACE)) {
-                log.log(System.Logger.Level.WARNING,
-                        "IBD peer timeout probation: peer={0}, age={1}, timeout={2}, grace={3}ms; "
-                                + "new assignments paused while existing requests may still prove progress",
-                        diagnosticPeerAddress(peer), evaluation.downloadingAge(), evaluation.timeout(),
-                        TIMEOUT_CONFIRMATION_GRACE.toMillis());
-                continue;
+            IOException failure = new ru.bitcoin.node.p2p.PeerCloseException(
+                    ru.bitcoin.node.p2p.PeerCloseReason.LOCAL_BLOCK_TIMEOUT,
+                    "SchedulerBlockDownloadSession.downloadTimeout",
+                    "Peer block download timeout after " + evaluation.downloadingAge()
+                            + " (timeout " + evaluation.timeout() + ")");
+            try {
+                peer.close(failure);
+            } catch (IOException closeFailure) {
+                failure.addSuppressed(closeFailure);
             }
-
-            IOException failure =
-                    new IOException(
-                            "Confirmed peer block download timeout after "
-                                    + evaluation.downloadingAge()
-                                    + " (timeout " + evaluation.timeout()
-                                    + ", confirmation grace " + TIMEOUT_CONFIRMATION_GRACE + ")"
-                    );
-
-            /*
-             * A block-request timeout is not proof that the Bitcoin transport is dead.
-             * Release this peer's outstanding block ownership and penalize/cool it down,
-             * but keep a READY TCP peer connected. The managed reader remains the single
-             * authority that closes a peer on EOF/transport failure. This prevents an
-             * overloaded or temporarily slow peer from causing pool-wide reconnect churn.
-             */
-            released = Math.addExact(released, failPeerDownloads(peer, failure));
-            peerState.stall(now, Duration.ofSeconds(2));
-
+            int peerReleased = failPeerDownloads(peer, failure);
+            released = Math.addExact(released, peerReleased);
             log.log(System.Logger.Level.WARNING,
-                    "IBD peer block timeout confirmed: peer={0}, released={1}; "
-                            + "keeping READY transport connected and cooling scheduler assignments",
-                    diagnosticPeerAddress(peer), released);
+                    "IBD peer block timeout: peer={0}, released={1}",
+                    diagnosticPeerAddress(peer), peerReleased);
         }
 
         return released;
@@ -1548,13 +1498,11 @@ public final class SchedulerBlockDownloadSession
         }
 
         if (ownedFuture == null || ownedState == null) {
-            throw new IllegalStateException(
-                    "In-flight frontier block has no active download: "
-                            + blockHash.toDisplayHex()
-            );
+            return false; // The shared registry may refer to another chainstate's session.
         }
 
         activeDownloads.remove(ownedFuture);
+        ownedFuture.cancel(true);
         inFlightTracker.remove(expectedPeer, blockHash);
         ownedState.inFlight = false;
         ownedState.awaitingAlternativePeer = true;
@@ -1608,6 +1556,34 @@ public final class SchedulerBlockDownloadSession
         }
 
         return true;
+    }
+
+    @Override
+    public synchronized boolean hasIdlePeerFor(BlockDownloadRequest request, Peer blockingPeer) {
+        var peers = peerManager.readyPeers();
+        peerPolicy.refresh(peers);
+        long now = System.nanoTime();
+        for (Peer peer : peers) {
+            if (peer == blockingPeer || !peer.isReady() || inFlightTracker.count(peer) != 0) continue;
+            PeerBlockDownloadState state = peerStates.computeIfAbsent(peer, PeerBlockDownloadState::new);
+            if (state.canServe(request.height(), now)
+                    && peerPolicy.canProbeWindowEnd(peer, request.blockHash(), request.height())) return true;
+        }
+        return false;
+    }
+
+    @Override
+    public synchronized Optional<Peer> findWindowStaller(BlockDownloadRequest beyondWindow,
+            java.util.function.BiFunction<Peer, BlockDownloadPeerPolicy, Optional<Peer>> probe) {
+        var peers = peerManager.readyPeers();
+        peerPolicy.refresh(peers);
+        for (var peer : peers) {
+            if (!peer.isReady() || inFlightTracker.count(peer) != 0
+                    || !peerPolicy.canProbeWindowEnd(peer, beyondWindow.blockHash(), beyondWindow.height())) continue;
+            var staller = Objects.requireNonNull(probe.apply(peer, peerPolicy));
+            if (staller.isPresent() && staller.get() != peer) return staller;
+        }
+        return Optional.empty();
     }
 
     @Override

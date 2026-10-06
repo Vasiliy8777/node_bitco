@@ -30,6 +30,55 @@ class NodeRelayServiceTest {
     Path directory;
 
     @Test
+    void lowWorkGetHeadersReturnsEmptyWithoutHistoricalLookup() throws Exception {
+        var validation = mock(NodeValidationService.class);
+        var sync = mock(NodeSyncInfrastructure.class);
+        var peer = mock(Peer.class);
+        when(peer.isReady()).thenReturn(true);
+        var incoming = new AtomicReference<PeerMessageListener>();
+        doAnswer(call -> { incoming.set(call.getArgument(0)); return null; })
+                .when(peer).addMessageListener(any());
+        var sent = new LinkedBlockingQueue<BitcoinMessage>();
+        doAnswer(call -> { sent.add(call.getArgument(0)); return null; }).when(peer).send(any());
+        try (var peers = new PeerManager()) {
+            peers.add(peer);
+            try (var relay = new NodeRelayService(validation, sync, peers)) {
+                incoming.get().onMessage(peer, BitcoinMessages.getHeaders(new GetHeadersMessage(
+                        VersionMessage.CURRENT_PROTOCOL_VERSION,
+                        List.of(NetworkParametersRegistry.regtest().genesisBlockHash()), new Hash256(new byte[32]))));
+                var response = take(sent);
+                assertEquals("headers", response.command());
+                assertTrue(BitcoinMessages.decodeHeaders(response).headers().isEmpty());
+                verify(validation, never()).headers(any(), any());
+                verify(validation, never()).bestActiveLocator(any());
+                verify(peer, never()).close();
+            }
+        }
+    }
+
+    @Test
+    void historicalIbdBlocksAreNotAnnouncedButSameBlockCanBeAnnouncedAfterIbd() throws Exception {
+        var validation = mock(NodeValidationService.class);
+        when(validation.downloadInitialBlockDownload()).thenReturn(true);
+        var sync = mock(NodeSyncInfrastructure.class);
+        var block = ru.bitcoin.node.protocol.block.GenesisBlockFactory.create(NetworkParametersRegistry.regtest());
+        var peer = mock(Peer.class);
+        when(peer.isReady()).thenReturn(true);
+        try (var peers = new PeerManager()) {
+            peers.add(peer);
+            try (var relay = new NodeRelayService(validation, sync, peers)) {
+                for (int i = 0; i < 1024; i++) relay.relayConnectedBlock(block, null);
+                verify(peer, never()).send(argThat(message -> message.command().equals("inv")
+                        || message.command().equals("headers") || message.command().equals("cmpctblock")));
+                verify(peer, never()).close();
+                when(validation.downloadInitialBlockDownload()).thenReturn(false);
+                relay.relayConnectedBlock(block, null);
+                verify(peer, timeout(3000)).send(argThat(message -> message.command().equals("inv")));
+            }
+        }
+    }
+
+    @Test
     void newBlockAnnouncementRunsBetweenHistoricalBlockResponses() throws Exception {
         var validation = mock(NodeValidationService.class);
         var sync = mock(NodeSyncInfrastructure.class);
@@ -817,7 +866,9 @@ class NodeRelayServiceTest {
         var parameters = NetworkParametersRegistry.regtest();
         try (var db = new RocksDbDatabase(directory.resolve("connected-block-relay"));
              var peers = new PeerManager()) {
-            var validation = new NodeValidationService(db, parameters, () -> 1_800_000_000L, new Mempool());
+            var validation = spy(new NodeValidationService(db, parameters, () -> 1_800_000_000L, new Mempool()));
+            // This fixture tests live-tip relay deduplication, outside IBD.
+            doReturn(false).when(validation).downloadInitialBlockDownload();
             var sync = new NodeSyncInfrastructure(db, parameters, () -> 1_800_000_000L);
             var source = mock(Peer.class);
             var destination = mock(Peer.class);

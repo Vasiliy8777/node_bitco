@@ -13,6 +13,10 @@ public final class Transaction {
     private final List<TxIn> inputs;
     private final List<TxOut> outputs;
     private final UInt32 lockTime;
+    // Transaction and its components defensively own their data. Like Core's
+    // immutable CTransaction, memoize hashes rather than repeatedly serializing.
+    private volatile Hash256 cachedTxId;
+    private volatile Hash256 cachedWtxId;
 
     public Transaction(
             int version,
@@ -75,9 +79,12 @@ public final class Transaction {
     }
 
     public Hash256 txId() {
-        return Hash256Digest.hash(
-                TransactionSerializer.serializeLegacy(this)
-        );
+        Hash256 hash = cachedTxId;
+        if (hash == null) {
+            hash = Hash256Digest.hash(TransactionSerializer.serializeLegacy(this));
+            cachedTxId = hash;
+        }
+        return hash;
     }
 
     public Hash256 wtxId() {
@@ -85,9 +92,12 @@ public final class Transaction {
             return txId();
         }
 
-        return Hash256Digest.hash(
-                TransactionSerializer.serialize(this)
-        );
+        Hash256 hash = cachedWtxId;
+        if (hash == null) {
+            hash = Hash256Digest.hash(TransactionSerializer.serialize(this));
+            cachedWtxId = hash;
+        }
+        return hash;
     }
     @Override
     public boolean equals(Object o) {

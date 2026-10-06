@@ -18,6 +18,7 @@ public final class BlockFailureResolver {
     };
     private long cachedRevision = -1;
     private Hash256 cachedAdditionalFailure;
+    private BlockIndex knownValidAnchor;
 
     public BlockFailureResolver(BlockIndexLookup lookup, BlockFailureStore failureStore) {
         this.lookup = Objects.requireNonNull(lookup, "lookup");
@@ -42,6 +43,7 @@ public final class BlockFailureResolver {
             cachedAdditionalFailure = null;
         }
         cache.put(index.hash(), Boolean.FALSE);
+        knownValidAnchor = index;
     }
 
 
@@ -61,6 +63,7 @@ public final class BlockFailureResolver {
             if (revision < 0 || revision != cachedRevision
                     || !Objects.equals(additionallyFailed, cachedAdditionalFailure)) {
                 cache.clear();
+                knownValidAnchor = null;
                 cachedRevision = revision;
                 cachedAdditionalFailure = additionallyFailed;
             }
@@ -68,6 +71,7 @@ public final class BlockFailureResolver {
             // A concurrent committed invalidation must not leave a stale result in the cache.
             if (revision < 0 || failureStore.revision() == revision) return failed;
             cache.clear();
+            knownValidAnchor = null;
         }
     }
 
@@ -76,11 +80,25 @@ public final class BlockFailureResolver {
             Hash256 additionallyFailed,
             BlockIndexLookup effectiveLookup
     ) {
+        checkInterrupted();
+        Boolean cached = cache.get(index.hash());
+        if (cached != null) return cached;
+        if (additionallyFailed == null && knownValidAnchor != null
+                && index.height() <= knownValidAnchor.height()
+                && effectiveLookup instanceof BlockIndexAncestorLookup ancestors) {
+            BlockIndex ancestor = ancestors.ancestor(knownValidAnchor, index.height(),
+                    BlockFailureResolver::checkInterrupted);
+            if (ancestor != null && ancestor.hash().equals(index.hash())) {
+                cache.put(index.hash(), Boolean.FALSE);
+                return false;
+            }
+        }
         BlockIndex current = index;
         Set<Hash256> visited = new HashSet<>();
         List<Hash256> path = new ArrayList<>();
         boolean failed;
         while (true) {
+            checkInterrupted();
             if (!visited.add(current.hash())) {
                 throw new IllegalStateException("Cycle detected in block-index ancestry at "
                         + current.hash().toDisplayHex());
@@ -109,5 +127,11 @@ public final class BlockFailureResolver {
         // Cache from root towards tip so the most useful recent entries survive eviction.
         for (int i = path.size() - 1; i >= 0; i--) cache.put(path.get(i), failed);
         return failed;
+    }
+
+    private static void checkInterrupted() {
+        if (Thread.currentThread().isInterrupted()) {
+            throw new java.util.concurrent.CancellationException("Block failure ancestry lookup interrupted");
+        }
     }
 }

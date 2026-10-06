@@ -29,7 +29,45 @@ class BlockDownloadWindowStallDetectorTest {
             new BlockDownloadWindowStallDetector();
 
     @Test
-    void shouldKeepFirstBlockingPeerWhenLaterWindowPositionIsUnassigned()
+    void skipsUnserviceableHistoryAndChecksWindowEndBeforeRetention() throws Exception {
+        var path = path(4);
+        try (var blocker = peer(); var observer = peer()) {
+            var result = detector.findStallingPeer(path, 0, 3, index -> false,
+                    index -> index.equals(path.get(0)) ? Optional.of(blocker) : Optional.empty(),
+                    observer, index -> true, index -> false);
+            assertEquals(Optional.of(blocker), result);
+        }
+    }
+
+    @Test
+    void doesNotBlameTheObservingPeerForItsOwnWindow() throws Exception {
+        var path = path(4);
+        try (var observer = peer()) {
+            assertTrue(detector.findStallingPeer(path, 0, 3, index -> false,
+                    index -> index.equals(path.get(3)) ? Optional.empty() : Optional.of(observer),
+                    observer, index -> true, index -> true).isEmpty());
+        }
+    }
+
+    @Test
+    void abortsTraversalBeforeSkippingAnAvailableInvalidOrWitnessIneligibleBlock() throws Exception {
+        var path = path(4);
+        try (var blocker = peer(); var observer = peer()) {
+            assertTrue(detector.findStallingPeer(path, 0, 3,
+                    index -> index.equals(path.get(1)), index -> Optional.of(blocker),
+                    observer, index -> !index.equals(path.get(1)), index -> true).isEmpty());
+        }
+    }
+
+    @Test
+    void acceptsAnOversizedWindowWithoutIntegerOverflow() {
+        var path = path(4);
+        assertTrue(detector.findStallingPeer(path, 2, Integer.MAX_VALUE,
+                index -> false, index -> Optional.empty()).isEmpty());
+    }
+
+    @Test
+    void shouldNotReportStallWhenLaterWindowPositionIsUnassigned()
             throws Exception {
 
         List<BlockIndex> path =
@@ -41,13 +79,7 @@ class BlockDownloadWindowStallDetectorTest {
             Map<BlockIndex, Peer> owners =
                     new HashMap<>();
 
-            /*
-             * Production IBD has a much larger logical download window than
-             * the per-peer in-flight budget. B1 may therefore be in-flight
-             * while B2 is still unassigned simply because all peer slots are
-             * occupied. B1 must keep its stall attribution; otherwise a 1024
-             * block window can suppress the stall timer forever.
-             */
+            // Per-peer capacity exhaustion is distinct from a full download window.
             owners.put(
                     path.get(0),
                     peer
@@ -64,14 +96,7 @@ class BlockDownloadWindowStallDetectorTest {
                             )
                     );
 
-            assertTrue(
-                    stallingPeer.isPresent()
-            );
-
-            assertSame(
-                    peer,
-                    stallingPeer.orElseThrow()
-            );
+            assertTrue(stallingPeer.isEmpty());
         }
     }
 
@@ -231,6 +256,18 @@ class BlockDownloadWindowStallDetectorTest {
                     firstPeer,
                     stallingPeer.orElseThrow()
             );
+        }
+    }
+
+    @Test
+    void shouldNotReportStallWhenBeyondWindowBlockIsAlreadyRequestedOrReceived() throws Exception {
+        List<BlockIndex> path = path(3);
+        try (Peer peer = peer()) {
+            assertTrue(detector.findStallingPeer(path, 0, 2, index -> false,
+                    index -> Optional.of(peer)).isEmpty());
+            assertTrue(detector.findStallingPeer(path, 0, 2,
+                    index -> index == path.get(2),
+                    index -> Optional.of(peer)).isEmpty());
         }
     }
 

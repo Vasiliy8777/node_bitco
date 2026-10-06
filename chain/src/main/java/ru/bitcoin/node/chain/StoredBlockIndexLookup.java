@@ -80,21 +80,32 @@ public final class StoredBlockIndexLookup implements BlockIndexAncestorLookup {
 
     @Override
     public BlockIndex ancestor(BlockIndex index, long targetHeight) {
+        return ancestor(index, targetHeight, () -> { });
+    }
+
+    @Override
+    public BlockIndex ancestor(BlockIndex index, long targetHeight, Runnable checkpoint) {
+        java.util.Objects.requireNonNull(checkpoint, "checkpoint");
+        checkpoint.run();
         if (index == null) throw new IllegalArgumentException("index must not be null");
         if (targetHeight < 0 || targetHeight > index.height()) {
             throw new IllegalArgumentException("Invalid ancestor height: " + targetHeight);
         }
         if (!(store instanceof RocksDbBlockIndexStore rocks)) {
-            return linearAncestor(index, targetHeight);
+            return linearAncestor(index, targetHeight, checkpoint);
         }
         BlockIndex current = index;
         while (current.height() > targetHeight) {
+            checkpoint.run();
             long heightSkip = RocksDbBlockIndexStore.getSkipHeight(current.height());
             long heightSkipPrev = RocksDbBlockIndexStore.getSkipHeight(current.height() - 1);
-            Hash256 skipHash = findSkipHash(rocks, current.hash());
-            boolean useSkip = skipHash != null && (heightSkip == targetHeight
+            boolean useSkip = heightSkip == targetHeight
                     || (heightSkip > targetHeight && !(heightSkipPrev < heightSkip - 2
-                    && heightSkipPrev >= targetHeight)));
+                    && heightSkipPrev >= targetHeight));
+            // Core can inspect an in-memory pskip pointer cheaply. Here the hash
+            // lives in RocksDB: do not fetch it when this step must use pprev.
+            Hash256 skipHash = useSkip ? findSkipHash(rocks, current.hash()) : null;
+            useSkip = useSkip && skipHash != null;
             Hash256 nextHash = useSkip ? skipHash : current.previousBlockHash();
             BlockIndex next = find(nextHash);
             if (next == null) throw new IllegalStateException("Missing ancestor for block "
@@ -156,9 +167,10 @@ public final class StoredBlockIndexLookup implements BlockIndexAncestorLookup {
         return loaded;
     }
 
-    private BlockIndex linearAncestor(BlockIndex index, long targetHeight) {
+    private BlockIndex linearAncestor(BlockIndex index, long targetHeight, Runnable checkpoint) {
         BlockIndex current = index;
         while (current.height() > targetHeight) {
+            checkpoint.run();
             BlockIndex parent = find(current.previousBlockHash());
             if (parent == null) throw new IllegalStateException("Missing ancestor for block "
                     + current.hash().toDisplayHex() + " at height " + current.height());

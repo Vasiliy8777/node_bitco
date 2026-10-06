@@ -92,6 +92,14 @@ public final class BlockDownloadStallTimeoutPolicy {
         ) > 0;
     }
 
+    /** Bitcoin Core BlockConnected: truncate to seconds and decay toward 2s. */
+    public synchronized void blockConnected() {
+        if (timeout.compareTo(DEFAULT_TIMEOUT) > 0) {
+            long seconds = timeout.getSeconds() * 85 / 100;
+            timeout = Duration.ofSeconds(Math.max(DEFAULT_TIMEOUT.getSeconds(), seconds));
+        }
+    }
+
     public synchronized void increaseAfterTimeout() {
 
         Duration doubled;

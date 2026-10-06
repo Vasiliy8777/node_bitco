@@ -33,8 +33,7 @@ public final class BlockSyncCoordinator {
      * It is intentionally independent from the per-peer
      * in-flight request limit.
      */
-    private static final int DEFAULT_DOWNLOAD_WINDOW = 128;
-    private static final int DEFAULT_REFILL_LOW_WATERMARK = 64;
+    private static final int DEFAULT_DOWNLOAD_WINDOW = 1024;
 
     /*
      * Block-index materialization is deliberately larger than the logical
@@ -51,7 +50,12 @@ public final class BlockSyncCoordinator {
     private static final Duration DOWNLOAD_COMPLETION_POLL_INTERVAL =
             Duration.ofMillis(250);
     private static final Duration DOWNLOAD_COMPLETION_DRAIN_INTERVAL = Duration.ZERO;
-    private static final int INITIAL_SYNC_CONNECT_BATCH = 512;
+    // Bound the activation step like Core's 32-index path slices. Return to
+    // refill the moving download window instead of holding it fixed for 512 commits.
+    private static final int INITIAL_SYNC_CONNECT_BATCH = 32;
+    // Bound cold UTXO prefetch work as well as block count. A single block is
+    // never split or rejected; this only yields sooner between whole blocks.
+    private static final long INITIAL_SYNC_CONNECT_INPUTS = 2048;
     private final int downloadWindow;
     private final BlockDownloadScheduler blockDownloadScheduler;
     private final NodeValidationService validationService;
@@ -366,13 +370,15 @@ public final class BlockSyncCoordinator {
                         windowCount - 1L
                 );
 
-                List<BlockIndex> window = connectWindow(
+                // Prepare only the first logical window and its stall probe.
+                // Extend the materialized chunk while downloads are already running.
+                List<BlockIndex> window = new ArrayList<>(connectWindow(
                         bestHeaderTip,
                         firstHeight,
-                        lastHeight
-                );
+                        Math.min(lastHeight, firstHeight + downloadWindow)
+                ));
 
-                processWindow(session, window, targetHeight);
+                processWindow(session, window, targetHeight, bestHeaderTip, lastHeight);
 
                 if (collectResult) {
                     result.addAll(window);
@@ -395,6 +401,7 @@ public final class BlockSyncCoordinator {
         if (complete) {
             BlockIndex finalTip = validationService.activeTip();
             while (finalTip.height() > bestHeaderTip.height()) {
+                ensureNotCancelled();
                 finalTip = Objects.requireNonNull(
                         lookup.find(finalTip.previousBlockHash()),
                         "Missing active ancestor"
@@ -407,6 +414,7 @@ public final class BlockSyncCoordinator {
                                 + ", actual " + finalTip.hash().toDisplayHex()
                 );
             }
+            SyncProgressConsole.blocksComplete(validationService.activeTip().height());
         }
 
         return collectResult ? List.copyOf(result) : List.of();
@@ -417,7 +425,7 @@ public final class BlockSyncCoordinator {
             BlockIndex bestHeaderTip,
             long firstHeight,
             long lastHeight
-    ) {
+    ) throws IOException {
         if (firstHeight < 1 || lastHeight < firstHeight || lastHeight > bestHeaderTip.height()) {
             throw new IllegalArgumentException(
                     "Invalid connect window " + firstHeight + ".." + lastHeight
@@ -431,6 +439,7 @@ public final class BlockSyncCoordinator {
         BlockIndex current = end;
 
         while (true) {
+            ensureNotCancelled();
             reversed.add(current);
             if (current.height() == firstHeight) {
                 break;
@@ -454,12 +463,24 @@ public final class BlockSyncCoordinator {
         return List.copyOf(reversed);
     }
 
-    private BlockIndex ancestorAtHeight(BlockIndex index, long targetHeight) {
+    private BlockIndex ancestorAtHeight(BlockIndex index, long targetHeight) throws IOException {
+        ensureNotCancelled();
         if (lookup instanceof ru.bitcoin.node.chain.BlockIndexAncestorLookup ancestorLookup) {
-            return ancestorLookup.ancestor(index, targetHeight);
+            BlockIndex result;
+            try {
+                result = ancestorLookup.ancestor(index, targetHeight, () -> {
+                    try { ensureNotCancelled(); }
+                    catch (IOException failure) { throw new java.io.UncheckedIOException(failure); }
+                });
+            } catch (java.io.UncheckedIOException failure) {
+                throw failure.getCause();
+            }
+            ensureNotCancelled();
+            return result;
         }
         BlockIndex current = index;
         while (current.height() > targetHeight) {
+            ensureNotCancelled();
             BlockIndex parent = lookup.find(current.previousBlockHash());
             if (parent == null) {
                 throw new IllegalStateException(
@@ -474,7 +495,9 @@ public final class BlockSyncCoordinator {
     private void processWindow(
             BlockDownloadSession session,
             List<BlockIndex> blocksToDownload,
-            long targetHeight
+            long targetHeight,
+            BlockIndex bestHeaderTip,
+            long lastHeight
     ) throws IOException {
         Map<Hash256, AvailableBlock> availableBlocks = new HashMap<>();
         int nextToExpose = 0;
@@ -484,7 +507,19 @@ public final class BlockSyncCoordinator {
         int receivedSinceSample = 0;
         long validationNanos = 0;
 
-        while (nextToProcess < blocksToDownload.size()) {
+        int pathSize = Math.toIntExact(lastHeight - blocksToDownload.getFirst().height() + 1);
+        while (nextToProcess < pathSize) {
+            ensureNotCancelled();
+            int needed = (int) Math.min(pathSize, (long) nextToProcess + downloadWindow + 1);
+            if (blocksToDownload.size() < needed) {
+                BlockIndex previous = blocksToDownload.getLast();
+                var extension = connectWindow(bestHeaderTip, previous.height() + 1,
+                        blocksToDownload.getFirst().height() + needed - 1);
+                if (!extension.getFirst().previousBlockHash().equals(previous.hash())) {
+                    throw new IllegalStateException("Materialized window extension does not connect");
+                }
+                blocksToDownload.addAll(extension);
+            }
             long now = System.nanoTime();
             if (now - sampledAt >= java.util.concurrent.TimeUnit.SECONDS.toNanos(5)) {
                 BlockIndex frontier = blocksToDownload.get(nextToProcess);
@@ -513,16 +548,9 @@ public final class BlockSyncCoordinator {
                 receivedSinceSample = 0;
                 validationNanos = 0;
             }
-            /*
-             * Replicated IBD frontier cache. Production exposes 128 unique
-             * consecutive heights and refills by 64 after half the frontier has
-             * been connected. The P2P session mirrors those same hashes across
-             * up to eight FULL_RELAY peers; the logical chain window therefore
-             * stays bounded while no single peer owns ordered progress.
-             *
-             * Small/custom windows retain continuously-sliding behaviour for
-             * deterministic bounded tests.
-             */
+            /* Bitcoin Core-style moving block-download window. The horizon is
+             * always measured from the next block that must be connected; every
+             * connected block immediately opens one new slot at the tail. */
             int horizonEnd = exposureHorizonEnd(
                     nextToProcess,
                     nextToExpose,
@@ -586,22 +614,18 @@ public final class BlockSyncCoordinator {
                         session.pollCompleted(DOWNLOAD_COMPLETION_DRAIN_INTERVAL);
                 if (ready.isEmpty()) break;
                 storeCompleted(availableBlocks, ready.get());
+                stallTracker.clear(ready.get().sourcePeer());
                 receivedSinceSample++;
             }
 
             boolean processedAny = false;
-            /*
-             * Production replicated IBD rotates a 128-block frontier exactly
-             * at the half-window boundary.  Even when all 128 bodies arrive at
-             * once, connect at most 64 before exposing the next 64 heights.
-             * Small/custom test windows retain the historical batch size.
-             */
-            int connectBatchLimit = downloadWindow >= DEFAULT_DOWNLOAD_WINDOW
-                    ? Math.min(INITIAL_SYNC_CONNECT_BATCH, DEFAULT_REFILL_LOW_WATERMARK)
-                    : INITIAL_SYNC_CONNECT_BATCH;
+            // Validation remains ordered, but it is independent of network window
+            // refill. Process every contiguous ready run up to the bounded batch.
+            int connectBatchLimit = INITIAL_SYNC_CONNECT_BATCH;
             List<BlockIndex> connectIndexes = new ArrayList<>(connectBatchLimit);
             List<AvailableBlock> connectBlocks = new ArrayList<>(connectBatchLimit);
             int scan = nextToProcess;
+            long connectInputs = 0;
             while (scan < blocksToDownload.size() && connectBlocks.size() < connectBatchLimit) {
                 BlockIndex index = blocksToDownload.get(scan);
                 AvailableBlock available = availableBlocks.get(index.hash());
@@ -612,6 +636,10 @@ public final class BlockSyncCoordinator {
                                     + index.hash().toDisplayHex() + ", actual "
                                     + available.block().hash().toDisplayHex());
                 }
+                long inputs = available.block().transactions().stream()
+                        .filter(tx -> !tx.isCoinbase()).mapToLong(tx -> tx.inputs().size()).sum();
+                if (!connectBlocks.isEmpty() && connectInputs + inputs > INITIAL_SYNC_CONNECT_INPUTS) break;
+                connectInputs += inputs;
                 connectIndexes.add(index);
                 connectBlocks.add(available);
                 scan++;
@@ -638,6 +666,7 @@ public final class BlockSyncCoordinator {
                                         + " at height " + index.height());
                     }
                     if (processingResult == BlockProcessingResult.CONNECTED) {
+                        stallTimeoutEvaluator.blockConnected();
                         connectedBlockListener.onConnected(available.block(), available.sourcePeer());
                     }
 
@@ -680,15 +709,20 @@ public final class BlockSyncCoordinator {
                         "No pending block downloads while synchronization is incomplete");
             }
 
-            Optional<Peer> stallingPeer = stallDetector.findStallingPeer(
-                    blocksToDownload,
-                    nextToProcess,
-                    downloadWindow,
-                    index -> availableBlocks.containsKey(
-                            index.hash()
-                    ),
-                    index -> session.inFlightPeer(index.hash())
-            );
+            Optional<Peer> stallingPeer = Optional.empty();
+            long windowEnd = (long) nextToProcess + downloadWindow;
+            if (windowEnd < blocksToDownload.size()) {
+                BlockIndex beyond = blocksToDownload.get((int) windowEnd);
+                int frontierPosition = nextToProcess;
+                stallingPeer = session.findWindowStaller(
+                        new BlockDownloadRequest(beyond.hash(), beyond.height()),
+                        (observer, policy) -> stallDetector.findStallingPeer(
+                                blocksToDownload, frontierPosition, downloadWindow,
+                                index -> availableBlocks.containsKey(index.hash()),
+                                index -> session.inFlightPeer(index.hash()), observer,
+                                index -> policy.canTraverse(observer, index.hash(), index.height()),
+                                index -> policy.canServe(observer, index.hash(), index.height())));
+            }
 
             stallTracker.update(stallingPeer.orElse(null));
 
@@ -743,36 +777,16 @@ public final class BlockSyncCoordinator {
                                 + stallEvaluation.stallingAge() + " with timeout "
                                 + stallEvaluation.timeout());
 
-                /*
-                 * Stage 8: rescue only the block that pins ordered progress.
-                 *
-                 * Disconnecting the peer here used to discard every one of its
-                 * otherwise useful in-flight blocks and trigger outbound-peer
-                 * reconnect churn. The scheduler now releases only the frontier
-                 * hash. Because the original peer is retained in that state's
-                 * attemptedPeers set, the retry is forced onto another READY
-                 * peer while the original connection remains available for the
-                 * rest of the IBD pipeline.
-                 *
-                 * Genuine transport/download timeouts are still handled by the
-                 * scheduler's BlockDownloadTimeoutEvaluator and may close a peer.
-                 */
-                boolean rescued = session.retryBlock(
-                        blockedIndex.hash(),
-                        timedOutPeer,
-                        stallFailure
-                );
-
-                if (rescued) {
-                    log.log(
-                            System.Logger.Level.INFO,
-                            "IBD frontier rescue: height={0}, hash={1}, previousPeer={2}, pending={3}",
-                            blockedIndex.height(),
-                            blockedIndex.hash().toDisplayHex(),
-                            diagnosticPeerAddress(timedOutPeer),
-                            session.pendingCount()
-                    );
+                // Core disconnects a peer that stalls a full download window.
+                // Release all ownership and retain requests while the pool replenishes.
+                try {
+                    timedOutPeer.close(new ru.bitcoin.node.p2p.PeerCloseException(
+                            ru.bitcoin.node.p2p.PeerCloseReason.LOCAL_BLOCK_TIMEOUT,
+                            "BlockSyncCoordinator.windowStall", stallFailure.getMessage(), stallFailure));
+                } catch (IOException closeFailure) {
+                    stallFailure.addSuppressed(closeFailure);
                 }
+                session.failPeer(timedOutPeer, stallFailure);
 
                 stallTimeoutEvaluator.timeoutHandled();
                 stallTracker.clear(timedOutPeer);
@@ -786,6 +800,7 @@ public final class BlockSyncCoordinator {
             }
 
             storeCompleted(availableBlocks, completedOptional.get());
+            stallTracker.clear(completedOptional.get().sourcePeer());
             receivedSinceSample++;
         }
     }
@@ -801,16 +816,9 @@ public final class BlockSyncCoordinator {
                 || totalBlocks < nextToExpose || downloadWindow <= 0) {
             throw new IllegalArgumentException("Invalid IBD exposure window state");
         }
-        int frontierWindow = downloadWindow >= DEFAULT_DOWNLOAD_WINDOW
-                ? Math.min(DEFAULT_DOWNLOAD_WINDOW, downloadWindow)
-                : downloadWindow;
-        int refillLowWatermark = downloadWindow >= DEFAULT_DOWNLOAD_WINDOW
-                ? Math.min(DEFAULT_REFILL_LOW_WATERMARK, frontierWindow / 2)
-                : Math.max(0, frontierWindow - 1);
-        int exposedAhead = nextToExpose - nextToProcess;
-        boolean refill = nextToExpose == 0 || exposedAhead <= refillLowWatermark;
-        if (!refill) return nextToExpose;
-        return Math.min(totalBlocks, Math.addExact(nextToProcess, frontierWindow));
+        // Core semantics: keep a continuously sliding window ahead of the
+        // active/next-to-process frontier. Do not wait for half-window rotation.
+        return Math.min(totalBlocks, Math.addExact(nextToProcess, downloadWindow));
     }
 
     static String diagnosticPeerAddress(Peer peer) {
@@ -880,7 +888,7 @@ public final class BlockSyncCoordinator {
             }
 
             BlockDownloadSession session =
-                    blockDownloadScheduler.openSession();
+                    new BufferedBlockDownloadSession(blockDownloadScheduler.openSession());
 
             activeSession = session;
             return session;

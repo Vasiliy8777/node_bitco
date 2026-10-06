@@ -51,14 +51,17 @@ public final class SyncProgressConsole {
         INSTANCE.publish(Phase.BLOCKS, current, target, timestampSeconds);
     }
 
+    /** Stop sampling after the requested chain is committed, rather than printing 100% at 0/s. */
+    public static void blocksComplete(long height) {
+        INSTANCE.completeBlocks(height);
+    }
+
     public static void clear() {
         INSTANCE.phase = Phase.IDLE;
     }
 
     private synchronized void publish(Phase newPhase, long newCurrent, long newTarget, long newBlockTimestampSeconds) {
         long normalizedCurrent = Math.max(0L, newCurrent);
-        long now = System.nanoTime();
-
         phase = newPhase;
         current = normalizedCurrent;
         target = Math.max(0L, newTarget);
@@ -93,6 +96,15 @@ public final class SyncProgressConsole {
         out.flush();
         lastWidth = 0;
         phase = Phase.IDLE;
+    }
+
+    private synchronized void completeBlocks(long height) {
+        phase = Phase.IDLE;
+        String line = "BLK synchronized at height " + height;
+        out.print("\r" + line + " ".repeat(Math.max(0, lastWidth - line.length())));
+        out.println();
+        out.flush();
+        lastWidth = 0;
     }
 
     private synchronized void render() {

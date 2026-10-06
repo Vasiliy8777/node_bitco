@@ -9,6 +9,18 @@ import static org.junit.jupiter.api.Assertions.*;
 class BlockDownloadStallTimeoutPolicyTest {
 
     @Test
+    void shouldDecayTimeoutOnEveryConnectedBlockUsingCoreWholeSeconds() {
+        var policy = new BlockDownloadStallTimeoutPolicy();
+        policy.increaseAfterTimeout();
+        policy.increaseAfterTimeout();
+        long[] expected = {6, 5, 4, 3, 2, 2};
+        for (long seconds : expected) {
+            policy.blockConnected();
+            assertEquals(Duration.ofSeconds(seconds), policy.timeout());
+        }
+    }
+
+    @Test
     void shouldUseBitcoinCoreDefaultTimeout() {
 
         BlockDownloadStallTimeoutPolicy policy =

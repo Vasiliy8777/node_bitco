@@ -30,6 +30,17 @@ public final class Peer implements AutoCloseable {
     private final Object lifecycleLock =
             new Object();
 
+    // Availability announcements are untrusted until resolved against validated headers.
+    private volatile ru.bitcoin.node.common.types.Hash256 lastBlockAnnouncement;
+
+    public void noteBlockAnnouncement(ru.bitcoin.node.common.types.Hash256 hash) {
+        lastBlockAnnouncement = java.util.Objects.requireNonNull(hash);
+    }
+
+    public ru.bitcoin.node.common.types.Hash256 lastBlockAnnouncement() {
+        return lastBlockAnnouncement;
+    }
+
     private IOException closeCause;
     private final PeerMessageDispatcher messageDispatcher;
     private final PeerMessageReader messageReader;
@@ -817,6 +828,12 @@ public final class Peer implements AutoCloseable {
                     "Invalid inv message",
                     exception
             );
+        }
+
+        for (InventoryVector vector : inventory.inventory()) {
+            if (vector.type() == InventoryVector.MSG_BLOCK || vector.type() == InventoryVector.MSG_WITNESS_BLOCK) {
+                noteBlockAnnouncement(vector.hash());
+            }
         }
 
         for (PeerInventoryListener listener :

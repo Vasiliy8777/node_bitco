@@ -57,6 +57,10 @@ public final class BlockSynchronizer {
     public CompletableFuture<Block> downloadAsync(
             Hash256 blockHash
     ) {
+        return downloadAsync(blockHash, false);
+    }
+
+    public CompletableFuture<Block> downloadAsync(Hash256 blockHash, boolean coreBlockRequest) {
 
         Objects.requireNonNull(blockHash, "blockHash");
 
@@ -64,7 +68,7 @@ public final class BlockSynchronizer {
                 peer.messageDispatcher();
 
         CompletableFuture<Block> source =
-                dispatcher.registerBlock(blockHash);
+                coreBlockRequest ? dispatcher.registerCoreBlock(blockHash) : dispatcher.registerBlock(blockHash);
 
         CompletableFuture<Block> result =
                 new CompletableFuture<>();

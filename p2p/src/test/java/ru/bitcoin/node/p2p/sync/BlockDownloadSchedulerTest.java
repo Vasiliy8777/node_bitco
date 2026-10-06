@@ -31,8 +31,163 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class BlockDownloadSchedulerTest {
 
+    @Test
+    void bufferedCloseInterruptsReceiverBeforeWaitingForAssignmentMonitor() throws Exception {
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var pending = new java.util.concurrent.atomic.AtomicInteger();
+        var interrupted = new java.util.concurrent.atomic.AtomicBoolean();
+        BlockDownloadSession delegate = new BlockDownloadSession() {
+            public void submit(List<Hash256> hashes) { pending.addAndGet(hashes.size()); }
+            public CompletedBlockDownload awaitCompleted() { throw new UnsupportedOperationException(); }
+            public synchronized Optional<CompletedBlockDownload> pollCompleted(Duration timeout) throws IOException {
+                entered.countDown();
+                try { release.await(); }
+                catch (InterruptedException failure) {
+                    interrupted.set(true);
+                    Thread.currentThread().interrupt();
+                    throw new IOException(failure);
+                }
+                return Optional.empty();
+            }
+            public int pendingCount() { return pending.get(); }
+            public Optional<Peer> inFlightPeer(Hash256 hash) { return Optional.empty(); }
+            public void failPeer(Peer peer, IOException failure) { }
+            public boolean retryBlock(Hash256 hash, Peer peer, IOException failure) { return false; }
+            public synchronized void close() { pending.set(0); }
+        };
+        var buffered = new BufferedBlockDownloadSession(delegate);
+        try {
+            buffered.submit(List.of(blocks(1).getFirst().hash()));
+            assertTrue(entered.await(5, TimeUnit.SECONDS));
+            CompletableFuture.runAsync(buffered::close).get(5, TimeUnit.SECONDS);
+            assertTrue(interrupted.get(), "close waited for the monitor before interrupting its owner");
+        } finally {
+            release.countDown();
+            buffered.close();
+        }
+    }
+
     private static final long REMOTE_NONCE =
             0x1112131415161718L;
+
+    @Test
+    void sessionsSharePeerSlotsAndReleaseOnlyTheirOwnRequests() throws Exception {
+        var blocks = blocks(4);
+        var release = new CountDownLatch(1);
+        try (var socket = new ServerSocket(0); var peers = new PeerManager()) {
+            var remote = CompletableFuture.runAsync(() -> {
+                try (var connection = socket.accept()) {
+                    completeHandshake(peerIo(connection));
+                    assertTrue(release.await(10, TimeUnit.SECONDS));
+                } catch (Exception exception) { throw new RuntimeException(exception); }
+            });
+            try {
+                var peer = connectPeer(socket.getLocalPort());
+                peers.add(peer);
+                var scheduler = new BlockDownloadScheduler(peers, new BlockDownloadService(peers),
+                        new BlockDownloadTimeoutPolicy(Duration.ofMinutes(10)), 2);
+                try (var foreground = scheduler.openSession(); var historical = scheduler.openSession();
+                     var waiting = scheduler.openSession()) {
+                    foreground.submit(List.of(blocks.get(0).hash()));
+                    historical.submit(List.of(blocks.get(1).hash()));
+                    waiting.submit(List.of(blocks.get(2).hash()));
+                    assertEquals(peer, foreground.inFlightPeer(blocks.get(0).hash()).orElseThrow());
+                    assertEquals(peer, historical.inFlightPeer(blocks.get(1).hash()).orElseThrow());
+                    assertTrue(waiting.inFlightPeer(blocks.get(2).hash()).isEmpty(), "shared peer budget exceeded");
+                    foreground.failPeer(peer, new IOException("release this session's work"));
+                    assertEquals(peer, historical.inFlightPeer(blocks.get(1).hash()).orElseThrow(),
+                            "failure cleanup removed another chainstate's request");
+                    waiting.pollCompleted(Duration.ZERO);
+                    assertEquals(peer, waiting.inFlightPeer(blocks.get(2).hash()).orElseThrow());
+                    historical.close();
+                    assertEquals(peer, waiting.inFlightPeer(blocks.get(2).hash()).orElseThrow(),
+                            "closing another session removed a live request");
+                    try (var replacement = scheduler.openSession()) {
+                        replacement.submit(List.of(blocks.get(3).hash()));
+                        assertEquals(peer, replacement.inFlightPeer(blocks.get(3).hash()).orElseThrow(),
+                                "closed session leaked its peer slot");
+                    }
+                }
+            } finally { release.countDown(); }
+            remote.get(5, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void sessionsNeverRequestTheSameHashConcurrently() throws Exception {
+        var block = blocks(1).getFirst();
+        var release = new CountDownLatch(1);
+        try (var socket = new ServerSocket(0); var peers = new PeerManager()) {
+            var remote = CompletableFuture.runAsync(() -> {
+                try (var connection = socket.accept()) {
+                    completeHandshake(peerIo(connection));
+                    assertTrue(release.await(10, TimeUnit.SECONDS));
+                } catch (Exception exception) { throw new RuntimeException(exception); }
+            });
+            try {
+                var peer = connectPeer(socket.getLocalPort());
+                peers.add(peer);
+                var scheduler = new BlockDownloadScheduler(peers, new BlockDownloadService(peers),
+                        new BlockDownloadTimeoutPolicy(Duration.ofMinutes(10)));
+                try (var owner = scheduler.openSession(); var other = scheduler.openSession()) {
+                    owner.submit(List.of(block.hash()));
+                    other.submit(List.of(block.hash()));
+                    assertFalse(other.retryBlock(block.hash(), peer, new IOException("foreign request")));
+                    other.close();
+                    assertEquals(peer, owner.inFlightPeer(block.hash()).orElseThrow());
+                    owner.close();
+                    try (var next = scheduler.openSession()) {
+                        assertDoesNotThrow(() -> next.submit(List.of(block.hash())),
+                                "closed session leaked the dispatcher's registered block request");
+                        assertEquals(peer, next.inFlightPeer(block.hash()).orElseThrow());
+                    }
+                }
+            } finally { release.countDown(); }
+            remote.get(5, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void bufferedSessionRefillsNetworkWhileConsumerIsBusy() throws Exception {
+        var blocks = blocks(17);
+        var refilled = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        try (var socket = new ServerSocket(0); var peers = new PeerManager()) {
+            var remote = CompletableFuture.runAsync(() -> {
+                try (var connection = socket.accept()) {
+                    var io = peerIo(connection);
+                    completeHandshake(io);
+                    var initial = new HashSet<Hash256>();
+                    for (int i = 0; i < 16; i++) initial.add(readRequestedBlockHash(io));
+                    assertEquals(new HashSet<>(blocks.subList(0, 16).stream().map(Block::hash).toList()), initial);
+                    io.output().write(io.encoder().encode(BitcoinMessages.block(new BlockMessage(blocks.getFirst()))));
+                    io.output().flush();
+                    assertEquals(blocks.get(16).hash(), readRequestedBlockHash(io));
+                    refilled.countDown();
+                    for (int i = 1; i < blocks.size(); i++)
+                        io.output().write(io.encoder().encode(BitcoinMessages.block(new BlockMessage(blocks.get(i)))));
+                    io.output().flush();
+                    assertTrue(release.await(5, TimeUnit.SECONDS));
+                } catch (Exception exception) { throw new RuntimeException(exception); }
+            });
+            try {
+                peers.add(connectPeer(socket.getLocalPort()));
+                var scheduler = new BlockDownloadScheduler(peers, new BlockDownloadService(peers),
+                        new BlockDownloadTimeoutPolicy(Duration.ofMinutes(10)));
+                try (var session = new BufferedBlockDownloadSession(scheduler.openSession())) {
+                    session.submit(blocks.stream().map(Block::hash).toList());
+                    // No consumer polling: validation may be blocked, but network refill must proceed.
+                    assertTrue(refilled.await(5, TimeUnit.SECONDS), "freed network slot was not refilled");
+                    assertEquals(17, session.pendingCount(), "buffered results remain logically pending");
+                    var received = new HashSet<Hash256>();
+                    while (session.pendingCount() > 0) received.add(session.awaitCompleted().requestedHash());
+                    assertEquals(new HashSet<>(blocks.stream().map(Block::hash).toList()), received);
+                }
+            } finally { release.countDown(); }
+            remote.get(5, TimeUnit.SECONDS);
+        }
+    }
 
     @Test
     void shouldAllowAtMostSixteenBlocksInFlightPerPeer()
@@ -1364,6 +1519,11 @@ class BlockDownloadSchedulerTest {
             CountDownLatch requestReceived,
             CountDownLatch releaseServer
     ) {
+        runStalledPeer(serverSocket, expectedBlockHash, requestReceived, releaseServer, false);
+    }
+
+    private static void runStalledPeer(ServerSocket serverSocket, Hash256 expectedBlockHash,
+            CountDownLatch requestReceived, CountDownLatch releaseServer, boolean sendNotFound) {
 
         try (Socket socket =
                      serverSocket.accept()) {
@@ -1387,6 +1547,11 @@ class BlockDownloadSchedulerTest {
                     requestedHash
             );
 
+            if (sendNotFound) {
+                io.output().write(io.encoder().encode(BitcoinMessages.notFound(new NotFoundMessage(List.of(
+                        new InventoryVector(InventoryVector.MSG_WITNESS_BLOCK, expectedBlockHash))))));
+                io.output().flush();
+            }
             requestReceived.countDown();
 
             /*
@@ -1410,7 +1575,7 @@ class BlockDownloadSchedulerTest {
     }
 
     @Test
-    void sessionShouldRetryFailedBlockOnAnotherPeer()
+    void sessionRetainsNotFoundOwnershipThenRetriesDisconnectedPeer()
             throws Exception {
 
         Block block =
@@ -1491,6 +1656,9 @@ class BlockDownloadSchedulerTest {
                                  )
                          )) {
 
+                var availabilityConfirmed = new java.util.concurrent.atomic.AtomicBoolean();
+                session.peerPolicy((peer, hash, height) -> peer == failedPeer || availabilityConfirmed.get());
+
                 session.submit(
                         List.of(
                                 block.hash()
@@ -1503,6 +1671,15 @@ class BlockDownloadSchedulerTest {
                                 TimeUnit.SECONDS
                         )
                 );
+
+                assertTrue(session.pollCompleted(Duration.ofMillis(100)).isEmpty());
+                assertEquals(failedPeer, session.inFlightPeer(block.hash()).orElseThrow());
+                failedPeer.close();
+                assertTrue(session.pollCompleted(Duration.ofSeconds(5)).isEmpty());
+                assertTrue(session.pollCompleted(Duration.ZERO).isEmpty(),
+                        "A ready peer awaiting its announcement is not exhausted");
+                assertEquals(1, session.pendingCount());
+                availabilityConfirmed.set(true);
 
                 CompletedBlockDownload completed =
                         session.awaitCompleted();
@@ -1529,12 +1706,10 @@ class BlockDownloadSchedulerTest {
                 );
 
                 /*
-                 * NOTFOUND means that this peer does not have
-                 * this block. It is not a transport failure,
-                 * therefore BlockDownloadService must leave
-                 * the peer usable.
+                 * NOTFOUND kept the original request owned by the first peer.
+                 * Only its subsequent explicit close released that ownership.
                  */
-                assertTrue(
+                assertFalse(
                         failedPeer.isReady()
                 );
 
@@ -1557,6 +1732,35 @@ class BlockDownloadSchedulerTest {
                     5,
                     TimeUnit.SECONDS
             );
+        }
+    }
+
+    @Test
+    void blockNotFoundKeepsRequestPendingUntilBlockArrives() throws Exception {
+        var block = blocks(1).getFirst();
+        var requested = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        try (var socket = new ServerSocket(0); var peers = new PeerManager()) {
+            var remote = CompletableFuture.runAsync(() ->
+                    runNotFoundPeer(socket, block.hash(), requested, release));
+            try {
+                var peer = connectPeer(socket.getLocalPort());
+                peers.add(peer);
+                var scheduler = new BlockDownloadScheduler(peers, new BlockDownloadService(peers),
+                        new BlockDownloadTimeoutPolicy(Duration.ofMinutes(10)));
+                try (var session = scheduler.openSession()) {
+                    session.submit(List.of(block.hash()));
+                    assertTrue(requested.await(5, TimeUnit.SECONDS));
+                    assertTrue(session.pollCompleted(Duration.ofMillis(100)).isEmpty());
+                    assertTrue(session.pollCompleted(Duration.ZERO).isEmpty());
+                    assertEquals(peer, session.inFlightPeer(block.hash()).orElseThrow());
+                    assertEquals(1, session.pendingCount());
+                    assertTrue(scheduler.acceptBlock(peer, block));
+                    assertEquals(block.hash(), session.awaitCompleted().requestedHash());
+                    assertTrue(peer.isReady(), "NOTFOUND should preserve the healthy connection");
+                }
+            } finally { release.countDown(); }
+            remote.get(5, TimeUnit.SECONDS);
         }
     }
 
@@ -1629,8 +1833,9 @@ class BlockDownloadSchedulerTest {
         }
     }
 
-    @Test
-    void sessionShouldRetryBlockOnAnotherPeerAfterDownloadTimeout()
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void sessionShouldRetryBlockOnAnotherPeerAfterDownloadTimeout(boolean sendNotFound)
             throws Exception {
 
         Block block =
@@ -1661,7 +1866,8 @@ class BlockDownloadSchedulerTest {
                                     stalledServerSocket,
                                     block.hash(),
                                     stalledRequestReceived,
-                                    releaseStalledServer
+                                    releaseStalledServer,
+                                    sendNotFound
                             )
                     );
 
@@ -1718,15 +1924,6 @@ class BlockDownloadSchedulerTest {
                         )
                 );
 
-                /*
-                 * Crossing the adaptive timeout once must quarantine the peer,
-                 * not synchronously tear down the whole connection. This guards
-                 * against one scheduler tick closing a batch of peers that were
-                 * filled at roughly the same time.
-                 */
-                Thread.sleep(300);
-                assertTrue(stalledPeer.isReady());
-
                 CompletedBlockDownload completed =
                         session.awaitCompleted();
 
@@ -1751,13 +1948,7 @@ class BlockDownloadSchedulerTest {
                         session.pendingCount()
                 );
 
-                /*
-                 * A block-request timeout releases/reassigns work but must not
-                 * tear down an otherwise READY Bitcoin transport.
-                 */
-                assertTrue(
-                        stalledPeer.isReady()
-                );
+                assertFalse(stalledPeer.isReady(), "Core disconnects a timed-out download peer");
 
                 /*
                  * The retry peer must remain healthy.
@@ -1818,13 +2009,8 @@ class BlockDownloadSchedulerTest {
         }
     }
     @Test
-    void deeperPipelineHonorsLegacyPerPeerAndSharedBudgetsAndRefillsOneSlot() throws Exception {
-        /*
-         * This remains a contract test for the legacy single-owner scheduler.
-         * Production replicated IBD starts at 128 and has its own fixed
-         * 128/64 frontier contract.
-         */
-        int legacyPerPeerLimit = 64;
+    void corePipelineHonorsPerPeerAndSharedBudgetsAndRefillsOneSlot() throws Exception {
+        int legacyPerPeerLimit = 16;
         for (int peerCount : new int[]{1, 3}) {
             var requested = new java.util.concurrent.LinkedBlockingQueue<BudgetRequest>();
             var done = new java.util.concurrent.atomic.AtomicBoolean();
@@ -1899,11 +2085,11 @@ class BlockDownloadSchedulerTest {
         try (var peers = new PeerManager()) {
             var downloads = new BlockDownloadService(peers);
             var timeout = new BlockDownloadTimeoutPolicy(Duration.ofMinutes(10));
-            for (int invalid : new int[]{-1, 0, 257, Integer.MAX_VALUE}) {
+            for (int invalid : new int[]{-1, 0, 17, 64, 257, Integer.MAX_VALUE}) {
                 assertThrows(IllegalArgumentException.class,
                         () -> new BlockDownloadScheduler(peers, downloads, timeout, invalid));
             }
-            assertEquals(32, new BlockDownloadScheduler(peers, downloads, timeout).maxBlocksInFlightPerPeer());
+            assertEquals(16, new BlockDownloadScheduler(peers, downloads, timeout).maxBlocksInFlightPerPeer());
         }
     }
     private record BudgetRequest(int peer, Hash256 hash) { }

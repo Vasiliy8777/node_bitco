@@ -41,7 +41,7 @@ class NodeConfigurationTest {
                     Map.of("bitcoin.data-directory", directory.toString())));
             context.register(NetworkConfiguration.class, NodeConfiguration.class);
             context.refresh();
-            assertEquals(128, context.getBean(BlockDownloadScheduler.class).maxBlocksInFlightPerPeer());
+            assertEquals(16, context.getBean(BlockDownloadScheduler.class).maxBlocksInFlightPerPeer());
         }
     }
     @TempDir

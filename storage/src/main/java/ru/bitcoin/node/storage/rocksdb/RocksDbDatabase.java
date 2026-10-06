@@ -22,11 +22,26 @@ public final class RocksDbDatabase
 
     private final Options options;
     private final RocksDB database;
+    private final org.rocksdb.LRUCache blockCache;
+    private final org.rocksdb.BloomFilter bloomFilter;
     private final Path databasePath;
     private final long networkMagic;
     private final long[] namespaceVersions = new long[256];
 
     private boolean closed;
+    private final java.util.Map<String, FlatFileRecordStore> payloadFiles = new java.util.HashMap<>();
+
+    /** One sequential writer per payload prefix, with the database owning its lifetime. */
+    public synchronized FlatFileRecordStore payloadFiles(String prefix) {
+        ensureOpen();
+        return payloadFiles.computeIfAbsent(prefix, key -> new FlatFileRecordStore(
+                externalDataRoot().resolve("blocks"), key, networkMagic,
+                FlatFileRecordStore.DEFAULT_MAX_FILE_SIZE, true));
+    }
+
+    private void flushPayloadFiles() {
+        payloadFiles.values().forEach(FlatFileRecordStore::flush);
+    }
 
     private void initializeNamespaceTelemetry() {
         for (int i = 0; i < 256; i++) {
@@ -119,6 +134,10 @@ public final class RocksDbDatabase
             Path databasePath,
             long networkMagic
     ) {
+        this(databasePath, networkMagic, 128);
+    }
+
+    public RocksDbDatabase(Path databasePath, long networkMagic, int blockCacheMiB) {
         if (databasePath == null) {
             throw new IllegalArgumentException(
                     "databasePath must not be null"
@@ -126,18 +145,24 @@ public final class RocksDbDatabase
         }
 
         initializeNamespaceTelemetry();
+        if (blockCacheMiB < 8 || blockCacheMiB > 16384)
+            throw new IllegalArgumentException("blockCacheMiB must be between 8 and 16384");
         this.databasePath = databasePath.toAbsolutePath().normalize();
         this.networkMagic = networkMagic;
+
+        // Keep hot index/coins SST blocks in RAM rather than relying on RocksDB's
+        // small implicit cache. Bloom filters avoid disk reads for absent coins.
+        blockCache = new org.rocksdb.LRUCache(blockCacheMiB * 1024L * 1024L);
+        bloomFilter = new org.rocksdb.BloomFilter(10, false);
+        options = new Options().setCreateIfMissing(true).setTableFormatConfig(
+                new org.rocksdb.BlockBasedTableConfig().setBlockCache(blockCache)
+                        .setCacheIndexAndFilterBlocks(true).setFilterPolicy(bloomFilter));
 
         try {
 
             Files.createDirectories(
                     this.databasePath
             );
-
-            options =
-                    new Options()
-                            .setCreateIfMissing(true);
 
             database =
                     RocksDB.open(
@@ -146,6 +171,9 @@ public final class RocksDbDatabase
                     );
 
         } catch (IOException | RocksDBException exception) {
+            options.close();
+            bloomFilter.close();
+            blockCache.close();
 
             throw new IllegalStateException(
                     "Failed to open RocksDB: "
@@ -384,6 +412,8 @@ public final class RocksDbDatabase
 
     public synchronized void forceFlushChainstate() {
         if (chainstateWriteBack == null) return;
+        // Flush payloads before the database checkpoint referring to them.
+        flushPayloadFiles();
         RocksDbWriteBatch batch = chainstateWriteBack;
         chainstateWriteBack = null;
         if (batch.operationCount() == 0) { batch.close(); return; }
@@ -407,6 +437,7 @@ public final class RocksDbDatabase
 
     public synchronized void syncWal() {
         ensureOpen();
+        flushPayloadFiles();
         long started = System.nanoTime();
         try {
             database.syncWal();
@@ -451,6 +482,7 @@ public final class RocksDbDatabase
                      new WriteOptions()
                              .setSync(sync)) {
 
+            if (sync) flushPayloadFiles();
             database.write(
                     writeOptions,
                     batch.nativeBatch()
@@ -701,11 +733,15 @@ public final class RocksDbDatabase
 
         if (!closed) {
             forceFlushChainstate();
+            flushPayloadFiles();
+            payloadFiles.values().forEach(FlatFileRecordStore::close);
             chainstateWriteBackEnabled = false;
             closed = true;
 
             database.close();
             options.close();
+            bloomFilter.close();
+            blockCache.close();
         }
     }
 }

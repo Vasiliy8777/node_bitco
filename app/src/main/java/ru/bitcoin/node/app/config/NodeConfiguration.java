@@ -53,10 +53,11 @@ public class NodeConfiguration {
     @Bean(destroyMethod = "close")
     public RocksDbDatabase chainDatabase(
             @Value("${bitcoin.data-directory}") String path,
+            @Value("${bitcoin.rocksdb-block-cache-mib:128}") int blockCacheMiB,
             NetworkParameters parameters
     ) {
         Path networkRoot = networkDataDirectory(Path.of(path), parameters);
-        return new RocksDbDatabase(networkRoot.resolve("chainstate"), parameters.magic());
+        return new RocksDbDatabase(networkRoot.resolve("chainstate"), parameters.magic(), blockCacheMiB);
     }
 
     @Bean
@@ -242,7 +243,7 @@ public class NodeConfiguration {
                 outboundPeerManager,
                 () -> Math.toIntExact(
                         validationService
-                                .activeTip()
+                                .downloadTip()
                                 .height()
                 ),
                 targetOutboundPeers,
@@ -337,6 +338,8 @@ public class NodeConfiguration {
             BlockDownloadService blockDownloadService,
             BlockDownloadTimeoutPolicy timeoutPolicy,
             NodeValidationService validationService,
+            NodeSyncInfrastructure infrastructure,
+            NetworkParameters parameters,
             @Value("${bitcoin.p2p.max-blocks-in-flight-per-peer:16}") int maxBlocksInFlightPerPeer
     ) {
         BlockDownloadScheduler scheduler = new BlockDownloadScheduler(
@@ -345,6 +348,11 @@ public class NodeConfiguration {
                 timeoutPolicy,
                 maxBlocksInFlightPerPeer
         );
+        scheduler.peerPolicy(new ru.bitcoin.node.app.sync.CoreBlockDownloadPeerPolicy(
+                infrastructure.blockIndexLookup(), validationService::downloadTip,
+                infrastructure.headerChainState(), infrastructure.blockLocatorBuilder(), parameters,
+                infrastructure::downloadBlockFailed, validationService::downloadInitialBlockDownload,
+                validationService::downloadSnapshotBase));
         validationService.attachBackgroundBlockDownloadScheduler(scheduler);
         return scheduler;
     }
@@ -384,7 +392,7 @@ public class NodeConfiguration {
             boolean listen,
             @Value("${bitcoin.p2p.port:0}")
             int listenPort,
-            @Value("${bitcoin.p2p.header-response-timeout-millis:30000}")
+            @Value("${bitcoin.p2p.header-response-timeout-millis:120000}")
             long headerTimeoutMillis,
             @Value("${bitcoin.mempool-checkpoint-interval-seconds:900}")
             long mempoolCheckpointIntervalSeconds

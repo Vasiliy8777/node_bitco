@@ -81,6 +81,10 @@ public final class BlockDownloadService {
             Peer peer,
             Hash256 blockHash
     ) {
+        return downloadAsync(peer, blockHash, false);
+    }
+
+    public CompletableFuture<Block> downloadAsync(Peer peer, Hash256 blockHash, boolean coreBlockRequest) {
         Objects.requireNonNull(peer, "peer");
         Objects.requireNonNull(blockHash, "blockHash");
 
@@ -94,7 +98,7 @@ public final class BlockDownloadService {
         }
 
         CompletableFuture<Block> network =
-                new BlockSynchronizer(peer).downloadAsync(blockHash);
+                new BlockSynchronizer(peer).downloadAsync(blockHash, coreBlockRequest);
 
         CompletableFuture<Block> result =
                 new CompletableFuture<>();

@@ -24,7 +24,7 @@ public final class RocksDbBlockStore implements BlockStore {
     public RocksDbBlockStore(RocksDbDatabase database) {
         if (database == null) throw new IllegalArgumentException("database must not be null");
         this.database=database;
-        this.files=new FlatFileRecordStore(database.externalDataRoot().resolve("blocks"), "blk", database.networkMagic());
+        this.files=database.payloadFiles("blk");
     }
 
     @Override public void save(Block block) {

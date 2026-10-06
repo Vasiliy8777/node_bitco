@@ -10,7 +10,7 @@ import java.nio.file.StandardOpenOption;
 import java.util.concurrent.ConcurrentHashMap;
 
 /** Core-style append-only flat-file payload storage (blkNNNNN.dat / revNNNNN.dat). */
-public final class FlatFileRecordStore {
+public final class FlatFileRecordStore implements AutoCloseable {
     public static final long DEFAULT_MAX_FILE_SIZE = 128L * 1024L * 1024L;
     private static final ConcurrentHashMap<Path, Object> LOCKS = new ConcurrentHashMap<>();
 
@@ -33,23 +33,35 @@ public final class FlatFileRecordStore {
     private final int magic;
     private final long maxFileSize;
     private final Object lock;
+    private final boolean keepOpen;
+    private java.nio.channels.FileChannel writer;
+    private int writerFile = -1;
+    private boolean dirty;
+    private boolean closed;
 
     public FlatFileRecordStore(Path directory, String prefix, long magic) {
         this(directory, prefix, magic, DEFAULT_MAX_FILE_SIZE);
     }
 
     FlatFileRecordStore(Path directory, String prefix, long magic, long maxFileSize) {
+        this(directory, prefix, magic, maxFileSize, false);
+    }
+
+    FlatFileRecordStore(Path directory, String prefix, long magic, long maxFileSize, boolean keepOpen) {
         if (directory == null || prefix == null || prefix.length() != 3) throw new IllegalArgumentException("Invalid flat-file configuration");
         if (maxFileSize <= 8) throw new IllegalArgumentException("maxFileSize too small");
         this.directory=directory.toAbsolutePath().normalize(); this.prefix=prefix; this.magic=(int)magic; this.maxFileSize=maxFileSize;
         this.lock=LOCKS.computeIfAbsent(this.directory.resolve(prefix), ignored -> new Object());
+        this.keepOpen = keepOpen;
         try { Files.createDirectories(this.directory); } catch(IOException e) { throw new IllegalStateException("Cannot create flat-file directory: "+directory,e); }
     }
 
     public Position append(byte[] payload) {
         if (payload == null) throw new IllegalArgumentException("payload must not be null");
         synchronized(lock) {
+            if (closed) throw new IllegalStateException("Flat-file store is closed");
             try {
+                if (keepOpen) return appendOpen(payload);
                 int file=lastFileNumber(); Path path=file(file); long size=Files.exists(path)?Files.size(path):0L;
                 long recordSize=8L+payload.length;
                 if (size > 0 && size + recordSize > maxFileSize) { file++; path=file(file); size=0L; }
@@ -59,6 +71,60 @@ public final class FlatFileRecordStore {
                 }
                 return new Position(file,size+8L,payload.length);
             } catch(IOException e) { throw new IllegalStateException("Failed to append "+prefix+" flat-file record",e); }
+        }
+    }
+
+    /** Database-owned stores reuse the sequential append handle between checkpoints. */
+    private Position appendOpen(byte[] payload) throws IOException {
+        if (writer == null) openWriter(lastFileNumber());
+        long size = writer.size();
+        if (size > 0 && size + 8L + payload.length > maxFileSize) {
+            flush();
+            writer.close();
+            writer = null;
+            openWriter(writerFile + 1);
+            size = 0;
+        }
+        writer.position(size);
+        ByteBuffer header = ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN)
+                .putInt(magic).putInt(payload.length).flip();
+        // A partial write must also participate in the next durability barrier.
+        dirty = true;
+        while (header.hasRemaining()) writer.write(header);
+        ByteBuffer body = ByteBuffer.wrap(payload);
+        while (body.hasRemaining()) writer.write(body);
+        return new Position(writerFile, size + 8L, payload.length);
+    }
+
+    private void openWriter(int fileNumber) throws IOException {
+        writer = java.nio.channels.FileChannel.open(file(fileNumber),
+                StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+        writerFile = fileNumber;
+    }
+
+    /** Flush payloads before publishing durable database pointers to them. */
+    public void flush() {
+        synchronized (lock) {
+            if (writer == null || !dirty) return;
+            try {
+                writer.force(true);
+                dirty = false;
+            } catch (IOException e) {
+                throw new IllegalStateException("Failed to flush " + prefix + " flat file", e);
+            }
+        }
+    }
+
+    @Override public void close() {
+        synchronized (lock) {
+            if (closed) return;
+            flush();
+            if (writer != null) {
+                try { writer.close(); }
+                catch (IOException e) { throw new IllegalStateException("Failed to close flat file", e); }
+                writer = null;
+            }
+            closed = true;
         }
     }
 

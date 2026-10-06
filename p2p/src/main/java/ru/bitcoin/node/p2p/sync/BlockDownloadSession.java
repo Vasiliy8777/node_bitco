@@ -43,6 +43,17 @@ public interface BlockDownloadSession
             Hash256 blockHash
     );
 
+    /** Whether another idle peer could download a block beyond a full window. */
+    default boolean hasIdlePeerFor(BlockDownloadRequest request, Peer blockingPeer) {
+        return false;
+    }
+
+    /** Evaluate FindNextBlocks in the context of each idle peer's own chain and window. */
+    default Optional<Peer> findWindowStaller(BlockDownloadRequest beyondWindow,
+            java.util.function.BiFunction<Peer, BlockDownloadPeerPolicy, Optional<Peer>> probe) {
+        return Optional.empty();
+    }
+
     void failPeer(
             Peer peer,
             IOException failure

@@ -22,6 +22,47 @@ class BlockFailureResolverTest {
     @TempDir Path directory;
 
     @Test
+    void validAnchorCertifiesOnlyItsAncestorsAndInvalidatesOnCommittedFailure() {
+        var indexes = chain(8);
+        var reads = new AtomicInteger();
+        var fork = new BlockIndex(hash(99), index(3).header(), 3,
+                index(2).hash(), index(3).chainWork());
+        indexes.put(fork.hash(), fork);
+        BlockIndexAncestorLookup lookup = new BlockIndexAncestorLookup() {
+            public BlockIndex find(Hash256 hash) { reads.incrementAndGet(); return indexes.get(hash); }
+            public BlockIndex ancestor(BlockIndex tip, long height) { return index((int) height); }
+        };
+        try (var db = new RocksDbDatabase(directory)) {
+            var failures = new RocksDbBlockFailureStore(db);
+            failures.markFailed(fork.hash());
+            var resolver = new BlockFailureResolver(lookup, failures);
+            resolver.seedKnownValid(index(7));
+            assertFalse(resolver.isFailed(index(3)));
+            assertEquals(0, reads.get(), "Valid ancestry should not require a historical parent walk");
+            assertTrue(resolver.isFailed(fork), "Same height on another branch is not certified");
+            failures.markFailed(index(2).hash());
+            assertTrue(resolver.isFailed(index(3)), "Committed invalidation must revoke the anchor");
+            assertTrue(reads.get() > 0);
+        }
+    }
+
+    @Test
+    void interruptedFailureWalkStopsBeforeReadingHistory() {
+        try (var db = new RocksDbDatabase(directory)) {
+            var reads = new AtomicInteger();
+            var resolver = new BlockFailureResolver(hash -> {
+                reads.incrementAndGet();
+                return index(0);
+            }, new RocksDbBlockFailureStore(db));
+            Thread.currentThread().interrupt();
+            try {
+                assertThrows(java.util.concurrent.CancellationException.class, () -> resolver.isFailed(index(3)));
+                assertEquals(0, reads.get());
+            } finally { Thread.interrupted(); }
+        }
+    }
+
+    @Test
     void sequentialHistoryNeedsOnlyOneParentReadPerNewBlockEvenAfterCacheEviction() {
         try (var db = new RocksDbDatabase(directory)) {
             var failures = new RocksDbBlockFailureStore(db);

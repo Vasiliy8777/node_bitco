@@ -66,6 +66,10 @@ public final class BlockDownloadStallTimeoutEvaluator {
         );
     }
 
+    public void blockConnected() {
+        timeoutPolicy.blockConnected();
+    }
+
     public void timeoutHandled() {
         timeoutPolicy.increaseAfterTimeout();
     }

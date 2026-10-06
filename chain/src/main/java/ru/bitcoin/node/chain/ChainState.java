@@ -2,7 +2,7 @@ package ru.bitcoin.node.chain;
 
 public final class ChainState {
 
-    private BlockIndex activeTip;
+    private volatile BlockIndex activeTip;
 
     public ChainState(
             BlockIndex initialTip

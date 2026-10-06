@@ -2006,13 +2006,15 @@ class NodeLifecycleServiceTest {
                         output
                 );
 
-                /*
-                 * Header sync must NOT restart here.
-                 *
-                 * The existing header chain already knows block1.
-                 * SchedulerBlockDownloadSession should simply assign the
-                 * unfinished block body to this new Peer instance.
-                 */
+                // A replacement connection must prove availability independently of VERSION.
+                // The locator probes the already validated tip; it does not redownload header history.
+                BitcoinMessage availabilityProbe = readProtocolMessage(reader, input);
+                assertEquals("getheaders", availabilityProbe.command());
+                var locator = GetHeadersMessageCodec.decode(availabilityProbe.payload());
+                assertEquals(block.header().previousBlockHash(), locator.locatorHashes().getFirst());
+                output.write(encoder.encode(BitcoinMessages.headers(new HeadersMessage(List.of(block.header())))));
+                output.flush();
+
                 BitcoinMessage getDataWire =
                         readProtocolMessage(
                                 reader,
@@ -2022,7 +2024,7 @@ class NodeLifecycleServiceTest {
                 assertEquals(
                         "getdata",
                         getDataWire.command(),
-                        "Replacement peer should resume block download without restarting header sync"
+                        "Replacement peer should resume the pending download after announcing its known tip"
                 );
 
                 GetDataMessage getData =
@@ -2072,7 +2074,7 @@ class NodeLifecycleServiceTest {
                 answerLiveHeaderPolls(reader, encoder, input, output);
             }
 
-        } catch (Exception exception) {
+        } catch (Throwable exception) {
 
             firstGetDataReceived.completeExceptionally(
                     exception

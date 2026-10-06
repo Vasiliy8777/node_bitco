@@ -795,6 +795,32 @@ class PeerMessageDispatcherTest {
         assertFalse(replacement.isDone());
     }
 
+    @Test
+    void coreRequestIgnoresBlockNotFoundAndAcceptsLaterBlock() throws Exception {
+        var block = GenesisBlockFactory.create(NetworkParametersRegistry.mainnet());
+        var dispatcher = new PeerMessageDispatcher(peer());
+        var pending = dispatcher.registerCoreBlock(block.hash());
+        dispatcher.dispatch(BitcoinMessages.notFound(new NotFoundMessage(List.of(
+                new InventoryVector(InventoryVector.MSG_BLOCK, block.hash()),
+                new InventoryVector(InventoryVector.MSG_WITNESS_BLOCK, block.hash())))));
+        assertFalse(pending.isDone());
+        dispatcher.dispatch(BitcoinMessages.block(new BlockMessage(block)));
+        assertEquals(block, pending.join());
+    }
+
+    @Test
+    void unregisterCoreRequestDoesNotChangeReplacementRequestPolicy() throws Exception {
+        var block = GenesisBlockFactory.create(NetworkParametersRegistry.mainnet());
+        var dispatcher = new PeerMessageDispatcher(peer());
+        var cancelled = dispatcher.registerCoreBlock(block.hash());
+        dispatcher.unregisterBlock(block.hash(), cancelled);
+        var replacement = dispatcher.registerBlock(block.hash());
+        dispatcher.dispatch(BitcoinMessages.notFound(new NotFoundMessage(List.of(
+                new InventoryVector(InventoryVector.MSG_BLOCK, block.hash())))));
+        assertTrue(replacement.isCompletedExceptionally());
+        assertFalse(cancelled.isDone());
+    }
+
     private static Peer peer() {
 
         PeerConnection connection =

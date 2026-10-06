@@ -69,10 +69,12 @@ class AssumeValidPolicyTest {
         BlockIndex best = cursor;
         BlockIndex assumedBlock = assumed;
         int[] ancestorCalls = {0};
+        int[] indexReads = {0};
 
         BlockIndexAncestorLookup lookup = new BlockIndexAncestorLookup() {
             @Override
             public BlockIndex find(Hash256 hash) {
+                indexReads[0]++;
                 return indexes.get(hash);
             }
 
@@ -94,6 +96,8 @@ class AssumeValidPolicyTest {
                 lookup, () -> best, parameters, assumedBlock.hash());
 
         assertFalse(policy.shouldVerifyScripts(genesis));
+        assertTrue(indexReads[0] <= 257,
+                "first candidate must not prefetch thousands of cold indexes under the chain lock");
         assertEquals(2, ancestorCalls[0],
                 "assumed-valid and best-header ancestry must use BlockIndexAncestorLookup");
 
