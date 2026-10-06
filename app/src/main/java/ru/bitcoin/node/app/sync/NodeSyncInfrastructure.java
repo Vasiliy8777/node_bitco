@@ -27,6 +27,12 @@ public final class NodeSyncInfrastructure {
             NetworkParameters parameters,
             AdjustedTime adjustedTime
     ) {
+        this(database, parameters, adjustedTime, null);
+    }
+
+    /** Reuse the validation index cache as Core reuses its global block index. */
+    public NodeSyncInfrastructure(RocksDbDatabase database, NetworkParameters parameters,
+                                  AdjustedTime adjustedTime, StoredBlockIndexLookup sharedLookup) {
         Objects.requireNonNull(
                 database,
                 "database"
@@ -60,10 +66,8 @@ public final class NodeSyncInfrastructure {
                         database
                 );
 
-        this.blockIndexLookup =
-                new StoredBlockIndexLookup(
-                        blockIndexStore
-                );
+        this.blockIndexLookup = sharedLookup != null ? sharedLookup
+                : new StoredBlockIndexLookup(blockIndexStore);
 
         this.headerChainState =
                 new HeaderChainStateLoader(

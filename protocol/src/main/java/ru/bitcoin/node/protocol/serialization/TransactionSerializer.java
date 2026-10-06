@@ -18,6 +18,33 @@ public final class TransactionSerializer {
     private TransactionSerializer() {
     }
 
+    /** Exact wire size without allocating serialized bytes; no validation is skipped. */
+    public static long serializedSize(Transaction transaction, boolean includeWitness) {
+        if (transaction == null) throw new IllegalArgumentException("transaction must not be null");
+        boolean witness = includeWitness && transaction.hasWitness();
+        long size = 8L + CompactSize.encodedSize(transaction.inputs().size())
+                + CompactSize.encodedSize(transaction.outputs().size()) + (witness ? 2 : 0);
+        for (TxIn input : transaction.inputs()) {
+            int length = input.scriptSigLength();
+            size = Math.addExact(size, 40L + CompactSize.encodedSize(length) + length);
+        }
+        for (TxOut output : transaction.outputs()) {
+            int length = output.scriptPubKeyLength();
+            size = Math.addExact(size, 8L + CompactSize.encodedSize(length) + length);
+        }
+        if (witness) {
+            for (TxIn input : transaction.inputs()) {
+                Witness stack = input.witness();
+                size = Math.addExact(size, CompactSize.encodedSize(stack.size()));
+                for (int i = 0; i < stack.size(); i++) {
+                    int length = stack.itemLength(i);
+                    size = Math.addExact(size, (long) CompactSize.encodedSize(length) + length);
+                }
+            }
+        }
+        return size;
+    }
+
     public static byte[] serialize(
             Transaction transaction
     ) {

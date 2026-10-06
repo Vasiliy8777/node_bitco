@@ -62,7 +62,7 @@ class AssumeValidPolicyTest {
         BlockIndex genesis = block(null, 0, 0, indexes);
         BlockIndex cursor = genesis;
         BlockIndex assumed = null;
-        for (int height = 1; height <= 2018; height++) {
+        for (int height = 1; height <= 2300; height++) {
             cursor = block(cursor, height, height, indexes);
             if (height == 1000) assumed = cursor;
         }
@@ -96,8 +96,8 @@ class AssumeValidPolicyTest {
                 lookup, () -> best, parameters, assumedBlock.hash());
 
         assertFalse(policy.shouldVerifyScripts(genesis));
-        assertTrue(indexReads[0] <= 257,
-                "first candidate must not prefetch thousands of cold indexes under the chain lock");
+        assertTrue(indexReads[0] <= 129,
+                "a proven best chain must reuse the assumed chain window instead of reading it twice");
         assertEquals(2, ancestorCalls[0],
                 "assumed-valid and best-header ancestry must use BlockIndexAncestorLookup");
 
@@ -108,6 +108,53 @@ class AssumeValidPolicyTest {
         assertFalse(policy.shouldVerifyScripts(heightOne));
         assertEquals(2, ancestorCalls[0],
                 "consecutive IBD candidates inside the ancestry window must reuse the exact cached proof");
+        for (int height = 2; height < 256; height++) {
+            final int candidateHeight = height;
+            var candidate = indexes.values().stream().filter(i -> i.height() == candidateHeight).findFirst().orElseThrow();
+            assertFalse(policy.shouldVerifyScripts(candidate));
+        }
+        assertEquals(3, ancestorCalls[0], "only the assumed-chain window needs refilling at height 128");
+        assertTrue(indexReads[0] <= 512, "best-chain membership must not duplicate historical reads");
+    }
+
+    @Test
+    void cachedBestMembershipMatchesIndependentChecksAcrossHeaderForks() {
+        var parameters = NetworkParametersRegistry.regtest();
+        Map<Hash256, BlockIndex> indexes = new HashMap<>();
+        var main = new java.util.ArrayList<BlockIndex>();
+        main.add(block(null, 0, 0, indexes));
+        for (int height = 1; height <= 3100; height++) {
+            main.add(block(main.getLast(), height, height, indexes));
+        }
+        var fork = main.get(500);
+        var forkCandidates = new java.util.ArrayList<BlockIndex>();
+        for (int height = 501; height <= 3100; height++) {
+            fork = block(fork, height, 10000 + height, indexes);
+            if (height == 501 || height == 1000) forkCandidates.add(fork);
+        }
+        var best = new java.util.concurrent.atomic.AtomicReference<>(main.getLast());
+        BlockIndexAncestorLookup skip = new BlockIndexAncestorLookup() {
+            public BlockIndex find(Hash256 hash) { return indexes.get(hash); }
+            public BlockIndex ancestor(BlockIndex index, long height) {
+                while (index.height() > height) index = indexes.get(index.previousBlockHash());
+                return index;
+            }
+        };
+        var optimized = new AssumeValidPolicy(skip, best::get, parameters, main.get(1000).hash());
+        // The plain lookup takes the original two independent parent walks,
+        // serving as an oracle unrelated to transitive-proof caching.
+        var reference = new AssumeValidPolicy(indexes::get, best::get, parameters, main.get(1000).hash());
+        for (var tip : java.util.List.of(main.getLast(), fork, main.get(600), main.getLast())) {
+            best.set(tip);
+            for (int height : new int[]{0, 127, 128, 499, 500, 501, 999, 1000, 1001, 2016}) {
+                var candidate = main.get(height);
+                assertEquals(reference.shouldVerifyScripts(candidate), optimized.shouldVerifyScripts(candidate),
+                        "candidate=" + height + " best=" + tip.hash().toDisplayHex());
+            }
+            for (var candidate : forkCandidates) {
+                assertEquals(reference.shouldVerifyScripts(candidate), optimized.shouldVerifyScripts(candidate));
+            }
+        }
     }
 
     private static BlockIndex block(BlockIndex parent, long height, long nonce, Map<Hash256, BlockIndex> indexes) {

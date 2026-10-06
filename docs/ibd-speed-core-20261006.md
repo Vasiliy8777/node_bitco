@@ -132,6 +132,47 @@ capture. Compared with the earlier 23.6% this is a different range/peer run, not
 controlled speedup; longest pauses did not improve. Historical index and cold
 UTXO access still limit actual progress despite buffered available bodies.
 
+## Follow-up: reuse exact assume-valid branch membership
+
+The measured historical index reads included two independent 128-height windows
+for candidates on the same assumed-valid/best-header path. The policy now proves
+once, using skip ancestry and exact hashes, that the best header contains the
+configured assumed-valid block. Candidate membership in the assumed chain then
+also proves membership in that best chain by transitivity. A positive proof is
+reused only for the identical immutable best-header hash. A changed best header
+must obtain its own proof; a fork/older/missing path falls back to the original
+independent candidate-membership check. Minimum chainwork and proof-equivalent
+two-week age still apply on every decision. This is equivalent evaluation of
+Core's gates, not removal of the best-chain gate or a new assume-valid trust rule.
+
+The ancestry-window cache is now bounded to four descendant hashes, preventing
+retention of every historic best-header window. In the instrumented fixture,
+the first candidate needs at most 129 explicit index lookups instead of up to
+257; the first 256 candidates require three skip-ancestor operations rather than
+four. An independent plain-parent-walk policy is used as an oracle across main
+and fork candidates, changed/older best headers and returning to the original tip.
+The first expanded fixture incorrectly expected script skipping for candidates
+inside the two-week boundary; its header tip was extended to keep all measured
+candidates old enough, with no production change for that test failure.
+
+Validation: `speed-ancestry-core-repeat.log` passed 41 selected tests (one skipped)
+including Core interoperability/reorg and the differential ancestry oracle.
+`speed-ancestry-chain-full.log` passed all 3116 tests in 212 classes in the reactor
+through chain, with zero failures/errors/skips. The full 3915-test result above
+belongs to the prior hash/prefetch change, not this follow-up.
+
+Public run: `testnet-ancestry-after.log` and console capture. It reached 722760,
+exited normally, and STOPPING to STOPPED took 204 ms. Of 163 one-second samples
+after initial positive progress, 27 were zero (16.6%), all in one consecutive
+27-sample series. This series was a network frontier wait, not index/UTXO work:
+height 721089 remained unavailable, owned by 35.171.228.28, while buffered bodies
+increased from 157 to 935 and connectBatchMs was zero. The block subsequently
+arrived and ordered connection resumed. The later input-heavy range was limited
+by cold UTXO reads: at 721172, 91961 UTXO reads took 4385 ms per telemetry interval,
+with zero persistent index-lookup cache misses. Small block-count rates there do
+not imply idle validation. Different ranges, peer conditions and cache warmth
+prevent attributing the change from 20.1% to 16.6% solely to this optimization.
+
 ## Remaining architectural limits
 
 No consensus checks were removed. Core still has a fully in-memory block index,

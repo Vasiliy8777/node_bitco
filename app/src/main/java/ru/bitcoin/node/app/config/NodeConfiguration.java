@@ -89,7 +89,8 @@ public class NodeConfiguration {
             @Value("${bitcoin.blockfilterindex:false}")
             boolean blockFilterIndex,
             @Value("${bitcoin.txospenderindex:false}")
-            boolean txOutSpenderIndex
+            boolean txOutSpenderIndex,
+            @Value("${bitcoin.ibd-utxo-prefetch:true}") boolean ibdUtxoPrefetch
     ) {
         long pruneTargetBytes = pruneTargetBytes(pruneMiB);
         var pruneState = new ru.bitcoin.node.storage.chain.RocksDbPruneStateStore(database);
@@ -153,7 +154,7 @@ public class NodeConfiguration {
         // restart-safe backfill before RPC/fork diagnostics can classify old validated branches.
         new ru.bitcoin.node.chain.BlockValidationStatusMigrator(database).migrate();
 
-        return new NodeValidationService(
+        var validation = new NodeValidationService(
                 database,
                 parameters,
                 adjustedTime,
@@ -166,6 +167,8 @@ public class NodeConfiguration {
                 blockFilterIndex,
                 txOutSpenderIndex
         );
+        validation.initialSyncPrefetchEnabled(ibdUtxoPrefetch);
+        return validation;
     }
 
     @Bean
@@ -178,7 +181,8 @@ public class NodeConfiguration {
         return new NodeSyncInfrastructure(
                 database,
                 parameters,
-                adjustedTime
+                adjustedTime,
+                validationService.storedBlockIndexLookup()
         );
     }
 

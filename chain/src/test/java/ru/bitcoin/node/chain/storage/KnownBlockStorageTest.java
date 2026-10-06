@@ -30,6 +30,72 @@ class KnownBlockStorageTest {
     Path tempDirectory;
 
     @Test
+    void shouldKeepCommittedHeaderIndexWithoutReadingOrRewritingIt() {
+        Path path = tempDirectory.resolve("known-header");
+        Block block = testBlock();
+        BlockIndex index = testIndex(block, 101);
+        try (RocksDbDatabase database = new RocksDbDatabase(path)) {
+            var indexes = new RocksDbBlockIndexStore(database);
+            indexes.save(ru.bitcoin.node.chain.BlockIndexStorageMapper.toStored(index));
+            var storage = new KnownBlockStorage(database, new RocksDbBlockStore(database), indexes);
+            byte prefix = ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.BLOCK_INDEX;
+            long version = database.namespaceVersion(prefix);
+            var before = database.namespaceIoStats();
+            try (var batch = new ru.bitcoin.node.storage.rocksdb.RocksDbWriteBatch()) {
+                storage.save(batch, block, index, index);
+                database.write(batch);
+            }
+            assertEquals(0, database.namespaceIoStats().minus(before).gets(prefix));
+            assertEquals(version, database.namespaceVersion(prefix));
+            assertTrue(storage.hasBody(block.hash()));
+            assertTrue(new RocksDbChainStateStore(database).loadActiveTipHash().isEmpty());
+        }
+        try (RocksDbDatabase reopened = new RocksDbDatabase(path)) {
+            assertEquals(block, new RocksDbBlockStore(reopened).find(block.hash()).orElseThrow());
+            assertEquals(ru.bitcoin.node.chain.BlockIndexStorageMapper.toStored(index),
+                    new RocksDbBlockIndexStore(reopened).find(index.hash()).orElseThrow());
+            assertTrue(new ru.bitcoin.node.storage.block.RocksDbBlockAvailabilityStore(reopened)
+                    .hasData(block.hash()));
+        }
+    }
+
+    @Test
+    void shouldPersistNewOrChangedIndexThroughRegularPath() {
+        try (RocksDbDatabase database = new RocksDbDatabase(tempDirectory.resolve("replacement"))) {
+            var indexes = new RocksDbBlockIndexStore(database);
+            var storage = new KnownBlockStorage(database, new RocksDbBlockStore(database), indexes);
+            Block block = testBlock();
+            BlockIndex old = testIndex(block, 101);
+            try (var batch = new ru.bitcoin.node.storage.rocksdb.RocksDbWriteBatch()) {
+                storage.save(batch, block, old, null);
+                database.write(batch);
+            }
+            BlockIndex replacement = testIndex(block, 102);
+            try (var batch = new ru.bitcoin.node.storage.rocksdb.RocksDbWriteBatch()) {
+                storage.save(batch, block, replacement, old);
+                database.write(batch);
+            }
+            assertEquals(ru.bitcoin.node.chain.BlockIndexStorageMapper.toStored(replacement),
+                    indexes.find(block.hash()).orElseThrow());
+            assertEquals(1, database.countPrefix(
+                    ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.BLOCK_HEIGHT_INDEX));
+            assertEquals(1, database.countPrefix(
+                    ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.BLOCK_WORK_INDEX));
+        }
+    }
+
+    private static Block testBlock() {
+        return new Block(new BlockHeader(1, Hash256.fromDisplayHex("33".repeat(32)),
+                Hash256.fromDisplayHex("44".repeat(32)), new UInt32(1_700_000_100L),
+                new UInt32(0x207FFFFFL), new UInt32(2)), List.of());
+    }
+
+    private static BlockIndex testIndex(Block block, long height) {
+        return new BlockIndex(block.hash(), block.header(), height,
+                block.header().previousBlockHash(), BigInteger.valueOf(height * 20));
+    }
+
+    @Test
     void shouldPersistKnownBlockWithoutActivatingIt() {
 
         try (RocksDbDatabase database =

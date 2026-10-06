@@ -23,6 +23,16 @@ public final class CoreBlockDownloadPeerPolicy implements BlockDownloadPeerPolic
     private final BooleanSupplier initialDownload;
     private final Supplier<BlockIndex> snapshotBase;
     private final Map<Peer, State> states = new IdentityHashMap<>();
+    private Hash256 locatorTip;
+    private List<Hash256> cachedLocator;
+    // Core uses shared in-memory CBlockIndex ancestry. Cache only immutable hash
+    // results here; mutable eligibility/failure decisions are never memoized.
+    private final Map<AncestorKey, Hash256> ancestors = new LinkedHashMap<>(256, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<AncestorKey, Hash256> eldest) {
+            return size() > 2048;
+        }
+    };
 
     public CoreBlockDownloadPeerPolicy(BlockIndexLookup lookup, Supplier<BlockIndex> activeTip,
             HeaderChainState headers, BlockLocatorBuilder locators, NetworkParameters parameters,
@@ -57,7 +67,8 @@ public final class CoreBlockDownloadPeerPolicy implements BlockDownloadPeerPolic
             }
             if (state.bestKnown != null && (!active.hash().equals(state.activeAtUpdate)
                     || state.bestAtUpdate != state.bestKnown)) {
-                BlockIndex fork = CommonAncestorFinder.find(state.bestKnown, active, lookup);
+                BlockIndex fork = contains(state.bestKnown, active) ? active
+                        : CommonAncestorFinder.find(state.bestKnown, active, lookup);
                 if (state.lastCommon == null || fork.chainWork().compareTo(state.lastCommon.chainWork()) > 0
                         || !contains(state.bestKnown, state.lastCommon)) state.lastCommon = fork;
                 state.activeAtUpdate = active.hash();
@@ -68,11 +79,10 @@ public final class CoreBlockDownloadPeerPolicy implements BlockDownloadPeerPolic
             if ((state.bestKnown == null || state.bestKnown.height() < headerTip.height())
                     && now >= state.nextHeadersRequest) {
                 state.nextHeadersRequest = now + Duration.ofMinutes(2).toNanos();
-                BlockIndex anchor = headerTip.height() == 0 ? headerTip : lookup.find(headerTip.previousBlockHash());
                 try {
                     peer.sendAsync(BitcoinMessages.getHeaders(new GetHeadersMessage(
                             Math.min(VersionMessage.CURRENT_PROTOCOL_VERSION, peer.remoteVersion().version()),
-                            locators.build(anchor), new Hash256(new byte[32]))));
+                            availabilityLocator(headerTip), new Hash256(new byte[32]))));
                 } catch (IOException | IllegalStateException ignored) {
                     // Transport owns disconnection and retry; this does not make the peer eligible.
                 }
@@ -122,10 +132,34 @@ public final class CoreBlockDownloadPeerPolicy implements BlockDownloadPeerPolic
 
     private boolean contains(BlockIndex tip, BlockIndex block) {
         if (block.height() > tip.height()) return false;
+        AncestorKey key = new AncestorKey(tip.hash(), block.height());
+        Hash256 cached = ancestors.get(key);
+        if (cached != null) return cached.equals(block.hash());
+        BlockIndex ancestor;
         if (lookup instanceof BlockIndexAncestorLookup accelerated)
-            return accelerated.ancestor(tip, block.height()).hash().equals(block.hash());
-        while (tip.height() > block.height()) tip = Objects.requireNonNull(lookup.find(tip.previousBlockHash()));
-        return tip.hash().equals(block.hash());
+            ancestor = accelerated.ancestor(tip, block.height());
+        else {
+            ancestor = tip;
+            while (ancestor.height() > block.height())
+                ancestor = Objects.requireNonNull(lookup.find(ancestor.previousBlockHash()));
+        }
+        ancestors.put(key, ancestor.hash());
+        return ancestor.hash().equals(block.hash());
+    }
+
+    private record AncestorKey(Hash256 tip, long height) { }
+
+    // All peers receive the same immutable locator for this header tip. Rebuild
+    // only when its hash changes, including a same-height header reorganization.
+    private List<Hash256> availabilityLocator(BlockIndex headerTip) {
+        if (!headerTip.hash().equals(locatorTip)) {
+            BlockIndex anchor = headerTip.height() == 0 ? headerTip
+                    : Objects.requireNonNull(lookup.find(headerTip.previousBlockHash()));
+            List<Hash256> built = List.copyOf(locators.build(anchor));
+            cachedLocator = built;
+            locatorTip = headerTip.hash();
+        }
+        return cachedLocator;
     }
 
     private static final class State {

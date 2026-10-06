@@ -93,6 +93,25 @@ public final class KnownBlockStorage {
             Block block,
             BlockIndex blockIndex
     ) {
+        save(batch, block, blockIndex, null);
+    }
+
+    public boolean usesIndexStore(ru.bitcoin.node.chain.StoredBlockIndexLookup lookup) {
+        return lookup != null && lookup.isBackedBy(blockIndexStore);
+    }
+
+    /**
+     * Persists the body using an immutable index already resolved by the validation
+     * lookup. The caller must serialize this operation with all chain/index writers
+     * and must supply an index that is already committed in this database.
+     * A changed index falls back to the regular secondary-index replacement path.
+     */
+    public void save(
+            RocksDbWriteBatch batch,
+            Block block,
+            BlockIndex blockIndex,
+            BlockIndex committedIndex
+    ) {
         if (batch == null) throw new IllegalArgumentException("batch must not be null");
         if (block == null) throw new IllegalArgumentException("block must not be null");
         if (blockIndex == null) throw new IllegalArgumentException("blockIndex must not be null");
@@ -104,6 +123,10 @@ public final class KnownBlockStorage {
         }
         blockStore.save(batch, block);
         availability.markData(batch, block.hash());
-        blockIndexStore.save(batch, BlockIndexStorageMapper.toStored(blockIndex));
+        var storedIndex = BlockIndexStorageMapper.toStored(blockIndex);
+        if (committedIndex == null
+                || !storedIndex.equals(BlockIndexStorageMapper.toStored(committedIndex))) {
+            blockIndexStore.save(batch, storedIndex);
+        }
     }
 }

@@ -29,6 +29,11 @@ public final class RocksDbDatabase
     private final long[] namespaceVersions = new long[256];
 
     private boolean closed;
+    // Hints only warm the native version-aware cache. Disposal excludes these reads.
+    private final java.util.concurrent.locks.ReentrantReadWriteLock warmReadLifetime =
+            new java.util.concurrent.locks.ReentrantReadWriteLock();
+    private final LongAdder warmKeysCount = new LongAdder();
+    private final LongAdder warmReadNanos = new LongAdder();
     private final java.util.Map<String, FlatFileRecordStore> payloadFiles = new java.util.HashMap<>();
 
     /** One sequential writer per payload prefix, with the database owning its lifetime. */
@@ -738,10 +743,48 @@ public final class RocksDbDatabase
             chainstateWriteBackEnabled = false;
             closed = true;
 
-            database.close();
-            options.close();
-            bloomFilter.close();
-            blockCache.close();
+            warmReadLifetime.writeLock().lock();
+            try {
+                database.close();
+                options.close();
+                bloomFilter.close();
+                blockCache.close();
+            } finally {
+                warmReadLifetime.writeLock().unlock();
+            }
         }
+    }
+
+    /** Read hints only: populate RocksDB's block cache, discard all coin values. */
+    public void warmKeys(List<byte[]> keys) {
+        java.util.Objects.requireNonNull(keys, "keys");
+        for (int offset = 0; offset < keys.size(); offset += 512) {
+            if (Thread.currentThread().isInterrupted()) return;
+            List<byte[]> cold = new ArrayList<>();
+            synchronized (this) {
+                if (closed) return;
+                for (byte[] key : keys.subList(offset, Math.min(keys.size(), offset + 512))) {
+                    java.util.Objects.requireNonNull(key, "key");
+                    if (chainstateWriteBack == null || !chainstateWriteBack.pendingValue(key).touched()) cold.add(key);
+                }
+                if (cold.isEmpty()) continue;
+                warmReadLifetime.readLock().lock();
+            }
+            long started = System.nanoTime();
+            try {
+                database.multiGetAsList(cold);
+            } catch (RocksDBException failure) {
+                throw new IllegalStateException("Failed to warm RocksDB cache", failure);
+            } finally {
+                warmKeysCount.add(cold.size());
+                warmReadNanos.add(System.nanoTime() - started);
+                warmReadLifetime.readLock().unlock();
+            }
+        }
+    }
+
+    public record WarmReadStats(long keys, long nanos) { }
+    public WarmReadStats warmReadStats() {
+        return new WarmReadStats(warmKeysCount.sum(), warmReadNanos.sum());
     }
 }

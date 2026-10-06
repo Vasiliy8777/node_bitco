@@ -6,6 +6,7 @@ import ru.bitcoin.node.protocol.network.NetworkParameters;
 
 import java.math.BigInteger;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.Supplier;
@@ -39,7 +40,13 @@ public final class AssumeValidPolicy {
      * correct but needlessly re-reads hundreds of block-index records. Cache a
      * small, branch-specific window of exact height -> hash proofs instead.
      */
-    private final Map<Hash256, AncestryWindow> ancestryWindows = new HashMap<>();
+    private final Map<Hash256, AncestryWindow> ancestryWindows = new LinkedHashMap<>(4, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<Hash256, AncestryWindow> eldest) {
+            return size() > 4;
+        }
+    };
+    private Hash256 provenBestHeader;
 
     public AssumeValidPolicy(BlockIndexLookup lookup,
                              Supplier<BlockIndex> bestHeaderSupplier,
@@ -65,10 +72,13 @@ public final class AssumeValidPolicy {
                 || !isAncestor(candidate, assumed)) return true;
 
         BlockIndex bestHeader = bestHeaderSupplier.get();
-        if (bestHeader == null || candidate.height() > bestHeader.height()
-                || !isAncestor(candidate, bestHeader)) return true;
+        if (bestHeader == null || candidate.height() > bestHeader.height()) return true;
 
         if (bestHeader.chainWork().compareTo(parameters.minimumChainWork()) < 0) return true;
+        // If candidate is in the assumed chain and best contains the assumed
+        // block, transitivity proves the same exact best-chain membership.
+        // Only a positive proof for this immutable best hash can be reused.
+        if (!bestIncludesAssumed(assumed, bestHeader) && !isAncestor(candidate, bestHeader)) return true;
 
         return proofEquivalentTime(bestHeader, candidate, bestHeader) <= ASSUME_VALID_DEPTH_SECONDS;
     }
@@ -113,6 +123,23 @@ public final class AssumeValidPolicy {
     }
 
     private record AncestryWindow(long lowHeight, long highHeight, Map<Long, Hash256> hashesByHeight) {
+    }
+
+    private synchronized boolean bestIncludesAssumed(BlockIndex assumed, BlockIndex best) {
+        if (best.hash().equals(provenBestHeader)) return true;
+        if (best.height() < assumed.height() || !(lookup instanceof BlockIndexAncestorLookup ancestors)) {
+            return false;
+        }
+        try {
+            BlockIndex ancestor = ancestors.ancestor(best, assumed.height(), AssumeValidPolicy::checkInterrupted);
+            if (ancestor != null && ancestor.hash().equals(assumed.hash())) {
+                provenBestHeader = best.hash();
+                return true;
+            }
+        } catch (IllegalStateException missingAncestry) {
+            // Do not memoize failure: additional headers may fill this ancestry.
+        }
+        return false;
     }
 
     private static void checkInterrupted() {

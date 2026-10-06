@@ -74,6 +74,17 @@ public final class RocksDbUtxoStore
 
     public byte namespacePrefix() { return prefix; }
 
+    /** Speculative disk-cache warming never publishes entries in the mutable coins cache. */
+    public void warmPersistentInputs(Collection<OutPoint> outPoints) {
+        List<byte[]> keys = new ArrayList<>();
+        synchronized (this) {
+            for (OutPoint outPoint : outPoints) {
+                if (readCache == null || !readCache.containsKey(outPoint)) keys.add(key(outPoint));
+            }
+        }
+        database.warmKeys(keys);
+    }
+
     /** Switches this already-wired store to another isolated UTXO namespace. */
     public synchronized void activateNamespace(byte prefix) {
         this.prefix = prefix;

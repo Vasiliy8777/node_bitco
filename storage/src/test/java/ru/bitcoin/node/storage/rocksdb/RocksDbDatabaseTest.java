@@ -12,6 +12,29 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class RocksDbDatabaseTest {
+    @Test
+    void nativeHintsRemainSafeDuringWritesAndConcurrentClose() throws Exception {
+        var db = new RocksDbDatabase(temporaryDirectory.resolve("warm-lifetime"));
+        var keys = new ArrayList<byte[]>();
+        for (int i = 0; i < 4096; i++) keys.add(new byte[]{3, (byte) (i >> 8), (byte) i});
+        db.put(keys.getFirst(), new byte[]{1});
+        var started = new java.util.concurrent.CountDownLatch(1);
+        var reader = java.util.concurrent.CompletableFuture.runAsync(() -> {
+            started.countDown();
+            for (int i = 0; i < 20; i++) db.warmKeys(keys);
+        });
+        try {
+            assertTrue(started.await(5, java.util.concurrent.TimeUnit.SECONDS));
+            for (int i = 0; i < 100; i++) db.put(keys.getFirst(), new byte[]{(byte) i});
+            db.enableChainstateWriteBack();
+            db.delete(keys.getFirst());
+            db.warmKeys(java.util.List.of(keys.getFirst()));
+            org.junit.jupiter.api.Assertions.assertNull(db.get(keys.getFirst()));
+            db.close();
+            reader.get(5, java.util.concurrent.TimeUnit.SECONDS);
+            db.warmKeys(keys); // a late cancelled hint is harmless after native disposal
+        } finally { db.close(); }
+    }
 
     @TempDir
     Path temporaryDirectory;

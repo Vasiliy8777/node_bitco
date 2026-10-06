@@ -85,6 +85,8 @@ class NodeConfigurationTest {
                         context.getBean(
                                 NodeSyncInfrastructure.class
                         );
+                assertSame(validationService.storedBlockIndexLookup(), syncInfrastructure.blockIndexLookup(),
+                        "Header/download path materialization must warm the same immutable index cache used by validation");
 
                 PeerAddressManager peerAddressManager =
                         context.getBean(

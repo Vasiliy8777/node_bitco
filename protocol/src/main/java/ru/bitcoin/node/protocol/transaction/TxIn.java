@@ -69,6 +69,8 @@ public final class TxIn {
         return scriptSig.clone();
     }
 
+    public int scriptSigLength() { return scriptSig.length; }
+
     public UInt32 sequence() {
         return sequence;
     }

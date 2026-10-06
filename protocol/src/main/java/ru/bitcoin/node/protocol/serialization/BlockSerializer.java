@@ -11,6 +11,14 @@ public final class BlockSerializer {
     private BlockSerializer() {
     }
 
+    public static long serializedSize(Block block, boolean includeWitness) {
+        if (block == null) throw new IllegalArgumentException("block must not be null");
+        long size = 80L + CompactSize.encodedSize(block.transactions().size());
+        for (Transaction transaction : block.transactions())
+            size = Math.addExact(size, TransactionSerializer.serializedSize(transaction, includeWitness));
+        return size;
+    }
+
     public static byte[] serialize(
             Block block
     ) {

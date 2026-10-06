@@ -24,14 +24,10 @@ public final class BlockWeight {
         }
 
         long strippedSize =
-                BlockSerializer.serializeLegacy(
-                        block
-                ).length;
+                BlockSerializer.serializedSize(block, false);
 
         long totalSize =
-                BlockSerializer.serialize(
-                        block
-                ).length;
+                BlockSerializer.serializedSize(block, true);
 
         /*
          * Bitcoin weight:

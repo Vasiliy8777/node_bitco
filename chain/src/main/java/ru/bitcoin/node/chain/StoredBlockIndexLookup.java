@@ -83,6 +83,11 @@ public final class StoredBlockIndexLookup implements BlockIndexAncestorLookup {
         return ancestor(index, targetHeight, () -> { });
     }
 
+    /** Identity check for persistence optimizations that require committed indexes. */
+    public boolean isBackedBy(BlockIndexStore candidateStore) {
+        return store == candidateStore;
+    }
+
     @Override
     public BlockIndex ancestor(BlockIndex index, long targetHeight, Runnable checkpoint) {
         java.util.Objects.requireNonNull(checkpoint, "checkpoint");

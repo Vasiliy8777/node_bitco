@@ -20,14 +20,10 @@ public final class TransactionWeight {
         }
 
         long strippedSize =
-                TransactionSerializer.serializeLegacy(
-                        transaction
-                ).length;
+                TransactionSerializer.serializedSize(transaction, false);
 
         long totalSize =
-                TransactionSerializer.serialize(
-                        transaction
-                ).length;
+                TransactionSerializer.serializedSize(transaction, true);
 
         /*
          * BIP141:

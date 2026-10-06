@@ -13,6 +13,30 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.*;
 
 class RocksDbUtxoStoreTest {
+    @Test
+    void warmingDoesNotPublishCoinsAndFollowsSpendAndNamespaceChanges() {
+        try (var db = new RocksDbDatabase(tempDirectory.resolve("warm-coins"))) {
+            var point = new OutPoint(new Hash256(new byte[32]), new UInt32(7));
+            var original = new StoredUtxo(100, new byte[]{0x51}, 1, false);
+            new RocksDbUtxoStore(db).save(point, original);
+            var coins = new RocksDbUtxoStore(db, (byte) 3, 16);
+            coins.warmPersistentInputs(java.util.List.of(point));
+            assertEquals(0, coins.cacheStats().size());
+            assertEquals(0, coins.cacheStats().misses());
+            assertEquals(1, db.warmReadStats().keys());
+            assertEquals(100, coins.find(point).orElseThrow().amount());
+            coins.delete(point);
+            coins.warmPersistentInputs(java.util.List.of(point));
+            assertTrue(coins.find(point).isEmpty());
+            new RocksDbUtxoStore(db, (byte) 0x40).save(point, new StoredUtxo(200, new byte[]{0x51}, 2, false));
+            coins.activateNamespace((byte) 0x40);
+            coins.warmPersistentInputs(java.util.List.of(point));
+            assertEquals(0, coins.cacheStats().size());
+            assertEquals(200, coins.find(point).orElseThrow().amount());
+            coins.activateNamespace((byte) 3);
+            assertTrue(coins.find(point).isEmpty());
+        }
+    }
 
     @TempDir
     Path tempDirectory;

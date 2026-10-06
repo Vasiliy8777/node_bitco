@@ -51,6 +51,9 @@ public final class NodeValidationService implements AutoCloseable {
     private BlockConnectChangesBuilder.DiagnosticSnapshot ibdTelemetryConnectBaseline;
     private final ChainState chain;
     private final StoredBlockIndexLookup lookup;
+
+    /** Shared immutable header/index metadata; mutable validation status is stored separately. */
+    public StoredBlockIndexLookup storedBlockIndexLookup() { return lookup; }
     private final RocksDbBlockStore blocks;
     private final UtxoView coins;
     private final BlockProcessor processor;
@@ -91,6 +94,19 @@ public final class NodeValidationService implements AutoCloseable {
     private boolean mempoolPersistenceDirty;
     private final ActiveChainAncestors activeAncestors = new ActiveChainAncestors();
     private final InitialBlockDownloadState initialBlockDownload;
+    private final InitialSyncUtxoPrefetcher initialSyncPrefetcher =
+            new InitialSyncUtxoPrefetcher(inputs -> utxoWarmInputs(inputs));
+    private volatile boolean initialSyncPrefetchEnabled = true;
+
+    private void utxoWarmInputs(List<OutPoint> inputs) { utxos.warmPersistentInputs(inputs); }
+
+    public void initialSyncPrefetchEnabled(boolean enabled) { initialSyncPrefetchEnabled = enabled; }
+
+    public void prefetchInitialSyncInputsAhead(List<Block> blocks) {
+        if (initialSyncPrefetchEnabled && !blocks.isEmpty()) {
+            initialSyncPrefetcher.offer(List.copyOf(initialSyncExternalInputs(blocks, 8192)));
+        }
+    }
 
     /** Immutable network parameters used by this validation instance. */
     public NetworkParameters networkParameters() {
@@ -614,6 +630,10 @@ public final class NodeValidationService implements AutoCloseable {
     // produced earlier in this ordered run will be resolved by ConnectBlock's
     // committed UTXO updates instead of querying their absence in the old DB.
     static Set<OutPoint> initialSyncExternalInputs(List<Block> batch) {
+        return initialSyncExternalInputs(batch, Integer.MAX_VALUE);
+    }
+
+    private static Set<OutPoint> initialSyncExternalInputs(List<Block> batch, int limit) {
         LinkedHashSet<OutPoint> inputs = new LinkedHashSet<>();
         Map<Hash256, Integer> earlierOutputs = new HashMap<>();
         for (Block block : batch) {
@@ -623,7 +643,10 @@ public final class NodeValidationService implements AutoCloseable {
                     for (var input : transaction.inputs()) {
                         OutPoint outPoint = input.previousOutput();
                         Integer outputs = earlierOutputs.get(outPoint.transactionId());
-                        if (outputs == null || outPoint.outputIndex().value() >= outputs) inputs.add(outPoint);
+                        if (outputs == null || outPoint.outputIndex().value() >= outputs) {
+                            inputs.add(outPoint);
+                            if (inputs.size() >= limit) return inputs;
+                        }
                     }
                 }
                 earlierOutputs.put(transaction.txId(), transaction.outputs().size());
@@ -687,6 +710,10 @@ public final class NodeValidationService implements AutoCloseable {
                 hits, misses, hitRate, cacheNow.size(), cacheNow.capacity()));
 
         LOG.log(System.Logger.Level.INFO, "IBD ROCKS GETS BY NS: " + formatNamespaceGets(namespaceDb));
+        var warm = database.warmReadStats();
+        if (warm.keys() > 0) LOG.log(System.Logger.Level.INFO, String.format(java.util.Locale.ROOT,
+                "IBD UTXO PREFETCH: cumulativeKeys=%,d cumulativeReadMs=%.1f",
+                warm.keys(), warm.nanos() / 1_000_000.0));
         var blockIndexDiagnostics = lookup.diagnosticSnapshot().minus(ibdTelemetryBlockIndexBaseline);
         LOG.log(System.Logger.Level.INFO, "IBD BLOCKINDEX MISS SAMPLES: misses="
                 + String.format(java.util.Locale.ROOT, "%,d", blockIndexDiagnostics.persistentMisses())
@@ -1788,6 +1815,7 @@ public final class NodeValidationService implements AutoCloseable {
 
     @Override
     public synchronized void close() {
+        initialSyncPrefetcher.close();
         database.forceFlushChainstate();
         database.disableChainstateWriteBack(false);
         backgroundValidationStop = true;

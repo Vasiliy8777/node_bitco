@@ -47,6 +47,8 @@ public final class Witness {
         return items.get(index).clone();
     }
 
+    public int itemLength(int index) { return items.get(index).length; }
+
     public List<byte[]> items() {
         List<byte[]> copy =
                 new ArrayList<>(items.size());

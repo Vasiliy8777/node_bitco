@@ -646,6 +646,15 @@ public final class BlockSyncCoordinator {
             }
 
             if (!connectBlocks.isEmpty()) {
+                // Warm only a small ready look-ahead while this ordered step runs.
+                // This cannot create coins or affect the chain selected for validation.
+                List<Block> ahead = new ArrayList<>(4);
+                for (int position = scan; position < blocksToDownload.size() && ahead.size() < 4; position++) {
+                    var ready = availableBlocks.get(blocksToDownload.get(position).hash());
+                    if (ready == null) break;
+                    ahead.add(ready.block());
+                }
+                validationService.prefetchInitialSyncInputsAhead(ahead);
                 long validationStarted = System.nanoTime();
                 List<BlockProcessingResult> results = validationService.processInitialSyncBatch(
                         connectBlocks.stream().map(AvailableBlock::block).toList());

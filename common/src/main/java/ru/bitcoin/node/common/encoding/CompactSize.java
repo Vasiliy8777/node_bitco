@@ -3,6 +3,13 @@ package ru.bitcoin.node.common.encoding;
 import ru.bitcoin.node.common.bytes.LittleEndian;
 
 public final class CompactSize {
+    public static int encodedSize(long value) {
+        if (value < 0) throw new IllegalArgumentException("value must not be negative");
+        if (value < 253) return 1;
+        if (value <= 0xffffL) return 3;
+        if (value <= 0xffffffffL) return 5;
+        return 9;
+    }
 
     private CompactSize() {
     }

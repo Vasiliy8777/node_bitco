@@ -248,7 +248,14 @@ class BitcoinCoreMiningRoundTripTest {
         command.addAll(List.of(arguments));
         Path outputFile = Files.createTempFile(directory, "core-rpc-", ".txt");
         var process = new ProcessBuilder(command).redirectErrorStream(true).redirectOutput(outputFile.toFile()).start();
-        if (!process.waitFor(10, TimeUnit.SECONDS)) { process.destroyForcibly(); throw new IllegalStateException("Core RPC timeout"); }
+        // Bulk regtest generation can exceed 10 s on a busy Windows disk.
+        // This is fixture setup; ordinary polling RPCs keep their short bound.
+        long timeoutSeconds = arguments.length > 0 && arguments[0].equals("generatetoaddress") ? 60 : 10;
+        if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
+            process.destroyForcibly();
+            process.waitFor(5, TimeUnit.SECONDS);
+            throw new IllegalStateException("Core RPC " + arguments[0] + " timed out after " + timeoutSeconds + " s");
+        }
         String output = Files.readString(outputFile);
         if (process.exitValue() != 0) throw new IllegalStateException(output);
         return output;

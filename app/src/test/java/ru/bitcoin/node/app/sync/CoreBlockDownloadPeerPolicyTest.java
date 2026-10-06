@@ -29,6 +29,72 @@ class CoreBlockDownloadPeerPolicyTest {
     CoreBlockDownloadPeerPolicyTest() { indexes.put(genesis.hash(), genesis); }
 
     @Test
+    void buildsAvailabilityLocatorOnceForPeersAndRebuildsForNewTip() throws Exception {
+        var tip = extend(genesis, 64, 1);
+        headers.consider(tip);
+        var builder = spy(new BlockLocatorBuilder(lookup));
+        var cachedPolicy = new CoreBlockDownloadPeerPolicy(lookup, active::get, headers,
+                builder, NetworkParametersRegistry.regtest(), failed::contains,
+                ibd::get, snapshot::get);
+        var peers = new ArrayList<Peer>();
+        for (int i = 0; i < 8; i++) peers.add(peer(VersionMessage.DEFAULT_SERVICES));
+        cachedPolicy.refresh(peers);
+        verify(builder, times(1)).build(ancestor(tip, 63));
+        for (var peer : peers) verify(peer, times(1)).sendAsync(any());
+        cachedPolicy.refresh(List.of(peer(VersionMessage.DEFAULT_SERVICES)));
+        verify(builder, times(1)).build(any());
+        var next = extend(tip, 1, 200);
+        headers.consider(next);
+        cachedPolicy.refresh(List.of(peer(VersionMessage.DEFAULT_SERVICES)));
+        verify(builder, times(1)).build(tip);
+        verify(builder, times(2)).build(any());
+    }
+
+    @Test
+    void sharesImmutableAncestryAcrossPeersButRechecksForksAndFailures() {
+        var tip = extend(genesis, 64, 1);
+        var other = extend(genesis, 65, 1000);
+        var requested = ancestor(tip, 32);
+        var calls = new AtomicInteger();
+        BlockIndexAncestorLookup counted = new BlockIndexAncestorLookup() {
+            @Override public BlockIndex find(Hash256 hash) { return indexes.get(hash); }
+            @Override public BlockIndex ancestor(BlockIndex index, long height) {
+                calls.incrementAndGet();
+                return CoreBlockDownloadPeerPolicyTest.this.ancestor(index, height);
+            }
+        };
+        var cachedPolicy = new CoreBlockDownloadPeerPolicy(counted, active::get, headers,
+                new BlockLocatorBuilder(counted), NetworkParametersRegistry.regtest(),
+                failed::contains, ibd::get, snapshot::get);
+        var peers = new ArrayList<Peer>();
+        for (int i = 0; i < 8; i++) {
+            var peer = peer(VersionMessage.DEFAULT_SERVICES);
+            when(peer.lastBlockAnnouncement()).thenReturn(tip.hash());
+            peers.add(peer);
+        }
+        cachedPolicy.refresh(peers);
+        int baseline = calls.get();
+        for (int repeat = 0; repeat < 10; repeat++) {
+            for (var peer : peers)
+                assertTrue(cachedPolicy.canDownload(peer, requested.hash(), requested.height()));
+        }
+        assertEquals(1, calls.get() - baseline, "80 decisions need one ancestry traversal");
+        active.set(requested);
+        cachedPolicy.refresh(peers);
+        assertEquals(1, calls.get() - baseline, "the committed frontier has already been proven");
+        var forkAtHeight = ancestor(other, 32);
+        assertFalse(cachedPolicy.canServe(peers.getFirst(), forkAtHeight.hash(), 32L));
+        failed.add(requested);
+        assertFalse(cachedPolicy.canServe(peers.getFirst(), requested.hash(), 32L));
+        failed.clear();
+        when(peers.getFirst().lastBlockAnnouncement()).thenReturn(other.hash());
+        cachedPolicy.refresh(peers);
+        assertFalse(cachedPolicy.canServe(peers.getFirst(), requested.hash(), 32L));
+        assertTrue(cachedPolicy.canServe(peers.getFirst(), forkAtHeight.hash(), 32L));
+        assertTrue(cachedPolicy.canServe(peers.getLast(), requested.hash(), 32L));
+    }
+
+    @Test
     void requiresValidatedAnnouncementInsteadOfVersionHeight() throws Exception {
         var tip = extend(genesis, 3, 1);
         headers.consider(tip);

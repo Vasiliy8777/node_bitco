@@ -36,6 +36,8 @@ public final class TxOut {
         return scriptPubKey.clone();
     }
 
+    public int scriptPubKeyLength() { return scriptPubKey.length; }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) {
