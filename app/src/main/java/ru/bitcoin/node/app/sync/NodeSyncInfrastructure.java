@@ -72,7 +72,8 @@ public final class NodeSyncInfrastructure {
         this.headerChainState =
                 new HeaderChainStateLoader(
                         blockIndexStore,
-                        chainStateStore
+                        chainStateStore,
+                        blockIndexLookup
                 )
                         .load()
                         .orElseThrow(

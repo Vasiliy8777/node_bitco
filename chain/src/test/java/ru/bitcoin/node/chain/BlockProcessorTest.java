@@ -201,6 +201,151 @@ class BlockProcessorTest {
     }
 
     @Test
+    void rejectsWrongCoinbaseHeightOnEqualWorkSideBranchBeforeStoringBody() {
+        try (Fixture f = new Fixture(directory)) {
+            Block main = child(f.genesis, 1, REWARD);
+            f.processor.process(main);
+            Block invalid = sideCoinbase(f.genesis, new byte[]{0x52, 9}, TxIn.FINAL_SEQUENCE, 0);
+            assertThrows(BlockValidationException.class, () -> f.processor.process(invalid));
+            f.assertTip(main.hash());
+            assertFalse(f.known.hasBody(invalid.hash()));
+            assertTrue(f.blocks.find(invalid.hash()).isEmpty());
+            assertTrue(f.utxos.find(output(invalid)).isEmpty());
+            assertTrue(f.undos.find(invalid.hash()).isEmpty());
+        }
+    }
+
+    @Test
+    void rejectsNonFinalSideBranchBeforeItCanBecomeDownloadAvailability() {
+        try (Fixture f = new Fixture(directory)) {
+            Block main = child(f.genesis, 1, REWARD);
+            f.processor.process(main);
+            Block invalid = sideCoinbase(f.genesis, new byte[]{0x51, 9}, new UInt32(0), 1);
+            assertThrows(ru.bitcoin.node.consensus.transaction.TransactionValidationException.class,
+                    () -> f.processor.process(invalid));
+            f.assertTip(main.hash());
+            assertFalse(f.known.hasBody(invalid.hash()));
+            assertTrue(f.blocks.find(invalid.hash()).isEmpty());
+        }
+    }
+
+    @Test
+    void appliesBip113ParentMedianTimeToSideBranchFinality() {
+        try (Fixture f = new Fixture(directory)) {
+            Block main = child(f.genesis, 1, REWARD);
+            f.processor.process(main);
+            long mtp = f.genesis.header().timestamp().value();
+            Block invalid = sideCoinbase(f.genesis, new byte[]{0x51, 9}, new UInt32(0), mtp);
+            assertTrue(invalid.header().timestamp().value() > mtp);
+            assertThrows(ru.bitcoin.node.consensus.transaction.TransactionValidationException.class,
+                    () -> f.processor.process(invalid));
+            Block valid = sideCoinbase(f.genesis, new byte[]{0x51, 10}, new UInt32(0), mtp - 1);
+            assertEquals(STORED_SIDE_CHAIN_CONTEXT_PENDING, f.processor.process(valid));
+            f.assertTip(main.hash());
+            assertFalse(f.known.hasBody(invalid.hash()));
+            assertTrue(f.known.hasBody(valid.hash()));
+        }
+    }
+
+    private static Block sideCoinbase(BlockIndex parent, byte[] script, UInt32 sequence, long lockTime) {
+        Transaction coinbase = new Transaction(1,
+                List.of(new TxIn(OutPoint.coinbase(), script, sequence)),
+                List.of(new TxOut(REWARD, new byte[]{0x51})), new UInt32(lockTime));
+        Hash256 root = MerkleTree.calculateRoot(List.of(coinbase.txId()));
+        Block block = new Block(new BlockHeader(4, parent.hash(), root,
+                new UInt32(parent.header().timestamp().value() + 1), new UInt32(BITS), new UInt32(0)),
+                List.of(coinbase));
+        return withHeader(block, parent.hash(), root, BITS, true);
+    }
+
+    @Test
+    void persistsReceptionFailureWithoutBodyAndPreservesSiblingAfterRestart() {
+        Block invalid;
+        Hash256 mainHash;
+        try (Fixture f = new Fixture(directory)) {
+            Block main = child(f.genesis, 1, REWARD);
+            f.processor.process(main);
+            mainHash = main.hash();
+            invalid = sideCoinbase(f.genesis, new byte[]{0x52, 9}, TxIn.FINAL_SEQUENCE, 0);
+            BlockIndex candidate = BlockIndexFactory.createChild(f.genesis, invalid.header());
+            // Independently prove the existing consensus rule fails before simulating
+            // index/failure persistence on this temporary database.
+            assertThrows(BlockValidationException.class, () -> ContextualBlockReceptionValidator.validate(
+                    invalid, candidate, f.genesis, f.lookup, PARAMETERS));
+            f.indexes.save(BlockIndexStorageMapper.toStored(candidate));
+            var failures = new ru.bitcoin.node.storage.block.RocksDbBlockFailureStore(f.database);
+            var resolver = new BlockFailureResolver(f.lookup, failures);
+            var manager = new BlockFailureManager(f.database, failures, f.indexes, f.tips, resolver);
+            manager.markFailed(candidate);
+            assertTrue(failures.isFailed(invalid.hash()));
+            assertFalse(failures.isFailed(mainHash));
+            assertFalse(failures.isFailed(f.genesis.hash()));
+            assertFalse(f.known.hasBody(invalid.hash()));
+            assertTrue(f.blocks.find(invalid.hash()).isEmpty());
+            assertEquals(mainHash, f.tips.loadBestHeaderTipHash().orElseThrow());
+            f.assertTip(mainHash);
+        }
+        try (Fixture f = new Fixture(directory)) {
+            var failures = new ru.bitcoin.node.storage.block.RocksDbBlockFailureStore(f.database);
+            assertTrue(new BlockFailureResolver(f.lookup, failures).isFailed(f.lookup.find(invalid.hash())));
+            assertFalse(failures.isFailed(mainHash));
+            assertFalse(f.known.hasBody(invalid.hash()));
+            f.assertTip(mainHash);
+            assertEquals(CONNECTED, f.processor.process(child(f.state.activeTip(), 3, REWARD)));
+        }
+    }
+
+    @Test
+    void receptionProcessorPersistsFailureAndRejectsAgainAfterRestart() {
+        Block invalid;
+        Hash256 mainHash;
+        try (Fixture f = new Fixture(directory)) {
+            Block main = child(f.genesis, 1, REWARD);
+            f.processor.process(main);
+            mainHash = main.hash();
+            invalid = sideCoinbase(f.genesis, new byte[]{0x52, 9}, TxIn.FINAL_SEQUENCE, 0);
+            assertThrows(BlockValidationException.class, () -> f.trackingProcessor().process(invalid));
+            assertTrue(new ru.bitcoin.node.storage.block.RocksDbBlockFailureStore(f.database)
+                    .isFailed(invalid.hash()));
+            assertNotNull(f.lookup.find(invalid.hash()));
+            assertFalse(f.known.hasBody(invalid.hash()));
+            assertEquals(mainHash, f.tips.loadBestHeaderTipHash().orElseThrow());
+            f.assertTip(mainHash);
+        }
+        try (Fixture f = new Fixture(directory)) {
+            assertThrows(IllegalArgumentException.class, () -> f.trackingProcessor().process(invalid));
+            assertFalse(f.known.hasBody(invalid.hash()));
+            f.assertTip(mainHash);
+            assertEquals(CONNECTED, f.trackingProcessor().process(child(f.state.activeTip(), 3, REWARD)));
+        }
+    }
+
+    @Test
+    void mutatedSideBodyDoesNotPermanentlyInvalidateItsHeader() {
+        try (Fixture f = new Fixture(directory)) {
+            f.processor.process(child(f.genesis, 1, REWARD));
+            Block validSide = child(f.genesis, 2, REWARD);
+            f.indexes.save(BlockIndexStorageMapper.toStored(
+                    BlockIndexFactory.createChild(f.genesis, validSide.header())));
+            var tracked = f.trackingProcessor();
+            Block wrongMerkle = new Block(validSide.header(), child(f.genesis, 9, REWARD).transactions());
+            assertThrows(BlockValidationException.class, () -> tracked.process(wrongMerkle));
+            Transaction original = validSide.transactions().getFirst();
+            TxIn input = original.inputs().getFirst();
+            Transaction withUnexpectedWitness = new Transaction(original.version(),
+                    List.of(new TxIn(input.previousOutput(), input.scriptSig(), input.sequence(),
+                            new Witness(List.of(new byte[32])))), original.outputs(), original.lockTime());
+            Block wrongWitness = new Block(validSide.header(), List.of(withUnexpectedWitness));
+            assertEquals(validSide.hash(), wrongWitness.hash());
+            assertThrows(BlockValidationException.class, () -> tracked.process(wrongWitness));
+            assertFalse(new ru.bitcoin.node.storage.block.RocksDbBlockFailureStore(f.database)
+                    .isFailed(validSide.hash()));
+            assertFalse(f.known.hasBody(validSide.hash()));
+            assertEquals(STORED_SIDE_CHAIN_CONTEXT_PENDING, tracked.process(validSide));
+        }
+    }
+
+    @Test
     void rejectsAddedWitnessEvenWhenHeaderAndTxidAreAlreadyActive() {
         try (Fixture f = new Fixture(directory)) {
             Block block = child(f.genesis, 1, REWARD);
@@ -426,6 +571,14 @@ class BlockProcessorTest {
 
         BlockProcessor processor(KnownBlockStorage storage) {
             return new BlockProcessor(state, lookup, storage, executor, PARAMETERS, () -> TIME + 1000);
+        }
+
+        BlockProcessor trackingProcessor() {
+            var failures = new ru.bitcoin.node.storage.block.RocksDbBlockFailureStore(database);
+            var resolver = new BlockFailureResolver(lookup, failures);
+            var manager = new BlockFailureManager(database, failures, indexes, tips, resolver);
+            return new BlockProcessor(state, lookup, known, executor, PARAMETERS,
+                    () -> TIME + 1000, manager, resolver);
         }
 
         void assertTip(Hash256 expected) {

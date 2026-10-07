@@ -20,6 +20,7 @@ public final class RocksDbPruneUsageStore {
     private static final byte UNDO_PREFIX = 0x04;
     private static final int HASH_SIZE = 32;
     private final RocksDbDatabase database;
+    private volatile boolean migrated;
 
     public RocksDbPruneUsageStore(RocksDbDatabase database) {
         this.database = Objects.requireNonNull(database, "database");
@@ -31,6 +32,7 @@ public final class RocksDbPruneUsageStore {
             byte[] version = database.get(VERSION_KEY);
             if (version != null) {
                 requireSupportedVersion(version);
+                migrated = true;
                 return;
             }
 
@@ -42,12 +44,23 @@ public final class RocksDbPruneUsageStore {
                     batch.delete(LEGACY_VERSION_KEY);
                     database.write(batch);
                 }
+                migrated = true;
                 return;
             }
 
             rebuildPrefix(BLOCK_PREFIX, BLOCK_SIZE_PREFIX);
             rebuildPrefix(UNDO_PREFIX, UNDO_SIZE_PREFIX);
             database.put(VERSION_KEY, new byte[]{VERSION});
+            migrated = true;
+        }
+    }
+
+    // The schema marker is immutable during the lifetime of a payload store.
+    // Publish only after migration and its durable marker have succeeded.
+    private void ensureReady() {
+        if (migrated) return;
+        synchronized (database) {
+            if (!migrated) ensureMigrated();
         }
     }
 
@@ -107,10 +120,10 @@ public final class RocksDbPruneUsageStore {
     public void setUndoSize(RocksDbWriteBatch batch, Hash256 hash, long size) {
         setSize(batch, UNDO_SIZE_PREFIX, hash, size);
     }
-    public long blockSize(Hash256 hash) { ensureMigrated(); return size(BLOCK_SIZE_PREFIX, hash); }
-    public long undoSize(Hash256 hash) { ensureMigrated(); return size(UNDO_SIZE_PREFIX, hash); }
+    public long blockSize(Hash256 hash) { ensureReady(); return size(BLOCK_SIZE_PREFIX, hash); }
+    public long undoSize(Hash256 hash) { ensureReady(); return size(UNDO_SIZE_PREFIX, hash); }
     public long usageBytes() {
-        ensureMigrated();
+        ensureReady();
         return Math.addExact(sum(BLOCK_SIZE_PREFIX), sum(UNDO_SIZE_PREFIX));
     }
     public void clearUndoSizes(RocksDbWriteBatch batch) {
@@ -121,7 +134,7 @@ public final class RocksDbPruneUsageStore {
     private void setSize(RocksDbWriteBatch batch, byte prefix, Hash256 hash, long size) {
         Objects.requireNonNull(batch, "batch"); Objects.requireNonNull(hash, "hash");
         if (size < 0) throw new IllegalArgumentException("size must not be negative");
-        ensureMigrated();
+        ensureReady();
         byte[] key = key(prefix, hash);
         if (size == 0) batch.delete(key); else batch.put(key, encodeSize(size));
     }

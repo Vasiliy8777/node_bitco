@@ -37,6 +37,70 @@ class StoredBlockIndexCancellationTest {
     }
 
     @Test
+    void heightHintsWarmBothForksWithoutChangingAncestryOrRereadingCachedRecords() {
+        try (var database = new RocksDbDatabase(directory.resolve("height-hints"))) {
+            var store = new RocksDbBlockIndexStore(database);
+            var genesis = BlockIndexFactory.createGenesis(
+                    GenesisBlockFactory.create(NetworkParametersRegistry.regtest()).header());
+            var left = genesis;
+            var right = genesis;
+            var indexes = new ArrayList<BlockIndex>();
+            indexes.add(genesis);
+            for (int i = 1; i <= 40; i++) {
+                left = child(left, i);
+                right = child(right, i + 1000);
+                indexes.add(left);
+                indexes.add(right);
+            }
+            indexes.forEach(index -> store.save(BlockIndexStorageMapper.toStored(index)));
+            store.visitByHeightAscending(index -> true); // Establish the versioned secondary index.
+            var lookup = new StoredBlockIndexLookup(store);
+            lookup.prefetchHeightRange(1, 40, () -> {});
+            long before = database.ioStats().gets();
+            for (var index : indexes) {
+                if (index.height() > 0) assertEquals(index.hash(), lookup.find(index.hash()).hash());
+            }
+            assertEquals(before, database.ioStats().gets(), "Both branches must be cached");
+            assertEquals(left.previousBlockHash(), lookup.ancestor(left, 39).hash());
+            assertEquals(right.previousBlockHash(), lookup.ancestor(right, 39).hash());
+            before = database.ioStats().gets();
+            lookup.prefetchHeightRange(1, 40, () -> {});
+            assertEquals(1, database.ioStats().gets() - before,
+                    "Warm ranges only read the height-index version, not primary records");
+            assertEquals(3, store.readHeightHints(1, 40, 3, hash -> true, () -> {}).size());
+            var failure = new java.util.concurrent.CancellationException("cancel prefetch");
+            var checks = new AtomicInteger();
+            assertSame(failure, assertThrows(java.util.concurrent.CancellationException.class,
+                    () -> lookup.prefetchHeightRange(1, 40, () -> {
+                        if (checks.incrementAndGet() == 5) throw failure;
+                    })));
+            assertEquals(left.hash(), lookup.find(left.hash()).hash());
+        }
+    }
+
+    @Test
+    void missingHeightIndexDoesNotMigrateOrNegativeCacheHeaders() {
+        try (var database = new RocksDbDatabase(directory.resolve("no-height-marker"))) {
+            var store = new RocksDbBlockIndexStore(database);
+            var lookup = new StoredBlockIndexLookup(store);
+            var genesis = BlockIndexFactory.createGenesis(
+                    GenesisBlockFactory.create(NetworkParametersRegistry.regtest()).header());
+            var one = child(genesis, 1);
+            lookup.prefetchHeightRange(1, 1, () -> {});
+            assertNull(lookup.find(one.hash()));
+            store.save(BlockIndexStorageMapper.toStored(one));
+            assertEquals(one.hash(), lookup.find(one.hash()).hash());
+            assertNull(database.get(ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.singletonKey(
+                    ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.BLOCK_HEIGHT_INDEX_VERSION)));
+        }
+    }
+
+    private static BlockIndex child(BlockIndex parent, int nonce) {
+        return BlockIndexFactory.createChild(parent, new BlockHeader(4, parent.hash(), parent.hash(),
+                new UInt32(parent.header().timestamp().value() + 1), parent.header().bits(), new UInt32(nonce)));
+    }
+
+    @Test
     void cancellationInterruptsBothSkipAndLinearAncestorWalks() {
         var indexes = new ArrayList<BlockIndex>();
         var parent = BlockIndexFactory.createGenesis(

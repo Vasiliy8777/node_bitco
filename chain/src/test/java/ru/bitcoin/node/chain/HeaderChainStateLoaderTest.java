@@ -22,6 +22,43 @@ class HeaderChainStateLoaderTest {
     Path tempDirectory;
 
     @Test
+    void sharesIndexButStillObservesTipChangesRollbackAndMissingMetadata() {
+        try (var database = new RocksDbDatabase(tempDirectory.resolve("shared-index"))) {
+            var indexes = new RocksDbBlockIndexStore(database);
+            var tips = new RocksDbChainStateStore(database);
+            BlockIndex genesis = BlockIndexFactory.createGenesis(
+                    GenesisBlockFactory.create(NetworkParametersRegistry.regtest()).header());
+            var first = BlockIndexFactory.createChild(genesis, new ru.bitcoin.node.protocol.block.BlockHeader(
+                    4, genesis.hash(), genesis.hash(), genesis.header().timestamp(), genesis.header().bits(),
+                    new ru.bitcoin.node.common.types.UInt32(1)));
+            var other = BlockIndexFactory.createChild(genesis, new ru.bitcoin.node.protocol.block.BlockHeader(
+                    4, genesis.hash(), genesis.hash(), genesis.header().timestamp(), genesis.header().bits(),
+                    new ru.bitcoin.node.common.types.UInt32(2)));
+            for (var index : java.util.List.of(genesis, first, other))
+                indexes.save(BlockIndexStorageMapper.toStored(index));
+            tips.saveBestHeaderTipHash(genesis.hash());
+            byte prefix = ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.BLOCK_INDEX;
+            var before = database.namespaceIoStats();
+            var legacy = new HeaderChainStateLoader(indexes, tips).load().orElseThrow();
+            for (int i = 0; i < 128; i++) assertEquals(genesis.hash(), legacy.bestHeaderTip().hash());
+            assertEquals(129, database.namespaceIoStats().minus(before).gets(prefix));
+            before = database.namespaceIoStats();
+            var shared = new HeaderChainStateLoader(indexes, tips,
+                    new StoredBlockIndexLookup(indexes)).load().orElseThrow();
+            for (int i = 0; i < 128; i++) assertEquals(genesis.hash(), shared.bestHeaderTip().hash());
+            assertEquals(1, database.namespaceIoStats().minus(before).gets(prefix));
+            tips.saveBestHeaderTipHash(first.hash());
+            assertEquals(first.hash(), shared.bestHeaderTip().hash());
+            tips.saveBestHeaderTipHash(other.hash());
+            assertEquals(other.hash(), shared.bestHeaderTip().hash());
+            tips.saveBestHeaderTipHash(genesis.hash());
+            assertEquals(genesis.hash(), shared.bestHeaderTip().hash());
+            tips.saveBestHeaderTipHash(Hash256.fromDisplayHex("11".repeat(32)));
+            assertThrows(IllegalStateException.class, shared::bestHeaderTip);
+        }
+    }
+
+    @Test
     void shouldReturnEmptyWhenBestHeaderTipDoesNotExist() {
 
         try (RocksDbDatabase database =

@@ -47,6 +47,9 @@ public final class BlockSyncCoordinator {
      * retain true sliding behaviour because short paths fit in one chunk.
      */
     private static final int BLOCK_INDEX_MATERIALIZATION_CHUNK = 32768;
+    // Amortize persistent ancestor traversal without enlarging the request horizon.
+    // Initial preparation still contains only the first window and its stall probe.
+    private static final int BLOCK_INDEX_EXTENSION_BATCH = 128;
     private static final Duration DOWNLOAD_COMPLETION_POLL_INTERVAL =
             Duration.ofMillis(250);
     private static final Duration DOWNLOAD_COMPLETION_DRAIN_INTERVAL = Duration.ZERO;
@@ -433,6 +436,20 @@ public final class BlockSyncCoordinator {
             );
         }
 
+        if (lookup instanceof ru.bitcoin.node.chain.StoredBlockIndexLookup storedLookup) {
+            try {
+                storedLookup.prefetchHeightRange(firstHeight, lastHeight, () -> {
+                    try { ensureNotCancelled(); }
+                    catch (IOException failure) { throw new java.io.UncheckedIOException(failure); }
+                });
+                return storedLookup.ancestorRange(bestHeaderTip, firstHeight, lastHeight, () -> {
+                    try { ensureNotCancelled(); }
+                    catch (IOException failure) { throw new java.io.UncheckedIOException(failure); }
+                });
+            } catch (java.io.UncheckedIOException failure) {
+                throw failure.getCause();
+            }
+        }
         BlockIndex end = ancestorAtHeight(bestHeaderTip, lastHeight);
         int size = Math.toIntExact(lastHeight - firstHeight + 1L);
         ArrayList<BlockIndex> reversed = new ArrayList<>(size);
@@ -513,8 +530,10 @@ public final class BlockSyncCoordinator {
             int needed = (int) Math.min(pathSize, (long) nextToProcess + downloadWindow + 1);
             if (blocksToDownload.size() < needed) {
                 BlockIndex previous = blocksToDownload.getLast();
+                int extendedSize = (int) Math.min(pathSize,
+                        Math.max((long) needed, (long) blocksToDownload.size() + BLOCK_INDEX_EXTENSION_BATCH));
                 var extension = connectWindow(bestHeaderTip, previous.height() + 1,
-                        blocksToDownload.getFirst().height() + needed - 1);
+                        blocksToDownload.getFirst().height() + extendedSize - 1);
                 if (!extension.getFirst().previousBlockHash().equals(previous.hash())) {
                     throw new IllegalStateException("Materialized window extension does not connect");
                 }

@@ -165,6 +165,21 @@ public final class BlockProcessor {
             diagnosticWitnessSignetNanos.add(System.nanoTime() - phaseStarted);
             logDiagnostic(candidate.height(), block, "witness+signet validation done");
 
+            // Core checks header-context body rules before publishing HAVE_DATA,
+            // including on branches that cannot yet activate. No UTXOs are needed.
+            try {
+                ContextualBlockReceptionValidator.validate(block, candidate, parent, lookup, parameters);
+            } catch (ru.bitcoin.node.consensus.block.BlockValidationException
+                     | ru.bitcoin.node.consensus.transaction.TransactionValidationException exception) {
+                // Structure/merkle/witness checks above do not enter this handler:
+                // a mutated body must never permanently invalidate its header.
+                if (failureManager != null) {
+                    if (known == null) storage.saveHeader(candidate);
+                    failureManager.markFailed(candidate);
+                }
+                throw exception;
+            }
+
             logDiagnostic(candidate.height(), block, "prepareUpdate start");
             phaseStarted = System.nanoTime();
             ChainUpdate update = chainState.prepareUpdate(candidate, lookup);

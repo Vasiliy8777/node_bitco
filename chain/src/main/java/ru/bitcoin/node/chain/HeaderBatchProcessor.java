@@ -140,12 +140,16 @@ public final class HeaderBatchProcessor {
         }
 
         boolean bestChanged = !candidateBest.hash().equals(initialBest.hash());
-        headerStorage.saveBatch(newlyCreated, bestChanged ? candidateBest : null, resolvedSkipHashes);
+        // A peer-policy reader may refresh the in-memory tip from persistence.
+        // Publish the durable and in-memory header tip together relative to that reader.
+        synchronized (headerChainState) {
+            headerStorage.saveBatch(newlyCreated, bestChanged ? candidateBest : null, resolvedSkipHashes);
 
-        if (bestChanged) {
-            boolean changed = headerChainState.consider(candidateBest);
-            if (!changed) {
-                throw new IllegalStateException("Best header state changed unexpectedly");
+            if (bestChanged) {
+                boolean changed = headerChainState.consider(candidateBest);
+                if (!changed) {
+                    throw new IllegalStateException("Best header state changed unexpectedly");
+                }
             }
         }
 

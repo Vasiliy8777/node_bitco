@@ -22,6 +22,15 @@ public final class StoredBlockIndexLookup implements BlockIndexAncestorLookup {
     private final BlockIndexStore store;
     private final Map<Hash256, BlockIndex> cache;
     private final Map<Hash256, Hash256> skipHashCache;
+    private final Map<AncestorKey, BlockIndex> verifiedAncestors;
+    // A live peer may announce a few new headers while the prepared root stays fixed.
+    // Keep only a handful of roots whose ranges can be reused after proving ancestry.
+    private final Map<Hash256, BlockIndex> verifiedRoots = new LinkedHashMap<>(8, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<Hash256, BlockIndex> eldest) {
+            return size() > 8;
+        }
+    };
 
     public StoredBlockIndexLookup(BlockIndexStore store) {
         this(store, DEFAULT_CACHE_ENTRIES);
@@ -41,6 +50,13 @@ public final class StoredBlockIndexLookup implements BlockIndexAncestorLookup {
             @Override
             protected boolean removeEldestEntry(Map.Entry<Hash256, Hash256> eldest) {
                 return size() > cacheEntries;
+            }
+        };
+        int ancestorEntries = Math.min(cacheEntries, 8192);
+        this.verifiedAncestors = ancestorEntries == 0 ? null : new LinkedHashMap<>(256, 0.75f, true) {
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<AncestorKey, BlockIndex> eldest) {
+                return size() > ancestorEntries;
             }
         };
     }
@@ -88,6 +104,62 @@ public final class StoredBlockIndexLookup implements BlockIndexAncestorLookup {
         return store == candidateStore;
     }
 
+    /** Warms immutable records; callers must still follow parent hashes to select a branch. */
+    public void prefetchHeightRange(long firstHeight, long lastHeight, Runnable checkpoint) {
+        java.util.Objects.requireNonNull(checkpoint, "checkpoint");
+        checkpoint.run();
+        if (cache == null || !(store instanceof RocksDbBlockIndexStore rocks)) return;
+        var records = rocks.readHeightHints(firstHeight, lastHeight, 2048, hash -> {
+            synchronized (cache) { return !cache.containsKey(hash); }
+        }, checkpoint);
+        for (var record : records) {
+            checkpoint.run();
+            rememberCommitted(BlockIndexStorageMapper.fromStored(record));
+        }
+    }
+
+    /**
+     * Materializes a selected branch and shares its verified ancestry with peer policy.
+     * Height hints alone never enter this cache: the end must be a resolved ancestor
+     * of this exact root hash and every preceding record must match its child's pprev.
+     */
+    public java.util.List<BlockIndex> ancestorRange(BlockIndex root, long firstHeight,
+            long lastHeight, Runnable checkpoint) {
+        java.util.Objects.requireNonNull(root, "root");
+        java.util.Objects.requireNonNull(checkpoint, "checkpoint");
+        if (firstHeight < 0 || lastHeight < firstHeight || lastHeight > root.height()
+                || lastHeight - firstHeight >= 32768) {
+            throw new IllegalArgumentException("Invalid bounded ancestor range");
+        }
+        checkpoint.run();
+        var reversed = new java.util.ArrayList<BlockIndex>(Math.toIntExact(lastHeight - firstHeight + 1));
+        BlockIndex current = ancestor(root, lastHeight, checkpoint);
+        while (true) {
+            checkpoint.run();
+            reversed.add(current);
+            if (current.height() == firstHeight) break;
+            BlockIndex parent = find(current.previousBlockHash());
+            if (parent == null || parent.height() != current.height() - 1) {
+                throw new IllegalStateException("Missing or invalid ancestor range parent at height " + current.height());
+            }
+            current = parent;
+        }
+        checkpoint.run();
+        java.util.Collections.reverse(reversed);
+        var result = java.util.List.copyOf(reversed);
+        if (verifiedAncestors != null) {
+            synchronized (verifiedAncestors) {
+                verifiedRoots.put(root.hash(), root);
+                for (BlockIndex index : result) {
+                    verifiedAncestors.put(new AncestorKey(root.hash(), index.height()), index);
+                }
+            }
+        }
+        return result;
+    }
+
+    private record AncestorKey(Hash256 root, long height) { }
+
     @Override
     public BlockIndex ancestor(BlockIndex index, long targetHeight, Runnable checkpoint) {
         java.util.Objects.requireNonNull(checkpoint, "checkpoint");
@@ -96,6 +168,34 @@ public final class StoredBlockIndexLookup implements BlockIndexAncestorLookup {
         if (targetHeight < 0 || targetHeight > index.height()) {
             throw new IllegalArgumentException("Invalid ancestor height: " + targetHeight);
         }
+        if (verifiedAncestors != null) {
+            var bridges = new java.util.ArrayList<VerifiedBridge>();
+            synchronized (verifiedAncestors) {
+                BlockIndex verified = verifiedAncestors.get(new AncestorKey(index.hash(), targetHeight));
+                if (verified != null) return verified;
+                for (BlockIndex root : verifiedRoots.values()) {
+                    BlockIndex cached = verifiedAncestors.get(new AncestorKey(root.hash(), targetHeight));
+                    if (cached != null) bridges.add(new VerifiedBridge(root, cached));
+                }
+            }
+            for (VerifiedBridge bridge : bridges) {
+                checkpoint.run();
+                // Resolve only the short header-tip extension. Never infer branch
+                // membership from height, work, or a VERSION height advertisement.
+                boolean sameBranch = index.height() >= bridge.root().height()
+                        ? resolveAncestor(index, bridge.root().height(), checkpoint).hash().equals(bridge.root().hash())
+                        : resolveAncestor(bridge.root(), index.height(), checkpoint).hash().equals(index.hash());
+                if (sameBranch) {
+                    return bridge.ancestor();
+                }
+            }
+        }
+        return resolveAncestor(index, targetHeight, checkpoint);
+    }
+
+    private record VerifiedBridge(BlockIndex root, BlockIndex ancestor) { }
+
+    private BlockIndex resolveAncestor(BlockIndex index, long targetHeight, Runnable checkpoint) {
         if (!(store instanceof RocksDbBlockIndexStore rocks)) {
             return linearAncestor(index, targetHeight, checkpoint);
         }

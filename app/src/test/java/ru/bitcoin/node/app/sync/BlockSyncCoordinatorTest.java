@@ -163,6 +163,64 @@ class BlockSyncCoordinatorTest {
     }
 
     @Test
+    void amortizesAncestorTraversalWhileKeepingRequestsInsideTheMovingCoreWindow() throws Exception {
+        var indexes = preparationIndexes(4096);
+        var validation = org.mockito.Mockito.mock(NodeValidationService.class);
+        var tip = new java.util.concurrent.atomic.AtomicReference<>(indexes.getFirst());
+        org.mockito.Mockito.when(validation.activeTip()).thenAnswer(call -> tip.get());
+        var scheduler = org.mockito.Mockito.mock(BlockDownloadScheduler.class);
+        var session = org.mockito.Mockito.mock(BlockDownloadSession.class);
+        org.mockito.Mockito.when(scheduler.openSession()).thenReturn(session);
+        var pending = new java.util.concurrent.atomic.AtomicInteger();
+        var traversals = new java.util.concurrent.atomic.AtomicInteger();
+        var sourcePeer = org.mockito.Mockito.mock(Peer.class);
+        var queue = new java.util.ArrayDeque<CompletedBlockDownload>();
+        var requested = new java.util.HashSet<Hash256>();
+        org.mockito.Mockito.when(session.pendingCount()).thenAnswer(call -> pending.get());
+        org.mockito.Mockito.doAnswer(call -> {
+            List<BlockDownloadRequest> requests = call.getArgument(0);
+            for (var request : requests) {
+                assertTrue(request.height() <= tip.get().height() + 1024,
+                        "Index lookahead must not enlarge the logical Core download window");
+                assertTrue(requested.add(request.blockHash()), "Duplicate request");
+                var index = indexes.get(Math.toIntExact(request.height()));
+                queue.add(new CompletedBlockDownload(Math.toIntExact(request.height() - 1),
+                        request.blockHash(), new Block(index.header(), List.of()), sourcePeer));
+            }
+            pending.addAndGet(requests.size());
+            return null;
+        }).when(session).submitRequests(org.mockito.ArgumentMatchers.anyList());
+        org.mockito.Mockito.when(session.pollCompleted(org.mockito.ArgumentMatchers.any())).thenAnswer(call -> {
+            var ready = queue.poll();
+            if (ready != null) pending.decrementAndGet();
+            return Optional.ofNullable(ready);
+        });
+        org.mockito.Mockito.when(validation.processInitialSyncBatch(org.mockito.ArgumentMatchers.anyList()))
+                .thenAnswer(call -> {
+                    List<Block> batch = call.getArgument(0);
+                    assertTrue(batch.size() <= 32);
+                    tip.set(indexes.get(Math.toIntExact(tip.get().height() + batch.size())));
+                    return Collections.nCopies(batch.size(), BlockProcessingResult.CONNECTED);
+                });
+        var delegate = preparationLookup(indexes, ignored -> {});
+        var lookup = new BlockIndexAncestorLookup() {
+            public BlockIndex find(Hash256 hash) { return delegate.find(hash); }
+            public BlockIndex ancestor(BlockIndex index, long height) {
+                traversals.incrementAndGet();
+                assertTrue(height <= tip.get().height() + 1152,
+                        "Preparation must remain within bounded lookahead");
+                return delegate.ancestor(index, height);
+            }
+        };
+        new BlockSyncCoordinator(scheduler, validation, new HeaderChainState(indexes.getLast()), lookup,
+                org.mockito.Mockito.mock(ru.bitcoin.node.storage.block.BlockStore.class)).synchronizeToTip();
+        assertEquals(indexes.getLast().hash(), tip.get().hash());
+        assertEquals(4096, requested.size());
+        assertTrue(traversals.get() <= 26,
+                "A moving window must not traverse tip ancestry after every 32-block connection batch");
+    }
+
+    @Test
     void cancellationStopsIndexPreparationBeforeRemainingDatabaseReads() throws Exception {
         var indexes = preparationIndexes(2048);
         var validation = org.mockito.Mockito.mock(NodeValidationService.class);

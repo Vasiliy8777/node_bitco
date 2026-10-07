@@ -19,12 +19,12 @@ public final class RocksDbBlockStore implements BlockStore {
     private static final byte BLOCK_PREFIX = 0x05;
     private static final int HASH_SIZE = 32;
     private final RocksDbDatabase database;
-    private final FlatFileRecordStore files;
+    private final FlatFileRecordStore files; private final RocksDbPruneUsageStore pruneUsage;
 
     public RocksDbBlockStore(RocksDbDatabase database) {
         if (database == null) throw new IllegalArgumentException("database must not be null");
         this.database=database;
-        this.files=database.payloadFiles("blk");
+        this.files=database.payloadFiles("blk"); this.pruneUsage=new RocksDbPruneUsageStore(database);
     }
 
     @Override public void save(Block block) {
@@ -50,7 +50,7 @@ public final class RocksDbBlockStore implements BlockStore {
             FlatFileRecordStore.Position position = FlatFileRecordStore.Position.deserialize(existing);
             batch.put(metadataKey, existing);
             new RocksDbBlockAvailabilityStore(database).markData(batch, hash);
-            new RocksDbPruneUsageStore(database).setBlockSize(batch, hash, position.payloadLength());
+            pruneUsage.setBlockSize(batch, hash, position.payloadLength());
             return;
         }
 
@@ -58,7 +58,7 @@ public final class RocksDbBlockStore implements BlockStore {
         FlatFileRecordStore.Position position=files.append(serialized);
         batch.put(metadataKey,position.serialize());
         new RocksDbBlockAvailabilityStore(database).markData(batch,hash);
-        new RocksDbPruneUsageStore(database).setBlockSize(batch,hash,serialized.length);
+        pruneUsage.setBlockSize(batch,hash,serialized.length);
     }
 
     @Override public Optional<Block> find(Hash256 hash) {
@@ -79,12 +79,12 @@ public final class RocksDbBlockStore implements BlockStore {
         });
     }
 
-    public long serializedSize(Hash256 hash){ if(hash==null) throw new IllegalArgumentException("blockHash must not be null"); return new RocksDbPruneUsageStore(database).blockSize(hash); }
+    public long serializedSize(Hash256 hash){ if(hash==null) throw new IllegalArgumentException("blockHash must not be null"); return pruneUsage.blockSize(hash); }
     @Override public void delete(Hash256 hash){ if(hash==null) throw new IllegalArgumentException("blockHash must not be null"); try(var batch=new RocksDbWriteBatch()){delete(batch,hash);database.write(batch);} }
     public void delete(RocksDbWriteBatch batch,Hash256 hash){
         if(batch==null) throw new IllegalArgumentException("batch must not be null"); if(hash==null) throw new IllegalArgumentException("blockHash must not be null");
         // Core-style flat files are append-only. Pruning drops metadata; physical file compaction/deletion is file-granular.
-        batch.delete(key(hash)); new RocksDbBlockAvailabilityStore(database).clearData(batch,hash); new RocksDbPruneUsageStore(database).setBlockSize(batch,hash,0L);
+        batch.delete(key(hash)); new RocksDbBlockAvailabilityStore(database).clearData(batch,hash); pruneUsage.setBlockSize(batch,hash,0L);
     }
     private static byte[] key(Hash256 hash){ byte[] h=hash.bytes(); if(h.length!=HASH_SIZE) throw new IllegalStateException("Invalid block hash length: "+h.length); byte[] k=new byte[1+HASH_SIZE]; k[0]=BLOCK_PREFIX; System.arraycopy(h,0,k,1,HASH_SIZE); return k; }
 }

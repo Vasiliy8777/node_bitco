@@ -30,6 +30,67 @@ class NodeRelayServiceTest {
     Path directory;
 
     @Test
+    void availabilityHeadersAreValidatedDuringIbdAndMakeThePeerDownloadEligible() throws Exception {
+        var parameters = NetworkParametersRegistry.regtest();
+        try (var database = new RocksDbDatabase(directory.resolve("availability-headers"));
+             var peers = new PeerManager()) {
+            var validation = new NodeValidationService(database, parameters, () -> 1_800_000_000L, new Mempool());
+            var sync = new NodeSyncInfrastructure(database, parameters, () -> 1_800_000_000L);
+            var genesis = validation.activeTip();
+            var original = genesis.header();
+            ru.bitcoin.node.protocol.block.BlockHeader header;
+            long nonce = 0;
+            do {
+                header = new ru.bitcoin.node.protocol.block.BlockHeader(4, genesis.hash(), genesis.hash(),
+                        new UInt32(original.timestamp().value() + 1), original.bits(), new UInt32(nonce++));
+            } while (!ru.bitcoin.node.consensus.pow.ProofOfWork.isValid(header, parameters));
+            var peer = mock(Peer.class);
+            when(peer.isReady()).thenReturn(true);
+            when(peer.remoteVersion()).thenReturn(new VersionMessage(
+                    VersionMessage.CURRENT_PROTOCOL_VERSION, VersionMessage.DEFAULT_SERVICES,
+                    1_800_000_000L, new NetworkAddress(VersionMessage.DEFAULT_SERVICES,
+                    new byte[16], 18444),
+                    new NetworkAddress(VersionMessage.DEFAULT_SERVICES, new byte[16], 18444),
+                    1L, "/availability-test/", 1, true));
+            when(peer.lastBlockAnnouncement()).thenReturn(header.hash());
+            var incoming = new AtomicReference<PeerMessageListener>();
+            doAnswer(call -> { incoming.set(call.getArgument(0)); return null; }).when(peer).addMessageListener(any());
+            var sent = new LinkedBlockingQueue<BitcoinMessage>();
+            doAnswer(call -> { sent.add(call.getArgument(0)); return null; }).when(peer).send(any());
+            peers.add(peer);
+            var policy = new ru.bitcoin.node.app.sync.CoreBlockDownloadPeerPolicy(sync.blockIndexLookup(),
+                    validation::activeTip, sync.headerChainState(), sync.blockLocatorBuilder(), parameters,
+                    sync::downloadBlockFailed, () -> true, () -> null);
+            policy.refresh(List.of(peer));
+            assertFalse(policy.canDownload(peer, header.hash(), 1L));
+            try (var relay = new NodeRelayService(validation, sync, peers)) {
+                incoming.get().onMessage(peer, BitcoinMessages.headers(new HeadersMessage(List.of(header))));
+                // Ordered-worker barrier: GETHEADERS runs after the announcement.
+                incoming.get().onMessage(peer, BitcoinMessages.getHeaders(new GetHeadersMessage(
+                        VersionMessage.CURRENT_PROTOCOL_VERSION, List.of(genesis.hash()), new Hash256(new byte[32]))));
+                assertEquals("headers", take(sent).command());
+                assertEquals(header.hash(), sync.headerChainState().bestHeaderTip().hash());
+                assertEquals(genesis.hash(), validation.activeTip().hash(), "Headers must not connect bodies");
+                assertNotNull(sync.blockIndexLookup().find(header.hash()));
+                policy.refresh(List.of(peer));
+                assertTrue(policy.canDownload(peer, header.hash(), 1L));
+                verify(peer, never()).disconnectForProtocolViolation(any(), any());
+
+                ru.bitcoin.node.protocol.block.BlockHeader invalid;
+                nonce = 0;
+                do {
+                    invalid = new ru.bitcoin.node.protocol.block.BlockHeader(4, header.hash(), genesis.hash(),
+                            new UInt32(header.timestamp().value() + 1), header.bits(), new UInt32(nonce++));
+                } while (ru.bitcoin.node.consensus.pow.ProofOfWork.isValid(invalid, parameters));
+                incoming.get().onMessage(peer, BitcoinMessages.headers(new HeadersMessage(List.of(invalid))));
+                verify(peer, timeout(3000)).disconnectForProtocolViolation(any(), any());
+                assertNull(sync.blockIndexLookup().find(invalid.hash()), "Invalid PoW must not be persisted");
+                assertEquals(header.hash(), sync.headerChainState().bestHeaderTip().hash());
+            }
+        }
+    }
+
+    @Test
     void lowWorkGetHeadersReturnsEmptyWithoutHistoricalLookup() throws Exception {
         var validation = mock(NodeValidationService.class);
         var sync = mock(NodeSyncInfrastructure.class);

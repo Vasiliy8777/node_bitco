@@ -164,7 +164,14 @@ class BitcoinCoreMiningRoundTripTest {
         int p2pPort = port();
         int count = Integer.getInteger("ibd.benchmark.blocks", 8192);
         assertTrue(count > 0, "ibd.benchmark.blocks must be positive");
+        // Regtest enables full block-tree consistency assertions by default.
+        // Match public-network defaults for this performance fixture only;
+        // consensus validation remains enabled. Set 1 to reproduce the old fixture.
+        int checkBlockIndex = Integer.getInteger("ibd.benchmark.core.checkblockindex", 0);
+        assertTrue(checkBlockIndex >= 0, "checkblockindex must not be negative");
+        System.out.printf(Locale.ROOT, "IBD_BENCH_CONFIG blocks=%d coreCheckBlockIndex=%d%n", count, checkBlockIndex);
         var process = new ProcessBuilder(binary.toString(), "-datadir=" + coreData, "-regtest", "-server",
+                "-checkblockindex=" + checkBlockIndex,
                 "-rpcuser=test", "-rpcpassword=test-password", "-rpcport=" + rpcPort,
                 "-port=" + p2pPort, "-bind=127.0.0.1:" + p2pPort, "-connect=0", "-dnsseed=0", "-discover=0",
                 "-listenonion=0", "-natpmp=0", "-whitelist=noban@127.0.0.1")
@@ -177,7 +184,7 @@ class BitcoinCoreMiningRoundTripTest {
             String address = command("getnewaddress").strip();
             for (int offset = 0; offset < count; offset += 512)
                 command("generatetoaddress", Integer.toString(Math.min(512, count - offset)), address);
-            measureReferenceCoreIbd(binary, p2pPort, count);
+            measureReferenceCoreIbd(binary, p2pPort, count, checkBlockIndex);
             try (var context = new AnnotationConfigApplicationContext()) {
                 context.getEnvironment().getPropertySources().addFirst(new MapPropertySource("core-ibd", Map.of(
                         "bitcoin.data-directory", directory.resolve("java-ibd").toString(), "bitcoin.network", "regtest",
@@ -205,10 +212,11 @@ class BitcoinCoreMiningRoundTripTest {
             }
         }
     }
-    private void measureReferenceCoreIbd(Path binary, int sourcePort, int count) throws Exception {
+    private void measureReferenceCoreIbd(Path binary, int sourcePort, int count, int checkBlockIndex) throws Exception {
         Path referenceData = Files.createDirectory(directory.resolve("core-ibd-reference"));
         int referenceRpcPort = port();
         var process = new ProcessBuilder(binary.toString(), "-datadir=" + referenceData, "-regtest", "-server",
+                "-checkblockindex=" + checkBlockIndex,
                 "-rpcuser=test", "-rpcpassword=test-password", "-rpcport=" + referenceRpcPort,
                 "-listen=0", "-connect=0", "-dnsseed=0", "-discover=0", "-listenonion=0", "-natpmp=0")
                 .redirectErrorStream(true).redirectOutput(directory.resolve("core-ibd-reference.log").toFile()).start();

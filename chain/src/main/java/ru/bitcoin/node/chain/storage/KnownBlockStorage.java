@@ -96,6 +96,15 @@ public final class KnownBlockStorage {
         save(batch, block, blockIndex, null);
     }
 
+    /** Persists a checked header without advertising a received block body. */
+    public void saveHeader(BlockIndex index) {
+        if (index == null) throw new IllegalArgumentException("index must not be null");
+        try (var batch = new RocksDbWriteBatch()) {
+            blockIndexStore.save(batch, BlockIndexStorageMapper.toStored(index));
+            database.write(batch);
+        }
+    }
+
     public boolean usesIndexStore(ru.bitcoin.node.chain.StoredBlockIndexLookup lookup) {
         return lookup != null && lookup.isBackedBy(blockIndexStore);
     }

@@ -175,7 +175,7 @@ public final class NodeRelayService implements AutoCloseable {
                 if (!compactFallbacks.containsKey(peer)) return;
             }
         }
-        if (closed || !Set.of("inv", "tx", "getdata", "getheaders", "notfound", "sendheaders", "sendcmpct", "feefilter", "cmpctblock", "getblocktxn", "blocktxn", "block").contains(message.command()))
+        if (closed || !Set.of("inv", "tx", "getdata", "getheaders", "headers", "notfound", "sendheaders", "sendcmpct", "feefilter", "cmpctblock", "getblocktxn", "blocktxn", "block").contains(message.command()))
             return;
         long bytes = message.payloadLength();
         AtomicLong peerQueued = queuedBytesByPeer.computeIfAbsent(peer, ignored -> new AtomicLong());
@@ -238,6 +238,22 @@ public final class NodeRelayService implements AutoCloseable {
                 if (role.relaysTransactions()) receiveTransaction(peer, TransactionParser.parse(message.payload()));
             }
             case "getdata" -> queueGetData(peer, BitcoinMessages.decodeGetData(message));
+            case "headers" -> {
+                var announcement = BitcoinMessages.decodeHeaders(message);
+                var batch = announcement.headers();
+                for (int i = 1; i < batch.size(); i++) {
+                    if (!batch.get(i).previousBlockHash().equals(batch.get(i - 1).hash())) {
+                        throw new IllegalArgumentException("Non-continuous headers announcement");
+                    }
+                }
+                try {
+                    // Availability responses use sendAsync rather than a pending HEADERS
+                    // future. Validate/persist them even while historical blocks download.
+                    validation.processHeaders(sync.headerSyncService(), announcement);
+                } catch (ru.bitcoin.node.consensus.block.BlockHeaderValidationException invalid) {
+                    throw new IllegalArgumentException("Invalid headers announcement", invalid);
+                }
+            }
             case "getheaders" -> {
                 var request = GetHeadersMessageCodec.decode(message.payload());
                 // Core returns an empty response below minimum chainwork. A
@@ -347,7 +363,7 @@ public final class NodeRelayService implements AutoCloseable {
 
         // A compact block carries a real block header. Feed it through the existing header
         // validation/index pipeline before accepting any reconstructed body.
-        sync.headerSyncService().process(new HeadersMessage(List.of(compact.header())));
+        validation.processHeaders(sync.headerSyncService(), new HeadersMessage(List.of(compact.header())));
 
         List<Transaction> candidates = validation.mempoolEntries().stream()
                 .map(entry -> entry.transaction()).toList();
@@ -774,7 +790,7 @@ public final class NodeRelayService implements AutoCloseable {
     public BlockProcessingResult submitBlock(Block block) {
         var result = validation.processBlock(block);
         if (result == BlockProcessingResult.CONNECTED) {
-            sync.headerSyncService().process(new HeadersMessage(List.of(block.header())));
+            validation.processHeaders(sync.headerSyncService(), new HeadersMessage(List.of(block.header())));
             onConnectedBlock(block, null);
         }
         return result;

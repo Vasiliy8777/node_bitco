@@ -2,7 +2,6 @@ package ru.bitcoin.node.chain;
 
 import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.storage.block.BlockIndexStore;
-import ru.bitcoin.node.storage.block.StoredBlockIndex;
 import ru.bitcoin.node.storage.chain.ChainStateStore;
 
 import java.util.Optional;
@@ -11,11 +10,18 @@ public final class HeaderChainStateLoader {
 
     private final BlockIndexStore blockIndexStore;
     private final ChainStateStore chainStateStore;
+    private final BlockIndexLookup sharedLookup;
 
     public HeaderChainStateLoader(
             BlockIndexStore blockIndexStore,
             ChainStateStore chainStateStore
     ) {
+        this(blockIndexStore, chainStateStore, null);
+    }
+
+    /** Shares immutable indexes; the selected persistent tip hash is still read on every refresh. */
+    public HeaderChainStateLoader(BlockIndexStore blockIndexStore, ChainStateStore chainStateStore,
+                                  BlockIndexLookup sharedLookup) {
         if (blockIndexStore == null) {
             throw new IllegalArgumentException(
                     "blockIndexStore must not be null"
@@ -33,6 +39,7 @@ public final class HeaderChainStateLoader {
 
         this.chainStateStore =
                 chainStateStore;
+        this.sharedLookup = sharedLookup;
     }
 
     public Optional<HeaderChainState> load() {
@@ -48,22 +55,7 @@ public final class HeaderChainStateLoader {
         Hash256 hash =
                 bestHeaderTipHash.orElseThrow();
 
-        StoredBlockIndex stored =
-                blockIndexStore
-                        .find(hash)
-                        .orElseThrow(
-                                () ->
-                                        new IllegalStateException(
-                                                "Best header tip refers to missing block index: "
-                                                        + hash.toDisplayHex()
-                                        )
-                        );
-
-        BlockIndex bestHeaderTip =
-                BlockIndexStorageMapper
-                        .fromStored(
-                                stored
-                        );
+        BlockIndex bestHeaderTip = requiredIndex(hash);
 
         return Optional.of(
                 new HeaderChainState(
@@ -78,11 +70,15 @@ public final class HeaderChainStateLoader {
                 .orElseThrow(() -> new IllegalStateException(
                         "Best header state disappeared from persistent storage"));
 
-        StoredBlockIndex stored = blockIndexStore.find(hash)
-                .orElseThrow(() -> new IllegalStateException(
-                        "Best header tip refers to missing block index: "
-                                + hash.toDisplayHex()));
+        return requiredIndex(hash);
+    }
 
-        return BlockIndexStorageMapper.fromStored(stored);
+    private BlockIndex requiredIndex(Hash256 hash) {
+        BlockIndex index = sharedLookup == null
+                ? blockIndexStore.find(hash).map(BlockIndexStorageMapper::fromStored).orElse(null)
+                : sharedLookup.find(hash);
+        if (index == null) throw new IllegalStateException(
+                "Best header tip refers to missing block index: " + hash.toDisplayHex());
+        return index;
     }
 }

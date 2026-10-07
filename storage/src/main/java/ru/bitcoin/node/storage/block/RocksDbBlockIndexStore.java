@@ -103,6 +103,58 @@ public final class RocksDbBlockIndexStore
                 .toList();
     }
 
+    /** Bounded cache hints only: height entries do not establish branch membership. */
+    public List<StoredBlockIndex> readHeightHints(long firstHeight, long lastHeight,
+            int limit, java.util.function.Predicate<Hash256> needed, Runnable checkpoint) {
+        if (firstHeight < 0 || lastHeight < firstHeight || limit < 1 || limit > 2048) {
+            throw new IllegalArgumentException("Invalid height hint range or limit");
+        }
+        java.util.Objects.requireNonNull(needed, "needed");
+        java.util.Objects.requireNonNull(checkpoint, "checkpoint");
+        checkpoint.run();
+        // Never trigger a whole-index migration from the download hot path.
+        byte[] version = database.get(HEIGHT_INDEX_VERSION_KEY);
+        if (!java.util.Arrays.equals(version, new byte[]{1})) return List.of();
+        byte[] cursor = new byte[9];
+        cursor[0] = HEIGHT_INDEX_PREFIX;
+        java.nio.ByteBuffer.wrap(cursor, 1, 8).putLong(firstHeight);
+        var hashes = new java.util.ArrayList<Hash256>();
+        var heights = new java.util.ArrayList<Long>();
+        int[] visited = {0};
+        database.visitPrefixAscendingAfter(HEIGHT_INDEX_PREFIX, cursor, (key, value) -> {
+            checkpoint.run();
+            if (++visited[0] > limit) return false;
+            if (key.length != 41 || value.length != HASH_SIZE) return true;
+            long height = java.nio.ByteBuffer.wrap(key, 1, 8).getLong();
+            if (height > lastHeight) return false;
+            Hash256 hash = new Hash256(value);
+            if (height >= firstHeight && needed.test(hash)) {
+                hashes.add(hash);
+                heights.add(height);
+            }
+            return true;
+        });
+        var result = new java.util.ArrayList<StoredBlockIndex>();
+        // Keep cancellation and the native database monitor responsive.
+        for (int offset = 0; offset < hashes.size(); offset += 256) {
+            checkpoint.run();
+            int end = Math.min(offset + 256, hashes.size());
+            var keys = hashes.subList(offset, end).stream().map(RocksDbBlockIndexStore::key).toList();
+            var values = database.getAll(keys);
+            for (int i = offset; i < end; i++) {
+                byte[] value = values.get(i - offset);
+                if (value == null) continue;
+                StoredBlockIndex index = StoredBlockIndexSerializer.deserialize(value);
+                if (!index.hash().equals(hashes.get(i))) {
+                    throw new IllegalStateException("Stored block index hash mismatch in height hints");
+                }
+                if (index.height() == heights.get(i)) result.add(index);
+            }
+        }
+        checkpoint.run();
+        return List.copyOf(result);
+    }
+
     public void forEach(java.util.function.Consumer<StoredBlockIndex> visitor) {
         java.util.Objects.requireNonNull(visitor, "visitor");
         database.forEachValueByPrefix(BLOCK_INDEX_PREFIX,

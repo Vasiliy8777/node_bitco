@@ -626,6 +626,16 @@ public final class NodeValidationService implements AutoCloseable {
         if (!inputs.isEmpty()) utxos.findAll(inputs);
     }
 
+    /** Serialize header persistence with block activation and failed-branch updates. */
+    public List<BlockIndex> processHeaders(HeaderSyncService service,
+            ru.bitcoin.node.p2p.message.HeadersMessage message) {
+        java.util.Objects.requireNonNull(service, "service");
+        java.util.Objects.requireNonNull(message, "message");
+        synchronized (chain) {
+            return service.process(message);
+        }
+    }
+
     // Prefetch is only a read hint, never an alternative source of coins. Inputs
     // produced earlier in this ordered run will be resolved by ConnectBlock's
     // committed UTXO updates instead of querying their absence in the old DB.

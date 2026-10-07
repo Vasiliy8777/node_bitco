@@ -21,6 +21,41 @@ import static org.junit.jupiter.api.Assertions.*;
 class RocksDbPruneUsageStoreTest {
     @TempDir Path temp;
 
+    @Test void migratedStoreDoesNotReadSchemaMarkerForEveryBatchEntry() {
+        Path path = temp.resolve("warm-usage");
+        var hash = GenesisBlockFactory.create(NetworkParametersRegistry.regtest()).hash();
+        try (var db = new RocksDbDatabase(path)) {
+            var usage = new RocksDbPruneUsageStore(db);
+            usage.ensureMigrated();
+            long before = db.ioStats().gets();
+            try (var batch = new ru.bitcoin.node.storage.rocksdb.RocksDbWriteBatch()) {
+                for (int i = 1; i <= 128; i++) {
+                    usage.setBlockSize(batch, hash, i);
+                    usage.setUndoSize(batch, hash, i * 2L);
+                }
+                db.write(batch);
+            }
+            assertEquals(0L, db.ioStats().gets() - before);
+            assertEquals(384L, usage.usageBytes());
+        }
+        try (var db = new RocksDbDatabase(path)) {
+            var usage = new RocksDbPruneUsageStore(db);
+            assertEquals(128L, usage.blockSize(hash));
+            assertEquals(256L, usage.undoSize(hash));
+        }
+    }
+
+    @Test void failedSchemaValidationIsNotCached() {
+        try (var db = new RocksDbDatabase(temp.resolve("bad-version"))) {
+            byte[] marker = RocksDbNamespaces.singletonKey(RocksDbNamespaces.PRUNE_USAGE_VERSION);
+            db.put(marker, new byte[]{2});
+            var usage = new RocksDbPruneUsageStore(db);
+            assertThrows(IllegalStateException.class, usage::usageBytes);
+            db.put(marker, new byte[]{1});
+            assertEquals(0L, usage.usageBytes());
+        }
+    }
+
     @Test void tracksBlockAndUndoPayloadWithoutReadingPayloadForSize() {
         try (var db = new RocksDbDatabase(temp.resolve("db"))) {
             var block = GenesisBlockFactory.create(NetworkParametersRegistry.regtest());
