@@ -720,6 +720,10 @@ public final class NodeValidationService implements AutoCloseable {
                 hits, misses, hitRate, cacheNow.size(), cacheNow.capacity()));
 
         LOG.log(System.Logger.Level.INFO, "IBD ROCKS GETS BY NS: " + formatNamespaceGets(namespaceDb));
+        var metadataReads = database.readCacheStats();
+        LOG.log(System.Logger.Level.INFO, String.format(java.util.Locale.ROOT,
+                "IBD METADATA CACHE: cumulativeNativeKeys=%,d cumulativeHits=%,d",
+                metadataReads.nativeKeys(), metadataReads.metadataHits()));
         var warm = database.warmReadStats();
         if (warm.keys() > 0) LOG.log(System.Logger.Level.INFO, String.format(java.util.Locale.ROOT,
                 "IBD UTXO PREFETCH: cumulativeKeys=%,d cumulativeReadMs=%.1f",

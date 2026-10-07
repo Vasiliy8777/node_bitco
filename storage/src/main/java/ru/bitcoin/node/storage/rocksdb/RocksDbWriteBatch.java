@@ -186,6 +186,27 @@ public final class RocksDbWriteBatch
         return (java.util.BitSet) changedPrefixes.clone();
     }
 
+    void invalidateMetadata(BlockMetadataCache cache) {
+        ensureOpen();
+        for (Operation op : operations) {
+            if (op.type == DELETE_PREFIX) cache.invalidatePrefix(op.key[0]);
+            else cache.invalidate(op.key);
+        }
+    }
+
+    /** Publish only after the native batch commits; preserve range-delete ordering. */
+    void publishMetadata(BlockMetadataCache cache) {
+        ensureOpen();
+        for (Operation op : operations) {
+            if (op.type == DELETE_PREFIX) cache.invalidatePrefix(op.key[0]);
+            else if (op.type == DELETE) cache.remember(op.key, null);
+            else {
+                cache.invalidate(op.key);
+                cache.remember(op.key, op.value);
+            }
+        }
+    }
+
     private void ensureOpen() {
         if (closed) {
             throw new IllegalStateException(

@@ -139,7 +139,19 @@ public final class RocksDbBlockIndexStore
         for (int offset = 0; offset < hashes.size(); offset += 256) {
             checkpoint.run();
             int end = Math.min(offset + 256, hashes.size());
-            var keys = hashes.subList(offset, end).stream().map(RocksDbBlockIndexStore::key).toList();
+            var keys = new java.util.ArrayList<byte[]>();
+            for (int i = offset; i < end; i++) keys.add(key(hashes.get(i)));
+            // Warm bounded, coherent metadata alongside primary index hints. These
+            // records never establish branch membership or replace validation.
+            for (int i = offset; i < end; i++) {
+                for (byte prefix : new byte[]{RocksDbNamespaces.BLOCK, RocksDbNamespaces.UNDO,
+                        RocksDbNamespaces.BLOCK_FAILURE, RocksDbNamespaces.BLOCK_AVAILABILITY}) {
+                    byte[] metadataKey = new byte[1 + HASH_SIZE];
+                    metadataKey[0] = prefix;
+                    System.arraycopy(hashes.get(i).bytes(), 0, metadataKey, 1, HASH_SIZE);
+                    keys.add(metadataKey);
+                }
+            }
             var values = database.getAll(keys);
             for (int i = offset; i < end; i++) {
                 byte[] value = values.get(i - offset);

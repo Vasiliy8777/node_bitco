@@ -55,7 +55,27 @@ class StoredBlockIndexCancellationTest {
             indexes.forEach(index -> store.save(BlockIndexStorageMapper.toStored(index)));
             store.visitByHeightAscending(index -> true); // Establish the versioned secondary index.
             var lookup = new StoredBlockIndexLookup(store);
+            var namespaceBefore = database.namespaceIoStats();
             lookup.prefetchHeightRange(1, 40, () -> {});
+            assertEquals(0, database.namespaceIoStats().minus(namespaceBefore)
+                    .gets(ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.BLOCK_SKIP_INDEX),
+                    "Sequential height warming must not speculatively read every skip pointer");
+            long nativeBefore = database.readCacheStats().nativeKeys();
+            for (var index : indexes) {
+                if (index.height() == 0) continue;
+                for (byte prefix : new byte[]{
+                        ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.BLOCK,
+                        ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.UNDO,
+                        ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.BLOCK_FAILURE,
+                        ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.BLOCK_AVAILABILITY}) {
+                    byte[] metadataKey = new byte[33];
+                    metadataKey[0] = prefix;
+                    System.arraycopy(index.hash().bytes(), 0, metadataKey, 1, 32);
+                    assertNull(database.get(metadataKey));
+                }
+            }
+            assertEquals(nativeBefore, database.readCacheStats().nativeKeys(),
+                    "Both branches' metadata misses must be warmed alongside their indexes");
             long before = database.ioStats().gets();
             for (var index : indexes) {
                 if (index.height() > 0) assertEquals(index.hash(), lookup.find(index.hash()).hash());

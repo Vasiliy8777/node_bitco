@@ -27,6 +27,7 @@ public final class RocksDbDatabase
     private final Path databasePath;
     private final long networkMagic;
     private final long[] namespaceVersions = new long[256];
+    private final BlockMetadataCache metadataCache = new BlockMetadataCache();
 
     private boolean closed;
     // Hints only warm the native version-aware cache. Disposal excludes these reads.
@@ -59,6 +60,15 @@ public final class RocksDbDatabase
     // contention-free enough for IBD while snapshots remain cheap.
     private final LongAdder getCount = new LongAdder();
     private final LongAdder getNanos = new LongAdder();
+    private final LongAdder nativeReadKeys = new LongAdder();
+    private final LongAdder metadataCacheHits = new LongAdder();
+
+    /** Actual native reads, separate from the historical logical-get telemetry. */
+    public record ReadCacheStats(long nativeKeys, long metadataHits) { }
+
+    public ReadCacheStats readCacheStats() {
+        return new ReadCacheStats(nativeReadKeys.sum(), metadataCacheHits.sum());
+    }
     private final LongAdder[] namespaceGetCount = new LongAdder[256];
     private final LongAdder[] namespaceGetNanos = new LongAdder[256];
     private final LongAdder writeBatchCount = new LongAdder();
@@ -232,11 +242,14 @@ public final class RocksDbDatabase
         try {
             if (chainstateWriteBackEnabled || chainstateWriteBack != null) {
                 ensureWriteBack().put(key, value);
+                metadataCache.invalidate(key);
                 if (key.length > 0) namespaceVersions[Byte.toUnsignedInt(key[0])]++;
                 flushChainstateIfNeeded();
                 return;
             }
             database.put(key, value);
+            metadataCache.invalidate(key);
+            metadataCache.remember(key, value);
             if (key.length > 0) namespaceVersions[Byte.toUnsignedInt(key[0])]++;
         } catch (RocksDBException e) {
             throw new IllegalStateException(
@@ -264,7 +277,14 @@ public final class RocksDbDatabase
                 var pending = chainstateWriteBack.pendingValue(key);
                 if (pending.touched()) return pending.value();
             }
-            return database.get(key);
+            if (metadataCache.contains(key)) {
+                metadataCacheHits.increment();
+                return metadataCache.get(key);
+            }
+            nativeReadKeys.increment();
+            byte[] value = database.get(key);
+            metadataCache.remember(key, value);
+            return value;
         } catch (RocksDBException e) {
             throw new IllegalStateException(
                     "Failed to read RocksDB value",
@@ -298,18 +318,26 @@ public final class RocksDbDatabase
 
         long started = System.nanoTime();
         try {
-            if (chainstateWriteBack == null) return database.multiGetAsList(keys);
             java.util.List<byte[]> result = new java.util.ArrayList<>(java.util.Collections.nCopies(keys.size(), null));
             java.util.List<byte[]> unresolved = new java.util.ArrayList<>();
             java.util.List<Integer> positions = new java.util.ArrayList<>();
             for (int i = 0; i < keys.size(); i++) {
-                var pending = chainstateWriteBack.pendingValue(keys.get(i));
-                if (pending.touched()) result.set(i, pending.value());
+                byte[] key = keys.get(i);
+                var pending = chainstateWriteBack == null ? null : chainstateWriteBack.pendingValue(key);
+                if (pending != null && pending.touched()) result.set(i, pending.value());
+                else if (metadataCache.contains(key)) {
+                    metadataCacheHits.increment();
+                    result.set(i, metadataCache.get(key));
+                }
                 else { unresolved.add(keys.get(i)); positions.add(i); }
             }
             if (!unresolved.isEmpty()) {
+                nativeReadKeys.add(unresolved.size());
                 var loaded = database.multiGetAsList(unresolved);
-                for (int i = 0; i < loaded.size(); i++) result.set(positions.get(i), loaded.get(i));
+                for (int i = 0; i < loaded.size(); i++) {
+                    metadataCache.remember(unresolved.get(i), loaded.get(i));
+                    result.set(positions.get(i), loaded.get(i));
+                }
             }
             return result;
         } catch (RocksDBException e) {
@@ -344,11 +372,13 @@ public final class RocksDbDatabase
         try {
             if (chainstateWriteBackEnabled || chainstateWriteBack != null) {
                 ensureWriteBack().delete(key);
+                metadataCache.invalidate(key);
                 if (key.length > 0) namespaceVersions[Byte.toUnsignedInt(key[0])]++;
                 flushChainstateIfNeeded();
                 return;
             }
             database.delete(key);
+            metadataCache.remember(key, null);
             if (key.length > 0) namespaceVersions[Byte.toUnsignedInt(key[0])]++;
         } catch (RocksDBException e) {
             throw new IllegalStateException(
@@ -425,6 +455,7 @@ public final class RocksDbDatabase
         long started = System.nanoTime();
         try (batch; WriteOptions options = new WriteOptions().setSync(true)) {
             database.write(options, batch.nativeBatch());
+            batch.publishMetadata(metadataCache);
             writeBatchCount.increment(); syncWriteBatchCount.increment();
         } catch (RocksDBException e) {
             throw new IllegalStateException("Failed to flush chainstate write-back cache", e);
@@ -476,6 +507,7 @@ public final class RocksDbDatabase
         }
         if (chainstateWriteBackEnabled || chainstateWriteBack != null) {
             ensureWriteBack().appendFrom(batch);
+            batch.invalidateMetadata(metadataCache);
             var prefixes = batch.changedPrefixes();
             for (int prefix = prefixes.nextSetBit(0); prefix >= 0; prefix = prefixes.nextSetBit(prefix + 1)) namespaceVersions[prefix]++;
             flushChainstateIfNeeded();
@@ -492,6 +524,7 @@ public final class RocksDbDatabase
                     writeOptions,
                     batch.nativeBatch()
             );
+            batch.publishMetadata(metadataCache);
             var prefixes = batch.changedPrefixes();
             for (int prefix = prefixes.nextSetBit(0); prefix >= 0; prefix = prefixes.nextSetBit(prefix + 1)) {
                 namespaceVersions[prefix]++;
