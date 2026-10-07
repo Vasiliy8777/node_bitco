@@ -9,6 +9,15 @@ import java.util.Objects;
 final class MiningPayoutResolver {
     private MiningPayoutResolver() {}
 
+    static byte[] resolveStratum(String address, String script, NetworkParameters parameters) {
+        byte[] payout = resolve(address, script, parameters);
+        if (parameters.network() != ru.bitcoin.node.protocol.network.BitcoinNetwork.REGTEST
+                && payout.length == 1 && payout[0] == 0x51) {
+            throw new IllegalArgumentException("Public-network Stratum mining requires a payout address or protected payout script; OP_TRUE is only allowed on regtest");
+        }
+        return payout;
+    }
+
     static byte[] resolve(String payoutAddress, String payoutScript, NetworkParameters parameters) {
         Objects.requireNonNull(parameters, "parameters");
         if (payoutAddress != null && !payoutAddress.isBlank()) {

@@ -142,6 +142,44 @@ class BitcoinCoreMiningRoundTripTest {
                         assertTrue(validation.mempoolEntries().isEmpty());
                         assertEquals(1, stratum.statistics().submittedBlocks());
                     }
+                    if (Boolean.getBoolean("bitcoin.gpu.test")) {
+                        String payoutAddress = command("getnewaddress").strip();
+                        byte[] payout = ru.bitcoin.node.protocol.address.SegwitAddressDecoder.toScriptPubKey(
+                                payoutAddress, NetworkParametersRegistry.regtest());
+                        var gpuBackend = new StratumMiningBackend(validation, context.getBean(NodeRelayService.class),
+                                NetworkParametersRegistry.regtest(), () -> java.time.Instant.now().getEpochSecond(),
+                                lifecycle::isMiningReady, payout, 3_996_000, new FeeRate(0));
+                        try (var stratum = new ru.bitcoin.node.stratum.StratumServer(new java.net.InetSocketAddress("127.0.0.1", 0),
+                                gpuBackend, "miner", "test-password", java.math.BigDecimal.ONE, 4)) {
+                            Path miner = Path.of(System.getProperty("maven.multiModuleProjectDirectory", ".."))
+                                    .resolve("tools/gpu-miner/miner.py").toAbsolutePath();
+                            Path output = directory.resolve("gpu-miner.log");
+                            var builder = new ProcessBuilder(System.getProperty("bitcoin.gpu.python", "python"), miner.toString(),
+                                    "--port", Integer.toString(stratum.port()), "--block-only", "--max-blocks", "1", "--batch-size", "64")
+                                    .redirectErrorStream(true).redirectOutput(output.toFile());
+                            builder.environment().put("BITCOIN_STRATUM_PASSWORD", "test-password");
+                            var gpu = builder.start();
+                            try {
+                                assertTrue(gpu.waitFor(45, TimeUnit.SECONDS), "GPU miner timed out");
+                                String log = Files.readString(output);
+                                System.out.println("GPU_CORE_ROUND_TRIP " + log);
+                                assertEquals(0, gpu.exitValue(), log);
+                                assertTrue(log.contains("Accepted block"), log);
+                                assertEquals(1, stratum.statistics().submittedBlocks());
+                                await(() -> {
+                                    try { return Integer.parseInt(command("getblockcount").strip()) == 106; }
+                                    catch (Exception exception) { return false; }
+                                }, Duration.ofSeconds(15));
+                                assertEquals(validation.activeTip().hash().toDisplayHex(), command("getbestblockhash").strip());
+                                var block = JSON.readValue(command("getblock", command("getbestblockhash").strip(), "2"), Map.class);
+                                var coinbase = (Map<?, ?>)((List<?>)block.get("tx")).getFirst();
+                                var outputScript = (Map<?, ?>)((Map<?, ?>)((List<?>)coinbase.get("vout")).getFirst()).get("scriptPubKey");
+                                assertEquals(HexFormat.of().formatHex(payout), outputScript.get("hex"));
+                            } finally {
+                                if (gpu.isAlive()) { gpu.destroyForcibly(); gpu.waitFor(5, TimeUnit.SECONDS); }
+                            }
+                        }
+                    }
                 }
             }
         } finally {

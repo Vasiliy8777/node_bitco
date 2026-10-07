@@ -18,13 +18,22 @@ import java.net.InetSocketAddress;
 @Configuration
 @ConditionalOnProperty(name = "bitcoin.stratum.enabled", havingValue = "true")
 public class StratumConfiguration {
+    record Credentials(String password) {
+        @Override public String toString() { return "Stratum credentials [redacted]"; }
+    }
+
+    @Bean
+    Credentials stratumCredentials(@Value("${bitcoin.stratum.password:}") String password) {
+        return new Credentials(password);
+    }
+
     @Bean(destroyMethod = "close")
     public StratumServer stratumServer(NodeValidationService validation, NodeRelayService relay,
                                        NodeLifecycleService lifecycle, NetworkParameters parameters, AdjustedTime time,
                                        @Value("${bitcoin.stratum.bind:127.0.0.1}") String bind,
                                        @Value("${bitcoin.stratum.port:3333}") int port,
                                        @Value("${bitcoin.stratum.user:miner}") String user,
-                                       @Value("${bitcoin.stratum.password:}") String password,
+                                       Credentials credentials,
                                        @Value("${bitcoin.stratum.difficulty:65536}") BigDecimal difficulty,
                                        @Value("${bitcoin.stratum.maximum-connections:64}") int maximumConnections,
                                        @Value("${bitcoin.stratum.vardiff.enabled:false}") boolean varDiffEnabled,
@@ -37,9 +46,9 @@ public class StratumConfiguration {
                                        @Value("${bitcoin.mining.maximum-weight:3996000}") long maximumWeight,
                                        @Value("${bitcoin.mining.minimum-fee-sat-per-kvb:1000}") long minimumFee) throws IOException {
         var backend = new StratumMiningBackend(validation, relay, parameters, time, lifecycle::isMiningReady,
-                MiningPayoutResolver.resolve(payoutAddress, payoutScript, parameters), maximumWeight, new FeeRate(minimumFee));
+                MiningPayoutResolver.resolveStratum(payoutAddress, payoutScript, parameters), maximumWeight, new FeeRate(minimumFee));
         var varDiff = new VarDiffConfig(varDiffEnabled, varDiffMinimum, varDiffMaximum,
                 java.time.Duration.ofSeconds(targetSeconds), java.time.Duration.ofSeconds(retargetSeconds));
-        return new StratumServer(new InetSocketAddress(bind, port), backend, user, password, difficulty, maximumConnections, varDiff);
+        return new StratumServer(new InetSocketAddress(bind, port), backend, user, credentials.password(), difficulty, maximumConnections, varDiff);
     }
 }

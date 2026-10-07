@@ -34,3 +34,4 @@ build/
 # These are reproducible node state, not source code.
 /app/data/
 /data/
+__pycache__/

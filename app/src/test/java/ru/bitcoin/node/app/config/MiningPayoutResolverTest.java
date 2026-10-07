@@ -9,6 +9,13 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class MiningPayoutResolverTest {
     @Test
+    void stratumDoesNotPayPublicRewardsToAnyoneCanSpendScript() {
+        assertThrows(IllegalArgumentException.class, () -> MiningPayoutResolver.resolveStratum(
+                "", "51", NetworkParametersRegistry.mainnet()));
+        assertArrayEquals(new byte[]{0x51}, MiningPayoutResolver.resolveStratum(
+                "", "51", NetworkParametersRegistry.regtest()));
+    }
+    @Test
     void payoutAddressTakesPrecedenceOverLegacyScript() {
         byte[] script = MiningPayoutResolver.resolve(
                 "bc1qpjf8xhuttzemn7hla024klrrftqqp607zphkyf", "51", NetworkParametersRegistry.mainnet());

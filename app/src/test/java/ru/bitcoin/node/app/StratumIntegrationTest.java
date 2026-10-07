@@ -133,6 +133,8 @@ class StratumIntegrationTest {
             context.getEnvironment().getPropertySources().addFirst(new org.springframework.core.env.MapPropertySource("stratum-test", Map.of(
                     "bitcoin.data-directory", directory.toString(), "bitcoin.network", "regtest", "bitcoin.stratum.enabled", "true",
                     "bitcoin.stratum.port", "0", "bitcoin.stratum.password", "secret", "bitcoin.mining.payout-script", "51",
+                    // Explicitly mask a developer's BITCOIN_MINING_PAYOUT_ADDRESS (possibly mainnet).
+                    "bitcoin.mining.payout-address", "",
                     "bitcoin.stratum.vardiff.enabled", "true")));
             context.register(ru.bitcoin.node.app.config.NetworkConfiguration.class, ru.bitcoin.node.app.config.NodeConfiguration.class,
                     ru.bitcoin.node.app.config.StratumConfiguration.class);

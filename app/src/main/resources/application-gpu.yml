@@ -1,0 +1,20 @@
+# Combine with a chain profile: --spring.profiles.active=mainnet,gpu
+bitcoin:
+  stratum:
+    enabled: true
+    bind: 127.0.0.1
+    port: 3333
+    user: miner
+    password: ${BITCOIN_STRATUM_PASSWORD:${random.uuid}}
+    difficulty: 1
+    vardiff:
+      enabled: true
+      minimum: 0.001
+      maximum: 1000000000000
+      target-seconds: 15
+      retarget-seconds: 60
+  gpu-miner:
+    enabled: true
+    python: ${BITCOIN_GPU_PYTHON:python}
+    script: ${BITCOIN_GPU_MINER_SCRIPT:tools/gpu-miner/miner.py}
+    device: 0
