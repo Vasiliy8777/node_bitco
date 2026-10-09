@@ -74,7 +74,7 @@ public final class NodeLifecycleService
 
     public boolean isMiningReady() {
         return isRunning()
-                && !validationService.isInitialBlockDownload()
+                && !validationService.downloadInitialBlockDownload()
                 && liveSync.isCurrent();
     }
 

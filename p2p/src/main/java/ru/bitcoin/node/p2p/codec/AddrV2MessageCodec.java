@@ -55,7 +55,7 @@ public final class AddrV2MessageCodec {
             );
 
             out.writeBytes(
-                    CompactSize.encode(
+                    CompactSize.encodeUnsigned(
                             entry.services()
                     )
             );
@@ -123,7 +123,7 @@ public final class AddrV2MessageCodec {
                     reader.readUInt32LE();
 
             long services =
-                    reader.readCompactSize();
+                    reader.readCompactSizeUnsigned();
 
             int networkId =
                     reader.readUnsignedByte();

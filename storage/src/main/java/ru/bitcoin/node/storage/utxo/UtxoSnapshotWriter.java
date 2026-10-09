@@ -32,6 +32,8 @@ public final class UtxoSnapshotWriter {
         Objects.requireNonNull(database);
         Objects.requireNonNull(baseHash);
         Objects.requireNonNull(target);
+        // Both the snapshot header count and body must include buffered chainstate writes.
+        database.forceFlushChainstate();
         Path absolute = target.toAbsolutePath().normalize();
         if (Files.exists(absolute)) throw new FileAlreadyExistsException(absolute.toString());
         Path parent = absolute.getParent();

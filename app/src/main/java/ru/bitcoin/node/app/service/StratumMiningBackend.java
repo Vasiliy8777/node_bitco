@@ -41,6 +41,7 @@ public final class StratumMiningBackend implements MiningBackend {
     }
 
     @Override public synchronized Optional<MiningWork> work() {
+        if (!ready.getAsBoolean()) { cached = null; return Optional.empty(); }
         var tip = validation.activeTip();
         if (!isCurrent(tip.hash())) { cached = null; return Optional.empty(); }
         long elapsed = System.nanoTime() - builtAt;

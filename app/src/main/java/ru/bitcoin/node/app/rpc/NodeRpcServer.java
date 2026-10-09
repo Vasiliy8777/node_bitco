@@ -699,12 +699,13 @@ public final class NodeRpcServer implements AutoCloseable {
                 yield result;
             }
             case "getconnectioncount" -> requirePeerManager().size();
-            case "getpeerinfo" -> requirePeerManager().peers().stream().map(peer -> {
+            case "getpeerinfo" -> requirePeerManager().managedPeers().stream().map(managed -> {
+                var peer = managed.peer();
                 var info = new LinkedHashMap<String, Object>();
                 var remote = peer.remoteAddress();
                 info.put("addr", remote == null ? "" : remote.getHostString() + ":" + remote.getPort());
                 info.put("inbound", peer.isInboundConnection());
-                info.put("connection_type", requirePeerManager().roleOf(peer).name().toLowerCase(Locale.ROOT));
+                info.put("connection_type", managed.role().name().toLowerCase(Locale.ROOT));
                 info.put("transport_protocol_type", peer.isV2Transport() ? "v2" : "v1");
                 byte[] sessionId = peer.transportSessionId();
                 info.put("session_id", sessionId == null ? "" : HexFormat.of().formatHex(sessionId));
@@ -863,18 +864,18 @@ public final class NodeRpcServer implements AutoCloseable {
                 yield result;
             }
             case "getblockchaininfo" -> {
-                var tip = validation.activeTip();
-                var prune = validation.pruneInfo();
+                var tip = validation.downloadTip();
+                var prune = validation.downloadPruningEnabled() ? validation.pruneInfo() : null;
                 var info = new LinkedHashMap<String, Object>();
                 info.put("chain", chainName());
                 info.put("blocks", tip.height());
-                info.put("headers", sync.headerChainState().bestHeaderTip().height());
+                info.put("headers", sync.headerChainState().publishedBestHeaderTip().height());
                 info.put("bestblockhash", tip.hash().toDisplayHex());
                 info.put("chainwork", String.format("%064x", tip.chainWork()));
-                info.put("difficulty", difficulty());
-                info.put("initialblockdownload", validation.isInitialBlockDownload());
-                info.put("pruned", prune.enabled());
-                if (prune.enabled()) {
+                info.put("difficulty", difficulty(tip));
+                info.put("initialblockdownload", validation.downloadInitialBlockDownload());
+                info.put("pruned", prune != null && prune.enabled());
+                if (prune != null && prune.enabled()) {
                     info.put("pruneheight", prune.pruneHeight());
                     info.put("automatic_pruning", prune.automatic());
                     if (prune.automatic()) info.put("prune_target_size", prune.targetBytes());
@@ -1033,8 +1034,10 @@ public final class NodeRpcServer implements AutoCloseable {
         };
     }
 
-    private double difficulty() {
-        var target = ru.bitcoin.node.consensus.pow.CompactTarget.decode(validation.activeTip().header().bits().value());
+    private double difficulty() { return difficulty(validation.activeTip()); }
+
+    private double difficulty(ru.bitcoin.node.chain.BlockIndex tip) {
+        var target = ru.bitcoin.node.consensus.pow.CompactTarget.decode(tip.header().bits().value());
         if (target.signum() <= 0) return 0.0d;
         var difficultyOne = ru.bitcoin.node.consensus.pow.CompactTarget.decode(0x1d00ffffL);
         return new java.math.BigDecimal(difficultyOne)

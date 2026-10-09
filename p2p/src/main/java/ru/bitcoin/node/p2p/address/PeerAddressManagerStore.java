@@ -29,7 +29,14 @@ public final class PeerAddressManagerStore {
                 throw new IOException("peers.dat belongs to a different Bitcoin network");
             byte[] secret = in.readNBytes(32);
             if (secret.length != 32) throw new EOFException("Truncated AddrMan secret");
-            int count = bounded(in.readInt(), 0, 100_000, "entry count");
+            // save() persists every known address, including unbucketed entries.
+            // Bound allocation by the file contents rather than an unrelated
+            // address-count limit which can reject our own valid snapshots.
+            // Header + bucket count occupy 56 bytes; each entry needs at least
+            // 51 bytes even before its address/source payloads are included.
+            int maximumEntries = (int) Math.min(Integer.MAX_VALUE,
+                    Math.max(0, (Files.size(file) - 56) / 51));
+            int count = bounded(in.readInt(), 0, maximumEntries, "entry count");
             List<PeerAddressManager.EntrySnapshot> entries = new ArrayList<>(count);
             for (int i = 0; i < count; i++) entries.add(readEntry(in));
             int bucketCount = bounded(in.readInt(), 0, (PeerAddressManager.NEW_BUCKET_COUNT + PeerAddressManager.TRIED_BUCKET_COUNT) * PeerAddressManager.BUCKET_SIZE, "bucket count");

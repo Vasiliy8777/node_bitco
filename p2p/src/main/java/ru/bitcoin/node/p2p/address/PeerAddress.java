@@ -32,7 +32,7 @@ public final class PeerAddress {
             throw new IllegalArgumentException("Invalid " + network + " address length: " + rawAddress.length);
         }
         if (port < 1 || port > 65535) throw new IllegalArgumentException("Invalid port: " + port);
-        if (services < 0) throw new IllegalArgumentException("services must fit supported uint64 range");
+        // Preserve all uint64 service bits; signed long is only the storage representation.
         if (network == PeerAddressNetwork.CJDNS && (rawAddress[0] & 0xff) != 0xfc) {
             throw new IllegalArgumentException("CJDNS address must use fc00::/8");
         }

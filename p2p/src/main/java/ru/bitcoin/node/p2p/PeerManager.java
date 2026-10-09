@@ -100,6 +100,12 @@ public final class PeerManager
             IOException cause
     ) {
 
+        // Cleanup is unconditional, even if a diagnostic or discouragement
+        // callback fails. Socket close happens before this notification.
+        synchronized (this) {
+            peers.remove(peer);
+            roles.remove(peer);
+        }
         if (isProtocolViolation(cause)) {
             java.net.InetSocketAddress remote = peer.remoteAddress();
             if (remote != null && remote.getAddress() != null) {
@@ -107,10 +113,6 @@ public final class PeerManager
             }
         }
 
-        synchronized (this) {
-            peers.remove(peer);
-            roles.remove(peer);
-        }
     }
 
     private static boolean isProtocolViolation(Throwable failure) {
@@ -155,6 +157,13 @@ public final class PeerManager
         return List.copyOf(
                 peers
         );
+    }
+
+    public record ManagedPeer(Peer peer, PeerConnectionRole role) { }
+
+    /** Roles are captured with peers so concurrent closure cannot break RPC enumeration. */
+    public synchronized List<ManagedPeer> managedPeers() {
+        return peers.stream().map(peer -> new ManagedPeer(peer, roles.get(peer))).toList();
     }
 
     public synchronized PeerConnectionRole roleOf(Peer peer) {

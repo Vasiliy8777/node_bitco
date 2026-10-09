@@ -36,11 +36,7 @@ public final class AddrV2Entry {
             );
         }
 
-        if (services < 0) {
-            throw new IllegalArgumentException(
-                    "services must fit supported uint64 range"
-            );
-        }
+        // Service flags are an unsigned 64-bit bitfield, including bit 63.
 
         if (networkId < 0 || networkId > 0xFF) {
             throw new IllegalArgumentException(

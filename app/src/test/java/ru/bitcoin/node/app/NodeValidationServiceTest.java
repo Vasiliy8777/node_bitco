@@ -21,6 +21,36 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class NodeValidationServiceTest {
     @Test
+    void publishedIbdStateReflectsPersistedTipImmediatelyAfterStartup() {
+        long genesisTime = GenesisBlockFactory.create(PARAMS).header().timestamp().value();
+        try (var db = new RocksDbDatabase(directory)) {
+            var service = new NodeValidationService(db, PARAMS, () -> genesisTime, new Mempool());
+            assertFalse(service.downloadInitialBlockDownload());
+        }
+        try (var db = new RocksDbDatabase(directory)) {
+            var restarted = new NodeValidationService(db, PARAMS, () -> genesisTime, new Mempool());
+            assertFalse(restarted.downloadInitialBlockDownload());
+        }
+    }
+
+    @Test
+    void disabledSpeculativePrefetchStillConnectsDependentTransactions() {
+        try (var db = new RocksDbDatabase(directory.resolve("no-prefetch"))) {
+            var service = new NodeValidationService(db, PARAMS, () -> 1_800_000_000L, new Mempool());
+            service.initialSyncPrefetchEnabled(false);
+            var fund = new OutPoint(Hash256.fromDisplayHex("14".repeat(32)), new UInt32(0));
+            var coins = new RocksDbUtxoStore(db);
+            coins.save(fund, new StoredUtxo(100_000, SCRIPT, 0, false));
+            var parent = spend(fund, 90_000);
+            var child = spend(new OutPoint(parent.txId(), new UInt32(0)), 80_000);
+            var first = block(service.activeTip(), 1, List.of(parent, child));
+            assertEquals(List.of(BlockProcessingResult.CONNECTED), service.processInitialSyncBatch(List.of(first)));
+            assertTrue(coins.find(new OutPoint(child.txId(), new UInt32(0))).isPresent());
+            assertTrue(coins.find(fund).isEmpty());
+        }
+    }
+
+    @Test
     void batchPrefetchSkipsEarlierOutputsButRetainsMissingAndForwardReferences() {
         var fund = new OutPoint(Hash256.fromDisplayHex("12".repeat(32)), new UInt32(0));
         var parent = spend(fund, 90_000);

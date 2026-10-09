@@ -13,6 +13,27 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.*;
 
 class RocksDbUtxoStoreTest {
+    @Test void statisticsAndSnapshotIncludeBufferedCreatesAndDeletes() throws Exception {
+        try (var db = new RocksDbDatabase(tempDirectory.resolve("buffered-stats"))) {
+            var store = new RocksDbUtxoStore(db);
+            var first = testOutPoint(0);
+            var second = testOutPoint(1);
+            store.save(first, new StoredUtxo(100,new byte[]{0x51},1,true));
+            store.save(second, new StoredUtxo(200,new byte[]{0x51},2,true));
+            db.enableChainstateWriteBack();
+            store.delete(second);
+            assertTrue(store.find(second).isEmpty());
+            var stats=store.statistics();
+            assertEquals(1,stats.txouts()); assertEquals(100,stats.totalAmount());
+            store.save(second,new StoredUtxo(300,new byte[]{0x51},3,false));
+            assertEquals(2,store.count());
+            store.delete(first);
+            var snapshot=UtxoSnapshotWriter.write(db,ru.bitcoin.node.protocol.network.NetworkParametersRegistry.regtest().magic(),
+                    new Hash256(new byte[32]),3,tempDirectory.resolve("buffered.dat"));
+            assertEquals(1,snapshot.coinsWritten());
+            assertEquals(300,store.statistics().totalAmount());
+        }
+    }
     @Test
     void warmingDoesNotPublishCoinsAndFollowsSpendAndNamespaceChanges() {
         try (var db = new RocksDbDatabase(tempDirectory.resolve("warm-coins"))) {

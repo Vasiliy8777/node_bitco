@@ -306,21 +306,21 @@ public final class RocksDbDatabase
      * getCount/namespaceGetCount as keys resolved rather than JNI calls made,
      * so IBD diagnostics remain comparable before and after batching.
      */
-    public synchronized List<byte[]> getAll(
-            List<byte[]> keys
-    ) {
-        ensureOpen();
+    public List<byte[]> getAll(List<byte[]> keys) {
         if (keys == null) throw new IllegalArgumentException("keys must not be null");
-        if (keys.isEmpty()) return List.of();
         for (byte[] key : keys) {
             if (key == null) throw new IllegalArgumentException("keys must not contain null");
         }
-
         long started = System.nanoTime();
-        try {
-            java.util.List<byte[]> result = new java.util.ArrayList<>(java.util.Collections.nCopies(keys.size(), null));
-            java.util.List<byte[]> unresolved = new java.util.ArrayList<>();
-            java.util.List<Integer> positions = new java.util.ArrayList<>();
+        List<byte[]> result = new ArrayList<>(java.util.Collections.nCopies(keys.size(), null));
+        List<byte[]> unresolved = new ArrayList<>();
+        List<Integer> positions = new ArrayList<>();
+        org.rocksdb.Snapshot snapshot = null;
+        long[] versions;
+        synchronized (this) {
+            ensureOpen();
+            if (keys.isEmpty()) return List.of();
+            versions = namespaceVersions.clone();
             for (int i = 0; i < keys.size(); i++) {
                 byte[] key = keys.get(i);
                 var pending = chainstateWriteBack == null ? null : chainstateWriteBack.pendingValue(key);
@@ -328,28 +328,59 @@ public final class RocksDbDatabase
                 else if (metadataCache.contains(key)) {
                     metadataCacheHits.increment();
                     result.set(i, metadataCache.get(key));
+                } else {
+                    unresolved.add(key);
+                    positions.add(i);
                 }
-                else { unresolved.add(keys.get(i)); positions.add(i); }
             }
             if (!unresolved.isEmpty()) {
-                nativeReadKeys.add(unresolved.size());
-                var loaded = database.multiGetAsList(unresolved);
-                for (int i = 0; i < loaded.size(); i++) {
-                    metadataCache.remember(unresolved.get(i), loaded.get(i));
-                    result.set(positions.get(i), loaded.get(i));
+                // Capture native and write-back values at the same linearization
+                // point. Disposal must wait, but other database operations need
+                // not wait for potentially seconds of disk reads.
+                warmReadLifetime.readLock().lock();
+                try { snapshot = database.getSnapshot(); }
+                catch (RuntimeException | Error failure) {
+                    warmReadLifetime.readLock().unlock();
+                    throw failure;
+                }
+            }
+        }
+        try {
+            if (snapshot != null) {
+                List<byte[]> loaded = new ArrayList<>(unresolved.size());
+                try (var reads = new org.rocksdb.ReadOptions().setSnapshot(snapshot)) {
+                    for (int offset = 0; offset < unresolved.size(); offset += 256) {
+                        var batch = unresolved.subList(offset, Math.min(unresolved.size(), offset + 256));
+                        nativeReadKeys.add(batch.size());
+                        loaded.addAll(database.multiGetAsList(reads, batch));
+                    }
+                } finally {
+                    // Never reacquire the database monitor while holding this
+                    // lifetime lock: close owns that monitor while waiting here.
+                    try { database.releaseSnapshot(snapshot); }
+                    finally { warmReadLifetime.readLock().unlock(); }
+                }
+                synchronized (this) {
+                    for (int i = 0; i < loaded.size(); i++) {
+                        byte[] key = unresolved.get(i);
+                        if (!closed && key.length > 0
+                                && versions[Byte.toUnsignedInt(key[0])] == namespaceVersions[Byte.toUnsignedInt(key[0])]) {
+                            metadataCache.remember(key, loaded.get(i));
+                        }
+                        result.set(positions.get(i), loaded.get(i));
+                    }
                 }
             }
             return result;
-        } catch (RocksDBException e) {
-            throw new IllegalStateException("Failed to batch-read RocksDB values", e);
+        } catch (RocksDBException failure) {
+            throw new IllegalStateException("Failed to batch-read RocksDB values", failure);
         } finally {
             long elapsed = System.nanoTime() - started;
             getCount.add(keys.size());
             getNanos.add(elapsed);
             long share = elapsed / keys.size();
             long remainder = elapsed % keys.size();
-            for (int i = 0; i < keys.size(); i++) {
-                byte[] key = keys.get(i);
+            for (byte[] key : keys) {
                 if (key.length == 0) continue;
                 int namespace = Byte.toUnsignedInt(key[0]);
                 namespaceGetCount[namespace].increment();

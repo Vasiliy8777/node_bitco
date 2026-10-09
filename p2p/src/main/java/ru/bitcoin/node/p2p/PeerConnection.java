@@ -58,6 +58,7 @@ public final class PeerConnection implements AutoCloseable {
     private final PeerWriteBudget.Account writeBudget;
 
     private volatile Socket socket;
+    private volatile InetSocketAddress remoteAddress;
     private InputStream input;
     private OutputStream output;
 
@@ -202,6 +203,7 @@ public final class PeerConnection implements AutoCloseable {
                             )
                     );
 
+            remoteAddress = (InetSocketAddress) newSocket.getRemoteSocketAddress();
             socket = newSocket;
             input = newInput;
             output = newOutput;
@@ -341,6 +343,7 @@ public final class PeerConnection implements AutoCloseable {
                             )
                     );
 
+            remoteAddress = (InetSocketAddress) acceptedSocket.getRemoteSocketAddress();
             socket =
                     acceptedSocket;
 
@@ -514,11 +517,9 @@ public final class PeerConnection implements AutoCloseable {
                 && !socket.isClosed();
     }
 
+    /** Last connected endpoint remains available to close observers. */
     public InetSocketAddress remoteAddress() {
-        ensureConnected();
-
-        return (InetSocketAddress)
-                socket.getRemoteSocketAddress();
+        return remoteAddress;
     }
 
     public InetSocketAddress localAddress() {

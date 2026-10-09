@@ -22,6 +22,7 @@ import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 /**
@@ -78,6 +79,7 @@ public final class NodeRelayService implements AutoCloseable {
             Thread.ofPlatform().daemon().name("bitcoin-tx-request-timer").factory());
     private final ThreadPoolExecutor worker = new ThreadPoolExecutor(1, 1, 0, TimeUnit.SECONDS,
             new ArrayBlockingQueue<>(128), Thread.ofPlatform().daemon().name("bitcoin-relay").factory());
+    private final AtomicBoolean requestTickQueued = new AtomicBoolean();
     private final TransactionRequestScheduler transactionRequests = new TransactionRequestScheduler();
     private final FeeFilterRounder feeFilterRounder =
             new FeeFilterRounder(
@@ -130,18 +132,22 @@ public final class NodeRelayService implements AutoCloseable {
     }
 
     private void enqueueRequestTick() {
-        if (closed) return;
+        if (closed || !requestTickQueued.compareAndSet(false, true)) return;
         try {
             worker.execute(() -> {
-                if (!closed) {
-                    dispatchTransactionRequests();
-                    flushTransactionInventory();
-                    maybeSendFeeFilters();
-                    expireCompactBlocks();
-                }
+                try {
+                    if (!closed) {
+                        if (!validation.downloadInitialBlockDownload()) {
+                            dispatchTransactionRequests();
+                            flushTransactionInventory();
+                            maybeSendFeeFilters();
+                        }
+                        expireCompactBlocks();
+                    }
+                } finally { requestTickQueued.set(false); }
             });
         } catch (RejectedExecutionException ignored) {
-            // Service is closing or inbound work is temporarily saturated.
+            requestTickQueued.set(false);
         }
     }
 
@@ -170,6 +176,10 @@ public final class NodeRelayService implements AutoCloseable {
     }
 
     private void enqueue(Peer peer, BitcoinMessage message) {
+        // Ignore transaction traffic before allocating relay tasks during IBD.
+        // Block inventory has its independent header/download listeners.
+        if (validation.downloadInitialBlockDownload()
+                && ("inv".equals(message.command()) || "tx".equals(message.command()))) return;
         if ("block".equals(message.command())) {
             synchronized (compactFallbacks) {
                 if (!compactFallbacks.containsKey(peer)) return;
@@ -184,7 +194,7 @@ public final class NodeRelayService implements AutoCloseable {
         if (peerTotal > MAX_QUEUED_INBOUND_BYTES_PER_PEER || globalTotal > MAX_QUEUED_INBOUND_BYTES) {
             peerQueued.addAndGet(-bytes);
             queuedBytes.addAndGet(-bytes);
-            peer.disconnectForProtocolViolation("Inbound relay queue budget exhausted", null);
+            closeForLocalOverload(peer, "Inbound relay queue budget exhausted", null);
             return;
         }
         try {
@@ -203,8 +213,15 @@ public final class NodeRelayService implements AutoCloseable {
             });
         } catch (RejectedExecutionException exception) {
             releaseQueuedBytes(peer, peerQueued, bytes);
-            if (!closed) peer.disconnectForProtocolViolation("Inbound relay work queue saturated", exception);
+            if (!closed) closeForLocalOverload(peer, "Inbound relay work queue saturated", exception);
         }
+    }
+
+    private void closeForLocalOverload(Peer peer, String message, Throwable failure) {
+        try {
+            peer.close(new PeerCloseException(PeerCloseReason.LOCAL_RESOURCE_LIMIT,
+                    "NodeRelayService.enqueue", message, failure));
+        } catch (IOException closeFailure) { log.debug("Unable to close overloaded peer", closeFailure); }
     }
 
     private void releaseQueuedBytes(Peer peer, AtomicLong peerQueued, long bytes) {
@@ -218,7 +235,7 @@ public final class NodeRelayService implements AutoCloseable {
         PeerConnectionRole role = peers.roleOf(peer);
         switch (message.command()) {
             case "inv" -> {
-                if (role.relaysTransactions()) {
+                if (role.relaysTransactions() && !validation.downloadInitialBlockDownload()) {
                     InvMessage inventory = BitcoinMessages.decodeInv(message);
                     TxRelayState relayState = txRelayStates.get(peer);
                     if (relayState != null) {
@@ -235,7 +252,8 @@ public final class NodeRelayService implements AutoCloseable {
                 }
             }
             case "tx" -> {
-                if (role.relaysTransactions()) receiveTransaction(peer, TransactionParser.parse(message.payload()));
+                if (role.relaysTransactions() && !validation.downloadInitialBlockDownload())
+                    receiveTransaction(peer, TransactionParser.parse(message.payload()));
             }
             case "getdata" -> queueGetData(peer, BitcoinMessages.decodeGetData(message));
             case "headers" -> {
@@ -707,7 +725,8 @@ public final class NodeRelayService implements AutoCloseable {
 
         Map<Hash256, Transaction> byTxId = new HashMap<>();
         Map<Hash256, Transaction> byWtxId = new HashMap<>();
-        boolean needsTransactions = role.relaysTransactions() && request.inventory().stream().anyMatch(vector ->
+        boolean needsTransactions = !validation.downloadInitialBlockDownload()
+                && role.relaysTransactions() && request.inventory().stream().anyMatch(vector ->
                 vector.type() == InventoryVector.MSG_TX || vector.type() == InventoryVector.MSG_WITNESS_TX
                         || vector.type() == MSG_WTX);
         if (needsTransactions) {

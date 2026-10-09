@@ -20,6 +20,41 @@ import static org.junit.jupiter.api.Assertions.*;
 class StratumIntegrationTest {
     @TempDir Path directory;
 
+    @Test
+    @org.junit.jupiter.api.condition.EnabledIfSystemProperty(named="bitcoin.pre-mainnet.test",matches="true")
+    void measuresWireNotificationLatencyAcrossRepeatedTemplateChanges() throws Exception {
+        var parameters = NetworkParametersRegistry.regtest();
+        var revision = new java.util.concurrent.atomic.AtomicLong();
+        try (var db = new RocksDbDatabase(directory);
+             var validation = new NodeValidationService(db, parameters, () -> 1_800_000_000L, new Mempool())) {
+            var snapshot = validation.miningSnapshot(new byte[]{0x51},new byte[16],3_996_000,new FeeRate(0));
+            var backend = new ru.bitcoin.node.stratum.job.MiningBackend() {
+                public Optional<ru.bitcoin.node.stratum.job.MiningWork> work() {
+                    return Optional.of(new ru.bitcoin.node.stratum.job.MiningWork(snapshot.block(),snapshot.medianTimePast()+1,revision.get(),true));
+                }
+                public boolean isCurrent(ru.bitcoin.node.common.types.Hash256 parent) { return true; }
+                public boolean submit(ru.bitcoin.node.protocol.block.Block block) { throw new AssertionError("Observer never mines"); }
+                public long currentTimeSeconds() {return 1_800_000_000L;}
+            };
+            try (var server = new StratumServer(new InetSocketAddress("127.0.0.1",0),backend,"miner","secret",BigDecimal.ONE,4);
+                 var client = new StratumWireMiner(server.port())) {
+                client.subscribe(); client.call("mining.authorize",List.of("miner.test","secret"));
+                var last=client.job(); var latencies=new ArrayList<Double>();
+                for(int i=0;i<60;i++) {
+                    Thread.sleep(20+(i*37)%400);
+                    long began=System.nanoTime(); revision.incrementAndGet();
+                    var next=client.job(); latencies.add((System.nanoTime()-began)/1e6);
+                    assertNotEquals(last.getFirst(),next.getFirst()); last=next;
+                }
+                String metrics="templateChanges=60 "+BitcoinCorePreMainnetTest.percentiles(latencies);
+                Path root=Path.of(System.getProperty("maven.multiModuleProjectDirectory",".."));
+                java.nio.file.Files.createDirectories(root.resolve("target/pre-mainnet-20261008"));
+                java.nio.file.Files.writeString(root.resolve("target/pre-mainnet-20261008/stratum-notify-latency.txt"),metrics);
+                System.out.println("STRATUM_NOTIFY_LATENCY "+metrics);
+            }
+        }
+    }
+
     @Test void blockedBlockSubmissionDoesNotStopOtherMinersReceivingWork() throws Exception {
         var entered = new java.util.concurrent.CountDownLatch(1);
         var release = new java.util.concurrent.CountDownLatch(1);

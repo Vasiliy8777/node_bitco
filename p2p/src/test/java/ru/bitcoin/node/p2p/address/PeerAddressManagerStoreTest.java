@@ -42,6 +42,35 @@ class PeerAddressManagerStoreTest {
     }
 
     @Test
+    void roundTripAcceptsMoreThanOneHundredThousandKnownAddresses() throws Exception {
+        var entries = new java.util.ArrayList<PeerAddressManager.EntrySnapshot>();
+        Instant seen = Instant.parse("2026-01-01T00:00:00Z");
+        for (int i = 0; i < 100_001; i++) {
+            byte[] raw = {11, (byte) (i >>> 16), (byte) (i >>> 8), (byte) i};
+            PeerAddress address = new PeerAddress(InetAddress.getByAddress(raw), 8333, 1L);
+            entries.add(new PeerAddressManager.EntrySnapshot(address,
+                    PeerAddressSource.fromRaw(PeerAddressNetwork.IPV4, raw),
+                    seen, seen, null, null, 0, AddrManState.NEW, 0));
+        }
+        PeerAddressManager manager = PeerAddressManager.restore(
+                new PeerAddressManager.Snapshot(new byte[32], entries, java.util.List.of()));
+        PeerAddressManagerStore store = new PeerAddressManagerStore(directory, 1L);
+        store.save(manager);
+        assertEquals(100_001, store.load().orElseThrow().size());
+    }
+
+    @Test
+    void rejectsEntryCountThatCannotFitInFile() throws Exception {
+        PeerAddressManagerStore store = new PeerAddressManagerStore(directory, 1L);
+        store.save(new PeerAddressManager());
+        try (var file = new java.io.RandomAccessFile(directory.resolve("peers.dat").toFile(), "rw")) {
+            file.seek(48);
+            file.writeInt(Integer.MAX_VALUE);
+        }
+        assertThrows(java.io.IOException.class, store::load);
+    }
+
+    @Test
     void rejectsSnapshotFromDifferentNetwork() throws Exception {
         PeerAddressManagerStore mainnet = new PeerAddressManagerStore(directory, 1L);
         mainnet.save(new PeerAddressManager());

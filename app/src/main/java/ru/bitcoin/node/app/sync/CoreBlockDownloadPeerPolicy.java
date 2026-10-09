@@ -23,6 +23,12 @@ public final class CoreBlockDownloadPeerPolicy implements BlockDownloadPeerPolic
     private final BooleanSupplier initialDownload;
     private final Supplier<BlockIndex> snapshotBase;
     private final Map<Peer, State> states = new IdentityHashMap<>();
+    private final Object refreshLock = new Object();
+    private final Map<ForkKey, BlockIndex> forks = new LinkedHashMap<>(256, 0.75f, true) {
+        @Override protected boolean removeEldestEntry(Map.Entry<ForkKey, BlockIndex> eldest) {
+            return size() > 2048;
+        }
+    };
     private Hash256 locatorTip;
     private List<Hash256> cachedLocator;
     // Core uses shared in-memory CBlockIndex ancestry. Cache only immutable hash
@@ -48,14 +54,26 @@ public final class CoreBlockDownloadPeerPolicy implements BlockDownloadPeerPolic
     }
 
     @Override
-    public synchronized void refresh(List<Peer> peers) {
-        states.keySet().removeIf(peer -> !peers.contains(peer) || !peer.isReady());
+    public void refresh(List<Peer> peers) {
+        synchronized (refreshLock) {
+            refreshInternal(peers);
+        }
+    }
+
+    private void refreshInternal(List<Peer> peers) {
+        Map<Peer, State> updated = new IdentityHashMap<>();
+        synchronized (this) {
+            for (Peer peer : peers) {
+                if (peer.isReady()) updated.put(peer, new State(states.get(peer)));
+            }
+        }
         BlockIndex active = activeTip.get();
-        BlockIndex headerTip = headers.bestHeaderTip();
+        BlockIndex headerTip = headers.publishedBestHeaderTip();
         long now = System.nanoTime();
         for (Peer peer : peers) {
             if (!peer.isReady()) continue;
-            State state = states.computeIfAbsent(peer, ignored -> new State());
+            State state = updated.get(peer);
+            if (state == null) continue;
             Hash256 announcement = peer.lastBlockAnnouncement();
             if (announcement != null && !announcement.equals(state.resolvedAnnouncement)) {
                 BlockIndex announced = lookup.find(announcement);
@@ -67,8 +85,13 @@ public final class CoreBlockDownloadPeerPolicy implements BlockDownloadPeerPolic
             }
             if (state.bestKnown != null && (!active.hash().equals(state.activeAtUpdate)
                     || state.bestAtUpdate != state.bestKnown)) {
-                BlockIndex fork = contains(state.bestKnown, active) ? active
-                        : CommonAncestorFinder.find(state.bestKnown, active, lookup);
+                ForkKey key = new ForkKey(state.bestKnown.hash(), active.hash());
+                BlockIndex fork = forks.get(key);
+                if (fork == null) {
+                    fork = contains(state.bestKnown, active) ? active
+                            : CommonAncestorFinder.find(state.bestKnown, active, lookup);
+                    forks.put(key, fork);
+                }
                 if (state.lastCommon == null || fork.chainWork().compareTo(state.lastCommon.chainWork()) > 0
                         || !contains(state.bestKnown, state.lastCommon)) state.lastCommon = fork;
                 state.activeAtUpdate = active.hash();
@@ -87,6 +110,12 @@ public final class CoreBlockDownloadPeerPolicy implements BlockDownloadPeerPolic
                     // Transport owns disconnection and retry; this does not make the peer eligible.
                 }
             }
+        }
+        // Publish a complete snapshot. Persistent ancestry reads above must not
+        // hold the monitor used by download eligibility decisions.
+        synchronized (this) {
+            states.clear();
+            states.putAll(updated);
         }
     }
 
@@ -133,7 +162,8 @@ public final class CoreBlockDownloadPeerPolicy implements BlockDownloadPeerPolic
     private boolean contains(BlockIndex tip, BlockIndex block) {
         if (block.height() > tip.height()) return false;
         AncestorKey key = new AncestorKey(tip.hash(), block.height());
-        Hash256 cached = ancestors.get(key);
+        Hash256 cached;
+        synchronized (ancestors) { cached = ancestors.get(key); }
         if (cached != null) return cached.equals(block.hash());
         BlockIndex ancestor;
         if (lookup instanceof BlockIndexAncestorLookup accelerated)
@@ -143,11 +173,12 @@ public final class CoreBlockDownloadPeerPolicy implements BlockDownloadPeerPolic
             while (ancestor.height() > block.height())
                 ancestor = Objects.requireNonNull(lookup.find(ancestor.previousBlockHash()));
         }
-        ancestors.put(key, ancestor.hash());
+        synchronized (ancestors) { ancestors.put(key, ancestor.hash()); }
         return ancestor.hash().equals(block.hash());
     }
 
     private record AncestorKey(Hash256 tip, long height) { }
+    private record ForkKey(Hash256 best, Hash256 active) { }
 
     // All peers receive the same immutable locator for this header tip. Rebuild
     // only when its hash changes, including a same-height header reorganization.
@@ -166,5 +197,15 @@ public final class CoreBlockDownloadPeerPolicy implements BlockDownloadPeerPolic
         BlockIndex bestKnown, lastCommon, bestAtUpdate;
         Hash256 resolvedAnnouncement, activeAtUpdate;
         long nextHeadersRequest;
+
+        State(State previous) {
+            if (previous == null) return;
+            bestKnown = previous.bestKnown;
+            lastCommon = previous.lastCommon;
+            bestAtUpdate = previous.bestAtUpdate;
+            resolvedAnnouncement = previous.resolvedAnnouncement;
+            activeAtUpdate = previous.activeAtUpdate;
+            nextHeadersRequest = previous.nextHeadersRequest;
+        }
     }
 }

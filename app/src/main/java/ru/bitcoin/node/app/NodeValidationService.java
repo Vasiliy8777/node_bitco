@@ -477,6 +477,7 @@ public final class NodeValidationService implements AutoCloseable {
         // first historical child does not walk all parents back to genesis.
         failureResolver.seedKnownValid(chain.activeTip());
         initialBlockDownload = new InitialBlockDownloadState(parameters, time::currentTimeSeconds);
+        initialBlockDownload.update(chain.activeTip());
         var storage = new RocksDbChainTransitionStorage(database, utxos, undos, indexes, tips);
         reorganizationExecutor = new ChainReorganizationExecutor(
                 blocks,
@@ -580,7 +581,7 @@ public final class NodeValidationService implements AutoCloseable {
             // one MultiGet before ConnectBlock starts. Outputs created by an earlier block in
             // this same batch replace any cached absence at that block's successful commit.
             // This turns per-block random RocksDB reads into a first-touch batch prefetch.
-            prefetchInitialSyncInputs(batch);
+            if (initialSyncPrefetchEnabled) prefetchInitialSyncInputs(batch);
 
             long processorStarted = System.nanoTime();
             List<BlockProcessingResult> results = new ArrayList<>(batch.size());
@@ -622,7 +623,7 @@ public final class NodeValidationService implements AutoCloseable {
     }
 
     private void prefetchInitialSyncInputs(List<Block> batch) {
-        var inputs = initialSyncExternalInputs(batch);
+        var inputs = initialSyncExternalInputs(batch, 8192);
         if (!inputs.isEmpty()) utxos.findAll(inputs);
     }
 
@@ -1457,6 +1458,8 @@ public final class NodeValidationService implements AutoCloseable {
         revision++;
         chain.notifyAll();
     }
+
+    public boolean downloadPruningEnabled() { return blockPruner.enabled(); }
 
     public boolean downloadInitialBlockDownload() {
         return initialBlockDownload.isInitialBlockDownload();

@@ -43,6 +43,44 @@ public final class CommonAncestorFinder {
             b = ancestorAtHeight(b, a.height(), lookup);
         }
 
+        if (a.hash().equals(b.hash())) return a;
+        if (lookup instanceof BlockIndexAncestorLookup accelerated) {
+            // Branch membership is monotonic with height: below the fork both
+            // ancestors match, above it they differ. Never walk a deep fork's
+            // parents one by one through persistent storage.
+            long low;
+            long high = a.height();
+            long step = 1;
+            BlockIndex common;
+            // Bracket the fork first so ordinary shallow reorganizations remain
+            // cheap even when the chain tip is hundreds of thousands high.
+            while (true) {
+                long target = high - Math.min(high, step);
+                BlockIndex left = accelerated.ancestor(a, target);
+                BlockIndex right = accelerated.ancestor(b, target);
+                if (left.hash().equals(right.hash())) {
+                    low = target;
+                    common = left;
+                    break;
+                }
+                if (target == 0) throw new IllegalStateException("Common ancestor not found");
+                high = target;
+                step = step > Long.MAX_VALUE / 2 ? high : Math.min(high, step * 2);
+            }
+            while (high - low > 1) {
+                long middle = low + (high - low) / 2;
+                BlockIndex left = accelerated.ancestor(a, middle);
+                BlockIndex right = accelerated.ancestor(b, middle);
+                if (left.hash().equals(right.hash())) {
+                    low = middle;
+                    common = left;
+                } else {
+                    high = middle;
+                }
+            }
+            return common;
+        }
+
         /*
          * Теперь обе вершины находятся
          * на одинаковой высоте.

@@ -17,7 +17,7 @@ public final class SchedulerBlockDownloadSession
             System.getLogger(SchedulerBlockDownloadSession.class.getName());
 
     private static final int FRONTIER_DIAGNOSTIC_STATE_LIMIT = 0;
-    private BlockDownloadPeerPolicy peerPolicy = BlockDownloadPeerPolicy.SERVICES_ONLY;
+    private volatile BlockDownloadPeerPolicy peerPolicy = BlockDownloadPeerPolicy.SERVICES_ONLY;
 
     synchronized void peerPolicy(BlockDownloadPeerPolicy policy) {
         peerPolicy = Objects.requireNonNull(policy);
@@ -129,30 +129,29 @@ public final class SchedulerBlockDownloadSession
     }
 
     @Override
-    public synchronized void submit(
+    public void submit(
             List<Hash256> blockHashes
     ) throws IOException {
         Objects.requireNonNull(blockHashes, "blockHashes");
-        submitInternal(
-                blockHashes.stream()
-                        .map(hash -> new PendingRequest(hash, null))
-                        .toList()
-        );
+        refreshPeerPolicy();
+        synchronized (this) {
+            submitInternal(blockHashes.stream()
+                    .map(hash -> new PendingRequest(hash, null))
+                    .toList());
+        }
     }
 
     @Override
-    public synchronized void submitRequests(
+    public void submitRequests(
             List<BlockDownloadRequest> requests
     ) throws IOException {
         Objects.requireNonNull(requests, "requests");
-        submitInternal(
-                requests.stream()
-                        .map(request -> new PendingRequest(
-                                request.blockHash(),
-                                Long.valueOf(request.height())
-                        ))
-                        .toList()
-        );
+        refreshPeerPolicy();
+        synchronized (this) {
+            submitInternal(requests.stream()
+                    .map(request -> new PendingRequest(request.blockHash(), request.height()))
+                    .toList());
+        }
     }
 
     private void submitInternal(
@@ -249,6 +248,8 @@ public final class SchedulerBlockDownloadSession
                     "timeout must not be negative"
             );
         }
+
+        refreshPeerPolicy();
 
         CompletableFuture<DownloadResult> future;
 
@@ -867,7 +868,6 @@ public final class SchedulerBlockDownloadSession
             List<Peer> peers
     ) {
 
-        peerPolicy.refresh(peers);
         while (activeDownloads.size() < BlockDownloadScheduler.MAX_TOTAL_BLOCKS_IN_FLIGHT) {
             Assignment assignment = nextAssignment(peers);
             if (assignment == null) return;
@@ -1468,7 +1468,12 @@ public final class SchedulerBlockDownloadSession
     }
 
     @Override
-    public synchronized boolean retryBlock(
+    public boolean retryBlock(Hash256 blockHash, Peer expectedPeer, IOException failure) throws IOException {
+        refreshPeerPolicy();
+        return retryBlockInternal(blockHash, expectedPeer, failure);
+    }
+
+    private synchronized boolean retryBlockInternal(
             Hash256 blockHash,
             Peer expectedPeer,
             IOException failure
@@ -1559,9 +1564,13 @@ public final class SchedulerBlockDownloadSession
     }
 
     @Override
-    public synchronized boolean hasIdlePeerFor(BlockDownloadRequest request, Peer blockingPeer) {
+    public boolean hasIdlePeerFor(BlockDownloadRequest request, Peer blockingPeer) {
+        refreshPeerPolicy();
+        return hasIdlePeerForInternal(request, blockingPeer);
+    }
+
+    private synchronized boolean hasIdlePeerForInternal(BlockDownloadRequest request, Peer blockingPeer) {
         var peers = peerManager.readyPeers();
-        peerPolicy.refresh(peers);
         long now = System.nanoTime();
         for (Peer peer : peers) {
             if (peer == blockingPeer || !peer.isReady() || inFlightTracker.count(peer) != 0) continue;
@@ -1573,10 +1582,15 @@ public final class SchedulerBlockDownloadSession
     }
 
     @Override
-    public synchronized Optional<Peer> findWindowStaller(BlockDownloadRequest beyondWindow,
+    public Optional<Peer> findWindowStaller(BlockDownloadRequest beyondWindow,
+            java.util.function.BiFunction<Peer, BlockDownloadPeerPolicy, Optional<Peer>> probe) {
+        refreshPeerPolicy();
+        return findWindowStallerInternal(beyondWindow, probe);
+    }
+
+    private synchronized Optional<Peer> findWindowStallerInternal(BlockDownloadRequest beyondWindow,
             java.util.function.BiFunction<Peer, BlockDownloadPeerPolicy, Optional<Peer>> probe) {
         var peers = peerManager.readyPeers();
-        peerPolicy.refresh(peers);
         for (var peer : peers) {
             if (!peer.isReady() || inFlightTracker.count(peer) != 0
                     || !peerPolicy.canProbeWindowEnd(peer, beyondWindow.blockHash(), beyondWindow.height())) continue;
@@ -1611,7 +1625,7 @@ public final class SchedulerBlockDownloadSession
     }
 
     @Override
-    public synchronized Optional<Peer> inFlightPeer(
+    public Optional<Peer> inFlightPeer(
             Hash256 blockHash
     ) {
 
@@ -1625,5 +1639,10 @@ public final class SchedulerBlockDownloadSession
                         blockHash
                 )
         );
+    }
+
+    private void refreshPeerPolicy() {
+        // Resolving persistent ancestry must not hold the session monitor.
+        peerPolicy.refresh(peerManager.readyPeers());
     }
 }

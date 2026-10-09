@@ -29,6 +29,46 @@ class CoreBlockDownloadPeerPolicyTest {
     CoreBlockDownloadPeerPolicyTest() { indexes.put(genesis.hash(), genesis); }
 
     @Test
+    void slowRefreshPublishesAtomicallyWithoutBlockingExistingEligibility() throws Exception {
+        var tip = extend(genesis, 32, 1);
+        var fork = extend(genesis, 33, 1000);
+        var requested = ancestor(tip, 16);
+        var entered = new java.util.concurrent.CountDownLatch(1);
+        var release = new java.util.concurrent.CountDownLatch(1);
+        BlockIndexLookup delayed = hash -> {
+            if (hash.equals(fork.hash())) {
+                entered.countDown();
+                try {
+                    if (!release.await(5, java.util.concurrent.TimeUnit.SECONDS))
+                        throw new AssertionError("Refresh not released");
+                } catch (InterruptedException failure) {
+                    Thread.currentThread().interrupt();
+                    throw new AssertionError(failure);
+                }
+            }
+            return indexes.get(hash);
+        };
+        var concurrent = new CoreBlockDownloadPeerPolicy(delayed, active::get, headers,
+                new BlockLocatorBuilder(delayed), NetworkParametersRegistry.regtest(),
+                failed::contains, ibd::get, snapshot::get);
+        var peer = peer(VersionMessage.DEFAULT_SERVICES);
+        when(peer.lastBlockAnnouncement()).thenReturn(tip.hash());
+        concurrent.refresh(List.of(peer));
+        assertTrue(concurrent.canDownload(peer, requested.hash(), requested.height()));
+        when(peer.lastBlockAnnouncement()).thenReturn(fork.hash());
+        var refreshing = java.util.concurrent.CompletableFuture.runAsync(() -> concurrent.refresh(List.of(peer)));
+        try {
+            assertTrue(entered.await(2, java.util.concurrent.TimeUnit.SECONDS));
+            var decision = java.util.concurrent.CompletableFuture.supplyAsync(
+                    () -> concurrent.canDownload(peer, requested.hash(), requested.height()));
+            assertTrue(decision.get(2, java.util.concurrent.TimeUnit.SECONDS));
+        } finally { release.countDown(); }
+        refreshing.get(2, java.util.concurrent.TimeUnit.SECONDS);
+        assertFalse(concurrent.canDownload(peer, requested.hash(), requested.height()));
+        assertTrue(concurrent.canDownload(peer, fork.hash(), fork.height()));
+    }
+
+    @Test
     void buildsAvailabilityLocatorOnceForPeersAndRebuildsForNewTip() throws Exception {
         var tip = extend(genesis, 64, 1);
         headers.consider(tip);

@@ -14,6 +14,25 @@ public final class CompactSize {
     private CompactSize() {
     }
 
+    /** Full uint64 bit pattern, for service flags; collection lengths use encode/decode. */
+    public static byte[] encodeUnsigned(long bits) {
+        if (bits >= 0) return encode(bits);
+        byte[] result = new byte[9];
+        result[0] = (byte)0xff;
+        System.arraycopy(LittleEndian.int64(bits), 0, result, 1, 8);
+        return result;
+    }
+
+    public static Decoded decodeUnsigned(byte[] bytes, int offset) {
+        if (bytes == null || offset < 0 || offset >= bytes.length || (bytes[offset] & 0xff) != 0xff)
+            return decode(bytes, offset);
+        requireBytes(bytes, offset, 9);
+        long bits = LittleEndian.readInt64(bytes, offset + 1);
+        if (Long.compareUnsigned(bits, 0xffff_ffffL) <= 0)
+            throw new IllegalArgumentException("Non-canonical CompactSize");
+        return new Decoded(bits, 9);
+    }
+
     public static byte[] encode(long value) {
         if (value < 0) {
             throw new IllegalArgumentException("CompactSize cannot be negative");
@@ -105,11 +124,8 @@ public final class CompactSize {
             return new Decoded(value, 5);
         }
 
-        /*
-         * Полный uint64 Bitcoin здесь пока намеренно не представляем
-         * обычным signed long: значения > Long.MAX_VALUE потребуют
-         * отдельного unsigned-представления.
-         */
+        // Collection lengths and counts must fit a nonnegative signed long.
+        // Bit fields spanning uint64 use decodeUnsigned instead.
         requireBytes(bytes, offset, 9);
 
         long value = LittleEndian.readInt64(

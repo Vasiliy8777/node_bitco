@@ -217,12 +217,16 @@ def mine(gpu, args):
                         connection.pump(1)
                         break
                     connection.send('mining.submit', [args.worker, job[0], extra, job[7], f'{solution:08x}'], value <= network_target)
-                    if args.max_blocks and value <= network_target:
+                    if value <= network_target:
                         deadline = time.monotonic() + 15
                         while connection.pending and time.monotonic() < deadline:
                             connection.pump(0.1)
-                            if connection.blocks >= args.max_blocks:
+                            if args.max_blocks and connection.blocks >= args.max_blocks:
                                 return
+                        # An accepted block invalidates its parent template. Wait for new work
+                        # rather than submitting further solutions for the previous height.
+                        while generation == connection.generation and time.monotonic() < deadline:
+                            connection.pump(0.1)
                         break
                 nonce += count
                 if nonce == 1 << 32:

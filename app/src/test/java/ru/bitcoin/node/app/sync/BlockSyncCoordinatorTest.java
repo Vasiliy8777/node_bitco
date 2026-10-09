@@ -127,7 +127,7 @@ class BlockSyncCoordinatorTest {
         try (var connection = new PeerConnection(PARAMETERS, 5_000, 5_000);
              var peer = new Peer(connection, VersionMessage.DEFAULT_SERVICES, 0, true)) {
             peer.close();
-            assertThrows(IllegalStateException.class, peer::remoteAddress);
+            assertNull(peer.remoteAddress(), "An endpoint is absent only if this peer never connected");
             assertEquals("<disconnected>", BlockSyncCoordinator.diagnosticPeerAddress(peer));
         }
     }

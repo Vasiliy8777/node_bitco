@@ -851,7 +851,8 @@ public final class BlockSyncCoordinator {
 
     static String diagnosticPeerAddress(Peer peer) {
         try {
-            return String.valueOf(peer.remoteAddress());
+            var address = peer.remoteAddress();
+            return address == null ? "<disconnected>" : address.toString();
         } catch (RuntimeException disconnected) {
             return "<disconnected>";
         }

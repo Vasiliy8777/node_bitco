@@ -23,7 +23,7 @@ public final class RocksDbUtxoStore
     private static final byte DEFAULT_UTXO_PREFIX = 0x03;
 
     /** Diagnostic full count; requires a stable chain snapshot. */
-    public long count() { return database.countPrefix(prefix); }
+    public long count() { database.forceFlushChainstate(); return database.countPrefix(prefix); }
 
     private static final int TXID_SIZE = 32;
     private static final int VOUT_SIZE = 4;
@@ -389,6 +389,9 @@ public final class RocksDbUtxoStore
     }
 
     public Statistics statistics(HashType hashType) {
+        // Native iterators cannot see the logical write-back overlay. Flush the
+        // stable chain snapshot before reporting counts/hashes for its active tip.
+        database.forceFlushChainstate();
         final long[] transactions = {0L};
         final long[] txouts = {0L};
         final long[] totalAmount = {0L};

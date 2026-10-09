@@ -33,6 +33,46 @@ class MiningRpcTest {
     private static final JsonMapper JSON = JsonMapper.builder().build();
 
     @Test
+    void blockchainInfoRemainsAvailableWhileBlockValidationHoldsChainLock() throws Exception {
+        var parameters = NetworkParametersRegistry.regtest();
+        try (var db = new RocksDbDatabase(directory); var peers = new PeerManager()) {
+            var validation = new NodeValidationService(db, parameters, () -> 1_800_000_000L, new Mempool());
+            var sync = new NodeSyncInfrastructure(db, parameters, () -> 1_800_000_000L);
+            var field = NodeValidationService.class.getDeclaredField("chain");
+            field.setAccessible(true);
+            Object chain = field.get(validation);
+            var locked = new CountDownLatch(1);
+            var release = new CountDownLatch(1);
+            try (var relay = new NodeRelayService(validation, sync, peers);
+                 var workers = Executors.newFixedThreadPool(2)) {
+                var mining = new MiningController(validation, relay, parameters, () -> false,
+                        new byte[]{0x51}, 4_000_000, new FeeRate(0));
+                try (var rpc = new NodeRpcServer(new InetSocketAddress("127.0.0.1", 0), "test", "test-password",
+                        mining, validation, relay, sync, () -> false, peers); var client = HttpClient.newHttpClient()) {
+                    var holder = workers.submit(() -> {
+                        synchronized (chain) {
+                            locked.countDown();
+                            try { release.await(); }
+                            catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+                        }
+                    });
+                    try {
+                        assertTrue(locked.await(2, TimeUnit.SECONDS));
+                        URI uri = URI.create("http://127.0.0.1:" + rpc.port());
+                        var response = workers.submit(() -> call(client, uri, "getblockchaininfo", List.of()));
+                        var result = response.get(2, TimeUnit.SECONDS);
+                        assertNull(result.get("error"));
+                        assertEquals(0, ((Number) ((Map<?, ?>) result.get("result")).get("blocks")).intValue());
+                    } finally {
+                        release.countDown();
+                        holder.get(2, TimeUnit.SECONDS);
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
     void authenticatesGatesMiningAndAcceptsBlockAssembledFromRpcTemplate() throws Exception {
         var parameters = NetworkParametersRegistry.regtest();
         try (var db = new RocksDbDatabase(directory); var peers = new PeerManager()) {

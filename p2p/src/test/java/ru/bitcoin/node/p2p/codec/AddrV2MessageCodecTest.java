@@ -14,6 +14,27 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class AddrV2MessageCodecTest {
 
+    @Test void acceptsFullUint64ServiceBitfieldButKeepsCountsBounded() {
+        // Canonical wire encoding: one IPv4 entry, time=0, services=0x8000000000000009.
+        byte[] wire = java.util.HexFormat.of().parseHex("0100000000ff0900000000000080010408080808208d");
+        var decoded = AddrV2MessageCodec.decode(wire);
+        var entry = decoded.addresses().getFirst();
+        assertEquals(Long.MIN_VALUE | 9L, entry.services());
+        assertArrayEquals(wire, AddrV2MessageCodec.encode(decoded));
+        var address = new ru.bitcoin.node.p2p.address.PeerAddress(
+                ru.bitcoin.node.p2p.address.PeerAddressNetwork.IPV4, entry.address(), entry.port(), entry.services());
+        assertEquals(entry.services(), address.services());
+        assertThrows(IllegalArgumentException.class, () -> AddrV2MessageCodec.decode(
+                java.util.HexFormat.of().parseHex("ff0000000000000080")));
+        assertThrows(IllegalArgumentException.class, () -> ru.bitcoin.node.common.encoding.CompactSize.decode(wire, 5));
+        for (long services : new long[]{Long.MAX_VALUE, Long.MIN_VALUE, -1L}) {
+            var message = new AddrV2Message(List.of(new AddrV2Entry(0, services, 1, new byte[]{8,8,8,8}, 8333)));
+            assertEquals(message.addresses(), AddrV2MessageCodec.decode(AddrV2MessageCodec.encode(message)).addresses());
+        }
+        assertThrows(IllegalArgumentException.class, () -> ru.bitcoin.node.common.encoding.CompactSize.decodeUnsigned(
+                java.util.HexFormat.of().parseHex("ff0900000000000000"), 0));
+    }
+
     @Test
     void roundTripsIpv4() {
 

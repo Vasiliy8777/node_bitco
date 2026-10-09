@@ -5,7 +5,7 @@ import java.util.function.Supplier;
 
 public final class HeaderChainState {
 
-    private BlockIndex bestHeaderTip;
+    private volatile BlockIndex bestHeaderTip;
     private final Supplier<BlockIndex> persistentBestHeaderSupplier;
 
     public HeaderChainState(BlockIndex bestHeaderTip) {
@@ -22,6 +22,11 @@ public final class HeaderChainState {
 
     public synchronized BlockIndex bestHeaderTip() {
         refreshFromPersistence();
+        return bestHeaderTip;
+    }
+
+    /** Last published validated header tip; network scheduling performs no disk read. */
+    public BlockIndex publishedBestHeaderTip() {
         return bestHeaderTip;
     }
 

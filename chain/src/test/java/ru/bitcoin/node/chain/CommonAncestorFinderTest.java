@@ -9,7 +9,7 @@ import ru.bitcoin.node.protocol.block.BlockHeader;
 import java.util.HashMap;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.*;
 
 class CommonAncestorFinderTest {
 
@@ -147,6 +147,43 @@ class CommonAncestorFinderTest {
                 ancestor.hash()
         );
     }
+
+    @Test
+    void deepPersistentForkUsesBoundedReadsAndFindsExactForkHeight() {
+        var main = new java.util.ArrayList<BlockIndex>();
+        main.add(BlockIndexFactory.createGenesis(genesisHeader()));
+        for (int height = 1; height <= 8192; height++) main.add(child(main.getLast(), height));
+        var fork = new java.util.ArrayList<>(main.subList(0, 18));
+        for (int height = 18; height <= 8193; height++) fork.add(child(fork.getLast(), height + 10000));
+        try (var database = new ru.bitcoin.node.storage.rocksdb.RocksDbDatabase(directory)) {
+            var store = new ru.bitcoin.node.storage.block.RocksDbBlockIndexStore(database);
+            var all = new java.util.ArrayList<>(main);
+            all.addAll(fork.subList(18, fork.size()));
+            new ru.bitcoin.node.chain.storage.KnownHeaderStorage(database, store,
+                    new ru.bitcoin.node.storage.chain.RocksDbChainStateStore(database))
+                    .saveBatch(all, main.getLast());
+            var lookup = new StoredBlockIndexLookup(store);
+            long before = database.ioStats().gets();
+            assertEquals(main.get(17).hash(), CommonAncestorFinder.find(main.getLast(), fork.getLast(), lookup).hash());
+            long reads = database.ioStats().gets() - before;
+            assertTrue(reads < 2000, "Deep fork must not read 16000 parents; actual reads=" + reads);
+            assertEquals(main.get(4096).hash(), CommonAncestorFinder.find(main.getLast(), main.get(4096), lookup).hash());
+            assertEquals(main.getLast().hash(), CommonAncestorFinder.find(main.getLast(), main.getLast(), lookup).hash());
+        }
+    }
+
+    @Test
+    void acceleratedSearchRejectsDifferentGenesis() {
+        var first = BlockIndexFactory.createGenesis(genesisHeader());
+        var second = BlockIndexFactory.createGenesis(child(first, 1).header());
+        BlockIndexAncestorLookup lookup = new BlockIndexAncestorLookup() {
+            public BlockIndex find(Hash256 hash) { throw new AssertionError("No parent reads expected"); }
+            public BlockIndex ancestor(BlockIndex index, long height) { return index; }
+        };
+        assertThrows(IllegalStateException.class, () -> CommonAncestorFinder.find(first, second, lookup));
+    }
+
+    @org.junit.jupiter.api.io.TempDir java.nio.file.Path directory;
 
     private static BlockIndex child(
             BlockIndex parent,

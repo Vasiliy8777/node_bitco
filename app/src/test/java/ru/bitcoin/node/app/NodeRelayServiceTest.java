@@ -30,6 +30,39 @@ class NodeRelayServiceTest {
     Path directory;
 
     @Test
+    void ibdTransactionFloodDoesNotOccupyRelayQueueOrWaitForMempool() throws Exception {
+        var validation = mock(NodeValidationService.class);
+        when(validation.downloadInitialBlockDownload()).thenReturn(true);
+        var sync = mock(NodeSyncInfrastructure.class);
+        var peer = mock(Peer.class);
+        when(peer.isReady()).thenReturn(true);
+        var incoming = new AtomicReference<PeerMessageListener>();
+        doAnswer(call -> { incoming.set(call.getArgument(0)); return null; })
+                .when(peer).addMessageListener(any());
+        var sent = new LinkedBlockingQueue<BitcoinMessage>();
+        doAnswer(call -> { sent.add(call.getArgument(0)); return null; }).when(peer).send(any());
+        try (var peers = new PeerManager()) {
+            peers.add(peer);
+            try (var relay = new NodeRelayService(validation, sync, peers)) {
+                var inv = BitcoinMessages.inv(new InvMessage(List.of(new InventoryVector(InventoryVector.MSG_TX,
+                        new Hash256(new byte[32])))));
+                for (int i = 0; i < 2048; i++) {
+                    incoming.get().onMessage(peer, inv);
+                    incoming.get().onMessage(peer, new BitcoinMessage("tx", new byte[0]));
+                }
+                incoming.get().onMessage(peer, BitcoinMessages.getHeaders(new GetHeadersMessage(
+                        VersionMessage.CURRENT_PROTOCOL_VERSION, List.of(new Hash256(new byte[32])), new Hash256(new byte[32]))));
+                assertEquals("headers", take(sent).command(), "Header handling remains available during IBD");
+                verify(validation, never()).mempoolEntries();
+                verify(validation, never()).feeFilterRate();
+                verify(validation, never()).acknowledgeMempoolBroadcast(any());
+                verify(peer, never()).disconnectForProtocolViolation(any(), any());
+                verify(peer, never()).close(any(java.io.IOException.class));
+            }
+        }
+    }
+
+    @Test
     void availabilityHeadersAreValidatedDuringIbdAndMakeThePeerDownloadEligible() throws Exception {
         var parameters = NetworkParametersRegistry.regtest();
         try (var database = new RocksDbDatabase(directory.resolve("availability-headers"));
@@ -193,7 +226,7 @@ class NodeRelayServiceTest {
         var parameters = NetworkParametersRegistry.regtest();
         byte[] script = HexFormat.of().parseHex("a914" + HexFormat.of().formatHex(Hash160.hash(new byte[]{0x51})) + "87");
         try (var db = new RocksDbDatabase(directory); var peers = new PeerManager()) {
-            var validation = new NodeValidationService(db, parameters, () -> 1_800_000_000L, new Mempool());
+            var validation = postIbdValidation(db, parameters);
             var sync = new NodeSyncInfrastructure(db, parameters, () -> 1_800_000_000L);
             var fund = new OutPoint(Hash256.fromDisplayHex("11".repeat(32)), new UInt32(0));
             new RocksDbUtxoStore(db).save(fund, new StoredUtxo(100_000, script, 0, false));
@@ -286,7 +319,7 @@ class NodeRelayServiceTest {
         var parameters = NetworkParametersRegistry.regtest();
         byte[] script = HexFormat.of().parseHex("a914" + HexFormat.of().formatHex(Hash160.hash(new byte[]{0x51})) + "87");
         try (var db = new RocksDbDatabase(directory.resolve("package-relay")); var peers = new PeerManager()) {
-            var validation = new NodeValidationService(db, parameters, () -> 1_800_000_000L, new Mempool());
+            var validation = postIbdValidation(db, parameters);
             var sync = new NodeSyncInfrastructure(db, parameters, () -> 1_800_000_000L);
             var fund = new OutPoint(Hash256.fromDisplayHex("33".repeat(32)), new UInt32(0));
             new RocksDbUtxoStore(db).save(fund, new StoredUtxo(100_000, script, 0, false));
@@ -738,7 +771,7 @@ class NodeRelayServiceTest {
         var parameters = NetworkParametersRegistry.regtest();
         try (var db = new RocksDbDatabase(directory.resolve("tx-request-window"));
              var peers = new PeerManager()) {
-            var validation = new NodeValidationService(db, parameters, () -> 1_800_000_000L, new Mempool());
+            var validation = postIbdValidation(db, parameters);
             var sync = new NodeSyncInfrastructure(db, parameters, () -> 1_800_000_000L);
             var peer = mock(Peer.class);
             when(peer.isReady()).thenReturn(true);
@@ -787,7 +820,7 @@ class NodeRelayServiceTest {
         var parameters = NetworkParametersRegistry.regtest();
         try (var db = new RocksDbDatabase(directory.resolve("tx-request-failover"));
              var peers = new PeerManager()) {
-            var validation = new NodeValidationService(db, parameters, () -> 1_800_000_000L, new Mempool());
+            var validation = postIbdValidation(db, parameters);
             var sync = new NodeSyncInfrastructure(db, parameters, () -> 1_800_000_000L);
             var first = mock(Peer.class);
             var second = mock(Peer.class);
@@ -840,7 +873,7 @@ class NodeRelayServiceTest {
         byte[] script = HexFormat.of().parseHex("a914" + HexFormat.of().formatHex(Hash160.hash(new byte[]{0x51})) + "87");
         try (var db = new RocksDbDatabase(directory.resolve("local-parent-orphan"));
              var peers = new PeerManager()) {
-            var validation = new NodeValidationService(db, parameters, () -> 1_800_000_000L, new Mempool());
+            var validation = postIbdValidation(db, parameters);
             var sync = new NodeSyncInfrastructure(db, parameters, () -> 1_800_000_000L);
             var fund = new OutPoint(Hash256.fromDisplayHex("31".repeat(32)), new UInt32(0));
             new RocksDbUtxoStore(db).save(fund, new StoredUtxo(100_000, script, 0, false));
@@ -971,10 +1004,20 @@ class NodeRelayServiceTest {
             peers.add(peer);
             try (var relay = new NodeRelayService(validation, sync, peers)) {
                 incoming.get().onMessage(peer, new BitcoinMessage("tx", new byte[2_000_001]));
-                verify(peer, timeout(2_000)).disconnectForProtocolViolation(
-                        eq("Inbound relay queue budget exhausted"), isNull());
+                verify(peer, timeout(2_000)).close(argThat(failure -> failure instanceof PeerCloseException close
+                        && close.reason() == PeerCloseReason.LOCAL_RESOURCE_LIMIT));
+                verify(peer, never()).disconnectForProtocolViolation(any(), any());
             }
         }
+    }
+
+    private static NodeValidationService postIbdValidation(RocksDbDatabase database,
+            ru.bitcoin.node.protocol.network.NetworkParameters parameters) {
+        // These fixtures exercise live transaction relay after synchronization.
+        long now = ru.bitcoin.node.protocol.block.GenesisBlockFactory.create(parameters).header().timestamp().value();
+        var validation = new NodeValidationService(database, parameters, () -> now, new Mempool());
+        assertFalse(validation.isInitialBlockDownload());
+        return validation;
     }
 
     private static Transaction spend(OutPoint point, long value, byte[] script) {

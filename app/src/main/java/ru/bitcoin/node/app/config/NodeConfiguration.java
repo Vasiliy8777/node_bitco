@@ -312,7 +312,7 @@ public class NodeConfiguration {
                 bitcoinClient,
                 peerManager,
                 peerAddressManager,
-                validationService::isInitialBlockDownload
+                validationService::downloadInitialBlockDownload
         );
     }
 

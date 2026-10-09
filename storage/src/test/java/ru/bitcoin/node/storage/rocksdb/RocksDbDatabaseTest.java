@@ -36,6 +36,64 @@ class RocksDbDatabaseTest {
         } finally { db.close(); }
     }
 
+    @Test
+    void multiGetSnapshotKeepsNativeCachedAndWriteBackValuesCoherentDuringWrites() throws Exception {
+        try (var db = new RocksDbDatabase(temporaryDirectory.resolve("snapshot-multiget"))) {
+            var keys = new ArrayList<byte[]>();
+            for (int i = 0; i < 512; i++) keys.add(new byte[]{3, (byte) (i >> 8), (byte) i});
+            byte[] metadata = new byte[33]; metadata[0] = RocksDbNamespaces.BLOCK_AVAILABILITY;
+            keys.add(metadata);
+            try (var batch = new RocksDbWriteBatch()) {
+                for (var key : keys) batch.put(key, new byte[]{0});
+                db.write(batch);
+            }
+            db.get(metadata); // Include the metadata cache in the same snapshot.
+            var start = new java.util.concurrent.CountDownLatch(1);
+            var writer = java.util.concurrent.CompletableFuture.runAsync(() -> {
+                try {
+                    start.await();
+                    for (int i = 1; i <= 64; i++) {
+                        synchronized (db) {
+                            if (i == 32) db.enableChainstateWriteBack();
+                            try (var batch = new RocksDbWriteBatch()) {
+                                for (var key : keys) batch.put(key, new byte[]{(byte) i});
+                                db.write(batch);
+                            }
+                            if (i == 48) db.disableChainstateWriteBack(true);
+                        }
+                    }
+                } catch (InterruptedException failure) { throw new AssertionError(failure); }
+            });
+            start.countDown();
+            for (int i = 0; i < 128; i++) {
+                var values = db.getAll(keys);
+                for (var value : values) org.junit.jupiter.api.Assertions.assertArrayEquals(values.getFirst(), value);
+            }
+            writer.get(10, java.util.concurrent.TimeUnit.SECONDS);
+            org.junit.jupiter.api.Assertions.assertArrayEquals(new byte[]{64}, db.getAll(keys).getFirst());
+        }
+    }
+
+    @Test
+    void concurrentMultiGetAndCloseSafelyDisposeNativeSnapshots() throws Exception {
+        var db = new RocksDbDatabase(temporaryDirectory.resolve("snapshot-close"));
+        var keys = new ArrayList<byte[]>();
+        for (int i = 0; i < 4096; i++) keys.add(new byte[]{3, (byte) (i >> 8), (byte) i});
+        var started = new java.util.concurrent.CountDownLatch(1);
+        var reader = java.util.concurrent.CompletableFuture.runAsync(() -> {
+            started.countDown();
+            try { for (int i = 0; i < 100; i++) db.getAll(keys); }
+            catch (IllegalStateException closed) {
+                assertEquals("RocksDbDatabase is already closed", closed.getMessage());
+            }
+        });
+        try {
+            assertTrue(started.await(5, java.util.concurrent.TimeUnit.SECONDS));
+            db.close();
+            reader.get(5, java.util.concurrent.TimeUnit.SECONDS);
+        } finally { db.close(); }
+    }
+
     @TempDir
     Path temporaryDirectory;
 

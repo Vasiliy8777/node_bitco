@@ -217,6 +217,40 @@ class PeerManagerTest {
         }
     }
 
+    @Test
+    void protocolCloseRetainsEndpointAndRemovesPeerBeforeDiscouragement() throws Exception {
+        try (var server = new java.net.ServerSocket(0);
+             var client = new java.net.Socket("127.0.0.1", server.getLocalPort());
+             var connection = new PeerConnection(PARAMETERS);
+             var manager = new PeerManager()) {
+            connection.accept(server.accept());
+            var endpoint = connection.remoteAddress();
+            var peer = new Peer(connection, 0, 0, true);
+            manager.add(peer);
+            var snapshot = manager.managedPeers();
+            peer.disconnectForProtocolViolation("Invalid message", null);
+            assertTrue(manager.isEmpty());
+            assertEquals(endpoint, peer.remoteAddress());
+            assertEquals(PeerConnectionRole.FULL_RELAY, snapshot.getFirst().role());
+            assertTrue(manager.discouragementManager().isDiscouraged(endpoint.getAddress()));
+        }
+    }
+
+    @Test
+    void localOverloadClosesPeerWithoutDiscouragingItsAddress() throws Exception {
+        try (var server = new java.net.ServerSocket(0);
+             var client = new java.net.Socket("127.0.0.1", server.getLocalPort());
+             var connection = new PeerConnection(PARAMETERS);
+             var manager = new PeerManager()) {
+            connection.accept(server.accept());
+            var peer = new Peer(connection, 0, 0, true);
+            manager.add(peer);
+            peer.close(new PeerCloseException(PeerCloseReason.LOCAL_RESOURCE_LIMIT, "relay", "Local overload"));
+            assertTrue(manager.isEmpty());
+            assertFalse(manager.discouragementManager().isDiscouraged(peer.remoteAddress().getAddress()));
+        }
+    }
+
     private static Peer newPeer() {
 
         PeerConnection connection =

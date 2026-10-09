@@ -105,6 +105,12 @@ public final class BitcoinReader {
         return result;
     }
 
+    public long readCompactSizeUnsigned() {
+        CompactSize.Decoded decoded = CompactSize.decodeUnsigned(data, position);
+        position += decoded.bytesRead();
+        return decoded.value();
+    }
+
     public long readCompactSize() {
         CompactSize.Decoded decoded =
                 CompactSize.decode(

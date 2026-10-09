@@ -11,6 +11,18 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.*;
 
 class PeerAddressBip155Test {
+    @Test void preservesUnknownHighServiceBitThroughAddrManAndLegacyRelay() throws Exception {
+        long services=Long.MIN_VALUE | 9L;
+        var entry=new AddrV2Entry(1,services,1,new byte[]{8,8,8,8},8333);
+        var address=PeerAddressProtocol.toPeerAddress(entry);
+        assertNotNull(address);
+        var manager=new PeerAddressManager(); manager.add(address,Instant.now());
+        assertEquals(services,manager.addresses().getFirst().peerAddress().services());
+        var legacy=ru.bitcoin.node.p2p.message.AddrEntry.fromIp(1,services,address.address(),8333);
+        var message=new ru.bitcoin.node.p2p.message.AddrMessage(java.util.List.of(legacy));
+        assertEquals(services,ru.bitcoin.node.p2p.codec.AddrMessageCodec.decode(
+                ru.bitcoin.node.p2p.codec.AddrMessageCodec.encode(message)).addresses().getFirst().services());
+    }
 
     @Test
     void convertsEverySupportedBip155NetworkIntoAddrManModel() throws Exception {
