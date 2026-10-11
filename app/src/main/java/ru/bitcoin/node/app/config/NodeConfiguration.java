@@ -90,7 +90,8 @@ public class NodeConfiguration {
             boolean blockFilterIndex,
             @Value("${bitcoin.txospenderindex:false}")
             boolean txOutSpenderIndex,
-            @Value("${bitcoin.ibd-utxo-prefetch:true}") boolean ibdUtxoPrefetch
+            @Value("${bitcoin.ibd-utxo-prefetch:true}") boolean ibdUtxoPrefetch,
+            @Value("${bitcoin.utxo-read-cache-entries:500000}") int utxoReadCacheEntries
     ) {
         long pruneTargetBytes = pruneTargetBytes(pruneMiB);
         var pruneState = new ru.bitcoin.node.storage.chain.RocksDbPruneStateStore(database);
@@ -165,7 +166,8 @@ public class NodeConfiguration {
                 txIndex,
                 coinStatsIndex,
                 blockFilterIndex,
-                txOutSpenderIndex
+                txOutSpenderIndex,
+                utxoReadCacheEntries
         );
         validation.initialSyncPrefetchEnabled(ibdUtxoPrefetch);
         return validation;

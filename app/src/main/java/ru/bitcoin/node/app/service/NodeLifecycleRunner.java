@@ -7,6 +7,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public final class NodeLifecycleRunner
         implements AutoCloseable {
 
+    private static final System.Logger LOG =
+            System.getLogger(NodeLifecycleRunner.class.getName());
+
     private static final long DEFAULT_SHUTDOWN_TIMEOUT_MILLIS =
             10_000L;
 
@@ -84,6 +87,10 @@ public final class NodeLifecycleRunner
             /*
              * Lifecycle implementation owns its failure state.
              */
+        } catch (Error fatal) {
+            LOG.log(System.Logger.Level.ERROR,
+                    "Node lifecycle worker terminated after fatal error", fatal);
+            throw fatal;
         }
     }
 

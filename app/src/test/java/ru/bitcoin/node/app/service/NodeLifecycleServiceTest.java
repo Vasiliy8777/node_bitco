@@ -49,6 +49,30 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class NodeLifecycleServiceTest {
 
+    @Test
+    void fatalStartupErrorIsRecordedAndStopsPeerActivity() throws Exception {
+        var discovery = org.mockito.Mockito.mock(ru.bitcoin.node.p2p.sync.PeerDiscovery.class);
+        var fatal = new OutOfMemoryError("Synthetic test failure; no actual heap exhaustion");
+        org.mockito.Mockito.doThrow(fatal).when(discovery).discover();
+        var supervisor = org.mockito.Mockito.mock(ru.bitcoin.node.p2p.OutboundPeerSupervisor.class);
+        var peers = org.mockito.Mockito.mock(PeerManager.class);
+        var blocks = org.mockito.Mockito.mock(ru.bitcoin.node.app.sync.BlockSyncCoordinator.class);
+        var server = org.mockito.Mockito.mock(ru.bitcoin.node.p2p.BitcoinServer.class);
+        var lifecycle = new NodeLifecycleService(
+                org.mockito.Mockito.mock(NodeValidationService.class),
+                org.mockito.Mockito.mock(NodeSyncInfrastructure.class), new PeerAddressManager(), discovery,
+                org.mockito.Mockito.mock(ru.bitcoin.node.p2p.OutboundPeerManager.class), supervisor,
+                peers, server, blocks, java.time.Duration.ofSeconds(1), false, 18444);
+        assertSame(fatal, assertThrows(OutOfMemoryError.class, lifecycle::start));
+        assertEquals(NodeLifecycleState.FAILED, lifecycle.state());
+        assertSame(fatal, lifecycle.failure().orElseThrow());
+        assertFalse(lifecycle.isMiningReady());
+        org.mockito.Mockito.verify(supervisor).close();
+        org.mockito.Mockito.verify(blocks).cancel();
+        org.mockito.Mockito.verify(peers).close();
+        org.mockito.Mockito.verify(server).close();
+    }
+
     private static final long BITS =
             0x207fffffL;
 

@@ -7,6 +7,7 @@ bitcoin:
   data-directory: "K:/BitcoinJavaNode"
   # Native SST cache; separate from the Java UTXO and chainstate write-back caches.
   rocksdb-block-cache-mib: 128
+  utxo-read-cache-entries: 500000
   # Bounded look-ahead warms native SST blocks without caching speculative coin values.
   ibd-utxo-prefetch: true
 

@@ -415,6 +415,16 @@ public final class NodeValidationService implements AutoCloseable {
                                  Hash256 assumedValidBlock, boolean persistMempool, boolean txIndexEnabled,
                                  boolean coinStatsIndexEnabled, boolean blockFilterIndexEnabled,
                                  boolean txOutSpenderIndexEnabled) {
+        this(database, parameters, time, mempool, pruneTargetBytes, assumedValidBlock, persistMempool,
+                txIndexEnabled, coinStatsIndexEnabled, blockFilterIndexEnabled, txOutSpenderIndexEnabled, 500_000);
+    }
+
+    public NodeValidationService(RocksDbDatabase database, NetworkParameters parameters,
+                                 AdjustedTime time, Mempool mempool, long pruneTargetBytes,
+                                 Hash256 assumedValidBlock, boolean persistMempool, boolean txIndexEnabled,
+                                 boolean coinStatsIndexEnabled, boolean blockFilterIndexEnabled,
+                                 boolean txOutSpenderIndexEnabled, int utxoReadCacheEntries) {
+        if (utxoReadCacheEntries < 0) throw new IllegalArgumentException("utxoReadCacheEntries must not be negative");
         this.database = Objects.requireNonNull(database);
         this.mempool = Objects.requireNonNull(mempool);
         this.mempoolStore = new RocksDbMempoolStore(database);
@@ -439,9 +449,8 @@ public final class NodeValidationService implements AutoCloseable {
         byte startupUtxoPrefix = snapshotActiveAtStartup
                 ? ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.SNAPSHOT_UTXO_STAGING
                 : ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.UTXO;
-        // The primary chainstate gets a bounded positive UTXO read cache. 500k entries
-        // is intentionally conservative; snapshot/background stores keep the uncached default.
-        utxos = new RocksDbUtxoStore(database, startupUtxoPrefix, 500_000);
+        // The primary cache is bounded; snapshot/background stores remain uncached.
+        utxos = new RocksDbUtxoStore(database, startupUtxoPrefix, utxoReadCacheEntries);
         indexes = new RocksDbBlockIndexStore(database);
         availability = new RocksDbBlockAvailabilityStore(database);
         validationStatus = new RocksDbBlockValidationStatusStore(database);

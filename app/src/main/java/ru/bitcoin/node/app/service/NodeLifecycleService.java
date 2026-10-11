@@ -267,11 +267,11 @@ public final class NodeLifecycleService
                     null;
         }
 
-        setState(
-                NodeLifecycleState.STARTING
-        );
-
         try {
+
+            setState(
+                    NodeLifecycleState.STARTING
+            );
 
             bootstrapAddresses();
 
@@ -368,6 +368,9 @@ public final class NodeLifecycleService
             );
 
             throw exception;
+        } catch (Error fatal) {
+            fail(fatal);
+            throw fatal;
         }
     }
 
@@ -749,8 +752,6 @@ public final class NodeLifecycleService
                 exception,
                 "exception"
         );
-        liveSync.close();
-
         NodeLifecycleState previousState;
 
         synchronized (this) {
@@ -772,6 +773,12 @@ public final class NodeLifecycleService
                 previousState,
                 exception
         );
+
+        try {
+            liveSync.close();
+        } catch (RuntimeException closeException) {
+            exception.addSuppressed(closeException);
+        }
 
         try {
 
