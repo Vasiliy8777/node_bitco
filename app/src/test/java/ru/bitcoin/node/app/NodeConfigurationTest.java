@@ -48,6 +48,44 @@ class NodeConfigurationTest {
     Path directory;
 
     @Test
+    void separateChainstateReopensWithPayloadFilesInOriginalDataDirectory() {
+        Path ssd = directory.resolve("ssd");
+        var parameters = ru.bitcoin.node.protocol.network.NetworkParametersRegistry.forNetwork(
+                ru.bitcoin.node.protocol.network.BitcoinNetwork.REGTEST);
+        var genesis = ru.bitcoin.node.protocol.block.GenesisBlockFactory.create(parameters);
+        var hash = genesis.header().hash();
+        for (int i = 0; i < 2; i++) {
+            try (var context = createContext(Map.of("bitcoin.chainstate-directory", ssd.toString()))) {
+                var db = context.getBean(ru.bitcoin.node.storage.rocksdb.RocksDbDatabase.class);
+                assertEquals(ssd.resolve("regtest/chainstate"), db.databasePath());
+                assertEquals(directory.resolve("regtest"), db.externalDataRoot());
+                var store = new ru.bitcoin.node.storage.block.RocksDbBlockStore(db);
+                if (i == 0) {
+                    store.save(genesis);
+                }
+                assertEquals(hash, store.find(hash).orElseThrow().header().hash());
+            }
+        }
+        assertTrue(java.nio.file.Files.isDirectory(directory.resolve("regtest/blocks")));
+        assertFalse(java.nio.file.Files.exists(ssd.resolve("regtest/blocks")));
+    }
+
+    @Test
+    void separateChainstateRefusesToCreateEmptyDatabaseOverExistingArchive() {
+        try (var context = createContext(Map.of())) {
+            assertNotNull(context.getBean(NodeValidationService.class));
+        }
+        var configuration = new NodeConfiguration();
+        var parameters = ru.bitcoin.node.protocol.network.NetworkParametersRegistry.forNetwork(
+                ru.bitcoin.node.protocol.network.BitcoinNetwork.REGTEST);
+        var exception = assertThrows(IllegalStateException.class,
+                () -> configuration.chainDatabase(directory.toString(),
+                        directory.resolve("empty-ssd").toString(), 128, parameters));
+        assertTrue(exception.getMessage().contains("Copy the existing chainstate"));
+        assertFalse(java.nio.file.Files.exists(directory.resolve("empty-ssd")));
+    }
+
+    @Test
     void explicitDataDirectoryInitializesPersistentNodeInfrastructureAndReopensIt() {
 
         for (int i = 0; i < 2; i++) {

@@ -53,11 +53,21 @@ public class NodeConfiguration {
     @Bean(destroyMethod = "close")
     public RocksDbDatabase chainDatabase(
             @Value("${bitcoin.data-directory}") String path,
+            @Value("${bitcoin.chainstate-directory:}") String chainstateDirectory,
             @Value("${bitcoin.rocksdb-block-cache-mib:128}") int blockCacheMiB,
             NetworkParameters parameters
     ) {
         Path networkRoot = networkDataDirectory(Path.of(path), parameters);
-        return new RocksDbDatabase(networkRoot.resolve("chainstate"), parameters.magic(), blockCacheMiB);
+        Path databasePath = chainstateDirectory.isBlank()
+                ? networkRoot.resolve("chainstate")
+                : networkDataDirectory(Path.of(chainstateDirectory), parameters).resolve("chainstate");
+        if (!databasePath.equals(networkRoot.resolve("chainstate"))
+                && java.nio.file.Files.exists(networkRoot.resolve("chainstate/CURRENT"))
+                && !java.nio.file.Files.exists(databasePath.resolve("CURRENT"))) {
+            throw new IllegalStateException("Copy the existing chainstate to " + databasePath
+                    + " while the node is stopped before changing bitcoin.chainstate-directory");
+        }
+        return new RocksDbDatabase(databasePath, parameters.magic(), blockCacheMiB, networkRoot);
     }
 
     @Bean

@@ -25,6 +25,7 @@ public final class RocksDbDatabase
     private final org.rocksdb.LRUCache blockCache;
     private final org.rocksdb.BloomFilter bloomFilter;
     private final Path databasePath;
+    private final Path externalDataDirectory;
     private final long networkMagic;
     private final long[] namespaceVersions = new long[256];
     private final BlockMetadataCache metadataCache = new BlockMetadataCache();
@@ -153,6 +154,12 @@ public final class RocksDbDatabase
     }
 
     public RocksDbDatabase(Path databasePath, long networkMagic, int blockCacheMiB) {
+        this(databasePath, networkMagic, blockCacheMiB, null);
+    }
+
+    /** Keeps payload files on their original volume when chainstate is relocated. */
+    public RocksDbDatabase(Path databasePath, long networkMagic, int blockCacheMiB,
+                           Path externalDataDirectory) {
         if (databasePath == null) {
             throw new IllegalArgumentException(
                     "databasePath must not be null"
@@ -163,6 +170,8 @@ public final class RocksDbDatabase
         if (blockCacheMiB < 8 || blockCacheMiB > 16384)
             throw new IllegalArgumentException("blockCacheMiB must be between 8 and 16384");
         this.databasePath = databasePath.toAbsolutePath().normalize();
+        this.externalDataDirectory = externalDataDirectory == null
+                ? null : externalDataDirectory.toAbsolutePath().normalize();
         this.networkMagic = networkMagic;
 
         // Keep hot index/coins SST blocks in RAM rather than relying on RocksDB's
@@ -212,6 +221,9 @@ public final class RocksDbDatabase
      * isolated sibling directory instead of writing inside an open RocksDB directory.
      */
     public Path externalDataRoot() {
+        if (externalDataDirectory != null) {
+            return externalDataDirectory;
+        }
         Path name = databasePath.getFileName();
         if (name != null && "chainstate".equalsIgnoreCase(name.toString())) {
             Path parent = databasePath.getParent();

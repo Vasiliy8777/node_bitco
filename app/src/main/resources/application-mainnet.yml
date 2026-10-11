@@ -7,6 +7,8 @@ bitcoin:
   # On the current HDD, speculative look-ahead competes with validation reads.
   ibd-utxo-prefetch: ${BITCOIN_IBD_UTXO_PREFETCH:false}
   data-directory: ${BITCOIN_DATA_DIRECTORY:K:/BitcoinJavaNode}
+  # Optional separate root for <network>/chainstate; block/undo files stay in data-directory.
+  chainstate-directory: ${BITCOIN_CHAINSTATE_DIRECTORY:}
 
   p2p:
     port: 8333

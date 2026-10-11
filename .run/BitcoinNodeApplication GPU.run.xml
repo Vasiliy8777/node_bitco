@@ -4,7 +4,7 @@
     <option name="ENABLE_LAUNCH_OPTIMIZATION" value="false" />
     <module name="app" />
     <option name="SPRING_BOOT_MAIN_CLASS" value="ru.bitcoin.node.app.BitcoinNodeApplication" />
-    <option name="VM_PARAMETERS" value="-Xms4g -Xmx8g -XX:+TieredCompilation -XX:TieredStopAtLevel=4 -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=target -XX:ErrorFile=target/hs_err_pid%p.log -Xlog:gc*,safepoint:file=target/mainnet-gc-%p.log:time,uptime,level,tags:filecount=5,filesize=20M" />
+    <option name="VM_PARAMETERS" value="-Xms4g -Xmx8g -Dbitcoin.chainstate-directory=data/ssd-chainstate -XX:+TieredCompilation -XX:TieredStopAtLevel=4 -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=target -XX:ErrorFile=target/hs_err_pid%p.log -Xlog:gc*,safepoint:file=target/mainnet-gc-%p.log:time,uptime,level,tags:filecount=5,filesize=20M" />
     <option name="WORKING_DIRECTORY" value="file://$PROJECT_DIR$" />
     <method v="2">
       <option name="Make" enabled="true" />
