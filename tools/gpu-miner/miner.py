@@ -174,6 +174,7 @@ def mine(gpu, args):
             connection.send('mining.authorize', [args.worker, os.environ.get('BITCOIN_STRATUM_PASSWORD', '')])
             generation, extra2, nonce = -1, 0, 0
             material = None
+            header = None
             batch = args.batch_size
             hashes, started, reported = 0, time.monotonic(), time.monotonic()
             while True:
@@ -187,18 +188,21 @@ def mine(gpu, args):
                         reported = time.monotonic()
                     continue
                 if generation != connection.generation:
-                    next_material = json.dumps(connection.job[1:8]) + connection.extra1
+                    next_material = json.dumps(connection.job[1:8]) + connection.extra1 + ':' + str(connection.extra2_size)
                     if next_material != material:
                         extra2, nonce, material = 0, 0, next_material
+                        header = None
+                    job = connection.job
+                    network_target = compact_target(job[6])
+                    target = network_target if args.block_only else max(network_target, difficulty_target(connection.job_difficulty))
                     if generation == -1:
                         started = reported = time.monotonic()
                     generation = connection.generation
                     retry = 1
-                job = connection.job
-                extra = extra2.to_bytes(connection.extra2_size, 'big').hex()
-                header = header_for(job, connection.extra1, extra)
-                network_target = compact_target(job[6])
-                target = network_target if args.block_only else max(network_target, difficulty_target(connection.job_difficulty))
+                if header is None:
+                    extra = extra2.to_bytes(connection.extra2_size, 'big').hex()
+                    header = header_for(job, connection.extra1, extra)
+                    prefix = header[:76]
                 count = min(batch, (1 << 32) - nonce)
                 found, overflow = gpu.search(header, target, nonce, count)
                 hashes += count
@@ -209,10 +213,13 @@ def mine(gpu, args):
                     batch = max(1, count // 2)
                     continue
                 for solution in found:
-                    digest = sha256d(header[:76] + struct.pack('<I', solution))
+                    digest = sha256d(prefix + struct.pack('<I', solution))
                     value = int.from_bytes(digest, 'little')
                     if value > target:
                         raise RuntimeError('GPU returned an invalid solution')
+                    if value <= network_target:
+                        print(f'FOUND BLOCK: hash={digest[::-1].hex()} '
+                              f'target={network_target:064x} job={job[0]} nonce={solution:08x}', flush=True)
                     if len(connection.pending) >= 256:
                         connection.pump(1)
                         break
@@ -232,6 +239,7 @@ def mine(gpu, args):
                 if nonce == 1 << 32:
                     nonce = 0
                     extra2 += 1
+                    header = None
                     if extra2 == 1 << (8 * connection.extra2_size):
                         raise ConnectionError('Extranonce exhausted; reconnecting')
                 now = time.monotonic()
@@ -259,8 +267,8 @@ def main():
     parser.add_argument('--block-only', action='store_true')
     parser.add_argument('--max-blocks', type=int, default=0)
     args = parser.parse_args()
-    if not 1 <= args.batch_size <= 1048576 or args.max_blocks < 0:
-        parser.error('batch-size must be 1..1048576; max-blocks must be nonnegative')
+    if not 1 <= args.batch_size <= 2097152 or args.max_blocks < 0:
+        parser.error('batch-size must be 1..2097152; max-blocks must be nonnegative')
     with CudaHasher(args.device) as gpu:
         print(f'CUDA device: {gpu.name} ({gpu.architecture})', flush=True)
         if args.self_test:

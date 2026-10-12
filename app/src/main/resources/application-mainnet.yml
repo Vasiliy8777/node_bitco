@@ -1,10 +1,10 @@
 bitcoin:
   network: mainnet
-  # Native cache is outside the 4 GiB Java heap; override for smaller hosts.
+  # Native cache is outside the Java heap; override for smaller hosts.
   rocksdb-block-cache-mib: ${BITCOIN_ROCKSDB_BLOCK_CACHE_MIB:4096}
   # Java coin objects share the heap with validation and downloaded blocks.
   utxo-read-cache-entries: ${BITCOIN_UTXO_READ_CACHE_ENTRIES:1000000}
-  # On the current HDD, speculative look-ahead competes with validation reads.
+  # Keep prefetch opt-in; tune it for the volume holding chainstate.
   ibd-utxo-prefetch: ${BITCOIN_IBD_UTXO_PREFETCH:false}
   data-directory: ${BITCOIN_DATA_DIRECTORY:K:/BitcoinJavaNode}
   # Optional separate root for <network>/chainstate; block/undo files stay in data-directory.

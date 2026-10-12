@@ -16,7 +16,8 @@ public class GpuMinerConfiguration {
             @Value("${bitcoin.gpu-miner.python:python}") String python,
             @Value("${bitcoin.gpu-miner.script:tools/gpu-miner/miner.py}") String script,
             @Value("${bitcoin.gpu-miner.device:0}") int device,
+            @Value("${bitcoin.gpu-miner.batch-size:262144}") int batchSize,
             @Value("${bitcoin.stratum.user:miner}") String user) {
-        return new GpuMinerProcess(python, Path.of(script), device, server.port(), user + ".gpu01", credentials.password());
+        return new GpuMinerProcess(python, Path.of(script), device, server.port(), user + ".gpu01", credentials.password(), batchSize);
     }
 }

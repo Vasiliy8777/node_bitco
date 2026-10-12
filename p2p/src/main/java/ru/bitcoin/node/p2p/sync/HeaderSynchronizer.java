@@ -77,6 +77,9 @@ public final class HeaderSynchronizer {
         );
 
         if (!peer.isReady()) {
+            if (peer.state() == ru.bitcoin.node.p2p.PeerState.CLOSED) {
+                throw new IOException("Peer disconnected before header request");
+            }
             throw new IllegalStateException(
                     "Peer handshake is not complete"
             );

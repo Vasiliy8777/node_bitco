@@ -341,8 +341,6 @@ public final class NodeLifecycleService
 
             synchronized (this) {
 
-                verifySynchronized();
-
                 if (state == NodeLifecycleState.STOPPING
                         || state == NodeLifecycleState.STOPPED) {
 
@@ -667,10 +665,35 @@ public final class NodeLifecycleService
                 NodeLifecycleState.SYNCHRONIZING_BLOCKS
         );
 
-        blockSyncCoordinator.synchronizeToTip();
+        while (true) {
+            ensureNotStopping();
+            BlockIndex previousActiveTip = validationService.activeTip();
+            BlockIndex previousHeaderTip = syncInfrastructure.headerChainState().bestHeaderTip();
+
+            // A download round targets a snapshot of the header tip. Headers may
+            // advance during a long IBD; catch up again before entering RUNNING.
+            blockSyncCoordinator.synchronizeToTip();
+            ensureNotStopping();
+
+            synchronized (this) {
+                if (verifySynchronized()) {
+                    return;
+                }
+            }
+
+            BlockIndex activeTip = validationService.activeTip();
+            BlockIndex bestHeaderTip = syncInfrastructure.headerChainState().bestHeaderTip();
+            if (activeTip.hash().equals(previousActiveTip.hash())
+                    && bestHeaderTip.hash().equals(previousHeaderTip.hash())) {
+                throw new IllegalStateException("Block synchronization made no progress: activeHeight="
+                        + activeTip.height() + ", bestHeaderHeight=" + bestHeaderTip.height());
+            }
+            log.info("IBD target advanced; continuing block synchronization: activeHeight={} bestHeaderHeight={}",
+                    activeTip.height(), bestHeaderTip.height());
+        }
     }
 
-    private void verifySynchronized() {
+    private boolean verifySynchronized() {
 
         BlockIndex activeTip =
                 validationService.activeTip();
@@ -684,14 +707,7 @@ public final class NodeLifecycleService
                 bestHeaderTip.hash()
         )) {
 
-            throw new IllegalStateException(
-                    "Initial block synchronization ended "
-                            + "before active tip reached best header tip: "
-                            + "activeHeight="
-                            + activeTip.height()
-                            + ", bestHeaderHeight="
-                            + bestHeaderTip.height()
-            );
+            return false;
         }
 
 
@@ -703,6 +719,7 @@ public final class NodeLifecycleService
                             + minimumChainWork.toString(16)
             );
         }
+        return true;
     }
 
     private void setState(

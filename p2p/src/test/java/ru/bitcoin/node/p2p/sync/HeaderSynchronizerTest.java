@@ -33,6 +33,18 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class HeaderSynchronizerTest {
 
+    @Test
+    void closedPeerIsAnIoFailureRatherThanIncompleteHandshake() throws Exception {
+        try (var connection = new PeerConnection(PARAMETERS, 5_000, 5_000);
+             var peer = new Peer(connection, VersionMessage.DEFAULT_SERVICES, 0, true)) {
+            peer.close();
+            var sync = new HeaderSynchronizer(peer, Duration.ofSeconds(1));
+            var failure = assertThrows(java.io.IOException.class,
+                    () -> sync.download(List.of(new Hash256(new byte[32])), new Hash256(new byte[32])));
+            assertTrue(failure.getMessage().contains("disconnected"));
+        }
+    }
+
     private static final long REMOTE_NONCE =
             0x1112131415161718L;
 

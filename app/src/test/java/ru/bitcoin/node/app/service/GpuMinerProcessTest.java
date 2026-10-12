@@ -21,13 +21,13 @@ class GpuMinerProcessTest {
                 import os, sys, time
                 from pathlib import Path
                 assert os.environ['BITCOIN_STRATUM_PASSWORD'] == 'test-only-password'
-                assert sys.argv[1:] == ['--host', '127.0.0.1', '--port', '3333', '--worker', 'miner.test', '--device', '0']
+                assert sys.argv[1:] == ['--host', '127.0.0.1', '--port', '3333', '--worker', 'miner.test', '--device', '0', '--batch-size', '2097152']
                 Path(__file__).with_name('pid.txt').write_text(str(os.getpid()))
                 time.sleep(60)
                 """);
         long pid;
         try (var worker = new GpuMinerProcess(System.getProperty("bitcoin.gpu.python", "python"), script,
-                0, 3333, "miner.test", "test-only-password")) {
+                0, 3333, "miner.test", "test-only-password", 2097152)) {
             worker.start();
             pid = Long.parseLong(Files.readString(marker));
             assertTrue(ProcessHandle.of(pid).orElseThrow().isAlive());

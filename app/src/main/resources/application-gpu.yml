@@ -18,3 +18,5 @@ bitcoin:
     python: ${BITCOIN_GPU_PYTHON:python}
     script: ${BITCOIN_GPU_MINER_SCRIPT:tools/gpu-miner/miner.py}
     device: 0
+    # RTX 4070: measured best of 262144, 524288, 1048576 and 2097152.
+    batch-size: ${BITCOIN_GPU_BATCH_SIZE:2097152}

@@ -50,7 +50,7 @@ class HeaderSyncStreamingTest {
     }
 
     @Test
-    void nonProgressingResponseIsRejectedBeforePublishingBatch() throws Exception {
+    void repeatedValidatedTipCompletesWithoutPublishingDuplicateBatch() throws Exception {
         var downloader = mock(HeaderSynchronizer.class);
         var processor = mock(HeaderSyncService.class);
         var state = mock(HeaderChainState.class);
@@ -63,8 +63,8 @@ class HeaderSyncStreamingTest {
         when(downloader.download(anyList(), any())).thenReturn(message);
         when(processor.process(eq(message), any())).thenReturn(List.of(start));
         var coordinator = new HeaderSyncCoordinator(downloader, processor, state, locator);
-        assertThrows(IllegalStateException.class, () -> coordinator.synchronize(start.hash(),
-                batch -> fail("Non-progressing batch must not be published")));
+        assertEquals(0, coordinator.synchronize(start.hash(),
+                batch -> fail("Duplicate batch must not be published")));
         verify(downloader, times(1)).download(anyList(), any());
     }
 

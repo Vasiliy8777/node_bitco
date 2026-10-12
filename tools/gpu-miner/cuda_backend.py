@@ -61,6 +61,7 @@ class CudaHasher:
         self.allocations=[]
         self.dll_directory=None
         self.prepared=None
+        self.prepared_target=None
         if os.name=='nt':
             roots=[Path(os.environ.get('CUDA_PATH','C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.2'))]
             matches=list(roots[0].glob('bin/nvrtc64*.dll'))
@@ -152,10 +153,11 @@ class CudaHasher:
             data=(c.c_uint32*11)(*words)
             self._call('cuMemcpyHtoD_v2',self.data,data,c.sizeof(data))
             self.prepared=prefix
-        if target is not None:
+        if target is not None and target != self.prepared_target:
             if not 0<=target<1<<256: raise ValueError('Invalid target')
             words=(c.c_uint32*8)(*struct.unpack('>8I',target.to_bytes(32,'big')))
             self._call('cuMemcpyHtoD_v2',self.target,words,32)
+            self.prepared_target=target
 
     @staticmethod
     def _range(start,count):

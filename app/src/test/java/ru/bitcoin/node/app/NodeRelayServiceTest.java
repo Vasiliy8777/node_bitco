@@ -30,6 +30,56 @@ class NodeRelayServiceTest {
     Path directory;
 
     @Test
+    void postIbdBurstIsDrainedFairlyWithoutDisconnectingOtherPeers() throws Exception {
+        var validation = mock(NodeValidationService.class);
+        var sync = mock(NodeSyncInfrastructure.class);
+        var messages = new ConcurrentHashMap<Peer, PeerMessageListener>();
+        var processedNoisy = new java.util.concurrent.atomic.AtomicInteger();
+        var firstEntered = new CountDownLatch(1);
+        var releaseFirst = new CountDownLatch(1);
+        var blockedOnce = new java.util.concurrent.atomic.AtomicBoolean();
+        var healthyServed = new CountDownLatch(1);
+        try (var peers = new PeerManager()) {
+            var noisy = mock(Peer.class);
+            var healthy = mock(Peer.class);
+            for (var peer : List.of(noisy, healthy)) {
+                when(peer.isReady()).thenReturn(true);
+                doAnswer(call -> { messages.put(peer, call.getArgument(0)); return null; })
+                        .when(peer).addMessageListener(any());
+                peers.add(peer);
+            }
+            var locator = new Hash256(new byte[32]);
+            var healthyStop = Hash256.fromDisplayHex("01".repeat(32));
+            when(validation.downloadHasMinimumChainWork()).thenReturn(true);
+            when(validation.headers(anyList(), any())).thenAnswer(call -> {
+                if (call.getArgument(1).equals(healthyStop)) {
+                    assertTrue(processedNoisy.get() <= 16, "One peer monopolized the relay worker");
+                } else processedNoisy.incrementAndGet();
+                if (blockedOnce.compareAndSet(false, true)) {
+                    firstEntered.countDown();
+                    assertTrue(releaseFirst.await(3, TimeUnit.SECONDS));
+                }
+                return List.of();
+            });
+            doAnswer(call -> { healthyServed.countDown(); return null; }).when(healthy).send(any());
+            try (var relay = new NodeRelayService(validation, sync, peers)) {
+                var request = BitcoinMessages.getHeaders(new GetHeadersMessage(
+                        VersionMessage.CURRENT_PROTOCOL_VERSION, List.of(locator), locator));
+                messages.get(noisy).onMessage(noisy, request);
+                assertTrue(firstEntered.await(2, TimeUnit.SECONDS));
+                for (int i = 0; i < 300; i++) messages.get(noisy).onMessage(noisy, request);
+                messages.get(healthy).onMessage(healthy, BitcoinMessages.getHeaders(new GetHeadersMessage(
+                        VersionMessage.CURRENT_PROTOCOL_VERSION, List.of(locator), healthyStop)));
+                releaseFirst.countDown();
+                assertTrue(healthyServed.await(3, TimeUnit.SECONDS), "Neighbor was starved by the burst");
+                verify(validation, timeout(3_000).times(302)).headers(anyList(), any());
+                verify(noisy, never()).close(any(java.io.IOException.class));
+                verify(healthy, never()).close(any(java.io.IOException.class));
+            } finally { releaseFirst.countDown(); }
+        }
+    }
+
+    @Test
     void ibdTransactionFloodDoesNotOccupyRelayQueueOrWaitForMempool() throws Exception {
         var validation = mock(NodeValidationService.class);
         when(validation.downloadInitialBlockDownload()).thenReturn(true);

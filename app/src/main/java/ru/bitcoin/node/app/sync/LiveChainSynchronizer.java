@@ -6,6 +6,7 @@ import ru.bitcoin.node.app.NodeValidationService;
 import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.p2p.*;
 import ru.bitcoin.node.p2p.message.InventoryVector;
+import ru.bitcoin.node.p2p.message.BitcoinMessages;
 import ru.bitcoin.node.p2p.sync.HeaderSynchronizer;
 
 import java.io.IOException;
@@ -17,6 +18,7 @@ import java.util.concurrent.Semaphore;
 /** Runs on the lifecycle worker, never on a peer's message reader. */
 public final class LiveChainSynchronizer implements AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(LiveChainSynchronizer.class);
+    private static final Duration MAX_LIVE_HEADER_RESPONSE_TIMEOUT = Duration.ofSeconds(5);
     private final PeerManager peers;
     private final NodeSyncInfrastructure infrastructure;
     private final BlockSyncCoordinator blocks;
@@ -26,12 +28,19 @@ public final class LiveChainSynchronizer implements AutoCloseable {
     private final Set<Peer> observed = new HashSet<>();
     private volatile boolean closed;
     private volatile long lastSuccess;
+    private volatile Hash256 confirmedTip;
     private final PeerInventoryListener inventoryListener = (peer, inventory) -> {
-        if (inventory.inventory().stream().anyMatch(v -> v.type() == InventoryVector.MSG_BLOCK
-                || v.type() == InventoryVector.MSG_WITNESS_BLOCK)) requestSync();
+        if (inventory.inventory().stream().anyMatch(v -> (v.type() == InventoryVector.MSG_BLOCK
+                || v.type() == InventoryVector.MSG_WITNESS_BLOCK)
+                && !v.hash().equals(confirmedTip))) invalidateAndRequestSync();
     };
     private final PeerMessageListener messageListener = (peer, message) -> {
-        if (message.command().equals("headers")) requestSync();
+        // Empty GETHEADERS responses confirm the tip; they must not create a
+        // feedback loop that polls every peer again and invalidates mining work.
+        if (message.command().equals("headers")) {
+            var headers = BitcoinMessages.decodeHeaders(message).headers();
+            if (!headers.isEmpty() && !headers.getLast().hash().equals(confirmedTip)) invalidateAndRequestSync();
+        }
     };
 
     public LiveChainSynchronizer(PeerManager peers, NodeSyncInfrastructure infrastructure,
@@ -40,15 +49,24 @@ public final class LiveChainSynchronizer implements AutoCloseable {
         this.infrastructure = infrastructure;
         this.blocks = blocks;
         this.validation = validation;
-        this.timeout = timeout;
+        // Initial header IBD may allow long responses. Live polling must fail
+        // over promptly so one silent peer cannot exhaust the 60-second freshness window.
+        this.timeout = timeout.compareTo(MAX_LIVE_HEADER_RESPONSE_TIMEOUT) > 0
+                ? MAX_LIVE_HEADER_RESPONSE_TIMEOUT : timeout;
     }
 
     public void requestSync() {
         synchronized (wakeup) {
-            lastSuccess = 0;
             if (wakeup.availablePermits() == 0) wakeup.release();
         }
         synchronized (this) { notifyAll(); }
+    }
+
+    private void invalidateAndRequestSync() {
+        synchronized (wakeup) {
+            lastSuccess = 0;
+            requestSync();
+        }
     }
 
     public boolean isCurrent() {
@@ -80,6 +98,7 @@ public final class LiveChainSynchronizer implements AutoCloseable {
                     nextPoll = System.nanoTime() + Duration.ofSeconds(30).toNanos();
                     for (Peer peer : ready) {
                         if (closed) break;
+                        if (!peer.isReady()) continue;
                         try {
                             new HeaderSyncCoordinator(new HeaderSynchronizer(peer, timeout),
                                     infrastructure.headerSyncService(), infrastructure.headerChainState(),
@@ -87,7 +106,11 @@ public final class LiveChainSynchronizer implements AutoCloseable {
                             if (closed) break;
                             blocks.synchronizeToTip();
                             synchronized (wakeup) {
-                                if (wakeup.availablePermits() == 0) lastSuccess = System.nanoTime();
+                                if (wakeup.availablePermits() == 0
+                                        && validation.activeTip().hash().equals(infrastructure.headerChainState().bestHeaderTip().hash())) {
+                                    confirmedTip = validation.activeTip().hash();
+                                    lastSuccess = System.nanoTime();
+                                }
                             }
                         } catch (IOException | IllegalArgumentException
                                  | ru.bitcoin.node.consensus.block.BlockHeaderValidationException
@@ -125,8 +148,13 @@ public final class LiveChainSynchronizer implements AutoCloseable {
 
 
     private void replaceFailedPeer(Peer peer, Exception exception) {
-        lastSuccess = 0;
-        log.warn("Live chain synchronization failed; replacing peer", exception);
+        // A failed connection cannot undo successful verification by another
+        // peer. Freshness expiry, loss of all peers and tip mismatch still gate mining.
+        if (peer.state() == PeerState.CLOSED) {
+            log.debug("Peer {} disconnected during live synchronization: {}", peer.remoteAddress(), exception.toString());
+        } else {
+            log.warn("Live chain synchronization failed; replacing peer", exception);
+        }
         try {
             peer.close();
         } catch (IOException closeFailure) {

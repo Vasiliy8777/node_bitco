@@ -19,6 +19,7 @@ public final class GpuMinerProcess implements AutoCloseable {
     private final String python;
     private final Path script;
     private final int device;
+    private final int batchSize;
     private final int port;
     private final String worker;
     private final String password;
@@ -26,9 +27,18 @@ public final class GpuMinerProcess implements AutoCloseable {
     private volatile boolean closed;
 
     public GpuMinerProcess(String python, Path script, int device, int port, String worker, String password) {
+        this(python, script, device, port, worker, password, 262144);
+    }
+
+    public GpuMinerProcess(String python, Path script, int device, int port, String worker, String password,
+                           int batchSize) {
+        if (batchSize < 1 || batchSize > 2097152) {
+            throw new IllegalArgumentException("GPU batch size must be 1..2097152");
+        }
         this.python = python;
         this.script = script.toAbsolutePath().normalize();
         this.device = device;
+        this.batchSize = batchSize;
         this.port = port;
         this.worker = worker;
         this.password = password;
@@ -39,7 +49,8 @@ public final class GpuMinerProcess implements AutoCloseable {
         if (closed || process != null) throw new IllegalStateException("GPU worker already started or closed");
         if (!Files.isRegularFile(script)) throw new IOException("GPU miner script not found: " + script + "; set working directory to the project root");
         var builder = new ProcessBuilder(List.of(python, "-u", script.toString(), "--host", "127.0.0.1",
-                "--port", Integer.toString(port), "--worker", worker, "--device", Integer.toString(device)))
+                "--port", Integer.toString(port), "--worker", worker, "--device", Integer.toString(device),
+                "--batch-size", Integer.toString(batchSize)))
                 .redirectErrorStream(true);
         builder.environment().put("BITCOIN_STRATUM_PASSWORD", password);
         process = builder.start();
@@ -56,7 +67,7 @@ public final class GpuMinerProcess implements AutoCloseable {
         if (process.waitFor(1500, TimeUnit.MILLISECONDS)) {
             throw new IOException("CUDA worker exited with code " + process.exitValue() + "; inspect the preceding console output");
         }
-        LOG.info("CUDA worker started, PID {}; waits for synchronized Stratum work", process.pid());
+        LOG.info("CUDA worker started, PID {}, batch size {}; waits for synchronized Stratum work", process.pid(), batchSize);
         process.onExit().thenAccept(exited -> {
             if (!closed) LOG.error("CUDA worker exited with code {}; restart the Spring Boot application to resume mining", exited.exitValue());
         });

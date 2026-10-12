@@ -77,6 +77,8 @@ public final class HeaderSyncCoordinator {
         long processedCount = 0;
 
         BlockIndex cursor = headerChainState.bestHeaderTip();
+        var visited = new java.util.HashSet<Hash256>();
+        visited.add(cursor.hash());
 
         while (true) {
 
@@ -119,11 +121,16 @@ public final class HeaderSyncCoordinator {
             if (cursor.hash().equals(
                     previousCursor.hash()
             )) {
-                throw new IllegalStateException(
-                        "Non-empty headers response made "
-                                + "no synchronization progress: "
-                                + cursor.hash().toDisplayHex()
-                );
+                // HEADERS has no request id. An unsolicited announcement or
+                // a concurrent relay update can deliver our already known tip
+                // while GETHEADERS is pending. The batch was validated above;
+                // it confirms the tip rather than representing a node failure.
+                return processedCount;
+            }
+
+            if (!visited.add(cursor.hash())) {
+                throw new IOException("Peer repeated an earlier header batch tip: "
+                        + cursor.hash().toDisplayHex());
             }
 
             processedCount = Math.addExact(processedCount, processed.size());
