@@ -154,9 +154,31 @@ class NodeValidationServiceTest {
             assertFalse(service.isMempoolPersistenceDirty());
         }
         try (var db = new RocksDbDatabase(directory)) {
-            var restored = new NodeValidationService(db, PARAMS, () -> 1_800_000_000L, new Mempool());
+            var pool = org.mockito.Mockito.spy(new Mempool());
+            var restored = new NodeValidationService(db, PARAMS, () -> 1_800_000_000L, pool);
             assertEquals(List.of(parent.txId(), child.txId()),
                     restored.mempoolEntries().stream().map(e -> e.transaction().txId()).toList());
+            org.mockito.Mockito.verify(pool, org.mockito.Mockito.never()).revalidate(
+                    org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                    org.mockito.ArgumentMatchers.anySet());
+        }
+    }
+
+    @Test
+    void suppliedMempoolIsStillValidatedAgainstStartupChain() {
+        var fund = new OutPoint(Hash256.fromDisplayHex("24".repeat(32)), new UInt32(0));
+        var tx = spend(fund, 90_000);
+        var pool = new Mempool();
+        pool.admit(tx, new ru.bitcoin.node.mempool.MempoolValidationContext(200, 1_800_000_000L, h -> 0),
+                point -> point.equals(fund)
+                        ? Optional.of(new ru.bitcoin.node.consensus.transaction.UtxoEntry(100_000, SCRIPT, 0, false))
+                        : Optional.empty());
+        assertEquals(1, pool.size());
+        try (var db = new RocksDbDatabase(directory)) {
+            // The new chain has no funding coin: the supplied entry must not survive startup.
+            var service = new NodeValidationService(db, PARAMS, () -> 1_800_000_000L, pool);
+            assertTrue(service.mempoolEntries().isEmpty());
+            assertTrue(pool.spendingTransaction(fund).isEmpty());
         }
     }
 

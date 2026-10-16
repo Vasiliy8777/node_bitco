@@ -21,41 +21,44 @@ public final class TransactionSelector {
             if (pool.put(entry.transaction().txId(), entry) != null) throw new IllegalArgumentException("Duplicate txid");
         }
 
-        List<Cursor> cursors = new ArrayList<>();
+        PriorityQueue<Cursor> cursors = new PriorityQueue<>((a, b) -> {
+            var left = a.peek();
+            var right = b.peek();
+            int rate = ClusterLinearization.compareRate(right.fee(), right.adjustedWeight(),
+                    left.fee(), left.adjustedWeight());
+            return rate != 0 ? rate : Integer.compare(a.ordinal, b.ordinal);
+        });
+        int ordinal = 0;
         for (Set<Hash256> cluster : ClusterLinearization.clusters(pool))
-            cursors.add(new Cursor(ClusterLinearization.chunks(pool, cluster)));
+            cursors.add(new Cursor(ClusterLinearization.chunks(pool, cluster), ordinal++));
 
         List<Transaction> result = new ArrayList<>();
-        while (true) {
-            Cursor best = null;
-            for (Cursor cursor : cursors) {
-                ClusterLinearization.Chunk chunk = cursor.peek();
-                if (chunk == null) continue;
-                if (chunk.fee() < minimumRate.feeForVSize(chunk.virtualSize())) { cursor.blocked = true; continue; }
-                long weight = 0, sigops = 0;
-                for (Hash256 id : chunk.transactions()) {
-                    MempoolEntry e = pool.get(id);
-                    weight = Math.addExact(weight, e.weight()); sigops = Math.addExact(sigops, e.sigOpCost());
-                }
-                if (weight > weightBudget || sigops > sigopsBudget) { cursor.blocked = true; continue; }
-                if (best == null || ClusterLinearization.compareRate(chunk.fee(), chunk.adjustedWeight(),
-                        best.peek().fee(), best.peek().adjustedWeight()) > 0) best = cursor;
+        while (!cursors.isEmpty()) {
+            Cursor best = cursors.remove();
+            ClusterLinearization.Chunk chunk = best.peek();
+            if (chunk.fee() < minimumRate.feeForVSize(chunk.virtualSize())) continue;
+            long weight = 0, sigops = 0;
+            for (Hash256 id : chunk.transactions()) {
+                MempoolEntry e = pool.get(id);
+                weight = Math.addExact(weight, e.weight()); sigops = Math.addExact(sigops, e.sigOpCost());
             }
-            if (best == null) return List.copyOf(result);
+            if (weight > weightBudget || sigops > sigopsBudget) continue;
             ClusterLinearization.Chunk chosen = best.take();
             for (Hash256 id : chosen.transactions()) {
                 MempoolEntry e = pool.get(id); result.add(e.transaction());
                 weightBudget -= e.weight(); sigopsBudget -= e.sigOpCost();
             }
+            if (best.peek() != null) cursors.add(best);
         }
+        return List.copyOf(result);
     }
 
     private static final class Cursor {
         private final List<ClusterLinearization.Chunk> chunks;
+        private final int ordinal;
         private int index;
-        private boolean blocked;
-        private Cursor(List<ClusterLinearization.Chunk> chunks) { this.chunks = chunks; }
-        private ClusterLinearization.Chunk peek() { return blocked || index >= chunks.size() ? null : chunks.get(index); }
+        private Cursor(List<ClusterLinearization.Chunk> chunks, int ordinal) { this.chunks = chunks; this.ordinal = ordinal; }
+        private ClusterLinearization.Chunk peek() { return index >= chunks.size() ? null : chunks.get(index); }
         private ClusterLinearization.Chunk take() { return chunks.get(index++); }
     }
 }

@@ -101,6 +101,16 @@ public final class Mempool {
         var entry = new MempoolEntry(transaction, fee, weight, arrivalTime, sigops, feeDelta, admissionHeight);
         if (!packageMode && entry.modifiedFee() < new FeeRate(minimumFeeRate()).feeForVSize(entry.virtualSize())) throw new MempoolAdmissionException("mempool-min-fee");
         MempoolGraphPolicy.replacement(entries, conflicts, evicted, entry, limits);
+        // Revalidation builds an isolated replacement pool. With no conflicts all
+        // fallible checks are complete, and package mode defers capacity trimming
+        // to the reconciliation boundary. Append without copying/scanning the pool
+        // for every transaction. Keep the ordinary RBF path for resurrection conflicts.
+        if (packageMode && bypassLimits && conflicts.isEmpty()) {
+            entries.put(txId, entry);
+            for (var input : transaction.inputs()) spent.put(input.previousOutput(), txId);
+            sequence++;
+            return entry;
+        }
         Map<Hash256, MempoolEntry> candidate = new LinkedHashMap<>(entries);
         evicted.forEach(candidate::remove);
         candidate.put(txId, entry);
@@ -366,7 +376,8 @@ public final class Mempool {
             if (pending.size() == before) throw new IllegalStateException("Cyclic mempool dependencies");
         }
         staged.rebuildSpent();
-        staged.revalidate(context, chainUtxos, confirmed);        staged.expire();
+        staged.revalidate(context, chainUtxos, confirmed);
+        staged.expire();
         int beforeTrim = staged.size();
         long removedRate = MempoolGraphPolicy.trim(staged.entries, limits.maxPoolVirtualBytes(), null);
         entries.clear(); entries.putAll(staged.entries);

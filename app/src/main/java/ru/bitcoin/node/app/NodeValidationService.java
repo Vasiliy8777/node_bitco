@@ -419,6 +419,22 @@ public final class NodeValidationService implements AutoCloseable {
                 txIndexEnabled, coinStatsIndexEnabled, blockFilterIndexEnabled, txOutSpenderIndexEnabled, 500_000);
     }
 
+    /** One coherent RPC view; pruning and reorgs cannot race body/undo loading. */
+    public record RpcBlockView(ActiveBlockInfo info, Optional<Block> block,
+                               Optional<ru.bitcoin.node.storage.undo.BlockUndoData> undo) {}
+
+    public Optional<RpcBlockView> rpcBlockView(Hash256 hash, boolean includeUndo) {
+        Objects.requireNonNull(hash, "hash");
+        synchronized (chain) {
+            var info = activeBlockInfo(hash);
+            if (info.isEmpty()) return Optional.empty();
+            var block = blocks.find(hash);
+            var undo = includeUndo && block.isPresent() ? undos.find(hash)
+                    : Optional.<ru.bitcoin.node.storage.undo.BlockUndoData>empty();
+            return Optional.of(new RpcBlockView(info.orElseThrow(), block, undo));
+        }
+    }
+
     public NodeValidationService(RocksDbDatabase database, NetworkParameters parameters,
                                  AdjustedTime time, Mempool mempool, long pruneTargetBytes,
                                  Hash256 assumedValidBlock, boolean persistMempool, boolean txIndexEnabled,
@@ -523,9 +539,14 @@ public final class NodeValidationService implements AutoCloseable {
         synchronized (chain) {
             if (persistMempool) {
                 mempoolFeeDeltaStore.load().forEach(mempool::restoreFeeDelta);
+            }
+            // A caller may supply an existing pool from another chain context.
+            // Validate it before restoration; restored entries are already fully
+            // checked by admit/admitRestored against this same chain snapshot.
+            if (!mempool.isEmpty()) mempool.revalidate(context(), coins, Set.of());
+            if (persistMempool) {
                 restorePersistentMempool();
             }
-            mempool.revalidate(context(), coins, Set.of());
             mempool.expire();
             if (persistMempool) {
                 mempoolStore.replace(persistedMempoolEntries());

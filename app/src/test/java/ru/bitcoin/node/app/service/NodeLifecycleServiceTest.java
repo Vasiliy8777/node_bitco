@@ -272,12 +272,14 @@ class NodeLifecycleServiceTest {
              var context =
                      new AnnotationConfigApplicationContext()) {
 
+            var stopping = new java.util.concurrent.atomic.AtomicBoolean();
             CompletableFuture<Void> server =
                     CompletableFuture.runAsync(
                             () -> runLifecyclePeer(
                                     serverSocket,
                                     parameters,
-                                    block1
+                                    block1,
+                                    stopping::get
                             )
                     );
 
@@ -421,6 +423,7 @@ class NodeLifecycleServiceTest {
 
             } finally {
 
+                stopping.set(true);
                 closeAndAwaitLifecycle(
                         lifecycle,
                         lifecycleThread
@@ -499,6 +502,15 @@ class NodeLifecycleServiceTest {
             ServerSocket serverSocket,
             NetworkParameters parameters,
             Block block
+    ) {
+        runLifecyclePeer(serverSocket, parameters, block, () -> false);
+    }
+
+    private static void runLifecyclePeer(
+            ServerSocket serverSocket,
+            NetworkParameters parameters,
+            Block block,
+            java.util.function.BooleanSupplier stopping
     ) {
 
         try (Socket socket =
@@ -653,7 +665,14 @@ class NodeLifecycleServiceTest {
 
             output.flush();
 
-            answerLiveHeaderPolls(reader, encoder, input, output);
+            try {
+                answerLiveHeaderPolls(reader, encoder, input, output);
+            } catch (java.net.SocketException disconnected) {
+                // Windows may report reset rather than EOF when the lifecycle
+                // closes a socket with protocol-maintenance traffic in flight.
+                // Earlier disconnects and handshake/download failures still fail.
+                if (!stopping.getAsBoolean()) throw disconnected;
+            }
 
         } catch (Exception exception) {
 

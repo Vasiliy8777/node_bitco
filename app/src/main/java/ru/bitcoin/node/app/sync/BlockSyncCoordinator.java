@@ -58,7 +58,9 @@ public final class BlockSyncCoordinator {
     private static final int INITIAL_SYNC_CONNECT_BATCH = 32;
     // Bound cold UTXO prefetch work as well as block count. A single block is
     // never split or rejected; this only yields sooner between whole blocks.
-    private static final long INITIAL_SYNC_CONNECT_INPUTS = 2048;
+    // Allow several modern blocks per batch so pool reconciliation and index
+    // maintenance are amortized, while keeping cold-input prefetch bounded.
+    private static final long INITIAL_SYNC_CONNECT_INPUTS = 32768;
     private final int downloadWindow;
     private final BlockDownloadScheduler blockDownloadScheduler;
     private final NodeValidationService validationService;

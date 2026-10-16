@@ -66,7 +66,7 @@ class BlockSyncCoordinatorTest {
             0x1112131415161718L;
 
     @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.ValueSource(ints = {0, 1024, 4096})
+    @org.junit.jupiter.params.provider.ValueSource(ints = {0, 1024, 4096, 65536})
     void refillsSlidingWindowBeforeConnectingTheRestOfAnAlreadyDownloadedRun(int inputsPerBlock) throws Exception {
         var indexes = preparationIndexes(128);
         var validation = org.mockito.Mockito.mock(NodeValidationService.class);
@@ -76,6 +76,7 @@ class BlockSyncCoordinatorTest {
         var session = org.mockito.Mockito.mock(BlockDownloadSession.class);
         org.mockito.Mockito.when(scheduler.openSession()).thenReturn(session);
         var pending = new java.util.concurrent.atomic.AtomicInteger();
+        var largestBatch = new java.util.concurrent.atomic.AtomicInteger();
         var sourcePeer = org.mockito.Mockito.mock(Peer.class);
         var transaction = org.mockito.Mockito.mock(Transaction.class);
         org.mockito.Mockito.when(transaction.inputs()).thenReturn(
@@ -102,9 +103,10 @@ class BlockSyncCoordinatorTest {
         org.mockito.Mockito.when(validation.processInitialSyncBatch(org.mockito.ArgumentMatchers.anyList()))
                 .thenAnswer(call -> {
                     List<Block> batch = call.getArgument(0);
+                    largestBatch.accumulateAndGet(batch.size(), Math::max);
                     assertTrue(batch.size() <= 32, "A long connect step monopolized the moving download window");
                     if (inputsPerBlock > 0) {
-                        assertTrue(batch.size() <= Math.max(1, 2048 / inputsPerBlock),
+                        assertTrue(batch.size() <= Math.max(1, 32768 / inputsPerBlock),
                                 "Cold UTXO work must yield between whole blocks; an oversized block must still connect");
                     }
                     long firstHeight = tip.get().height() + 1;
@@ -120,6 +122,9 @@ class BlockSyncCoordinatorTest {
                 org.mockito.Mockito.mock(ru.bitcoin.node.storage.block.BlockStore.class), 64);
         coordinator.synchronizeToTip();
         assertEquals(indexes.getLast().hash(), tip.get().hash());
+        if (inputsPerBlock == 4096) {
+            assertTrue(largestBatch.get() > 1, "Modern blocks must share a maintenance batch");
+        }
     }
 
     @Test

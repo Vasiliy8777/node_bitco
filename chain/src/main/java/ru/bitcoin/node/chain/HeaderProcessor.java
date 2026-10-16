@@ -80,11 +80,7 @@ public final class HeaderProcessor {
                 );
 
         if (parent == null) {
-            throw new IllegalStateException(
-                    "Parent header is unknown: "
-                            + header.previousBlockHash()
-                            .toDisplayHex()
-            );
+            throw new UnconnectedHeaderException(header.hash(), header.previousBlockHash());
         }
 
         ChainHeaderValidator.validate(

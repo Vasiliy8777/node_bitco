@@ -33,6 +33,61 @@ class MiningRpcTest {
     private static final JsonMapper JSON = JsonMapper.builder().build();
 
     @Test
+    void blockDetailsUseHistoricalUndoAndOmitUnavailableData() throws Exception {
+        var parameters = NetworkParametersRegistry.regtest();
+        try (var db = new RocksDbDatabase(directory); var peers = new PeerManager()) {
+            var validation = new NodeValidationService(db, parameters, () -> 1_800_000_000L, new Mempool());
+            var sync = new NodeSyncInfrastructure(db, parameters, () -> 1_800_000_000L);
+            ru.bitcoin.node.protocol.block.Block last = null;
+            for (int height = 1; height <= 102; height++) {
+                try (var resource = getClass().getResourceAsStream("/core-spend/" + height + ".bin")) {
+                    assertNotNull(resource);
+                    last = ru.bitcoin.node.protocol.serialization.BlockParser.parse(resource.readAllBytes());
+                    assertEquals(ru.bitcoin.node.chain.BlockProcessingResult.CONNECTED, validation.processBlock(last));
+                }
+            }
+            var block = Objects.requireNonNull(last);
+            try (var relay = new NodeRelayService(validation, sync, peers)) {
+                var mining = new MiningController(validation, relay, parameters, () -> true,
+                        new byte[]{0x51}, 4_000_000, new FeeRate(0));
+                try (var rpc = new NodeRpcServer(new InetSocketAddress("127.0.0.1", 0), "test", "test-password",
+                        mining, validation, relay, sync, () -> true, peers); var client = HttpClient.newHttpClient()) {
+                    var uri = URI.create("http://127.0.0.1:" + rpc.port());
+                    String hash = block.hash().toDisplayHex();
+                    var json2 = (Map<?, ?>) call(client, uri, "getblock", List.of(hash, 2)).get("result");
+                    var txs2 = (List<?>) json2.get("tx");
+                    assertFalse(((Map<?, ?>) txs2.getFirst()).containsKey("fee"));
+                    var spend2 = (Map<?, ?>) txs2.get(1);
+                    assertEquals(0.0001d, ((Number) spend2.get("fee")).doubleValue(), 1e-12);
+                    assertFalse(((Map<?, ?>) ((List<?>) spend2.get("vin")).getFirst()).containsKey("prevout"));
+                    var json3 = (Map<?, ?>) call(client, uri, "getblock", List.of(hash, 3)).get("result");
+                    var spend3 = (Map<?, ?>) ((List<?>) json3.get("tx")).get(1);
+                    assertEquals(spend2.get("fee"), spend3.get("fee"));
+                    var prevout = (Map<?, ?>) ((Map<?, ?>) ((List<?>) spend3.get("vin")).getFirst()).get("prevout");
+                    assertEquals(true, prevout.get("generated"));
+                    assertEquals(1L, ((Number) prevout.get("height")).longValue());
+                    assertEquals(50.0d, ((Number) prevout.get("value")).doubleValue());
+                    assertEquals("51", ((Map<?, ?>) prevout.get("scriptPubKey")).get("hex"));
+                    assertEquals(-8, error(call(client, uri, "getblock", List.of(hash, 4))));
+
+                    var undos = new ru.bitcoin.node.storage.undo.RocksDbUndoStore(db);
+                    var validUndo = undos.find(block.hash()).orElseThrow();
+                    undos.delete(block.hash());
+                    var withoutUndo = (Map<?, ?>) call(client, uri, "getblock", List.of(hash, 3)).get("result");
+                    var spendWithoutUndo = (Map<?, ?>) ((List<?>) withoutUndo.get("tx")).get(1);
+                    assertFalse(spendWithoutUndo.containsKey("fee"));
+                    assertFalse(((Map<?, ?>) ((List<?>) spendWithoutUndo.get("vin")).getFirst()).containsKey("prevout"));
+                    undos.save(block.hash(), new ru.bitcoin.node.storage.undo.BlockUndoData(List.of()));
+                    assertEquals(-32603, error(call(client, uri, "getblock", List.of(hash, 3))));
+                    assertNull(call(client, uri, "getblock", List.of(hash, 1)).get("error"));
+                    undos.delete(block.hash());
+                    undos.save(block.hash(), validUndo);
+                }
+            }
+        }
+    }
+
+    @Test
     void blockchainInfoRemainsAvailableWhileBlockValidationHoldsChainLock() throws Exception {
         var parameters = NetworkParametersRegistry.regtest();
         try (var db = new RocksDbDatabase(directory); var peers = new PeerManager()) {
@@ -194,6 +249,7 @@ class MiningRpcTest {
                     assertEquals(64, ((Number) mempoolInfo.get("limitclustercount")).intValue());
                     assertEquals(101_000L, ((Number) mempoolInfo.get("limitclustersize")).longValue());
                     assertEquals(true, mempoolInfo.get("optimal"));
+                    assertFalse(mempoolInfo.containsKey("usage"), "Unmeasured JVM memory must not be reported as virtual size");
                     assertEquals(true, mempoolInfo.get("fullrbf"));
                     assertEquals(List.of(), call(client, uri, "getmempoolfeeratediagram", List.of()).get("result"));
                     var missingCluster = call(client, uri, "getmempoolcluster", List.of("00".repeat(32)));
@@ -263,6 +319,22 @@ class MiningRpcTest {
                     );
 
                     var coinbase = mined.transactions().getFirst();
+                    var coinbaseJson = (Map<?, ?>) blockJson.get("coinbase_tx");
+                    assertEquals(coinbase.version(), ((Number) coinbaseJson.get("version")).intValue());
+                    assertEquals(coinbase.lockTime().value(), ((Number) coinbaseJson.get("locktime")).longValue());
+                    assertEquals(coinbase.inputs().getFirst().sequence().value(), ((Number) coinbaseJson.get("sequence")).longValue());
+                    assertEquals(HexFormat.of().formatHex(coinbase.inputs().getFirst().scriptSig()), coinbaseJson.get("coinbase"));
+                    assertEquals(HexFormat.of().formatHex(coinbase.inputs().getFirst().witness().items().getFirst()), coinbaseJson.get("witness"));
+                    assertEquals(BlockSerializer.serializeLegacy(mined).length, ((Number) blockJson.get("strippedsize")).intValue());
+                    var detailedBlock = (Map<?, ?>) call(client, uri, "getblock",
+                            List.of(mined.hash().toDisplayHex(), 2)).get("result");
+                    var detailedTransactions = (List<?>) detailedBlock.get("tx");
+                    assertEquals(mined.transactions().size(), detailedTransactions.size());
+                    assertEquals(coinbase.txId().toDisplayHex(), ((Map<?, ?>) detailedTransactions.getFirst()).get("txid"));
+                    assertEquals(HexFormat.of().formatHex(ru.bitcoin.node.protocol.serialization.TransactionSerializer.serialize(coinbase)),
+                            ((Map<?, ?>) detailedTransactions.getFirst()).get("hex"));
+                    assertEquals(coinbaseJson, detailedBlock.get("coinbase_tx"));
+
                     var txout = (Map<?, ?>) call(client, uri, "gettxout",
                             List.of(coinbase.txId().toDisplayHex(), 0)).get("result");
                     assertNotNull(txout);

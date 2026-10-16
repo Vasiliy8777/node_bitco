@@ -676,12 +676,13 @@ public final class NodeRpcServer implements AutoCloseable {
                 if (params.isEmpty() || params.size() > 2 || !(params.getFirst() instanceof String hashText))
                     throw new RpcException(-32602, "Expected block hash and optional verbosity");
                 int verbosity = intParam(params, 1, 1);
-                if (verbosity < 0 || verbosity > 1)
-                    throw new RpcException(-8, "Verbosity must be 0 or 1");
+                if (verbosity < 0 || verbosity > 3)
+                    throw new RpcException(-8, "Verbosity must be 0, 1, 2 or 3");
                 Hash256 hash = parseHash(hashText);
-                var info = validation.activeBlockInfo(hash)
+                var view = validation.rpcBlockView(hash, verbosity >= 2)
                         .orElseThrow(() -> new RpcException(-5, "Block not found"));
-                var block = validation.findBlock(hash);
+                var info = view.info();
+                var block = view.block();
                 if (block.isEmpty()) {
                     if (validation.isPrunedActiveBlock(hash))
                         throw new RpcException(-1, "Block not available (pruned data)");
@@ -692,10 +693,13 @@ public final class NodeRpcServer implements AutoCloseable {
                 }
                 var result = new LinkedHashMap<String, Object>(blockHeaderJson(info));
                 result.put("size", BlockSerializer.serialize(block.get()).length);
+                result.put("strippedsize", BlockSerializer.serializeLegacy(block.get()).length);
                 result.put("weight", blockWeight(block.get()));
                 result.put("nTx", block.get().transactions().size());
-                result.put("tx", block.get().transactions().stream()
-                        .map(tx -> tx.txId().toDisplayHex()).toList());
+                result.put("coinbase_tx", coinbaseJson(block.get().transactions().getFirst()));
+                result.put("tx", verbosity == 1
+                        ? block.get().transactions().stream().map(tx -> tx.txId().toDisplayHex()).toList()
+                        : blockTransactionsJson(block.orElseThrow(), view.undo().orElse(null), verbosity));
                 yield result;
             }
             case "getconnectioncount" -> requirePeerManager().size();
@@ -718,7 +722,6 @@ public final class NodeRpcServer implements AutoCloseable {
                     info.put("version", version.version());
                     info.put("subver", version.userAgent());
                     info.put("services", String.format("%016x", version.services()));
-                    info.put("startingheight", version.startHeight());
                 }
                 return info;
             }).toList();
@@ -912,7 +915,7 @@ public final class NodeRpcServer implements AutoCloseable {
                 info.put("loaded", true);
                 info.put("size", entries.size());
                 info.put("bytes", bytes);
-                info.put("usage", bytes);
+                // JVM retained memory is not measured; virtual size is reported as bytes only.
                 info.put("total_fee", satoshisToBtc(entries.stream().mapToLong(ru.bitcoin.node.mempool.MempoolEntry::fee).sum()));
                 info.put("maxmempool", MempoolLimits.DEFAULT.maxPoolVirtualBytes());
                 info.put("mempoolminfee", satoshisPerKvBToBtcPerKvB(validation.feeFilterRate()));
@@ -921,7 +924,8 @@ public final class NodeRpcServer implements AutoCloseable {
                 info.put("unbroadcastcount", validation.unbroadcastMempoolCount());
                 info.put("limitclustercount", MempoolLimits.DEFAULT.clusterCount());
                 info.put("limitclustersize", MempoolLimits.DEFAULT.clusterVirtualBytes());
-                info.put("optimal", true);
+                // The greedy cluster linearizer does not certify global optimality.
+                info.put("optimal", entries.isEmpty());
                 info.put("fullrbf", true);
                 yield info;
             }
@@ -1099,6 +1103,55 @@ public final class NodeRpcServer implements AutoCloseable {
         if (value instanceof Boolean bool) return bool ? 1 : 0;
         if (value instanceof Number number) return number.intValue();
         throw new RpcException(-32602, "verbosity must be numeric or boolean");
+    }
+
+    private List<Map<String, Object>> blockTransactionsJson(
+            ru.bitcoin.node.protocol.block.Block block,
+            ru.bitcoin.node.storage.undo.BlockUndoData undo, int verbosity) {
+        var transactions = block.transactions();
+        if (undo != null && undo.transactions().size() != transactions.size() - 1)
+            throw new RpcException(-32603, "Block undo transaction count mismatch");
+        var result = new ArrayList<Map<String, Object>>(transactions.size());
+        for (int i = 0; i < transactions.size(); i++) {
+            var transaction = transactions.get(i);
+            var json = transactionJson(transaction, null, null);
+            if (i > 0 && undo != null) {
+                var coins = undo.transactions().get(i - 1).spentOutputs();
+                if (coins.size() != transaction.inputs().size())
+                    throw new RpcException(-32603, "Block undo input count mismatch");
+                long totalIn = 0;
+                @SuppressWarnings("unchecked")
+                var inputs = (List<Map<String, Object>>) json.get("vin");
+                for (int j = 0; j < coins.size(); j++) {
+                    var coin = coins.get(j);
+                    totalIn = Math.addExact(totalIn, coin.amount());
+                    if (verbosity == 3) inputs.get(j).put("prevout", Map.of(
+                            "generated", coin.coinbase(), "height", coin.height(),
+                            "value", satoshisToBtc(coin.amount()),
+                            "scriptPubKey", Map.of("hex", HexFormat.of().formatHex(coin.scriptPubKey()))));
+                }
+                long totalOut = 0;
+                for (var output : transaction.outputs()) totalOut = Math.addExact(totalOut, output.value());
+                long fee = Math.subtractExact(totalIn, totalOut);
+                if (fee < 0 || fee > ru.bitcoin.node.storage.utxo.StoredUtxo.MAX_MONEY)
+                    throw new RpcException(-32603, "Block undo fee out of range");
+                json.put("fee", satoshisToBtc(fee));
+            }
+            result.add(json);
+        }
+        return result;
+    }
+
+    private static Map<String, Object> coinbaseJson(Transaction coinbase) {
+        var input = coinbase.inputs().getFirst();
+        var result = new LinkedHashMap<String, Object>();
+        result.put("version", coinbase.version());
+        result.put("locktime", coinbase.lockTime().value());
+        result.put("sequence", input.sequence().value());
+        result.put("coinbase", HexFormat.of().formatHex(input.scriptSig()));
+        if (!input.witness().isEmpty())
+            result.put("witness", HexFormat.of().formatHex(input.witness().items().getFirst()));
+        return result;
     }
 
     private Map<String, Object> transactionJson(

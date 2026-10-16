@@ -15,6 +15,7 @@ final class MempoolGraphPolicy {
     }
 
     static Set<Hash256> descendants(Map<Hash256, MempoolEntry> entries, Set<Hash256> roots) {
+        if (roots.isEmpty()) return Set.of();
         Set<Hash256> result = new HashSet<>(roots);
         boolean changed;
         do {

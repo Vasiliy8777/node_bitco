@@ -153,7 +153,7 @@ public final class LiveChainSynchronizer implements AutoCloseable {
         if (peer.state() == PeerState.CLOSED) {
             log.debug("Peer {} disconnected during live synchronization: {}", peer.remoteAddress(), exception.toString());
         } else {
-            log.warn("Live chain synchronization failed; replacing peer", exception);
+            log.warn("Live chain synchronization failed for peer {}; replacing peer", peer.remoteAddress(), exception);
         }
         try {
             peer.close();

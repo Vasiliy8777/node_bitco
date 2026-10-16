@@ -28,10 +28,11 @@ public final class ClusterLinearization {
     public static List<Set<Hash256>> clusters(Map<Hash256, MempoolEntry> entries) {
         Objects.requireNonNull(entries, "entries");
         Set<Hash256> remaining = new LinkedHashSet<>(entries.keySet());
+        var neighbors = neighbors(entries);
         List<Set<Hash256>> result = new ArrayList<>();
         while (!remaining.isEmpty()) {
             Hash256 root = remaining.iterator().next();
-            Set<Hash256> component = connected(entries, root);
+            Set<Hash256> component = connectedNeighbors(neighbors, List.of(root));
             remaining.removeAll(component);
             result.add(component);
         }
@@ -135,26 +136,35 @@ public final class ClusterLinearization {
     public static Set<Hash256> connected(Map<Hash256, MempoolEntry> entries, Collection<Hash256> roots) {
         Objects.requireNonNull(entries);
         Objects.requireNonNull(roots);
+        return connectedNeighbors(neighbors(entries), roots);
+    }
+
+    /** Build both directions once, rather than scanning every transaction per visited node. */
+    private static Map<Hash256, List<Hash256>> neighbors(Map<Hash256, MempoolEntry> entries) {
+        Map<Hash256, List<Hash256>> neighbors = new LinkedHashMap<>();
+        for (Hash256 id : entries.keySet()) neighbors.put(id, new ArrayList<>());
+        for (var entry : entries.entrySet()) {
+            Hash256 child = entry.getKey();
+            for (var input : entry.getValue().transaction().inputs()) {
+                Hash256 parent = input.previousOutput().transactionId();
+                if (neighbors.containsKey(parent)) {
+                    neighbors.get(child).add(parent);
+                    neighbors.get(parent).add(child);
+                }
+            }
+        }
+        return neighbors;
+    }
+
+    private static Set<Hash256> connectedNeighbors(Map<Hash256, List<Hash256>> neighbors, Collection<Hash256> roots) {
         Set<Hash256> result = new LinkedHashSet<>();
         Deque<Hash256> queue = new ArrayDeque<>(roots);
         while (!queue.isEmpty()) {
             Hash256 id = queue.removeFirst();
-            if (!entries.containsKey(id) || !result.add(id)) continue;
-            for (var input : entries.get(id).transaction().inputs()) {
-                Hash256 parent = input.previousOutput().transactionId();
-                if (entries.containsKey(parent)) queue.addLast(parent);
-            }
-            for (var candidate : entries.entrySet()) {
-                if (!result.contains(candidate.getKey()) && candidate.getValue().transaction().inputs().stream()
-                        .anyMatch(input -> input.previousOutput().transactionId().equals(id)))
-                    queue.addLast(candidate.getKey());
-            }
+            if (!neighbors.containsKey(id) || !result.add(id)) continue;
+            for (Hash256 neighbor : neighbors.get(id)) if (!result.contains(neighbor)) queue.addLast(neighbor);
         }
         return Set.copyOf(result);
-    }
-
-    private static Set<Hash256> connected(Map<Hash256, MempoolEntry> entries, Hash256 root) {
-        return connected(entries, List.of(root));
     }
 
     private static void collectAncestors(Hash256 id, Map<Hash256, MempoolEntry> entries, Set<Hash256> remaining,

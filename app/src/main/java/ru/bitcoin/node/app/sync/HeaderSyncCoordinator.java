@@ -100,11 +100,16 @@ public final class HeaderSyncCoordinator {
                 return processedCount;
             }
 
-            List<BlockIndex> processed =
-                    headerSyncService.process(
-                            headers,
-                            onValidatedHeader
-                    );
+            List<BlockIndex> processed;
+            try {
+                processed = headerSyncService.process(headers, onValidatedHeader);
+            } catch (ru.bitcoin.node.chain.UnconnectedHeaderException exception) {
+                // A peer may send an unsolicited/fork header that cannot connect to
+                // our tree. Initial and live sync must replace this peer, not fail
+                // the node. Other storage/programming state errors remain fatal.
+                throw new IOException("Peer sent an unconnected header "
+                        + exception.headerHash().toDisplayHex() + ": " + exception.getMessage(), exception);
+            }
 
             if (processed.isEmpty()) {
                 throw new IllegalStateException(
