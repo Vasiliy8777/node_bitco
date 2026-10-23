@@ -1,7 +1,10 @@
 package ru.bitcoin.node.rvn.p2p;
+
 import ru.bitcoin.node.rvn.protocol.*;
+
 import java.io.IOException;
 import java.util.*;
+
 /**
  * One explicit, bounded fetch. Locators MUST be supplied by the caller from trusted sources.
  * No automatic pagination: next locators require verified Ravencoin block IDs.
@@ -11,8 +14,9 @@ public final class RvnHeadersProbeCoordinator {
     private final RvnHeadersIngestor ingestor;
     private final RvnNetwork network;
     private final int connectTimeoutMs, queueCapacity;
+
     public RvnHeadersProbeCoordinator(RvnPeerSelector selector, RvnHeadersIngestor ingestor,
-            RvnNetwork network, int connectTimeoutMs, int queueCapacity) {
+                                      RvnNetwork network, int connectTimeoutMs, int queueCapacity) {
         this.selector = Objects.requireNonNull(selector);
         this.ingestor = Objects.requireNonNull(ingestor);
         this.network = Objects.requireNonNull(network);
@@ -21,8 +25,9 @@ public final class RvnHeadersProbeCoordinator {
         this.connectTimeoutMs = connectTimeoutMs;
         this.queueCapacity = queueCapacity;
     }
+
     public Optional<RvnHeadersIngestor.Receipt> fetchOnce(int protocolVersion, List<byte[]> trustedLocators,
-            byte[] stopHash, long activationTime, long responseTimeoutMs) throws IOException, InterruptedException {
+                                                          byte[] stopHash, long activationTime, long responseTimeoutMs) throws IOException, InterruptedException {
         // Validate request BEFORE opening a network connection or consuming a peer slot.
         RvnGetHeaders.encode(protocolVersion, trustedLocators, stopHash);
         long now = System.nanoTime();

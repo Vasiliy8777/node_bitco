@@ -54,10 +54,15 @@ public final class RvnPeerSession implements AutoCloseable {
             socket.setTcpNoDelay(true);
             RvnWire.write(socket.getOutputStream(), network,
                     new RvnMessage("version", RvnVersion.outbound(70028, port, 0)));
+            long handshakeDeadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis);
             boolean gotVersion = false;
             boolean gotVerack = false;
             int remoteVersion = 0;
             for (int i = 0; i < 16 && !(gotVersion && gotVerack); i++) {
+                long remainingNanos = handshakeDeadline - System.nanoTime();
+                if (remainingNanos <= 0) throw new SocketTimeoutException("RVN handshake deadline exceeded");
+                long remainingMillis = Math.max(1, TimeUnit.NANOSECONDS.toMillis(remainingNanos));
+                socket.setSoTimeout((int) Math.min(timeoutMillis, remainingMillis));
                 RvnMessage message = RvnWire.read(socket.getInputStream(), network);
                 switch (message.command()) {
                     case "version" -> {
@@ -83,6 +88,7 @@ public final class RvnPeerSession implements AutoCloseable {
                 }
             }
             if (!gotVersion || !gotVerack) throw new IOException("Handshake incomplete");
+            socket.setSoTimeout(timeoutMillis);
             return new RvnPeerSession(network, socket, remoteVersion, queueCapacity);
         } catch (IOException | RuntimeException e) {
             try {

@@ -10,6 +10,11 @@ import java.util.concurrent.TimeUnit;
  * One bounded getheaders round-trip over an already handshaken session.
  */
 public final class RvnHeadersClient {
+    /**
+     * Prevents an active peer from feeding unlimited unrelated messages.
+     */
+    public static final int MAX_IGNORED_MESSAGES = 64;
+
     private RvnHeadersClient() {
     }
 
@@ -18,7 +23,10 @@ public final class RvnHeadersClient {
             throws IOException, InterruptedException {
         if (session == null) throw new IllegalArgumentException("session");
         if (timeoutMs < 1 || timeoutMs > 120_000) throw new IllegalArgumentException("timeoutMs");
-        session.requestHeaders(protocolVersion, locator, stopHash);
+        if (protocolVersion <= 0) throw new IllegalArgumentException("protocolVersion");
+        int negotiatedVersion = Math.min(protocolVersion, session.peerVersion());
+        session.requestHeaders(negotiatedVersion, locator, stopHash);
+        int ignored = 0;
         long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
         while (true) {
             long remaining = deadline - System.nanoTime();
@@ -31,7 +39,10 @@ public final class RvnHeadersClient {
                 RvnHeaderRules.checkBatch(headers);
                 return headers;
             }
-            // Other messages are not treated as a headers response.
+            // Ignore a bounded number of unrelated messages; do not let a peer
+            // indefinitely flood us while waiting for the requested response.
+            if (++ignored > MAX_IGNORED_MESSAGES)
+                throw new IOException("Too many unrelated messages while awaiting RVN headers");
         }
     }
 }
