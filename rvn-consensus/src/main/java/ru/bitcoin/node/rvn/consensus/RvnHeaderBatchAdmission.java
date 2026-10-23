@@ -22,6 +22,17 @@ public final class RvnHeaderBatchAdmission {
     private RvnHeaderBatchAdmission() {
     }
 
+    /**
+     * Performs whole-batch structural checks before any index mutation.
+     * Proof validation still happens sequentially and may partially commit.
+     */
+    public static List<RvnValidatedHeaderIndex.Entry> admitPreflighted(
+            RvnValidatedHeaderIndex index, List<Item> batch,
+            RvnHeaderProofGate.Verifier verifier, RvnHeaderFormatPolicy policy) {
+        RvnHeaderBatchPreflight.check(batch, policy);
+        return admit(index, batch, verifier);
+    }
+
     public static List<RvnValidatedHeaderIndex.Entry> admit(
             RvnValidatedHeaderIndex index, List<Item> batch,
             RvnHeaderProofGate.Verifier verifier) {
