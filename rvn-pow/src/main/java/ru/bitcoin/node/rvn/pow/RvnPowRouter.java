@@ -3,7 +3,7 @@ package ru.bitcoin.node.rvn.pow;
 import java.util.Objects;
 
 /**
- * Dispatch by independently established block height; never infer epoch from timestamp.
+ * Fail-closed height-based dispatch. KawPoW requires independently computed mix.
  */
 public final class RvnPowRouter {
     private final RvnPowSchedule schedule;
@@ -17,9 +17,14 @@ public final class RvnPowRouter {
     public RvnPowResult calculate(long height, byte[] raw) throws RvnPowException {
         var algorithm = schedule.atHeight(height);
         RvnPowHeaderRules.requireHeader(algorithm, raw);
-        if (algorithm == RvnPowAlgorithm.KAWPOW &&
-                RvnPowHeaderRules.kawpowDeclaredHeight(raw) != height)
-            throw new RvnPowException("KawPoW declared height mismatch");
-        return engine.calculate(algorithm, raw.clone());
+        if (algorithm == RvnPowAlgorithm.KAWPOW) {
+            if (RvnPowHeaderRules.kawpowDeclaredHeight(raw) != height)
+                throw new RvnPowException("KawPoW declared height mismatch");
+            if (!(engine instanceof RvnKawpowMixEngine mix))
+                throw new RvnPowException("KawPoW requires independently verified mix");
+            return RvnKawpowProof.requireValidMix(mix, raw);
+        }
+        return Objects.requireNonNull(engine.calculate(algorithm, raw.clone()),
+                "PoW engine returned null");
     }
 }
