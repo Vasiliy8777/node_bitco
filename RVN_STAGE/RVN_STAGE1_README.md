@@ -2,7 +2,7 @@
 
 Source base: supplied node_bitco-main archive dated 2026-10-16. Original Bitcoin classes are unchanged.
 
-Added modules: `rvn-consensus` (strict uint32 nBits/256-bit target primitive + tests) and `rvn-app` (independent Spring Boot launcher). Root `pom.xml` gains these modules. `rvn-app` does not depend on `app` and cannot accidentally start Bitcoin P2P/mining. Its mining flag deliberately refuses to start.
+Added modules: `rvn-consensus` (strict uint32 nBits/256-bit target primitive + tests) and `rvn-app` (independent Spring Boot launcher). Root `../pom.xml` gains these modules. `rvn-app` does not depend on `app` and cannot accidentally start Bitcoin P2P/mining. Its mining flag deliberately refuses to start.
 
 ## Build / test
 

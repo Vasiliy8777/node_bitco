@@ -5,7 +5,7 @@ Extract at the repository root, preserving directory names and replacing only th
 No Bitcoin source, settings, run configuration, database, or mining logic is included or changed.
 
 ## Changes
-- Fix duplicate `rvn-p2p` dependency in `rvn-app/pom.xml`.
+- Fix duplicate `rvn-p2p` dependency in `../rvn-app/pom.xml`.
 - Add `RvnPeerSession` (persistent outbound TCP connection, handshake, ping/pong, bounded incoming queue, timeouts, close, error reporting).
 - Add loopback JUnit tests for the session.
 - Add optional short session smoke test in `rvn-app`; disabled by default.
