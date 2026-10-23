@@ -163,6 +163,35 @@ public final class RvnValidatedHeaderIndex {
         return List.copyOf(records);
     }
 
+
+    /**
+     * An immutable, internally consistent snapshot of the active verified chain.
+     * All header bytes are copied while holding the same lock as tip selection.
+     * No candidate from a stale fork can appear in this snapshot.
+     */
+    public record ActiveHeader(RvnHash256 id, byte[] raw) {
+        public ActiveHeader {
+            Objects.requireNonNull(id);
+            raw = Objects.requireNonNull(raw).clone();
+        }
+
+        @Override
+        public byte[] raw() {
+            return raw.clone();
+        }
+    }
+
+    public synchronized List<ActiveHeader> activeHeadersSnapshot() {
+        List<Entry> path = pathToAnchor(bestId);
+        List<ActiveHeader> result = new ArrayList<>(path.size());
+        for (Entry entry : path) {
+            byte[] raw = verifiedWire.get(entry.candidate().id());
+            if (raw == null) throw new IllegalStateException("Missing verified header bytes");
+            result.add(new ActiveHeader(entry.candidate().id(), raw));
+        }
+        return List.copyOf(result);
+    }
+
     public synchronized Optional<Entry> find(RvnHash256 id) {
         return Optional.ofNullable(entries.get(Objects.requireNonNull(id)));
     }

@@ -21,9 +21,9 @@ public final class RvnVerifiedHeadersResponder {
         Objects.requireNonNull(anchor);
         var request = RvnGetHeaders.decode(getheadersPayload);
         // Snapshot the active chain once; no fork header is eligible for reply.
-        List<RvnValidatedHeaderIndex.Entry> chain = index.pathToAnchor(index.bestId());
+        List<RvnValidatedHeaderIndex.ActiveHeader> chain = index.activeHeadersSnapshot();
         Map<RvnHash256, Integer> positions = new HashMap<>(chain.size());
-        for (int i = 0; i < chain.size(); i++) positions.put(chain.get(i).candidate().id(), i);
+        for (int i = 0; i < chain.size(); i++) positions.put(chain.get(i).id(), i);
         int start = -1;
         for (byte[] wire : request.locators()) {
             RvnHash256 hash = new RvnHash256(wire);
@@ -43,10 +43,9 @@ public final class RvnVerifiedHeadersResponder {
         byte[] stop = request.stopHash();
         for (int i = start; i < chain.size() && headers.size() < RvnHeaders.MAX_HEADERS; i++) {
             var entry = chain.get(i);
-            byte[] raw = index.verifiedRaw(entry.candidate().id())
-                    .orElseThrow(() -> new IllegalStateException("Missing validated header bytes"));
+            byte[] raw = entry.raw();
             headers.add(RvnBlockHeader.parse(raw, activationTime));
-            if (Arrays.equals(entry.candidate().id().wire(), stop)) break;
+            if (Arrays.equals(entry.id().wire(), stop)) break;
         }
         return RvnHeaders.encode(headers);
     }
