@@ -40,12 +40,12 @@ public final class RvnHeaderRecovery {
      * recovered index can be returned to the caller.
      */
     public static Result recoverAudited(Path path,
-                                         Supplier<RvnValidatedHeaderIndex> emptyIndexFactory,
-                                         RvnHeaderFormatPolicy policy,
-                                         RvnHeaderProofGate.Verifier verifier,
-                                         RvnHash256 anchor, long anchorHeight,
-                                         java.math.BigInteger anchorWork,
-                                         java.math.BigInteger powLimit) throws IOException {
+                                        Supplier<RvnValidatedHeaderIndex> emptyIndexFactory,
+                                        RvnHeaderFormatPolicy policy,
+                                        RvnHeaderProofGate.Verifier verifier,
+                                        RvnHash256 anchor, long anchorHeight,
+                                        java.math.BigInteger anchorWork,
+                                        java.math.BigInteger powLimit) throws IOException {
         Result result = recover(path, emptyIndexFactory, policy, verifier);
         RvnVerifiedChainAudit.check(result.index(), anchor, anchorHeight, anchorWork, powLimit);
         return result;
@@ -71,18 +71,32 @@ public final class RvnHeaderRecovery {
         if (index.size() != 0)
             throw new IllegalArgumentException("Factory must return an empty index");
         var records = RvnVerifiedHeaderJournal.read(path);
+
+        // A journal is a parent-first GRAPH, not necessarily a single chain.
+        // Split it into contiguous runs: the normal network headers path can
+        // validate each run atomically, while fork boundaries start new runs.
+        // Never assume that two consecutive journal records share a parent.
         int restored = 0;
-        for (int start = 0; start < records.size(); start += 2000) {
-            int end = Math.min(start + 2000, records.size());
-            var batch = new java.util.ArrayList<RvnHeaderBatchAdmission.Item>(end - start);
-            for (int i = start; i < end; i++) {
-                var record = records.get(i);
-                var candidate = RvnHeaderCandidateFactory.unverified(
-                        record.claimedId(), record.raw(), policy);
-                batch.add(new RvnHeaderBatchAdmission.Item(candidate, record.raw()));
+        java.util.Set<RvnHash256> seen = new java.util.HashSet<>();
+        java.util.ArrayList<RvnHeaderBatchAdmission.Item> run = new java.util.ArrayList<>(2000);
+        RvnHash256 previous = null;
+        for (var record : records) {
+            if (!seen.add(record.claimedId()))
+                throw new SecurityException("Duplicate block ID in journal");
+            var candidate = RvnHeaderCandidateFactory.unverified(
+                    record.claimedId(), record.raw(), policy);
+            var item = new RvnHeaderBatchAdmission.Item(candidate, record.raw());
+            if (!run.isEmpty() && (run.size() == 2000 || !candidate.parentId().equals(previous))) {
+                index.admitBatchAtomicContextual(run, verifierFactory, policy);
+                restored += run.size();
+                run.clear();
             }
-            index.admitBatchAtomicContextual(batch, verifierFactory, policy);
-            restored += batch.size();
+            run.add(item);
+            previous = candidate.id();
+        }
+        if (!run.isEmpty()) {
+            index.admitBatchAtomicContextual(run, verifierFactory, policy);
+            restored += run.size();
         }
         return new Result(index, restored);
     }
