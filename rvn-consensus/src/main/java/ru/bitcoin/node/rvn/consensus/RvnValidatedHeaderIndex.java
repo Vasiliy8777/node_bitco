@@ -13,7 +13,7 @@ public final class RvnValidatedHeaderIndex {
                         BigInteger blockWork, BigInteger chainWork) {
     }
 
-    private final Map<RvnHash256, Entry> entries = new HashMap<>();
+    private final Map<RvnHash256, Entry> entries = new LinkedHashMap<>();
     private final Map<RvnHash256, byte[]> verifiedWire = new HashMap<>();
     private final int capacity;
     private final RvnHash256 anchor;
@@ -83,6 +83,51 @@ public final class RvnValidatedHeaderIndex {
     public synchronized Optional<byte[]> verifiedRaw(RvnHash256 id) {
         byte[] raw = verifiedWire.get(Objects.requireNonNull(id));
         return raw == null ? Optional.empty() : Optional.of(raw.clone());
+    }
+
+
+    /**
+     * All-or-nothing in-memory batch commit. The complete batch is checked against
+     * a private copy, including all proof-gate calls, before index state is changed.
+     * The caller MUST use a complete consensus verifier and trusted anchor.
+     */
+    public synchronized List<Entry> admitBatchAtomic(
+            List<RvnHeaderBatchAdmission.Item> batch,
+            RvnHeaderProofGate.Verifier verifier,
+            RvnHeaderFormatPolicy policy) {
+        Objects.requireNonNull(verifier);
+        RvnHeaderBatchPreflight.check(batch, policy);
+        RvnValidatedHeaderIndex staged = new RvnValidatedHeaderIndex(
+                capacity, anchor, anchorHeight, anchorWork, powLimit);
+        staged.entries.putAll(entries);
+        for (var wireEntry : verifiedWire.entrySet())
+            staged.verifiedWire.put(wireEntry.getKey(), wireEntry.getValue().clone());
+        staged.bestId = bestId;
+        staged.bestHeight = bestHeight;
+        staged.bestWork = bestWork;
+        List<Entry> result = new ArrayList<>(batch.size());
+        for (var item : batch)
+            result.add(staged.admit(item.candidate(), item.raw(), verifier));
+        entries.clear();
+        entries.putAll(staged.entries);
+        verifiedWire.clear();
+        verifiedWire.putAll(staged.verifiedWire);
+        bestId = staged.bestId;
+        bestHeight = staged.bestHeight;
+        bestWork = staged.bestWork;
+        return List.copyOf(result);
+    }
+
+    /**
+     * Export validated candidates in parent-first insertion order for a journal.
+     * This does not make the journal trusted; replay must reverify every record.
+     */
+    public synchronized List<RvnVerifiedHeaderJournal.Record> journalRecords() {
+        List<RvnVerifiedHeaderJournal.Record> records = new ArrayList<>(entries.size());
+        for (Entry entry : entries.values())
+            records.add(new RvnVerifiedHeaderJournal.Record(
+                    entry.candidate().id(), verifiedWire.get(entry.candidate().id())));
+        return List.copyOf(records);
     }
 
     public synchronized Optional<Entry> find(RvnHash256 id) {

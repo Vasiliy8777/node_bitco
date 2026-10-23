@@ -33,6 +33,16 @@ public final class RvnHeaderBatchAdmission {
         return admit(index, batch, verifier);
     }
 
+
+    /**
+     * Atomic alternative to the legacy sequential admission API.
+     */
+    public static List<RvnValidatedHeaderIndex.Entry> admitAtomic(
+            RvnValidatedHeaderIndex index, List<Item> batch,
+            RvnHeaderProofGate.Verifier verifier, RvnHeaderFormatPolicy policy) {
+        return Objects.requireNonNull(index).admitBatchAtomic(batch, verifier, policy);
+    }
+
     public static List<RvnValidatedHeaderIndex.Entry> admit(
             RvnValidatedHeaderIndex index, List<Item> batch,
             RvnHeaderProofGate.Verifier verifier) {
