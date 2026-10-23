@@ -13,3 +13,6 @@ ravencoin:
     host: ${RVN_P2P_HOST:127.0.0.1}
     port: ${RVN_P2P_PORT:0}
     timeout-ms: 5000
+    session-enabled: ${RVN_P2P_SESSION:false}
+    session-duration-ms: ${RVN_P2P_SESSION_DURATION_MS:5000}
+    queue-capacity: ${RVN_P2P_QUEUE_CAPACITY:64}

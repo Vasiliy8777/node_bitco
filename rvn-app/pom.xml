@@ -23,11 +23,6 @@
             <artifactId>rvn-p2p</artifactId>
             <version>${project.version}</version>
         </dependency>
-        <dependency>
-            <groupId>ru.bitcoin.mining</groupId>
-            <artifactId>rvn-p2p</artifactId>
-            <version>${project.version}</version>
-        </dependency>
     </dependencies>
     <build>
         <plugins>

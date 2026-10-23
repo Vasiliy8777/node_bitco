@@ -1,7 +1,7 @@
 package ru.bitcoin.node.rvn.p2p;
 
 import ru.bitcoin.node.rvn.protocol.*;
-
+import ru.bitcoin.node.rvn.protocol.RvnNetwork;
 import java.io.*;
 import java.net.*;
 
