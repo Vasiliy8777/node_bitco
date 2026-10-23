@@ -1,0 +1,15 @@
+spring:
+  application:
+    name: ravencoin-node
+  main:
+    web-application-type: none
+ravencoin:
+  network: ${RVN_NETWORK:mainnet}
+  data-directory: ./data/ravencoin/mainnet
+  mining:
+    enabled: false
+  p2p:
+    probe-enabled: ${RVN_P2P_PROBE:false}
+    host: ${RVN_P2P_HOST:127.0.0.1}
+    port: ${RVN_P2P_PORT:0}
+    timeout-ms: 5000

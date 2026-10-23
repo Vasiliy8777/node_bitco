@@ -24,6 +24,22 @@
         <netty.version>4.1.137.Final</netty.version>
         <bouncycastle.version>1.83</bouncycastle.version>
     </properties>
+    <dependencies>
+        <dependency>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-autoconfigure</artifactId>
+        </dependency>
+    </dependencies>
 
     <modules>
         <module>common</module>
@@ -38,6 +54,10 @@
         <module>mining</module>
         <module>stratum</module>
         <module>app</module>
+        <module>rvn-p2p</module>
+        <module>rvn-protocol</module>
+        <module>rvn-consensus</module>
+        <module>rvn-app</module>
     </modules>
 
     <dependencyManagement>
@@ -94,6 +114,14 @@
                             <version>21</version>
                         </jdk>
                     </toolchains>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <source>10</source>
+                    <target>10</target>
                 </configuration>
             </plugin>
         </plugins>
