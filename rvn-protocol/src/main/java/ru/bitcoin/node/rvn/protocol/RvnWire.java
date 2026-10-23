@@ -6,7 +6,7 @@ import java.security.*;
 import java.util.Arrays;
 
 public final class RvnWire {
-    public static final int MAX_PAYLOAD = 4_000_000;
+    public static final int MAX_PAYLOAD = 8_000_000;
 
     private RvnWire() {
     }

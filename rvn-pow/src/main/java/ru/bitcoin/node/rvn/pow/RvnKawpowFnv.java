@@ -11,11 +11,13 @@ public final class RvnKawpowFnv {
     }
 
     public static int mix(int a, int b) {
-        return (a * PRIME) ^ b;
+        return fnv1a(a, b);
     }
 
-    /** Ethash dataset parent FNV-1 (xor before multiply). */
-    public static int fnv1(int a, int b) { return (a ^ b) * PRIME; }
+    /** Ethash dataset parent FNV-1: multiply before XOR. */
+    public static int fnv1(int a, int b) { return (a * PRIME) ^ b; }
+
+    public static int fnv1a(int a, int b) { return (a ^ b) * PRIME; }
 
     public static int reduce(int[] values) {
         if (values == null || values.length == 0) throw new IllegalArgumentException("values");

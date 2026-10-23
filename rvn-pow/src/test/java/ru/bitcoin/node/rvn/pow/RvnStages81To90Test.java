@@ -48,7 +48,7 @@ class RvnStages81To90Test {
     @Test
     void fnvUnsignedOverflow() {
         assertEquals(0x01000193, RvnKawpowFnv.PRIME);
-        assertEquals((0x811c9dc5 * 0x01000193) ^ 0x12345678,
+        assertEquals((0x811c9dc5 ^ 0x12345678) * 0x01000193,
                 RvnKawpowFnv.mix(RvnKawpowFnv.OFFSET_BASIS, 0x12345678));
         assertEquals(RvnKawpowFnv.mix(RvnKawpowFnv.OFFSET_BASIS, 0x12345678),
                 RvnKawpowFnv.reduce(new int[]{0x12345678}));

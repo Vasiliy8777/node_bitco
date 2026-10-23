@@ -59,6 +59,8 @@
         <module>rvn-consensus</module>
         <module>rvn-app</module>
         <module>rvn-pow</module>
+        <module>rvn-storage</module>
+        <module>rvn-chain</module>
     </modules>
 
     <dependencyManagement>

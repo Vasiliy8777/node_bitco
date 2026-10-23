@@ -10,21 +10,39 @@ class RvnPowInfrastructureTest {
     @Test
     void dispatchBoundaries() {
         var s = new RvnPowSchedule(100, 200);
-        assertEquals(RvnPowAlgorithm.X16R, s.atHeight(99));
-        assertEquals(RvnPowAlgorithm.X16RV2, s.atHeight(100));
-        assertEquals(RvnPowAlgorithm.X16RV2, s.atHeight(199));
-        assertEquals(RvnPowAlgorithm.KAWPOW, s.atHeight(200));
+        assertEquals(RvnPowAlgorithm.X16R, s.atTimestamp(99));
+        assertEquals(RvnPowAlgorithm.X16RV2, s.atTimestamp(100));
+        assertEquals(RvnPowAlgorithm.X16RV2, s.atTimestamp(199));
+        assertEquals(RvnPowAlgorithm.KAWPOW, s.atTimestamp(200));
         assertThrows(IllegalArgumentException.class, () -> new RvnPowSchedule(100, 100));
+    }
+
+    @Test
+    void routerSelectsByTimeIndependentlyOfHeight() throws Exception {
+        var seen = new ArrayList<RvnPowAlgorithm>();
+        var router = new RvnPowRouter(RvnPowSchedule.mainnet(), (algorithm, raw) -> {
+            seen.add(algorithm);
+            return new RvnPowResult(new byte[32], new byte[32]);
+        });
+        byte[] old = new byte[80];
+        RvnKawpowWords.writeLE(1569945599, old, 68);
+        router.calculate(2000000, old);
+        RvnKawpowWords.writeLE(1569945600, old, 68);
+        router.calculate(1, old);
+        assertEquals(List.of(RvnPowAlgorithm.X16R, RvnPowAlgorithm.X16RV2), seen);
+        RvnKawpowWords.writeLE(1588788000, old, 68);
+        assertThrows(IllegalArgumentException.class, () -> router.calculate(1, old));
     }
 
     @Test
     void noSilentFallback() {
         var router = new RvnPowRouter(new RvnPowSchedule(100, 200), new RvnPowUnavailable());
         assertThrows(RvnPowException.class, () -> router.calculate(1, new byte[80]));
-        assertThrows(IllegalArgumentException.class, () -> router.calculate(200, new byte[80]));
-        assertThrows(RvnPowException.class, () -> router.calculate(200, new byte[120]));
+        assertThrows(RvnPowException.class, () -> router.calculate(200, new byte[80]));
+        byte[] kawpow = new byte[120]; kawpow[68] = (byte) 200;
+        assertThrows(RvnPowException.class, () -> router.calculate(200, kawpow));
         byte[] raw = new byte[120];
-        raw[76] = 1;
+        raw[76] = 1; raw[68] = (byte) 200;
         assertThrows(RvnPowException.class, () -> router.calculate(200, raw));
     }
 

@@ -6,8 +6,18 @@ spring:
 ravencoin:
   network: ${RVN_NETWORK:mainnet}
   data-directory: ./data/ravencoin/mainnet
+  sync:
+    enabled: ${RVN_SYNC_ENABLED:false}
+    blocks-enabled: ${RVN_SYNC_BLOCKS:false}
+    peers: ${RVN_SYNC_PEERS:seed-raven.bitactivate.com,seed-raven.ravencoin.com,seed-raven.ravencoin.org}
+    response-timeout-ms: 30000
+    poll-ms: 10000
   mining:
     enabled: false
+    address: ${RVN_MINING_ADDRESS:}
+  pow:
+    self-test-enabled: ${RVN_POW_SELF_TEST:false}
+    cached-dag-items: 1024
   p2p:
     probe-enabled: ${RVN_P2P_PROBE:false}
     host: ${RVN_P2P_HOST:127.0.0.1}

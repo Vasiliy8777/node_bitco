@@ -22,8 +22,10 @@ public final class RvnKawpowLightDag implements RvnKawpowDagReader {
 
     public RvnKawpowLightDag(RvnKawpowCache lightCache, long datasetBytes, int maxCachedItems) {
         this.lightCache = Objects.requireNonNull(lightCache, "lightCache");
-        if (datasetBytes <= 0 || datasetBytes % ITEM_BYTES != 0)
-            throw new IllegalArgumentException("DAG size must be positive and 256-byte aligned");
+        // Core counts 128-byte dataset rows, then floors rowCount / 2 for
+        // ProgPoW's 256-byte accesses. The final odd row is not addressed.
+        if (datasetBytes < ITEM_BYTES || datasetBytes % 128 != 0)
+            throw new IllegalArgumentException("DAG size must contain a full item and be 128-byte aligned");
         this.count = datasetBytes / ITEM_BYTES;
         if (count > 0x4000_0000L)
             throw new IllegalArgumentException("DAG exceeds supported node-index range");

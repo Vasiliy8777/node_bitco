@@ -8,6 +8,12 @@ import org.springframework.beans.factory.annotation.Value;
 import ru.bitcoin.node.rvn.p2p.RvnPeerProbe;
 import ru.bitcoin.node.rvn.p2p.RvnPeerSession;
 import ru.bitcoin.node.rvn.protocol.RvnNetwork;
+import ru.bitcoin.node.rvn.pow.RvnKawpowLightEngine;
+import ru.bitcoin.node.rvn.pow.RvnKawpowSelfTest;
+import ru.bitcoin.node.rvn.pow.RvnJavaPowEngine;
+import ru.bitcoin.node.rvn.pow.RvnHistoricalPowSelfTest;
+import ru.bitcoin.node.rvn.pow.RvnPowException;
+import ru.bitcoin.node.rvn.app.config.RvnMiningSettings;
 
 /**
  * Separate RVN application; does not component-scan Bitcoin modules.
@@ -19,7 +25,29 @@ public class RavencoinNodeApplication {
     }
 
     @Bean
+    RvnMiningSettings rvnMiningSettings(@Value("${ravencoin.network:mainnet}") String network,
+                                       @Value("${ravencoin.mining.address:}") String address) {
+        return new RvnMiningSettings(RvnNetwork.parse(network), address);
+    }
+
+    @Bean
+    RvnKawpowLightEngine rvnKawpowEngine(@Value("${ravencoin.pow.cached-dag-items:1024}") int capacity) {
+        return new RvnKawpowLightEngine(capacity);
+    }
+
+    @Bean
+    RvnJavaPowEngine rvnPowEngine(RvnKawpowLightEngine kawpow) throws RvnPowException {
+        return new RvnJavaPowEngine(kawpow);
+    }
+
+    @Bean
     ApplicationRunner rvnStartup(@Value("${ravencoin.mining.enabled:false}") boolean mining,
+                                 @Value("${ravencoin.sync.enabled:false}") boolean sync,
+                                 @Value("${ravencoin.sync.blocks-enabled:false}") boolean blocks,
+                                 RvnMiningSettings miningSettings,
+                                 @Value("${ravencoin.pow.self-test-enabled:false}") boolean selfTest,
+                                 RvnKawpowLightEngine powEngine,
+                                 RvnJavaPowEngine allEraEngine,
                                  @Value("${ravencoin.p2p.probe-enabled:false}") boolean probe,
                                  @Value("${ravencoin.network:mainnet}") String networkName,
                                  @Value("${ravencoin.p2p.host:127.0.0.1}") String host,
@@ -31,7 +59,15 @@ public class RavencoinNodeApplication {
         return args -> {
             if (mining) throw new IllegalStateException("RVN mining NOT implemented; refusing to claim it is active");
             RvnNetwork network = RvnNetwork.parse(networkName);
-            System.out.println("RVN stage 2: " + network + "; P2P probe=" + probe + "; chain/KawPoW mining NOT implemented");
+            if (selfTest) {
+                RvnHistoricalPowSelfTest.requireValid(allEraEngine);
+                System.out.println("RVN X16R/X16RV2 CPU self-test OK (genesis and Core C vectors)");
+                RvnKawpowSelfTest.requireValid(powEngine);
+                System.out.println("RVN KawPoW CPU self-test OK (Ravencoin Core known answers)");
+            }
+            System.out.println("RVN " + network + "; header sync=" + sync + "; P2P probe=" + probe
+                    + "; body download=" + blocks + "; payout configured=" + miningSettings.payout().isPresent()
+                    + "; full-block validation and mining NOT implemented");
             if (probe && sessionEnabled) throw new IllegalArgumentException("Choose probe or session, not both");
             if (sessionEnabled) {
                 if (sessionDurationMs < 100 || sessionDurationMs > 60000)

@@ -15,6 +15,7 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * One bounded outbound RVN peer session. This is transport infrastructure, not block validation.
@@ -27,6 +28,8 @@ public final class RvnPeerSession implements AutoCloseable {
     private final BlockingQueue<RvnMessage> incoming;
     private final AtomicBoolean closed = new AtomicBoolean();
     private final AtomicReference<IOException> failure = new AtomicReference<>();
+    private final AtomicLong incomingBytes = new AtomicLong();
+    private static final long MAX_QUEUED_BYTES = 32L * 1024 * 1024;
     private final Thread reader;
     private final int peerVersion;
 
@@ -88,7 +91,10 @@ public final class RvnPeerSession implements AutoCloseable {
                 }
             }
             if (!gotVersion || !gotVerack) throw new IOException("Handshake incomplete");
-            socket.setSoTimeout(timeoutMillis);
+            // The framed reader must not discard partially consumed messages on a
+            // socket timeout. Request deadlines live in RvnHeadersClient; closing
+            // the session always unblocks this reader, even on an idle connection.
+            socket.setSoTimeout(0);
             return new RvnPeerSession(network, socket, remoteVersion, queueCapacity);
         } catch (IOException | RuntimeException e) {
             try {
@@ -113,8 +119,12 @@ public final class RvnPeerSession implements AutoCloseable {
                     send(new RvnMessage("pong", message.payload()));
                 } else if ("version".equals(message.command()) || "verack".equals(message.command())) {
                     throw new IOException("Duplicate handshake message");
-                } else if (!incoming.offer(message)) {
-                    throw new IOException("Inbound peer message queue full: " + incoming.size());
+                } else {
+                    long queued = incomingBytes.addAndGet(message.payloadSize());
+                    if (queued > MAX_QUEUED_BYTES || !incoming.offer(message)) {
+                        incomingBytes.addAndGet(-message.payloadSize());
+                        throw new IOException("RVN inbound queue byte/count limit exceeded");
+                    }
                 }
             }
         } catch (IOException e) {
@@ -135,7 +145,7 @@ public final class RvnPeerSession implements AutoCloseable {
     public RvnMessage poll(long timeoutMillis) throws InterruptedException, IOException {
         if (timeoutMillis < 0) throw new IllegalArgumentException("timeoutMillis");
         RvnMessage message = incoming.poll(timeoutMillis, TimeUnit.MILLISECONDS);
-        if (message != null) return message;
+        if (message != null) { incomingBytes.addAndGet(-message.payloadSize()); return message; }
         IOException error = failure.get();
         if (error != null) throw new IOException("RVN peer disconnected", error);
         if (closed.get()) throw new IOException("RVN peer session closed");

@@ -3,7 +3,7 @@ package ru.bitcoin.node.rvn.pow;
 import java.util.Objects;
 
 /**
- * Fail-closed height-based dispatch. KawPoW requires independently computed mix.
+ * Timestamp-based dispatch; height independently checks the KawPoW header claim.
  */
 public final class RvnPowRouter {
     private final RvnPowSchedule schedule;
@@ -15,7 +15,8 @@ public final class RvnPowRouter {
     }
 
     public RvnPowResult calculate(long height, byte[] raw) throws RvnPowException {
-        var algorithm = schedule.atHeight(height);
+        if (height < 0) throw new IllegalArgumentException("height");
+        var algorithm = schedule.atTimestamp(RvnPowHeaderRules.unsigned32(raw, 68));
         RvnPowHeaderRules.requireHeader(algorithm, raw);
         if (algorithm == RvnPowAlgorithm.KAWPOW) {
             if (RvnPowHeaderRules.kawpowDeclaredHeight(raw) != height)

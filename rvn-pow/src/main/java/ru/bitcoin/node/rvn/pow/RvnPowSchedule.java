@@ -3,17 +3,21 @@ package ru.bitcoin.node.rvn.pow;
 import java.util.Objects;
 
 /**
- * Network-specific activation heights MUST be independently verified against Ravencoin Core.
+ * Timestamp-based algorithm selection, as in Core CBlockHeader::GetHash.
  */
-public record RvnPowSchedule(long x16rv2Height, long kawpowHeight) {
+public record RvnPowSchedule(long x16rv2Time, long kawpowTime) {
     public RvnPowSchedule {
-        if (x16rv2Height <= 0 || kawpowHeight <= x16rv2Height)
-            throw new IllegalArgumentException("Invalid PoW activation heights");
+        if (x16rv2Time <= 0 || kawpowTime <= x16rv2Time || kawpowTime > 0xffff_ffffL)
+            throw new IllegalArgumentException("Invalid PoW activation timestamps");
     }
 
-    public RvnPowAlgorithm atHeight(long height) {
-        if (height < 0) throw new IllegalArgumentException("height");
-        return height >= kawpowHeight ? RvnPowAlgorithm.KAWPOW :
-                height >= x16rv2Height ? RvnPowAlgorithm.X16RV2 : RvnPowAlgorithm.X16R;
+    public static RvnPowSchedule mainnet() {
+        return new RvnPowSchedule(1_569_945_600L, 1_588_788_000L);
+    }
+
+    public RvnPowAlgorithm atTimestamp(long timestamp) {
+        if (timestamp < 0 || timestamp > 0xffff_ffffL) throw new IllegalArgumentException("timestamp");
+        return timestamp >= kawpowTime ? RvnPowAlgorithm.KAWPOW :
+                timestamp >= x16rv2Time ? RvnPowAlgorithm.X16RV2 : RvnPowAlgorithm.X16R;
     }
 }

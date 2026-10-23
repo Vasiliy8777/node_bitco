@@ -1,0 +1,10 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="RavencoinNodeApplication (mainnet block download)" type="SpringBootApplicationConfigurationType" factoryName="Spring Boot">
+    <option name="ENABLE_LAUNCH_OPTIMIZATION" value="false" />
+    <module name="rvn-app" />
+    <option name="SPRING_BOOT_MAIN_CLASS" value="ru.bitcoin.node.rvn.app.RavencoinNodeApplication" />
+    <option name="VM_PARAMETERS" value="-Xms256m -Xmx2g -Dravencoin.sync.enabled=true -Dravencoin.sync.blocks-enabled=true" />
+    <option name="WORKING_DIRECTORY" value="file://$PROJECT_DIR$" />
+    <method v="2"><option name="Make" enabled="true" /></method>
+  </configuration>
+</component>

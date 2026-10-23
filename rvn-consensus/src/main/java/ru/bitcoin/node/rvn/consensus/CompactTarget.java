@@ -9,6 +9,17 @@ public final class CompactTarget {
     private CompactTarget() {
     }
 
+    /** Core GetCompact for a non-negative uint256 (including zero). */
+    public static long encode(BigInteger target) {
+        if (target == null || target.signum() < 0 || target.bitLength() > 256)
+            throw new IllegalArgumentException("target must be uint256");
+        int size = (target.bitLength() + 7) / 8;
+        long word = size <= 3 ? target.longValue() << (8 * (3 - size))
+                : target.shiftRight(8 * (size - 3)).longValue();
+        if ((word & 0x00800000L) != 0) { word >>>= 8; size++; }
+        return ((long) size << 24) | (word & 0x007fffffL);
+    }
+
     /**
      * Decode an unsigned 32-bit nBits representation and reject negative/overflow/zero targets.
      */

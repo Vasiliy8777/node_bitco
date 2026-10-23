@@ -52,7 +52,7 @@ class RvnStages61To70Test {
         };
         var router = new RvnPowRouter(new RvnPowSchedule(100, 200), generic);
         byte[] header = new byte[120];
-        header[76] = (byte) 200;
+        header[76] = (byte) 200; header[68] = (byte) 200;
         assertThrows(RvnPowException.class, () -> router.calculate(200, header));
     }
 
@@ -71,7 +71,7 @@ class RvnStages61To70Test {
         };
         var router = new RvnPowRouter(new RvnPowSchedule(100, 200), kawpow);
         byte[] header = new byte[120];
-        header[76] = (byte) 200;
+        header[76] = (byte) 200; header[68] = (byte) 200;
         assertThrows(RvnPowException.class, () -> router.calculate(200, header));
     }
 

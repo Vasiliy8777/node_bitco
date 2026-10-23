@@ -32,8 +32,8 @@ class RvnProgpowConsensusCorrectionsTest {
     @Test
     void fnv1AndFnv1aAreDistinct() {
         int a = 0x12345678, b = 0x87654321;
-        assertEquals((a ^ b) * RvnKawpowFnv.PRIME, RvnKawpowFnv.fnv1(a, b));
-        assertEquals((a * RvnKawpowFnv.PRIME) ^ b, RvnKawpowFnv.mix(a, b));
+        assertEquals((a * RvnKawpowFnv.PRIME) ^ b, RvnKawpowFnv.fnv1(a, b));
+        assertEquals((a ^ b) * RvnKawpowFnv.PRIME, RvnKawpowFnv.mix(a, b));
         assertNotEquals(RvnKawpowFnv.fnv1(a, b), RvnKawpowFnv.mix(a, b));
     }
 

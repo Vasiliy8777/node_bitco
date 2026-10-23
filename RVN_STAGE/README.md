@@ -1,21 +1,26 @@
-# Ravencoin PoW — KawPoW calculation building blocks
+# Ravencoin node integration
 
-Input: `node_bitco-main - 2026-10-23T224749.097.zip`.
+Current implementation, run instructions, validation evidence and remaining work:
+[IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
 
-Includes actual 22-round Keccak-f[800] permutation, unsigned 32-bit ProgPoW arithmetic,
-KawPoW 7500-block epoch indexing, a 120-byte header field view, and a 16-lane
-mix reduction utility. All are isolated in the existing `rvn-pow` module.
+The current code includes independent Java X16R/X16RV2/KawPoW engines and opt-in
+mainnet header synchronization and optional commitment-checked body download
+backed by an independent RocksDB store. Mining payout uses `RVN_MINING_ADDRESS`.
+It does not yet validate full blocks/UTXO/assets or perform GPU mining.
 
-## Crucial scope
-This is **not** the full KawPoW verifier. No DAG/cache generation, programmable
-random math sequence, seed/final hash, or Core-validated header vectors are
-provided. X16R is also incomplete (14 primitives missing), as is X16RV2
-(Tiger192 and the same primitives missing). Do not use these classes alone
-to validate blocks.
+IntelliJ Spring Boot configurations:
 
-## Testing
-`mvn -pl rvn-pow -am test`
-`mvn -pl rvn-app -am test`
+- `BitcoinNodeApplication GPU`: existing Bitcoin launcher.
+- `RavencoinNodeApplication (development)`: offline RVN engine checks.
+- `RavencoinNodeApplication (mainnet headers)`: persistent RVN header sync.
+- `RavencoinNodeApplication (mainnet block download)`: headers and candidate bodies.
 
-Compiled production sources against the current source ZIP with JDK 21;
-full Maven/JUnit not run in this environment.
+Build and test without `clean`:
+
+```powershell
+mvn -pl rvn-app -am package
+```
+
+The numbered stage READMEs and other patch notes describe historical snapshots;
+their statements about missing components are not the current status. Keep them
+as implementation history and consult `IMPLEMENTATION_STATUS.md` first.

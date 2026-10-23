@@ -10,4 +10,5 @@ public record RvnMessage(String command, byte[] payload) {
     @Override public byte[] payload () {
         return payload.clone();
     }
+    public int payloadSize() { return payload.length; }
 }

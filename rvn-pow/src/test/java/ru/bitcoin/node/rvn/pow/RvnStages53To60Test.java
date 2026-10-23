@@ -3,6 +3,7 @@ import org.junit.jupiter.api.Test;
 import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 class RvnStages53To60Test {
+    private static byte[] kawpowHeader() { byte[] h = new byte[120]; h[68]=(byte)200; h[76]=(byte)200; return h; }
     @Test void referenceOrderFromPreviousBlockDisplay() {
         // Displayed previous hash ends in 070ef6eb6da46c8eae389df90;
         // last 16 hex digits are 6da46c8eae389df90? Use a known 16-char suffix below.
@@ -53,6 +54,6 @@ class RvnStages53To60Test {
         assertThrows(RvnPowException.class,()->RvnKawpowProof.requireValidMix(engine,raw));
         assertThrows(RvnPowException.class,()->new RvnPowRouter(
             new RvnPowSchedule(100,200),(a,b)->new RvnPowResult(new byte[32],new byte[32]))
-            .calculate(200,new byte[120]));
+            .calculate(200,kawpowHeader()));
     }
 }
