@@ -8,6 +8,7 @@ import ru.bitcoin.node.rvn.protocol.RvnWire;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.net.SocketException;
 import java.net.SocketTimeoutException;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
@@ -84,7 +85,10 @@ public final class RvnPeerSession implements AutoCloseable {
             if (!gotVersion || !gotVerack) throw new IOException("Handshake incomplete");
             return new RvnPeerSession(network, socket, remoteVersion, queueCapacity);
         } catch (IOException | RuntimeException e) {
-            try { socket.close(); } catch (IOException ignored) { }
+            try {
+                socket.close();
+            } catch (IOException ignored) {
+            }
             throw e;
         }
     }
@@ -119,7 +123,9 @@ public final class RvnPeerSession implements AutoCloseable {
         RvnWire.write(socket.getOutputStream(), network, message);
     }
 
-    /** Returns null if no message arrived within the requested interval. */
+    /**
+     * Returns null if no message arrived within the requested interval.
+     */
     public RvnMessage poll(long timeoutMillis) throws InterruptedException, IOException {
         if (timeoutMillis < 0) throw new IllegalArgumentException("timeoutMillis");
         RvnMessage message = incoming.poll(timeoutMillis, TimeUnit.MILLISECONDS);
@@ -130,14 +136,38 @@ public final class RvnPeerSession implements AutoCloseable {
         return null;
     }
 
-    public int peerVersion() { return peerVersion; }
-    public int queuedMessages() { return incoming.size(); }
-    public boolean isClosed() { return closed.get(); }
-    public IOException failure() { return failure.get(); }
+    /**
+     * Requests headers after the completed version/verack handshake. Does not validate returned headers.
+     */
+    public void requestHeaders(int protocolVersion, java.util.List<byte[]> locatorHashes, byte[] stopHash)
+            throws IOException {
+        send(new RvnMessage("getheaders", ru.bitcoin.node.rvn.protocol.RvnGetHeaders.encode(
+                protocolVersion, locatorHashes, stopHash)));
+    }
 
-    @Override public void close() {
+    public int peerVersion() {
+        return peerVersion;
+    }
+
+    public int queuedMessages() {
+        return incoming.size();
+    }
+
+    public boolean isClosed() {
+        return closed.get();
+    }
+
+    public IOException failure() {
+        return failure.get();
+    }
+
+    @Override
+    public void close() {
         if (closed.compareAndSet(false, true)) {
-            try { socket.close(); } catch (IOException ignored) { }
+            try {
+                socket.close();
+            } catch (IOException ignored) {
+            }
         }
     }
 }
