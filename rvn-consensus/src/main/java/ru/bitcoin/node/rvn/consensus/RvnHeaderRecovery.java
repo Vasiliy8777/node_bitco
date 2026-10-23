@@ -34,6 +34,23 @@ public final class RvnHeaderRecovery {
         return new Result(candidate, count);
     }
 
+
+    /**
+     * Strict recovery: all journal records are parsed and checked before any
+     * recovered index can be returned to the caller.
+     */
+    public static Result recoverAudited(Path path,
+                                         Supplier<RvnValidatedHeaderIndex> emptyIndexFactory,
+                                         RvnHeaderFormatPolicy policy,
+                                         RvnHeaderProofGate.Verifier verifier,
+                                         RvnHash256 anchor, long anchorHeight,
+                                         java.math.BigInteger anchorWork,
+                                         java.math.BigInteger powLimit) throws IOException {
+        Result result = recover(path, emptyIndexFactory, policy, verifier);
+        RvnVerifiedChainAudit.check(result.index(), anchor, anchorHeight, anchorWork, powLimit);
+        return result;
+    }
+
     public static void save(Path path, RvnValidatedHeaderIndex index) throws IOException {
         Objects.requireNonNull(index);
         RvnVerifiedHeaderJournal.writeAtomically(path, index.journalRecords());
