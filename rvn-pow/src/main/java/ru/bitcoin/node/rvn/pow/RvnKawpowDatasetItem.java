@@ -1,11 +1,11 @@
 package ru.bitcoin.node.rvn.pow;
 
 /**
- * Ethash light-client 64-byte dataset node calculation, 256 parent accesses.
- * KawPoW consumes 128-byte DAG items assembled from two consecutive nodes.
+ * Ethash light-client 64-byte dataset node calculation, 512 parent accesses.
+ * KawPoW consumes 256-byte ProgPoW DAG items assembled from four consecutive nodes.
  */
 public final class RvnKawpowDatasetItem {
-    public static final int PARENTS = 256;
+    public static final int PARENTS = 512;
 
     private RvnKawpowDatasetItem() {
     }
@@ -19,21 +19,21 @@ public final class RvnKawpowDatasetItem {
         mix = RvnKeccak512.digest(mix);
         int[] words = RvnKawpowWords.decode(mix);
         for (int parent = 0; parent < PARENTS; parent++) {
-            int p = RvnKawpowFnv.mix((int) nodeIndex ^ parent, words[parent % 16]);
+            int p = RvnKawpowFnv.fnv1((int) nodeIndex ^ parent, words[parent % 16]);
             int cacheIndex = (int) (Integer.toUnsignedLong(p) % count);
             byte[] source = cache.rowInternal(cacheIndex);
             for (int w = 0; w < 16; w++)
-                words[w] = RvnKawpowFnv.mix(words[w], RvnKawpowWords.readLE(source, w * 4));
+                words[w] = RvnKawpowFnv.fnv1(words[w], RvnKawpowWords.readLE(source, w * 4));
         }
         return RvnKeccak512.digest(RvnKawpowWords.encode(words));
     }
 
     public static byte[] dagItem(RvnKawpowCache cache, long itemIndex) {
-        if (itemIndex < 0 || itemIndex > 0x7fff_ffffL)
+        if (itemIndex < 0 || itemIndex > 0x3fff_ffffL)
             throw new IllegalArgumentException("Invalid DAG item index");
-        byte[] result = new byte[128];
-        System.arraycopy(node(cache, itemIndex * 2), 0, result, 0, 64);
-        System.arraycopy(node(cache, itemIndex * 2 + 1), 0, result, 64, 64);
+        byte[] result = new byte[256];
+        for (int i = 0; i < 4; i++)
+            System.arraycopy(node(cache, itemIndex * 4 + i), 0, result, i * 64, 64);
         return result;
     }
 }

@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class RvnKawpowDagBatchTest {
     @Test
     void parallelBatchPreservesOrderAndDuplicates() {
-        var dag = new RvnKawpowLightDag(RvnKawpowCache.build(new byte[32], 17), 128L * 32, 4);
+        var dag = new RvnKawpowLightDag(RvnKawpowCache.build(new byte[32], 17), 256L * 32, 4);
         var batch = new RvnKawpowDagBatch(dag);
         long[] indexes = {3, 0, 3, 1, 7, 0, 5};
         List<byte[]> result = batch.read(indexes, 4);
@@ -23,7 +23,7 @@ class RvnKawpowDagBatchTest {
 
     @Test
     void emptyBatchAndInvalidParameters() {
-        var dag = new RvnKawpowLightDag(RvnKawpowCache.build(new byte[32], 17), 128L * 4, 0);
+        var dag = new RvnKawpowLightDag(RvnKawpowCache.build(new byte[32], 17), 256L * 4, 0);
         var batch = new RvnKawpowDagBatch(dag);
         assertEquals(List.of(), batch.read(new long[0], 1));
         assertThrows(IllegalArgumentException.class, () -> batch.read(null, 1));

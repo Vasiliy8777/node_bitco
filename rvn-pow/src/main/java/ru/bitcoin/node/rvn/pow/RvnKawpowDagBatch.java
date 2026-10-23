@@ -52,8 +52,8 @@ public final class RvnKawpowDagBatch {
     }
 
     private static byte[] checked(byte[] value) {
-        if (value == null || value.length != 128)
-            throw new IllegalStateException("DAG reader returned non-128-byte item");
+        if (value == null || value.length != 256)
+            throw new IllegalStateException("DAG reader returned non-256-byte item");
         return value.clone();
     }
 }

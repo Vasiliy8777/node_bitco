@@ -12,7 +12,7 @@ import java.util.concurrent.CompletionException;
  * distinct DAG indexes may be calculated concurrently. Returned bytes are copies.
  */
 public final class RvnKawpowLightDag implements RvnKawpowDagReader {
-    public static final int ITEM_BYTES = 128;
+    public static final int ITEM_BYTES = 256;
     private final RvnKawpowCache lightCache;
     private final long count;
     private final int maxCachedItems;
@@ -23,9 +23,9 @@ public final class RvnKawpowLightDag implements RvnKawpowDagReader {
     public RvnKawpowLightDag(RvnKawpowCache lightCache, long datasetBytes, int maxCachedItems) {
         this.lightCache = Objects.requireNonNull(lightCache, "lightCache");
         if (datasetBytes <= 0 || datasetBytes % ITEM_BYTES != 0)
-            throw new IllegalArgumentException("DAG size must be positive and 128-byte aligned");
+            throw new IllegalArgumentException("DAG size must be positive and 256-byte aligned");
         this.count = datasetBytes / ITEM_BYTES;
-        if (count > 0x8000_0000L)
+        if (count > 0x4000_0000L)
             throw new IllegalArgumentException("DAG exceeds supported node-index range");
         if (maxCachedItems < 0) throw new IllegalArgumentException("Negative cache capacity");
         this.maxCachedItems = maxCachedItems;

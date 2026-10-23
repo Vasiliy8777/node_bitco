@@ -28,7 +28,7 @@ public final class RvnKawpowDagLookup {
     }
 
     public int wordUnsigned(int index, int word) {
-        if (word < 0 || word >= 32)
+        if (word < 0 || word >= 64)
             throw new IndexOutOfBoundsException("DAG word index");
         return RvnKawpowWords.readLE(itemUnsigned(index), word * 4);
     }

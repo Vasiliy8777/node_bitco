@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class RvnKawpowParallelDagTest {
     private RvnKawpowLightDag fixture(int capacity) {
-        return new RvnKawpowLightDag(RvnKawpowCache.build(new byte[32], 17), 128L * 32, capacity);
+        return new RvnKawpowLightDag(RvnKawpowCache.build(new byte[32], 17), 256L * 32, capacity);
     }
 
     @Test

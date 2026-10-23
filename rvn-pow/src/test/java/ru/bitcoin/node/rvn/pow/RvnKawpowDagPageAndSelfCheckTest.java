@@ -10,7 +10,7 @@ class RvnKawpowDagPageAndSelfCheckTest {
     @Test
     void pageReadsAreDefensiveAndLittleEndian() {
         var cache = RvnKawpowCache.build(new byte[32], 17);
-        var dag = new RvnKawpowLightDag(cache, 128L * 8, 2);
+        var dag = new RvnKawpowLightDag(cache, 256L * 8, 2);
         var page = new RvnKawpowDagPage(dag, 2, 3);
         assertEquals(2, page.firstIndex());
         assertEquals(3, page.size());
@@ -30,7 +30,7 @@ class RvnKawpowDagPageAndSelfCheckTest {
     @Test
     void selfCheckDetectsCorruption() {
         var cache = RvnKawpowCache.build(new byte[32], 17);
-        var dag = new RvnKawpowLightDag(cache, 128L * 8, 2);
+        var dag = new RvnKawpowLightDag(cache, 256L * 8, 2);
         RvnKawpowDagSelfCheck.verify(dag, cache, 0, 2, 7);
         RvnKawpowDagReader broken = new RvnKawpowDagReader() {
             public long itemCount() {
@@ -38,7 +38,7 @@ class RvnKawpowDagPageAndSelfCheckTest {
             }
 
             public byte[] item(long index) {
-                return new byte[128];
+                return new byte[256];
             }
         };
         assertThrows(IllegalStateException.class, () -> RvnKawpowDagSelfCheck.verify(broken, cache, 1));

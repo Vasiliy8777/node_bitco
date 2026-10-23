@@ -56,9 +56,12 @@ class RvnStages101To110Test {
         assertArrayEquals(zero, RvnKawpowDatasetItem.node(cache, 0));
         assertFalse(Arrays.equals(zero, RvnKawpowDatasetItem.node(cache, 1)));
         byte[] item = RvnKawpowDatasetItem.dagItem(cache, 0);
-        assertEquals(128, item.length);
+        assertEquals(256, item.length);
         assertArrayEquals(zero, Arrays.copyOfRange(item, 0, 64));
-        assertArrayEquals(RvnKawpowDatasetItem.node(cache, 1), Arrays.copyOfRange(item, 64, 128));
+        for (int i = 1; i < 4; i++) {
+            assertArrayEquals(RvnKawpowDatasetItem.node(cache, i),
+                    Arrays.copyOfRange(item, i * 64, (i + 1) * 64));
+        }
         assertThrows(IllegalArgumentException.class, () -> RvnKawpowDatasetItem.node(cache, -1));
         assertThrows(IllegalArgumentException.class, () -> RvnKawpowDatasetItem.dagItem(cache, -1));
     }

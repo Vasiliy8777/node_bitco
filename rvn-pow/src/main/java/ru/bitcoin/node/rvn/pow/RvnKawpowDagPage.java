@@ -18,7 +18,7 @@ public final class RvnKawpowDagPage {
         this.items = new byte[count][];
         for (int i = 0; i < count; i++) {
             byte[] value = reader.item(firstIndex + i);
-            if (value == null || value.length != 128) throw new IllegalStateException("Invalid DAG item");
+            if (value == null || value.length != 256) throw new IllegalStateException("Invalid DAG item");
             items[i] = value.clone();
         }
     }

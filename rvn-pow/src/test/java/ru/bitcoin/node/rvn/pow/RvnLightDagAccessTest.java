@@ -9,13 +9,13 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class RvnLightDagAccessTest {
     private static RvnKawpowLightDag dag(int capacity) {
-        return new RvnKawpowLightDag(RvnKawpowCache.build(new byte[32], 17), 128 * 5L, capacity);
+        return new RvnKawpowLightDag(RvnKawpowCache.build(new byte[32], 17), 256 * 5L, capacity);
     }
 
     @Test
     void onDemandMatchesExistingDatasetBuilder() {
         var cache = RvnKawpowCache.build(new byte[32], 17);
-        var dag = new RvnKawpowLightDag(cache, 128 * 5L, 2);
+        var dag = new RvnKawpowLightDag(cache, 256 * 5L, 2);
         assertEquals(5, dag.itemCount());
         for (int i = 0; i < 5; i++)
             assertArrayEquals(RvnKawpowDatasetItem.dagItem(cache, i), dag.item(i));
@@ -60,14 +60,14 @@ class RvnLightDagAccessTest {
         assertThrows(IllegalArgumentException.class, () -> dag(-1));
         assertThrows(IndexOutOfBoundsException.class, () -> dag(1).item(5));
         assertThrows(IndexOutOfBoundsException.class, () -> dag(1).item(-1));
-        assertThrows(IndexOutOfBoundsException.class, () -> new RvnKawpowDagLookup(dag(1)).wordUnsigned(0, 32));
+        assertThrows(IndexOutOfBoundsException.class, () -> new RvnKawpowDagLookup(dag(1)).wordUnsigned(0, 64));
         assertThrows(IllegalArgumentException.class, () -> new RvnKawpowDagLookup(new RvnKawpowDagReader() {
             public long itemCount() {
                 return 0;
             }
 
             public byte[] item(long index) {
-                return new byte[128];
+                return new byte[256];
             }
         }));
         var malformed = new RvnKawpowDagLookup(new RvnKawpowDagReader() {

@@ -45,7 +45,7 @@ class RvnProgpowStateTest {
 
     @Test
     void dagWordsAreDefensiveAndUnsigned() {
-        byte[] data = new byte[128];
+        byte[] data = new byte[256];
         RvnKawpowWords.writeLE(0x89abcdef, data, 124);
         var dag = new RvnKawpowDagReader() {
             public long itemCount() {
@@ -62,6 +62,7 @@ class RvnProgpowStateTest {
         int[] words = access.words(0);
         words[31] = 0;
         assertEquals(0x89abcdef, access.word(0, 31));
-        assertThrows(IndexOutOfBoundsException.class, () -> access.word(0, 32));
+        assertEquals(0, access.word(0, 32));
+        assertThrows(IndexOutOfBoundsException.class, () -> access.word(0, 64));
     }
 }
