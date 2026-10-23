@@ -3,6 +3,7 @@
     <parent><groupId>ru.bitcoin.mining</groupId><artifactId>node</artifactId><version>0.0.1-SNAPSHOT</version><relativePath>../pom.xml</relativePath></parent>
     <artifactId>rvn-chain</artifactId>
     <dependencies>
+        <dependency><groupId>ru.bitcoin.mining</groupId><artifactId>script</artifactId><version>${project.version}</version></dependency>
         <dependency><groupId>ru.bitcoin.mining</groupId><artifactId>rvn-protocol</artifactId><version>${project.version}</version></dependency>
         <dependency><groupId>ru.bitcoin.mining</groupId><artifactId>protocol</artifactId><version>${project.version}</version></dependency>
         <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><version>5.12.2</version><scope>test</scope></dependency>

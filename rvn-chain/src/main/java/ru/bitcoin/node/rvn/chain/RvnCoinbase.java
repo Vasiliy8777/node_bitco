@@ -21,12 +21,28 @@ public final class RvnCoinbase {
         long value = Math.addExact(subsidy(height), fees);
         if (value > RvnBlockBodyChecks.MAX_MONEY) throw new IllegalArgumentException("RVN reward exceeds money range");
         var script = new ByteArrayOutputStream();
-        if (height <= 16) script.write(0x50 + (int) height); else pushNumber(script, height);
+        script.writeBytes(heightPrefix(height));
         pushNumber(script, extraNonce);
         byte[] tag = "/java-rvn/".getBytes(StandardCharsets.US_ASCII);
         script.write(tag.length); script.writeBytes(tag);
         return new Transaction(1, List.of(new TxIn(OutPoint.coinbase(), script.toByteArray(), TxIn.FINAL_SEQUENCE)),
                 List.of(new TxOut(value, payout.scriptPubKey())), new UInt32(0));
+    }
+
+    /** BIP34 compares the exact minimal serialized height prefix, not just the
+     * numerical value of the first script stack item. Genesis is exempt. */
+    public static void requireHeight(Transaction coinbase, long height) {
+        if (!coinbase.isCoinbase()) throw new SecurityException("RVN coinbase required");
+        byte[] expected = heightPrefix(height), actual = coinbase.inputs().getFirst().scriptSig();
+        if (actual.length < expected.length || !Arrays.equals(expected, Arrays.copyOf(actual, expected.length)))
+            throw new SecurityException("RVN coinbase height prefix mismatch");
+    }
+
+    private static byte[] heightPrefix(long height) {
+        if (height < 1 || height > 0xffff_ffffL) throw new IllegalArgumentException("RVN coinbase height");
+        var out = new ByteArrayOutputStream();
+        if (height <= 16) out.write(0x50 + (int) height); else pushNumber(out, height);
+        return out.toByteArray();
     }
     private static void pushNumber(ByteArrayOutputStream script, long number) {
         var encoded = new ByteArrayOutputStream();

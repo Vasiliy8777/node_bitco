@@ -4,6 +4,7 @@ import org.springframework.context.SmartLifecycle;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import ru.bitcoin.node.rvn.app.chain.RvnMainnetHeaderChain;
+import ru.bitcoin.node.rvn.app.chain.RvnNativeBlockReplay;
 import ru.bitcoin.node.rvn.consensus.RvnHash256;
 import ru.bitcoin.node.rvn.p2p.*;
 import ru.bitcoin.node.rvn.protocol.*;
@@ -20,6 +21,7 @@ public final class RvnHeaderSyncService implements SmartLifecycle {
     private final int port, timeoutMs;
     private final long responseTimeoutMs, pollMs;
     private final RvnBlockDownloader blocks;
+    private final RvnNativeBlockReplay replay;
     private final ThreadPoolExecutor connector = new ThreadPoolExecutor(1, 1, 0, TimeUnit.SECONDS,
             new ArrayBlockingQueue<>(1), Thread.ofPlatform().daemon(true).name("rvn-connect").factory());
     private volatile boolean running;
@@ -33,6 +35,12 @@ public final class RvnHeaderSyncService implements SmartLifecycle {
 
     public RvnHeaderSyncService(RvnMainnetHeaderChain chain, List<String> peers, int port,
                                 int timeoutMs, long responseTimeoutMs, long pollMs, RvnBlockDownloader blocks) {
+        this(chain, peers, port, timeoutMs, responseTimeoutMs, pollMs, blocks, null);
+    }
+
+    public RvnHeaderSyncService(RvnMainnetHeaderChain chain, List<String> peers, int port,
+                                int timeoutMs, long responseTimeoutMs, long pollMs, RvnBlockDownloader blocks,
+                                RvnNativeBlockReplay replay) {
         this.chain = Objects.requireNonNull(chain);
         this.peers = List.copyOf(peers);
         if (peers.isEmpty() || peers.size() > 64 || peers.stream().anyMatch(s -> s == null || s.isBlank())
@@ -41,6 +49,8 @@ public final class RvnHeaderSyncService implements SmartLifecycle {
             throw new IllegalArgumentException("Invalid RVN sync settings");
         this.port = port; this.timeoutMs = timeoutMs; this.responseTimeoutMs = responseTimeoutMs; this.pollMs = pollMs;
         this.blocks = blocks;
+        if (replay != null && blocks == null) throw new IllegalArgumentException("RVN native replay requires block download");
+        this.replay = replay;
     }
 
     @Override public synchronized void start() {
@@ -54,6 +64,8 @@ public final class RvnHeaderSyncService implements SmartLifecycle {
     private void run() {
         int peerIndex = 0; long backoff = 1000;
         try {
+            // Resume cached bodies before DNS/network access after a restart.
+            while (running && replayBodies(128) > 0) { }
             while (running) {
                 String peer = peers.get(peerIndex++ % peers.size());
                 try (RvnPeerSession session = connectBounded(peer)) {
@@ -100,16 +112,32 @@ public final class RvnHeaderSyncService implements SmartLifecycle {
                 } finally { active = null; }
             }
         } catch (RuntimeException fatal) {
-            log.error("RVN header synchronization stopped after a local failure", fatal);
+            if (running && !Thread.currentThread().isInterrupted())
+                log.error("RVN header synchronization stopped after a local failure", fatal);
         } finally { running = false; connector.shutdownNow(); }
     }
 
     private int downloadBodies(RvnPeerSession session, int limit) throws IOException, InterruptedException {
         if (blocks == null) return 0;
+        int replayed = replayBodies(limit);
         int added = blocks.downloadBatch(session, limit);
         if (added > 0) log.info("RVN candidate block bodies: added={}, downloadedHeight={}; UTXO validation pending",
                 added, blocks.downloadedHeight());
-        return added;
+        return added + replayed + replayBodies(limit);
+    }
+
+    private int replayBodies(int limit) {
+        if (replay == null) return 0;
+        try {
+            var progress = replay.advance(limit);
+            if (progress.connected() + progress.disconnected() > 0)
+                log.info("RVN historical native replay: connected={}, disconnected={}, nativeHeight={}; assets/full-chain validation pending",
+                        progress.connected(), progress.disconnected(), progress.tip().height());
+            return progress.connected() + progress.disconnected();
+        } catch (IOException | SecurityException e) {
+            // Stored-data replay failures are local validation failures, not peer retries.
+            throw new IllegalStateException("RVN stored native-block replay failed", e);
+        }
     }
 
     /** DNS/handshake run on a bounded daemon executor so shutdown cannot hang in platform DNS. */

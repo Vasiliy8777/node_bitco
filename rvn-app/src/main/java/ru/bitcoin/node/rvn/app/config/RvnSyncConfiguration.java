@@ -4,22 +4,23 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.*;
 import org.springframework.beans.factory.annotation.Value;
 import ru.bitcoin.node.rvn.app.chain.RvnMainnetHeaderChain;
+import ru.bitcoin.node.rvn.app.chain.RvnNativeBlockReplay;
+import ru.bitcoin.node.rvn.storage.RvnCoinStore;
+import org.springframework.beans.factory.ObjectProvider;
 import ru.bitcoin.node.rvn.app.sync.RvnHeaderSyncService;
 import ru.bitcoin.node.rvn.app.sync.RvnBlockDownloader;
 import ru.bitcoin.node.rvn.consensus.*;
 import ru.bitcoin.node.rvn.pow.*;
 import ru.bitcoin.node.rvn.protocol.RvnNetwork;
 import ru.bitcoin.node.rvn.storage.RvnHeaderStore;
-import java.nio.file.Path;
 import java.util.Arrays;
 
 @Configuration
 @ConditionalOnProperty(name = "ravencoin.sync.enabled", havingValue = "true")
 public class RvnSyncConfiguration {
     @Bean(destroyMethod = "close")
-    RvnHeaderStore rvnHeaderStore(RvnJavaPowEngine engine, RvnKawpowLightEngine kawpow,
+    RvnHeaderStore rvnHeaderStore(RvnJavaPowEngine engine, RvnKawpowLightEngine kawpow, RvnDataDirectories directories,
             @Value("${ravencoin.network:mainnet}") String network,
-            @Value("${ravencoin.data-directory:./data/ravencoin/mainnet}") String directory,
             @Value("${ravencoin.mining.enabled:false}") boolean mining,
             @Value("${ravencoin.p2p.probe-enabled:false}") boolean probe,
             @Value("${ravencoin.p2p.session-enabled:false}") boolean session) throws Exception {
@@ -29,7 +30,7 @@ public class RvnSyncConfiguration {
         if (probe || session) throw new IllegalArgumentException("Choose header sync or a diagnostic probe/session");
         RvnHistoricalPowSelfTest.requireValid(engine);
         RvnKawpowSelfTest.requireValid(kawpow);
-        return new RvnHeaderStore(Path.of(directory).resolve("headers"), RvnMainnetExpectedBits.GENESIS_ID,
+        return new RvnHeaderStore(directories.headers(), RvnMainnetExpectedBits.GENESIS_ID,
                 RvnHistoricalPowSelfTest.mainnetGenesisHeader(), RvnMainnetDifficulty.POW_LIMIT);
     }
 
@@ -39,7 +40,21 @@ public class RvnSyncConfiguration {
     }
 
     @Bean
+    @ConditionalOnProperty(name = "ravencoin.validation.native-replay-enabled", havingValue = "true")
+    RvnCoinStore rvnCoinStore(RvnDataDirectories directories, RvnHeaderStore headers) throws Exception {
+        // Header storage is opened/self-tested first; failures cannot create an orphan coin DB.
+        return new RvnCoinStore(directories.coins(), RvnMainnetExpectedBits.GENESIS_ID);
+    }
+
+    @Bean
+    @ConditionalOnProperty(name = "ravencoin.validation.native-replay-enabled", havingValue = "true")
+    RvnNativeBlockReplay rvnNativeBlockReplay(RvnHeaderStore headers, RvnCoinStore coins) throws Exception {
+        return new RvnNativeBlockReplay(headers, coins);
+    }
+
+    @Bean
     RvnHeaderSyncService rvnHeaderSyncService(RvnMainnetHeaderChain chain, RvnHeaderStore store,
+            ObjectProvider<RvnNativeBlockReplay> replay,
             @Value("${ravencoin.sync.peers:seed-raven.bitactivate.com,seed-raven.ravencoin.com,seed-raven.ravencoin.org}") String peers,
             @Value("${ravencoin.p2p.port:0}") int port,
             @Value("${ravencoin.p2p.timeout-ms:5000}") int timeout,
@@ -48,6 +63,6 @@ public class RvnSyncConfiguration {
             @Value("${ravencoin.sync.blocks-enabled:false}") boolean blocks) {
         return new RvnHeaderSyncService(chain, Arrays.stream(peers.split(",")).map(String::trim).toList(),
                 port == 0 ? RvnNetwork.MAINNET.port() : port, timeout, responseTimeout, poll,
-                blocks ? new RvnBlockDownloader(store, responseTimeout) : null);
+                blocks ? new RvnBlockDownloader(store, responseTimeout) : null, replay.getIfAvailable());
     }
 }

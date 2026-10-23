@@ -3,7 +3,7 @@
     <option name="ENABLE_LAUNCH_OPTIMIZATION" value="false" />
     <module name="rvn-app" />
     <option name="SPRING_BOOT_MAIN_CLASS" value="ru.bitcoin.node.rvn.app.RavencoinNodeApplication" />
-    <option name="VM_PARAMETERS" value="-Xms256m -Xmx2g -Dravencoin.pow.self-test-enabled=true" />
+    <option name="VM_PARAMETERS" value="-Xms256m -Xmx2g -Djava.io.tmpdir=K:/RVNJavaNjde/tmp -XX:ErrorFile=K:/RVNJavaNjde/logs/hs_err_pid%p.log -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=K:/RVNJavaNjde/logs -Dravencoin.pow.self-test-enabled=true" />
     <option name="WORKING_DIRECTORY" value="file://$PROJECT_DIR$" />
     <method v="2"><option name="Make" enabled="true" /></method>
   </configuration>

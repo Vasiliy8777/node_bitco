@@ -14,6 +14,7 @@ import ru.bitcoin.node.rvn.pow.RvnJavaPowEngine;
 import ru.bitcoin.node.rvn.pow.RvnHistoricalPowSelfTest;
 import ru.bitcoin.node.rvn.pow.RvnPowException;
 import ru.bitcoin.node.rvn.app.config.RvnMiningSettings;
+import ru.bitcoin.node.rvn.app.config.RvnDataDirectories;
 
 /**
  * Separate RVN application; does not component-scan Bitcoin modules.
@@ -22,6 +23,18 @@ import ru.bitcoin.node.rvn.app.config.RvnMiningSettings;
 public class RavencoinNodeApplication {
     public static void main(String[] args) {
         SpringApplication.run(RavencoinNodeApplication.class, args);
+    }
+
+    @Bean
+    RvnDataDirectories rvnDataDirectories(
+            @Value("${ravencoin.data-directory:" + RvnDataDirectories.DEFAULT_ROOT + "}") String directory,
+            @Value("${ravencoin.validation.native-replay-enabled:false}") boolean nativeReplay,
+            @Value("${ravencoin.sync.enabled:false}") boolean sync,
+            @Value("${ravencoin.sync.blocks-enabled:false}") boolean blocks) {
+        if (nativeReplay && (!sync || !blocks))
+            throw new IllegalArgumentException("RVN native replay requires header sync and block download");
+        if (directory.isBlank()) throw new IllegalArgumentException("RVN data directory must not be blank");
+        return new RvnDataDirectories(java.nio.file.Path.of(directory));
     }
 
     @Bean
@@ -58,6 +71,8 @@ public class RavencoinNodeApplication {
                                  @Value("${ravencoin.p2p.queue-capacity:64}") int queueCapacity) {
         return args -> {
             if (mining) throw new IllegalStateException("RVN mining NOT implemented; refusing to claim it is active");
+            if (blocks && !sync)
+                throw new IllegalArgumentException("RVN body download requires ravencoin.sync.enabled=true");
             RvnNetwork network = RvnNetwork.parse(networkName);
             if (selfTest) {
                 RvnHistoricalPowSelfTest.requireValid(allEraEngine);

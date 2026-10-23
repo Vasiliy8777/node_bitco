@@ -14,6 +14,8 @@ IntelliJ Spring Boot configurations:
 - `RavencoinNodeApplication (development)`: offline RVN engine checks.
 - `RavencoinNodeApplication (mainnet headers)`: persistent RVN header sync.
 - `RavencoinNodeApplication (mainnet block download)`: headers and candidate bodies.
+- `RavencoinNodeApplication (historical native replay)`: persistent native coin
+  checks of downloaded bodies, stopping before asset activation; mining stays off.
 
 Build and test without `clean`:
 

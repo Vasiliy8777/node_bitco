@@ -16,7 +16,7 @@ class RvnMiningAddressBindingTest {
         environment.getPropertySources().addFirst(new org.springframework.core.env.MapPropertySource(
                 "rvn-test-environment", Map.of("RVN_MINING_ADDRESS", vector)));
         application.setEnvironment(environment);
-        try (var context = application.run("--spring.main.banner-mode=off", "--ravencoin.network=mainnet",
+        try (var context = application.run("--spring.main.banner-mode=off", "--logging.file.name=", "--ravencoin.network=mainnet",
                 "--ravencoin.sync.enabled=false", "--ravencoin.mining.enabled=false",
                 "--ravencoin.pow.self-test-enabled=false", "--ravencoin.p2p.probe-enabled=false",
                 "--ravencoin.p2p.session-enabled=false")) {

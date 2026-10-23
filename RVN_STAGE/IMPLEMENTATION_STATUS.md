@@ -53,7 +53,65 @@ worker, data and configuration are not changed by this work.
   neither successful startup nor validation errors print the address.
 - Coinbase assembly supports the configured payout script, BIP34 height,
   extraNonce, RVN's 5000-coin subsidy / 2,100,000-block halvings and explicit fees.
-  Complete block-template/witness-commitment assembly is still pending.
+- `RvnBlockTemplateBuilder` assembles KawPoW candidates from caller-supplied
+  transactions and contextual header fields, adds witness commitment/reserved
+  value when needed, computes the transaction Merkle root and applies body checks.
+  Worker nonce/mix insertion preserves the 80-byte KawPoW input. This is a
+  candidate assembly API, not a validated template service: UTXO/assets/fees,
+  transaction dependency ordering, header context and worker proof must still
+  be independently validated by the future mining lifecycle.
+- Native RVN coin accounting (`RvnCoin`, `RvnCoinView`, `RvnCoinAccounting`)
+  derives fees from a stable parent snapshot, enforces money ranges, coinbase
+  maturity, ordered in-block dependencies, double-spend/output collision checks
+  and the subsidy-plus-fees reward limit. Immutable net created/spent maps retain
+  parent coins for future undo without mutating storage. Unspendable outputs are
+  omitted. `RvnBlockTemplateBuilder.buildFromCoins` derives fees using this API;
+  scripts, locks, assets and contextual rules still require separate validation.
+- `RVN_DATA_DIRECTORY` selects the RVN data root. `RVN_MINING_ENABLED` binds the
+  mining switch, defaulting to false; true still fails because the lifecycle is
+  incomplete. Body download without header sync now fails startup explicitly.
+- `RvnNativeScriptChecks` adapts shared legacy/P2SH and witness-v0 primitives
+  without Bitcoin's Taproot/anchor shortcuts. It rejects unsupported/policy flags,
+  noncanonical nested witness wrappers and unexpected witness data. The caller
+  must supply RVN branch-specific activation flags; there is no default mainnet
+  activation policy in this adapter. Asset opcode semantics remain unsupported.
+- `RvnNativeTransactionChecks` combines native accounting with input scripts and
+  absolute locktime, using an explicit caller-supplied time cutoff. Resolved coins
+  include preceding in-block outputs. `buildWithNativeChecks` connects these
+  checks to candidate template construction. The `RvnSpendContext` overload adds
+  BIP68 height/time locks with a branch-specific ancestor MTP resolver, 512-second
+  time units, unsigned transaction versions and in-block dependency handling.
+  `RvnSigOpCost` enforces the 80000-unit block budget including coinbase, legacy,
+  P2SH and witness costs. RIP2 does not double this sigop limit. The compatibility
+  overload without branch context still omits BIP68. Assets and full contextual
+  validation remain pending. These APIs are now wired to opt-in historical native
+  replay; its persisted progress is not a full-block validation or mining status.
+- `RvnCoinStore` adds a separate native coin RocksDB with an empty genesis coin
+  set, synchronous atomic coin/undo/tip commits, stale-parent checks, exact spent
+  coin matching, creation collision checks and tip-only disconnect. Undo retains
+  original coins and has a checksum. Reopening verifies identity/tip, current undo
+  and affected coins. Foreign directories, missing CURRENT, wrong network and
+  concurrent opens are rejected. Spring opens this store only in historical
+  native replay mode. Assets/block admission must commit their state consistently
+  with it before it can become a production full-block chainstate.
+- `RvnNativeBlockReplay` processes stored bodies on the best verified header
+  branch, checks exact BIP34 coinbase height, native scripts/amounts/locks/sigops
+  with parent-branch MTP, and commits coins/undo. It rewinds during header reorgs
+  and resumes after restart. Cached bodies are replayed before DNS/handshake.
+  It stops before assets activation; stored replay failures stop the sync worker
+  rather than repeatedly blaming another peer. No mining lifecycle is enabled.
+- Asset foundation: `RvnAssetNames` classifies root/sub/unique/channel/owner/vote/
+  qualifier/restricted names against pinned Core grammar. `RvnAssetScriptCodec`
+  represents canonical issuance, owner, transfer and reissue P2PKH envelopes,
+  IPFS/transaction metadata hashes, optional transfer expiry and signed unit
+  fields. This strict codec is not a full historical consensus classifier.
+- `RvnAssetMetadataRules` checks canonical issuance/reissuance transitions:
+  duplicate names, integer amount precision, unit bounds, special unique/channel/
+  qualifier supply parameters, activation gates, cumulative supply and permanent
+  disabling of reissuance. It retains metadata on a no-change reissue. These
+  rules do not authorize a transaction or persist asset state; burns, ownership,
+  asset conservation, null restrictions/verifier expressions and atomic undo are
+  still required. The replay stop before asset activation remains enabled.
 
 ## Verification and limits
 
@@ -84,6 +142,62 @@ tests cover checksum/network/script conversion, coinbase halvings/extraNonce and
 Spring binding from the exact `RVN_MINING_ADDRESS` placeholder. Published Core
 burn addresses are test vectors only and are never a default payout.
 
+On 2026-10-24, `mvn -pl rvn-app -am test -B -q` passed before and after the
+template addition. The available local C oracle executable also reproduced all
+125 committed historical vectors; it was not rebuilt during this audit.
+Four new template tests cover coinbase-only roundtrip, explicit fee payout,
+witness commitment with an independently assembled two-leaf preimage, witness
+tampering, extraNonce job changes, nonce64/mix insertion and rejected inputs.
+The subsequent accounting/configuration change also passed the full
+`mvn -pl rvn-app -am test -B -q` run. Seven accounting tests cover maturity at
+99/100 blocks, native RVN amounts above Bitcoin's limit, aggregate input overflow,
+overspending/double spending, dependency order, undo data, reward limits, output
+collisions and unspendable-output pruning. Three Spring tests cover environment
+binding and rejected startup combinations. These are synthetic accounting tests,
+not evidence of accepted mainnet blocks or a persistent UTXO chainstate.
+The native script adapter passed `mvn -pl rvn-app -am test -B -q` before the
+final template API addition; `mvn -pl rvn-chain -am test -B -q` then checks that
+addition. Seven script/transaction tests cover signed P2PKH/P2WPKH, altered
+outputs and witness amounts, native/nested P2WSH, canonical wrappers, legacy
+P2SH, unexpected witness, unknown witness versions, rejected flags, locktime
+boundaries, in-block coin resolution and template script rejection. These use
+synthetic transactions, not an independently exported RVN transaction corpus.
+The BIP68/sigop addition passed `mvn -pl rvn-app -am test -B -q`. Five new tests
+cover height/time boundaries, activation/disable flags, signed-version handling,
+same-block zero/positive delays, missing ancestry, the 80000/80004-unit boundary
+including coinbase, and P2SH/witness cost scaling.
+Seven native coin-store tests cover restart, connect/disconnect, alternate-branch
+reconnect, exact coin restoration, stale parents, rejected deltas, directory/DB
+identity, lock exclusion, corrupt coins/undo and an actual child-JVM
+`Runtime.halt(17)` after a synchronous commit without closing RocksDB. Reopening
+that DB recovers the committed coins/tip and can undo them successfully.
+Historical native replay passed the full `mvn -pl rvn-app -am test -B -q` run.
+Six replay tests cover cached/missing bodies, restart, interrupted branch switch,
+coinbase height/reward/finality rejection, the assets stop, interruption, coin/header
+metadata mismatch and replay-before-network order. Two independent BIP34 prefix
+tests cover small opcodes, sign padding and rejected nonminimal encodings. Spring
+tests cover valid replay storage ownership/shutdown and invalid prerequisites
+without opening either DB. Positive replay proofs remain explicitly synthetic.
+The asset foundation adds 10 tests, including all 124 literal name-validity
+assertions extracted from pinned Core `asset_tests.cpp`, fixed canonical format
+examples, roundtrips with hashes/messages, truncation/malformed envelope checks,
+and metadata supply/unit/activation/reissue boundaries. Fixtures and regeneration
+scope are documented in `rvn-chain/reference/README.md`. Format examples are
+synthetic; no accepted asset-era blocks have been replayed by this change.
+The coin-store change passed `mvn -pl rvn-app -am test -B -q`; subsequent
+reopen-integrity/ancestor-ID checks passed `mvn -pl rvn-storage -am test -B -q`.
+
+Local launch audit: NVIDIA reports an RTX 4070 with 12282 MiB VRAM. The repository
+GPU worker implements Bitcoin SHA256d, not KawPoW. Ravencoin Core binaries are
+installed under `C:/Program Files/Raven`, but no Raven process was running during
+the audit. No RVN mainnet mining process has been started. The user explicitly
+confirmed the target: an independent RVN node and GPU mining on that node.
+Pool/Core RPC fallbacks are excluded from this implementation. CUDA Toolkit
+12.2 (`nvcc`) is available locally for the future KawPoW GPU worker.
+The packaged JAR passed offline startup with both historical and KawPoW
+self-tests. An actual P2P probe of `seed-raven.ravencoin.com` failed with
+`UnknownHostException` in this environment; no mainnet handshake was established.
+
 The synthetic chain vectors are not a replay of accepted historical blocks;
 real X16RV2 block fixtures and full historical chain replay remain required.
 Raw header tests cover endian conversion, accepting the computed mix and
@@ -110,7 +224,24 @@ header synchronization, or use:
 java -Xmx2g -jar rvn-app/target/rvn-app-0.0.1-SNAPSHOT.jar --ravencoin.sync.enabled=true
 ```
 
-Headers live in `data/ravencoin/mainnet/headers`, independently of Bitcoin.
+The default RVN data root is `K:/RVNJavaNjde` as requested. `RVN_DATA_DIRECTORY`
+or `--ravencoin.data-directory=...` can override it. The shared `RvnDataDirectories`
+layout resolves `headers`, `coins`, `dag`, `logs` and `tmp` beneath that root.
+Headers and downloaded block bodies currently share `K:/RVNJavaNjde/headers`
+RocksDB. Historical native replay opens native coin storage under `coins` when
+explicitly enabled. `dag` is reserved for future disk-backed GPU datasets;
+the current CPU light cache remains in memory and is not persisted by this change.
+Application logs are written to `logs/rvn-node.log`, with 20 MB rotation, 14-day
+history and a 512 MB archive cap. The RVN IntelliJ configurations also place JVM
+temporary files, crash reports and heap dumps under this root. If overriding the
+root in IntelliJ, update those VM options too. For command-line startup, add
+`'-Djava.io.tmpdir=K:/RVNJavaNjde/tmp'` before `-jar` in PowerShell to select that temporary path;
+the directory must already exist. Build/test artifacts remain in Maven `target`
+directories. No existing DB is silently moved or imported.
+The data-layout change passed `mvn -pl rvn-app -am test -B -q` and packaging.
+An offline run of the packaged JAR with the K: root and JVM temporary directory
+exited successfully and created `K:/RVNJavaNjde/logs/rvn-node.log`.
+
 `RVN_SYNC_PEERS` is a comma-separated list of hostnames/IPs; `ravencoin.p2p.port`
 overrides their common port. Only mainnet header synchronization is supported.
 Probe/session diagnostic modes cannot be combined with synchronization.
@@ -126,6 +257,15 @@ For commitment-checked body download choose IntelliJ configuration
 keeps mining disabled. Bodies currently share the independent RVN RocksDB with
 header records under separate key prefixes; full body retention consumes disk.
 
+For historical native replay use IntelliJ configuration
+`RavencoinNodeApplication (historical native replay)`, or enable all of
+`RVN_SYNC_ENABLED=true`, `RVN_SYNC_BLOCKS=true` and `RVN_NATIVE_REPLAY=true`.
+The last switch maps to `ravencoin.validation.native-replay-enabled`, default false.
+It requires both header sync and body download. Progress resumes from the native
+coin tip under `K:/RVNJavaNjde/coins`, independently of the body-download cursor.
+Processing stops at assets activation because asset validation/state is pending.
+Neither this native tip nor the downloaded-body cursor makes the node mining-ready.
+
 Set `RVN_MINING_ADDRESS` in the environment inherited by the RVN JVM (including
 IntelliJ's selected RVN run configuration). No address is hardcoded in production
 or copied into shared run configurations. If a Windows user environment variable
@@ -140,11 +280,15 @@ Payout configuration does not enable mining before full validation is implemente
 2. Exercise real mainnet header synchronization/recovery and historical replay;
    broaden peer discovery/management and verify real mainnet body download. The new
    persistent header path replaces the bounded in-memory graph for sync mode.
-3. Full transaction/block validation, scripts, UTXO and RVN assets state,
-   deployment rules, block undo and atomic recovery/reorganizations.
-4. Mempool, validated fee accounting, complete block template assembly (including
-   witness commitment), candidate submission and relay. Basic payout/coinbase
-   assembly is implemented.
+3. Integrate native checks and durable UTXO/undo with full contextual block
+   admission, RVN assets/deployment state and coordinated recovery/reorganizations.
+   Historical native replay is connected to durable coin storage, but is not a
+   validated full-block chainstate. Asset mutations must be committed consistently
+   with native coins and asset-era blocks must not pass through the native-only path.
+4. Mempool, fully validated fee accounting, a template service tied to validated chain
+   state, candidate submission and relay. Candidate/coinbase/witness assembly is
+   implemented; fees can be derived from a caller-supplied stable coin snapshot.
+   Context and complete transaction validity must still be established.
 5. GPU KawPoW worker, job cancellation on tip changes, local candidate
    validation and network submission.
 6. End-to-end tests with independently accepted blocks, then enable the
@@ -152,6 +296,12 @@ Payout configuration does not enable mining before full validation is implemente
 
 ## Reference sources
 
+- https://github.com/RavenProject/Ravencoin/blob/6d48ae0175b10283248146ae3080e2ba70966739/src/assets/assets.cpp
+- https://github.com/RavenProject/Ravencoin/blob/6d48ae0175b10283248146ae3080e2ba70966739/src/assets/assettypes.h
+- https://github.com/RavenProject/Ravencoin/blob/6d48ae0175b10283248146ae3080e2ba70966739/src/test/assets/asset_tests.cpp
+- https://github.com/RavenProject/Ravencoin/blob/master/src/consensus/consensus.h
+- https://github.com/RavenProject/Ravencoin/blob/master/src/consensus/tx_verify.cpp
+- https://github.com/RavenProject/Ravencoin/blob/master/src/script/interpreter.cpp
 - https://github.com/RavenProject/Ravencoin/blob/master/src/crypto/ethash/lib/ethash/bit_manipulation.h
 - https://github.com/RavenProject/Ravencoin/blob/master/src/crypto/ethash/lib/ethash/progpow.cpp
 - https://github.com/RavenProject/Ravencoin/blob/master/src/crypto/ethash/progpow_test_vectors.hpp

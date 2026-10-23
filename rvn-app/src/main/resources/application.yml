@@ -5,7 +5,7 @@ spring:
     web-application-type: none
 ravencoin:
   network: ${RVN_NETWORK:mainnet}
-  data-directory: ./data/ravencoin/mainnet
+  data-directory: '${RVN_DATA_DIRECTORY:K:/RVNJavaNjde}'
   sync:
     enabled: ${RVN_SYNC_ENABLED:false}
     blocks-enabled: ${RVN_SYNC_BLOCKS:false}
@@ -13,8 +13,11 @@ ravencoin:
     response-timeout-ms: 30000
     poll-ms: 10000
   mining:
-    enabled: false
+    enabled: ${RVN_MINING_ENABLED:false}
     address: ${RVN_MINING_ADDRESS:}
+  validation:
+    # Historical native-coin replay only; stops before asset activation.
+    native-replay-enabled: ${RVN_NATIVE_REPLAY:false}
   pow:
     self-test-enabled: ${RVN_POW_SELF_TEST:false}
     cached-dag-items: 1024
@@ -26,3 +29,11 @@ ravencoin:
     session-enabled: ${RVN_P2P_SESSION:false}
     session-duration-ms: ${RVN_P2P_SESSION_DURATION_MS:5000}
     queue-capacity: ${RVN_P2P_QUEUE_CAPACITY:64}
+logging:
+  file:
+    name: '${ravencoin.data-directory}/logs/rvn-node.log'
+  logback:
+    rollingpolicy:
+      max-file-size: 20MB
+      max-history: 14
+      total-size-cap: 512MB
