@@ -97,17 +97,51 @@ public final class RvnValidatedHeaderIndex {
             RvnHeaderFormatPolicy policy) {
         Objects.requireNonNull(verifier);
         RvnHeaderBatchPreflight.check(batch, policy);
-        RvnValidatedHeaderIndex staged = new RvnValidatedHeaderIndex(
-                capacity, anchor, anchorHeight, anchorWork, powLimit);
-        staged.entries.putAll(entries);
-        for (var wireEntry : verifiedWire.entrySet())
-            staged.verifiedWire.put(wireEntry.getKey(), wireEntry.getValue().clone());
-        staged.bestId = bestId;
-        staged.bestHeight = bestHeight;
-        staged.bestWork = bestWork;
+        RvnValidatedHeaderIndex staged = copyState();
         List<Entry> result = new ArrayList<>(batch.size());
         for (var item : batch)
             result.add(staged.admit(item.candidate(), item.raw(), verifier));
+        replaceState(staged);
+        return List.copyOf(result);
+    }
+
+    /**
+     * A contextual verifier is constructed against the STAGED index, not the live
+     * index. This is essential for MTP and difficulty checks inside one batch.
+     */
+    @FunctionalInterface
+    public interface ContextualVerifierFactory {
+        RvnHeaderProofGate.Verifier forIndex(RvnValidatedHeaderIndex stagedIndex);
+    }
+
+    public synchronized List<Entry> admitBatchAtomicContextual(
+            List<RvnHeaderBatchAdmission.Item> batch,
+            ContextualVerifierFactory verifierFactory,
+            RvnHeaderFormatPolicy policy) {
+        Objects.requireNonNull(verifierFactory);
+        RvnHeaderBatchPreflight.check(batch, policy);
+        RvnValidatedHeaderIndex staged = copyState();
+        RvnHeaderProofGate.Verifier verifier = Objects.requireNonNull(verifierFactory.forIndex(staged));
+        List<Entry> result = new ArrayList<>(batch.size());
+        for (var item : batch)
+            result.add(staged.admit(item.candidate(), item.raw(), verifier));
+        replaceState(staged);
+        return List.copyOf(result);
+    }
+
+    private RvnValidatedHeaderIndex copyState() {
+        RvnValidatedHeaderIndex staged = new RvnValidatedHeaderIndex(
+                capacity, anchor, anchorHeight, anchorWork, powLimit);
+        staged.entries.putAll(entries);
+        for (var e : verifiedWire.entrySet())
+            staged.verifiedWire.put(e.getKey(), e.getValue().clone());
+        staged.bestId = bestId;
+        staged.bestHeight = bestHeight;
+        staged.bestWork = bestWork;
+        return staged;
+    }
+
+    private void replaceState(RvnValidatedHeaderIndex staged) {
         entries.clear();
         entries.putAll(staged.entries);
         verifiedWire.clear();
@@ -115,7 +149,6 @@ public final class RvnValidatedHeaderIndex {
         bestId = staged.bestId;
         bestHeight = staged.bestHeight;
         bestWork = staged.bestWork;
-        return List.copyOf(result);
     }
 
     /**
