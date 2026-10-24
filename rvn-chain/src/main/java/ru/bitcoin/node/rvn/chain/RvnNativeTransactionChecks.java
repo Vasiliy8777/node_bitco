@@ -22,15 +22,30 @@ public final class RvnNativeTransactionChecks {
 
     public static RvnCoinAccounting.Changes block(RvnBlock block, RvnSpendContext context,
             boolean assetsActive, RvnCoinView parent) {
+        return block(block, context, assetsActive, parent, false);
+    }
+
+    /** Native part of the explicit canonical-asset validator; not general asset admission. */
+    public static RvnCoinAccounting.Changes blockCanonicalAssets(RvnBlock block, RvnSpendContext context, RvnCoinView parent) {
+        return block(block, context, true, parent, true);
+    }
+
+    private static RvnCoinAccounting.Changes block(RvnBlock block, RvnSpendContext context,
+            boolean assetsActive, RvnCoinView parent, boolean canonicalAssets) {
         var changes = RvnCoinAccounting.block(block, context.height(), assetsActive, parent);
         var txs = block.transactions();
-        check(context, txs.subList(1, txs.size()), parent, RvnSigOpCost.legacy(txs.getFirst()));
+        check(context, txs.subList(1, txs.size()), parent, RvnSigOpCost.legacy(txs.getFirst()), canonicalAssets);
         requireFinal(txs.getFirst(), context);
         return changes;
     }
 
     private static RvnCoinAccounting.Changes check(RvnSpendContext context,
             List<Transaction> transactions, RvnCoinView parent, long initialSigops) {
+        return check(context, transactions, parent, initialSigops, false);
+    }
+
+    private static RvnCoinAccounting.Changes check(RvnSpendContext context,
+            List<Transaction> transactions, RvnCoinView parent, long initialSigops, boolean canonicalAssets) {
         var selected = List.copyOf(transactions);
         long[] sigops = {initialSigops};
         for (var tx : selected) {
@@ -42,7 +57,8 @@ public final class RvnNativeTransactionChecks {
             requireSequence(tx, index, coin, context);
             sigops[0] = Math.addExact(sigops[0], RvnSigOpCost.input(tx, index, coin, context.scriptFlags()));
             requireSigops(sigops[0]);
-            RvnNativeScriptChecks.requireValid(tx, index, coin, context.scriptFlags());
+            if (canonicalAssets) RvnCanonicalAssetScriptChecks.requireValid(tx, index, coin, context.scriptFlags());
+            else RvnNativeScriptChecks.requireValid(tx, index, coin, context.scriptFlags());
         });
     }
 

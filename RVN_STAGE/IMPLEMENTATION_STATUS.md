@@ -42,8 +42,8 @@ worker, data and configuration are not changed by this work.
   RVN money limits, transaction/coinbase shape checks, Merkle mutation detection
   and witness commitments. Pre-assets / RIP2 block weight limits are enforced.
 - Witness `getdata` block requests and optional sequential body download. Bodies
-  are stored atomically in the RVN DB with integrity metadata and a separate
-  persistent download cursor; header reorgs rewind this cursor while retaining
+  use a forced append-only HDD archive with an atomic SSD reference/metadata
+  and download-cursor commit; header reorgs rewind this cursor while retaining
   cached off-branch bodies. These are candidate bodies, not validated UTXO state.
 - RVN P2P accepts up to 8 MB per frame, with a 32 MiB inbound queue byte budget
   in addition to the existing message-count limit.
@@ -87,13 +87,30 @@ worker, data and configuration are not changed by this work.
   validation remain pending. These APIs are now wired to opt-in historical native
   replay; its persisted progress is not a full-block validation or mining status.
 - `RvnCoinStore` adds a separate native coin RocksDB with an empty genesis coin
-  set, synchronous atomic coin/undo/tip commits, stale-parent checks, exact spent
+  set, synchronous atomic coin/undo-reference/tip commits, stale-parent checks, exact spent
   coin matching, creation collision checks and tip-only disconnect. Undo retains
   original coins and has a checksum. Reopening verifies identity/tip, current undo
   and affected coins. Foreign directories, missing CURRENT, wrong network and
   concurrent opens are rejected. Spring opens this store only in historical
-  native replay mode. Assets/block admission must commit their state consistently
-  with it before it can become a production full-block chainstate.
+  native replay mode. The asset-aware overload also commits immutable metadata
+  before/after deltas in the same batch and shared undo, checks stale asset values,
+  and verifies/restores affected metadata on reopen/disconnect. First asset writes
+  atomically upgrade the DB schema so native-only binaries refuse to reopen it.
+  Asset block validation must still supply these deltas before this becomes a
+  production full-block chainstate.
+- Tiered storage: `RvnFlatFileStore` writes block/undo payloads sequentially to
+  128 MiB segments on K:, forces them, and only then allows synchronous RocksDB
+  reference/state commits on C:. Crashes before index commit leave unreachable
+  tails without moving the tip. Reads check bounded references, record headers
+  and checksums. Archives have independent identities/locks. Legacy inline APIs
+  remain available; Spring uses external payloads. Existing DBs are not silently
+  relocated/reset, and indexed archives cannot be omitted on reopen.
+- RocksDB caches are explicitly bounded: headers 64 MiB, coins 256 MiB, plus two
+  32 MiB write buffers per DB. RVN IntelliJ profiles use a 4 GiB heap and 512 MiB
+  Java direct-buffer limit (separate from RocksDB JNI memory). GPU admission
+  planning checks one epoch DAG plus a device reserve against actual free VRAM;
+  the separate CUDA worker performs its own allocation-time VRAM checks.
+  Analysis: [STORAGE_AND_MEMORY.md](STORAGE_AND_MEMORY.md).
 - `RvnNativeBlockReplay` processes stored bodies on the best verified header
   branch, checks exact BIP34 coinbase height, native scripts/amounts/locks/sigops
   with parent-branch MTP, and commits coins/undo. It rewinds during header reorgs
@@ -109,9 +126,10 @@ worker, data and configuration are not changed by this work.
   duplicate names, integer amount precision, unit bounds, special unique/channel/
   qualifier supply parameters, activation gates, cumulative supply and permanent
   disabling of reissuance. It retains metadata on a no-change reissue. These
-  rules do not authorize a transaction or persist asset state; burns, ownership,
-  asset conservation, null restrictions/verifier expressions and atomic undo are
-  still required. The replay stop before asset activation remains enabled.
+  rules alone do not authorize transactions. Canonical root/sub transfer, issue
+  and reissue checks add burns, ownership and conservation; null restrictions,
+  verifier expressions and historical acceptance still need implementation.
+  The replay stop before asset activation remains enabled.
 
 ## Verification and limits
 
@@ -188,12 +206,13 @@ The coin-store change passed `mvn -pl rvn-app -am test -B -q`; subsequent
 reopen-integrity/ancestor-ID checks passed `mvn -pl rvn-storage -am test -B -q`.
 
 Local launch audit: NVIDIA reports an RTX 4070 with 12282 MiB VRAM. The repository
-GPU worker implements Bitcoin SHA256d, not KawPoW. Ravencoin Core binaries are
+original GPU worker implements Bitcoin SHA256d; RVN now has a separate CUDA
+KawPoW worker and hardware self-test. Ravencoin Core binaries are
 installed under `C:/Program Files/Raven`, but no Raven process was running during
 the audit. No RVN mainnet mining process has been started. The user explicitly
 confirmed the target: an independent RVN node and GPU mining on that node.
 Pool/Core RPC fallbacks are excluded from this implementation. CUDA Toolkit
-12.2 (`nvcc`) is available locally for the future KawPoW GPU worker.
+12.2 is available locally and NVRTC is used by the new KawPoW GPU worker.
 The packaged JAR passed offline startup with both historical and KawPoW
 self-tests. An actual P2P probe of `seed-raven.ravencoin.com` failed with
 `UnknownHostException` in this environment; no mainnet handshake was established.
@@ -224,23 +243,23 @@ header synchronization, or use:
 java -Xmx2g -jar rvn-app/target/rvn-app-0.0.1-SNAPSHOT.jar --ravencoin.sync.enabled=true
 ```
 
-The default RVN data root is `K:/RVNJavaNjde` as requested. `RVN_DATA_DIRECTORY`
-or `--ravencoin.data-directory=...` can override it. The shared `RvnDataDirectories`
-layout resolves `headers`, `coins`, `dag`, `logs` and `tmp` beneath that root.
-Headers and downloaded block bodies currently share `K:/RVNJavaNjde/headers`
-RocksDB. Historical native replay opens native coin storage under `coins` when
-explicitly enabled. `dag` is reserved for future disk-backed GPU datasets;
-the current CPU light cache remains in memory and is not persisted by this change.
-Application logs are written to `logs/rvn-node.log`, with 20 MB rotation, 14-day
-history and a 512 MB archive cap. The RVN IntelliJ configurations also place JVM
-temporary files, crash reports and heap dumps under this root. If overriding the
-root in IntelliJ, update those VM options too. For command-line startup, add
-`'-Djava.io.tmpdir=K:/RVNJavaNjde/tmp'` before `-jar` in PowerShell to select that temporary path;
-the directory must already exist. Build/test artifacts remain in Maven `target`
-directories. No existing DB is silently moved or imported.
-The data-layout change passed `mvn -pl rvn-app -am test -B -q` and packaging.
-An offline run of the packaged JAR with the K: root and JVM temporary directory
-exited successfully and created `K:/RVNJavaNjde/logs/rvn-node.log`.
+The cold root is `K:/RVNJavaNjde` (`RVN_DATA_DIRECTORY`); the hot NVMe root is
+`C:/RVNJavaNjde` (`RVN_HOT_DIRECTORY` / `ravencoin.storage.hot-directory`).
+`RvnDataDirectories` resolves headers/coins/tmp under C: and blocks/undo/archives/
+logs under K:. Optional disk DAG snapshots are reserved under K:/.../dag; the
+current CPU light cache stays in RAM. JVM temporary files use C:/.../tmp in RVN
+IntelliJ profiles; crash logs and heap dumps use K:/.../logs and /archives.
+Application logs retain 20 MB rotation, 14-day history and a 512 MB archive cap.
+If overriding either root, update IntelliJ VM paths too. Command-line PowerShell
+can use `'-Djava.io.tmpdir=C:/RVNJavaNjde/tmp'` before `-jar`; create tmp first.
+Build/test artifacts remain in Maven target directories. No existing DB is moved
+or imported automatically. The new layout refuses to ignore a legacy cold DB.
+The full tiered change passed `mvn -pl rvn-app -am package -B -q`. Five storage
+tests cover rotation, identities, references instead of large DB payloads,
+corruption/missing files and actual child-JVM halts before/after index commit.
+Two GPU memory-plan tests cover epoch boundaries, free VRAM and reserve gates.
+An isolated real C:/K: smoke check passed payload/state commit, reopen and undo;
+neither this smoke nor crash tests simulate physical power loss or benchmark IBD.
 
 `RVN_SYNC_PEERS` is a comma-separated list of hostnames/IPs; `ravencoin.p2p.port`
 overrides their common port. Only mainnet header synchronization is supported.
@@ -254,15 +273,15 @@ full-block/UTXO height.
 For commitment-checked body download choose IntelliJ configuration
 `RavencoinNodeApplication (mainnet block download)` or additionally set
 `--ravencoin.sync.blocks-enabled=true` / `RVN_SYNC_BLOCKS=true`. This mode also
-keeps mining disabled. Bodies currently share the independent RVN RocksDB with
-header records under separate key prefixes; full body retention consumes disk.
+keeps mining disabled. Bodies now live in K:/RVNJavaNjde/blocks segments; only
+their references and integrity metadata live alongside headers on C:.
 
 For historical native replay use IntelliJ configuration
 `RavencoinNodeApplication (historical native replay)`, or enable all of
 `RVN_SYNC_ENABLED=true`, `RVN_SYNC_BLOCKS=true` and `RVN_NATIVE_REPLAY=true`.
 The last switch maps to `ravencoin.validation.native-replay-enabled`, default false.
 It requires both header sync and body download. Progress resumes from the native
-coin tip under `K:/RVNJavaNjde/coins`, independently of the body-download cursor.
+coin tip under `C:/RVNJavaNjde/coins`, independently of the body-download cursor.
 Processing stops at assets activation because asset validation/state is pending.
 Neither this native tip nor the downloaded-body cursor makes the node mining-ready.
 
@@ -289,10 +308,40 @@ Payout configuration does not enable mining before full validation is implemente
    state, candidate submission and relay. Candidate/coinbase/witness assembly is
    implemented; fees can be derived from a caller-supplied stable coin snapshot.
    Context and complete transaction validity must still be established.
-5. GPU KawPoW worker, job cancellation on tip changes, local candidate
+5. Connect the CUDA KawPoW worker to validated jobs, cancellation on tip changes, local candidate
    validation and network submission.
 6. End-to-end tests with independently accepted blocks, then enable the
    production mining lifecycle in the dedicated Spring Boot launcher.
+
+Canonical asset transaction checks now include ordinary root/subasset transfer
+conservation (including owner tokens), metadata/units checks and bounded sums.
+Mainnet root/sub issuance plans validate exact burn outputs, the final owner/issue
+pair, and spent/returned parent ownership for subassets. Reissue plans check the
+exact 100 RVN mainnet burn, owner input/return, metadata transitions and conservation
+of existing transfer balances. Eight transaction scenarios cover these rules.
+Five asset/coin storage tests cover restart, reorg, stale-plan rejection,
+registry tampering, schema upgrade and abrupt child-process termination with
+external shared undo. These are synthetic fixtures, not accepted mainnet blocks.
+Historical script handling, remaining asset families
+and integrating validated deltas into admission still block asset-era replay
+and production mining. A canonical mainnet root/sub/unique/channel block validator now combines
+native checks, full-script asset signatures, intra-block coin/metadata overlays
+and net atomic plans; it rejects repeated reissues and unsupported script forms.
+Six signed/synthetic block tests exercise this subset. Unique issuance supports
+multi-token batches with a shared immediate parent, distinct names, exact 5 RVN
+burn per token and spent/returned parent ownership. Channels require an exact
+100 RVN burn, one issuance and messaging activation. Both families transfer as
+one indivisible token. Four additional tagged-transaction tests check these
+rules, duplicate/existing names, mixed parents, burns and activation. Full historical asset
+consensus is not claimed and the replay activation stop remains.
+
+CUDA KawPoW now has a real local worker: GPU DAG generation, height/3 generated
+programs, bounded uint64 nonce search and full 256-bit target comparison. The
+Java bridge recomputes every candidate with the CPU light verifier and enforces
+timeouts/ranges/result bounds. RTX 4070 hardware tests passed all four Core
+vectors, epoch replacement and unsigned nonce/target boundaries. A Spring
+opt-in CUDA diagnostic and IntelliJ CUDA Check profile are available; neither
+supplies production mining jobs. Details: [CUDA worker](../rvn-pow/native/cuda/README.md).
 
 ## Reference sources
 

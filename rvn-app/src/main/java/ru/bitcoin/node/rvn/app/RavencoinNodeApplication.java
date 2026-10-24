@@ -28,13 +28,21 @@ public class RavencoinNodeApplication {
     @Bean
     RvnDataDirectories rvnDataDirectories(
             @Value("${ravencoin.data-directory:" + RvnDataDirectories.DEFAULT_ROOT + "}") String directory,
+            @Value("${ravencoin.storage.hot-directory:" + RvnDataDirectories.DEFAULT_HOT_ROOT + "}") String hotDirectory,
             @Value("${ravencoin.validation.native-replay-enabled:false}") boolean nativeReplay,
             @Value("${ravencoin.sync.enabled:false}") boolean sync,
             @Value("${ravencoin.sync.blocks-enabled:false}") boolean blocks) {
         if (nativeReplay && (!sync || !blocks))
             throw new IllegalArgumentException("RVN native replay requires header sync and block download");
-        if (directory.isBlank()) throw new IllegalArgumentException("RVN data directory must not be blank");
-        return new RvnDataDirectories(java.nio.file.Path.of(directory));
+        if (directory.isBlank() || hotDirectory.isBlank()) throw new IllegalArgumentException("RVN data directories must not be blank");
+        var paths = new RvnDataDirectories(java.nio.file.Path.of(directory), java.nio.file.Path.of(hotDirectory));
+        if (sync && !paths.root().equals(paths.hotRoot())
+                && ((java.nio.file.Files.exists(paths.root().resolve("headers/CURRENT"))
+                     && !java.nio.file.Files.exists(paths.headers().resolve("CURRENT")))
+                    || (java.nio.file.Files.exists(paths.root().resolve("coins/CURRENT"))
+                        && !java.nio.file.Files.exists(paths.coins().resolve("CURRENT")))))
+            throw new IllegalStateException("Legacy RVN database found on cold root; migrate it offline or explicitly set RVN_HOT_DIRECTORY to its parent");
+        return paths;
     }
 
     @Bean

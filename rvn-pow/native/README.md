@@ -1,4 +1,8 @@
 # Native consensus implementation boundary (NOT bundled)
+
+The separate [CUDA KawPoW worker](cuda/README.md) now provides real GPU DAG
+generation/search through a local subprocess and Java candidate verification.
+The JNI interface described below is separate and remains unimplemented.
 The Java `RvnPowNativeBackend` expects a JNI library exporting:
 `Java_ru_bitcoin_node_rvn_pow_RvnPowNativeBackend_calculateNative(JNIEnv*,jclass,jint,jbyteArray)`.
 Inputs: algorithm ordinal 0=X16R, 1=X16RV2, 2=KawPoW; header 80 or 120 bytes.

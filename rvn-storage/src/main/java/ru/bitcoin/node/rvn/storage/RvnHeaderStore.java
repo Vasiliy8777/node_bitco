@@ -20,8 +20,11 @@ public final class RvnHeaderStore implements AutoCloseable, RvnHeaderLookup {
     private static final byte[] BEST = "rvn.headers.best".getBytes(StandardCharsets.US_ASCII);
     private static final byte[] COUNT = "rvn.headers.count".getBytes(StandardCharsets.US_ASCII);
     private static final byte[] BODY_CURSOR = "rvn.blocks.downloadCursor".getBytes(StandardCharsets.US_ASCII);
+    private static final byte[] BODY_LAYOUT = "rvn.blocks.externalLayout".getBytes(StandardCharsets.US_ASCII);
+    private final RvnFlatFileStore bodyFiles;
     private final RocksDB db;
     private final Options options;
+    private final Cache blockCache;
     private final WriteOptions durable;
     private final BigInteger powLimit;
     private final RvnHash256 genesis;
@@ -38,17 +41,25 @@ public final class RvnHeaderStore implements AutoCloseable, RvnHeaderLookup {
     /** Callers must independently check the fixed genesis header before constructing this store. */
     public RvnHeaderStore(Path directory, RvnHash256 genesisId, byte[] genesisRaw, BigInteger powLimit)
             throws IOException {
+        this(directory, genesisId, genesisRaw, powLimit, null);
+    }
+
+    public RvnHeaderStore(Path directory, RvnHash256 genesisId, byte[] genesisRaw, BigInteger powLimit,
+                          RvnFlatFileStore bodyFiles) throws IOException {
+        this.bodyFiles = bodyFiles;
         this.genesis = Objects.requireNonNull(genesisId);
         this.powLimit = Objects.requireNonNull(powLimit);
         byte[] identity = ("RVN-MAINNET-HEADERS-1\n" + genesisId + "\n").getBytes(StandardCharsets.US_ASCII);
         guardDirectory(directory.toAbsolutePath().normalize(), identity);
         durable = new WriteOptions().setSync(true);
+        Cache openedCache = new LRUCache(64L * 1024 * 1024, -1, true);
         Options openedOptions = new Options().setCreateIfMissing(true).setParanoidChecks(true)
-                .setWriteBufferSize(32L * 1024 * 1024).setMaxWriteBufferNumber(2);
+                .setWriteBufferSize(32L * 1024 * 1024).setMaxWriteBufferNumber(2)
+                .setTableFormatConfig(new BlockBasedTableConfig().setBlockCache(openedCache).setCacheIndexAndFilterBlocks(true));
         RocksDB openedDb = null;
         try {
             openedDb = RocksDB.open(openedOptions, directory.toAbsolutePath().toString());
-            db = openedDb; options = openedOptions;
+            db = openedDb; options = openedOptions; blockCache = openedCache;
             byte[] schema = db.get(SCHEMA);
             if (schema == null) {
                 try (var iterator = db.newIterator()) {
@@ -77,9 +88,13 @@ public final class RvnHeaderStore implements AutoCloseable, RvnHeaderLookup {
                     throw new IOException("RVN genesis/count mismatch");
                 validateTip(best);
             }
+            byte[] layout = db.get(BODY_LAYOUT);
+            if (layout != null && (bodyFiles == null || !Arrays.equals(layout, new byte[]{1})))
+                throw new IOException("RVN header DB requires its external block archive");
+            if (bodyFiles != null && layout == null) db.put(durable, BODY_LAYOUT, new byte[]{1});
         } catch (Exception e) {
             if (openedDb != null) openedDb.close();
-            openedOptions.close(); durable.close();
+            openedOptions.close(); openedCache.close(); durable.close();
             if (e instanceof IOException io) throw io;
             throw new IOException("Cannot open RVN header DB: " + directory, e);
         }
@@ -243,8 +258,12 @@ public final class RvnHeaderStore implements AutoCloseable, RvnHeaderLookup {
             var cursor = downloadedBodyTip();
             boolean advance = header.parentId().equals(cursor.id())
                     && header.height() <= best.height() && ancestor(best, header.height()).id().equals(id);
+            // Publish metadata only after the HDD record has been forced to disk.
+            byte[] reference = bodyFiles == null ? null : bodyFiles.append(payload);
             try (var batch = new WriteBatch()) {
-                batch.put(bodyKey(2, id), payload); batch.put(bodyKey(3, id), hash);
+                if (reference == null) batch.put(bodyKey(2, id), payload);
+                else batch.put(bodyKey(4, id), reference);
+                batch.put(bodyKey(3, id), hash);
                 if (advance) batch.put(BODY_CURSOR, id.wire());
                 db.write(durable, batch);
             }
@@ -255,14 +274,17 @@ public final class RvnHeaderStore implements AutoCloseable, RvnHeaderLookup {
     public synchronized byte[] blockBody(RvnHash256 id) throws IOException {
         ensureOpen();
         try {
-            byte[] payload = db.get(bodyKey(2, id)), digest = db.get(bodyKey(3, id));
+            byte[] reference = db.get(bodyKey(4, id));
+            if (reference != null && bodyFiles == null) throw new IOException("Missing external RVN block archive");
+            byte[] payload = reference == null ? db.get(bodyKey(2, id)) : bodyFiles.read(reference);
+            byte[] digest = db.get(bodyKey(3, id));
             if (payload == null && digest == null) return null;
             if (payload == null || digest == null || !Arrays.equals(RvnWire.doubleSha(payload), digest)) {
                 failed = true;
                 throw new IOException("RVN stored block body integrity failure");
             }
             return payload;
-        } catch (RocksDBException e) { failed = true; throw new IOException("RVN block body read failed", e); }
+        } catch (RocksDBException | IOException e) { failed = true; throw new IOException("RVN block body read failed", e); }
     }
 
     private static byte[] bodyKey(int prefix, RvnHash256 id) { byte[] key = key(id); key[0] = (byte) prefix; return key; }
@@ -321,6 +343,6 @@ public final class RvnHeaderStore implements AutoCloseable, RvnHeaderLookup {
         if (failed) throw new IllegalStateException("RVN header DB failed; close and reopen before use");
     }
     @Override public synchronized void close() {
-        if (!closed) { closed = true; cache.clear(); db.close(); durable.close(); options.close(); }
+        if (!closed) { closed = true; cache.clear(); db.close(); durable.close(); options.close(); blockCache.close(); }
     }
 }

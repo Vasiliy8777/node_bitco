@@ -6,6 +6,8 @@ spring:
 ravencoin:
   network: ${RVN_NETWORK:mainnet}
   data-directory: '${RVN_DATA_DIRECTORY:K:/RVNJavaNjde}'
+  storage:
+    hot-directory: '${RVN_HOT_DIRECTORY:C:/RVNJavaNjde}'
   sync:
     enabled: ${RVN_SYNC_ENABLED:false}
     blocks-enabled: ${RVN_SYNC_BLOCKS:false}
@@ -13,10 +15,21 @@ ravencoin:
     response-timeout-ms: 30000
     poll-ms: 10000
   mining:
+    # Startup currently rejects true: complete asset-era admission and the mining
+    # job/candidate lifecycle must be connected before production mining.
     enabled: ${RVN_MINING_ENABLED:false}
     address: ${RVN_MINING_ADDRESS:}
+    cuda:
+      # Enables the local worker and real GPU Core-vector tests, not live mining.
+      enabled: ${RVN_CUDA_ENABLED:false}
+      python: ${RVN_CUDA_PYTHON:python}
+      worker: '${RVN_CUDA_WORKER:rvn-pow/native/cuda/worker.py}'
+      device: ${RVN_CUDA_DEVICE:0}
+      reserve-mib: ${RVN_CUDA_RESERVE_MIB:1024}
   validation:
     # Historical native-coin replay only; stops before asset activation.
+    # Canonical root/sub/unique/channel checks exist, but historical envelopes,
+    # qualifier/restricted state and deployment handling still block full replay.
     native-replay-enabled: ${RVN_NATIVE_REPLAY:false}
   pow:
     self-test-enabled: ${RVN_POW_SELF_TEST:false}

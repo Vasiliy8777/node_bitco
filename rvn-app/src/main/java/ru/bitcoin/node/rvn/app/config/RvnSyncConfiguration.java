@@ -6,6 +6,8 @@ import org.springframework.beans.factory.annotation.Value;
 import ru.bitcoin.node.rvn.app.chain.RvnMainnetHeaderChain;
 import ru.bitcoin.node.rvn.app.chain.RvnNativeBlockReplay;
 import ru.bitcoin.node.rvn.storage.RvnCoinStore;
+import ru.bitcoin.node.rvn.storage.RvnFlatFileStore;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.ObjectProvider;
 import ru.bitcoin.node.rvn.app.sync.RvnHeaderSyncService;
 import ru.bitcoin.node.rvn.app.sync.RvnBlockDownloader;
@@ -19,7 +21,13 @@ import java.util.Arrays;
 @ConditionalOnProperty(name = "ravencoin.sync.enabled", havingValue = "true")
 public class RvnSyncConfiguration {
     @Bean(destroyMethod = "close")
+    RvnFlatFileStore rvnBlockFiles(RvnDataDirectories directories) throws Exception {
+        return new RvnFlatFileStore(directories.blocks(), "BLOCKS\n" + RvnMainnetExpectedBits.GENESIS_ID, 8_000_000);
+    }
+
+    @Bean(destroyMethod = "close")
     RvnHeaderStore rvnHeaderStore(RvnJavaPowEngine engine, RvnKawpowLightEngine kawpow, RvnDataDirectories directories,
+            @Qualifier("rvnBlockFiles") RvnFlatFileStore bodyFiles,
             @Value("${ravencoin.network:mainnet}") String network,
             @Value("${ravencoin.mining.enabled:false}") boolean mining,
             @Value("${ravencoin.p2p.probe-enabled:false}") boolean probe,
@@ -31,7 +39,7 @@ public class RvnSyncConfiguration {
         RvnHistoricalPowSelfTest.requireValid(engine);
         RvnKawpowSelfTest.requireValid(kawpow);
         return new RvnHeaderStore(directories.headers(), RvnMainnetExpectedBits.GENESIS_ID,
-                RvnHistoricalPowSelfTest.mainnetGenesisHeader(), RvnMainnetDifficulty.POW_LIMIT);
+                RvnHistoricalPowSelfTest.mainnetGenesisHeader(), RvnMainnetDifficulty.POW_LIMIT, bodyFiles);
     }
 
     @Bean
@@ -39,11 +47,18 @@ public class RvnSyncConfiguration {
         return new RvnMainnetHeaderChain(store, engine, () -> System.currentTimeMillis() / 1000);
     }
 
-    @Bean
+    @Bean(destroyMethod = "close")
     @ConditionalOnProperty(name = "ravencoin.validation.native-replay-enabled", havingValue = "true")
-    RvnCoinStore rvnCoinStore(RvnDataDirectories directories, RvnHeaderStore headers) throws Exception {
+    RvnFlatFileStore rvnUndoFiles(RvnDataDirectories directories) throws Exception {
+        return new RvnFlatFileStore(directories.undo(), "UNDO\n" + RvnMainnetExpectedBits.GENESIS_ID, 64 * 1024 * 1024);
+    }
+
+    @Bean(destroyMethod = "close")
+    @ConditionalOnProperty(name = "ravencoin.validation.native-replay-enabled", havingValue = "true")
+    RvnCoinStore rvnCoinStore(RvnDataDirectories directories, RvnHeaderStore headers,
+            @Qualifier("rvnUndoFiles") RvnFlatFileStore undoFiles) throws Exception {
         // Header storage is opened/self-tested first; failures cannot create an orphan coin DB.
-        return new RvnCoinStore(directories.coins(), RvnMainnetExpectedBits.GENESIS_ID);
+        return new RvnCoinStore(directories.coins(), RvnMainnetExpectedBits.GENESIS_ID, undoFiles);
     }
 
     @Bean

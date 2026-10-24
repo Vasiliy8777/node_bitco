@@ -1,0 +1,10 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="RavencoinNodeApplication (CUDA Check)" type="SpringBootApplicationConfigurationType" factoryName="Spring Boot">
+    <option name="ENABLE_LAUNCH_OPTIMIZATION" value="false" />
+    <module name="rvn-app" />
+    <option name="SPRING_BOOT_MAIN_CLASS" value="ru.bitcoin.node.rvn.app.RavencoinNodeApplication" />
+    <option name="VM_PARAMETERS" value="-Xms256m -Xmx4g -XX:MaxDirectMemorySize=512m -Djava.io.tmpdir=C:/RVNJavaNjde/tmp -Dravencoin.mining.cuda.enabled=true -Dravencoin.mining.enabled=false -Dravencoin.sync.enabled=false -Dravencoin.sync.blocks-enabled=false -Dravencoin.validation.native-replay-enabled=false" />
+    <option name="WORKING_DIRECTORY" value="file://$PROJECT_DIR$" />
+    <method v="2"><option name="Make" enabled="true" /></method>
+  </configuration>
+</component>
