@@ -29,6 +29,23 @@ public final class RvnCanonicalAssetBlockChecks {
     public static Plan verifyMainnet(RvnBlock block, RvnSpendContext context, Activation activation,
                                     boolean enforcedReissueValues, RvnCoinView parent,
                                     Function<String, Metadata> registry, RvnAssetRulesView parentRules) {
+        return verify(block, context, activation, enforcedReissueValues, parent, registry, parentRules,
+                RvnAssetScriptCodec::decodeCanonicalSpendable);
+    }
+
+    /** Historical envelopes use Core positional decoding. Unsupported consensus cases still fail closed. */
+    public static Plan verifyHistoricalMainnet(RvnBlock block, RvnSpendContext context, Activation activation,
+                                    boolean enforcedReissueValues, RvnCoinView parent,
+                                    Function<String, Metadata> registry, RvnAssetRulesView parentRules,
+                                    boolean transferSizeFix) {
+        return verify(block, context, activation, enforcedReissueValues, parent, registry, parentRules,
+                script -> RvnHistoricalAssetCodec.decodeSpendable(script, transferSizeFix, activation.messages()));
+    }
+
+    private static Plan verify(RvnBlock block, RvnSpendContext context, Activation activation,
+                                    boolean enforcedReissueValues, RvnCoinView parent,
+                                    Function<String, Metadata> registry, RvnAssetRulesView parentRules,
+                                    Function<byte[], Optional<Decoded>> decoder) {
         if (!activation.assets()) throw new IllegalArgumentException("Canonical asset block checks require activation");
         Objects.requireNonNull(registry);
         RvnCoinbase.requireHeight(block.transactions().getFirst(), context.height());
@@ -40,7 +57,7 @@ public final class RvnCanonicalAssetBlockChecks {
         var metadata = new HashMap<String, Metadata>();
         Function<String, Metadata> view = name -> metadata.containsKey(name) ? metadata.get(name) : registry.apply(name);
         var reissued = new HashSet<String>();
-        var rules = new RvnRestrictedBlockState(parentRules, registry);
+        var rules = new RvnRestrictedBlockState(parentRules, registry, decoder);
         for (var tx : block.transactions()) {
             var spent = new ArrayList<Payload>();
             if (!tx.isCoinbase()) for (var input : tx.inputs()) {
@@ -48,14 +65,14 @@ public final class RvnCanonicalAssetBlockChecks {
                 if (!consumed.add(point)) throw new SecurityException("RVN asset block double spend");
                 var coin = overlay.remove(point);
                 if (coin == null) coin = parent.find(point).orElseThrow(() -> new SecurityException("RVN missing asset input"));
-                var asset = classify(coin.output().scriptPubKey());
+                var asset = classify(coin.output().scriptPubKey(), decoder);
                 if (asset != null) { spent.add(asset); rules.source(asset, coin.output().scriptPubKey()); }
             }
             var outputs = new ArrayList<RvnAssetIssueChecks.Output>();
             var payloads = new ArrayList<Payload>();
             for (var output : tx.outputs()) {
                 outputs.add(new RvnAssetIssueChecks.Output(output.value(), output.scriptPubKey()));
-                var payload = classify(output.scriptPubKey());
+                var payload = classify(output.scriptPubKey(), decoder);
                 if (payload == null) continue;
                 if (tx.isCoinbase()) throw new UnsupportedOperationException("Asset coinbase outputs are outside canonical subset");
                 if (!(payload instanceof Reissue) || enforcedReissueValues)
@@ -73,21 +90,21 @@ public final class RvnCanonicalAssetBlockChecks {
                 var last = payloads.getLast();
                 var type = RvnAssetNames.requireValid(last.name());
                 if (last instanceof Issue && (type == RvnAssetNames.Type.UNIQUE || type == RvnAssetNames.Type.CHANNEL))
-                    metadata.putAll(RvnTaggedAssetIssueChecks.verifyMainnet(spent, outputs, activation, view));
+                    metadata.putAll(RvnTaggedAssetIssueChecks.verifyMainnet(spent, outputs, activation, view, decoder));
                 else if (last instanceof Issue && (type == RvnAssetNames.Type.QUALIFIER || type == RvnAssetNames.Type.SUB_QUALIFIER)) {
-                    var issued = RvnQualifierIssueChecks.verifyMainnet(spent, outputs, activation, view);
+                    var issued = RvnQualifierIssueChecks.verifyMainnet(spent, outputs, activation, view, decoder);
                     metadata.put(issued.name(), issued);
                 }
                 else if (last instanceof Issue && type == RvnAssetNames.Type.RESTRICTED) {
-                    var issued = RvnRestrictedIssueChecks.verifyMainnet(spent, outputs, activation, view);
+                    var issued = RvnRestrictedIssueChecks.verifyMainnet(spent, outputs, activation, view, decoder);
                     metadata.put(issued.name(), issued);
                 }
                 else {
-                    var issued = RvnAssetIssueChecks.verifyMainnet(spent, outputs, activation, view);
+                    var issued = RvnAssetIssueChecks.verifyMainnet(spent, outputs, activation, view, decoder);
                     metadata.put(issued.name(), issued);
                 }
             } else if (payloads.stream().anyMatch(p -> p instanceof Reissue)) {
-                var updated = RvnAssetReissueChecks.verifyMainnet(spent, outputs, activation, view);
+                var updated = RvnAssetReissueChecks.verifyMainnet(spent, outputs, activation, view, decoder);
                 if (!reissued.add(updated.name())) throw new SecurityException("RVN multiple reissues of one asset in block");
                 metadata.put(updated.name(), updated);
             } else {
@@ -108,8 +125,8 @@ public final class RvnCanonicalAssetBlockChecks {
         return new Plan(coinChanges, new RvnAssetChanges(changes, rules.changes()));
     }
 
-    private static Payload classify(byte[] script) {
-        var decoded = decodeCanonicalSpendable(script);
+    private static Payload classify(byte[] script, Function<byte[], Optional<Decoded>> decoder) {
+        var decoded = decoder.apply(script);
         if (decoded.isPresent()) return decoded.get().payload();
         if (RvnHistoricalAssetCodec.decodeNull(script).isPresent()) return null;
         // Find OP_RVN_ASSET as an opcode, never as a byte inside pushed hashes.

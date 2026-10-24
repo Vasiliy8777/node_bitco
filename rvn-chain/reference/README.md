@@ -44,10 +44,10 @@ parent owner for subassets, and returns an immutable metadata plan.
 `RvnAssetChanges` carries immutable net before/after values; the storage module
 can commit these atomically with native coins, shared undo and tip. This is a
 storage primitive, not an accepted-block validation status.
-These APIs are not wired into block admission: callers must classify every
-script, resolve unique inputs, verify signatures and native values, and commit
-metadata with UTXO/undo atomically. Other asset families, complete messaging
-deployment handling and historical envelopes remain incomplete.
+The block checker below wires these APIs into opt-in replay: it resolves inputs,
+checks native values and signatures, and commits metadata with UTXO/undo
+atomically. Full historical acceptance still needs the remaining cases and
+independent accepted-block fixtures described below.
 Burn constants and layout come from the pinned `src/chainparams.cpp` and
 `CTransaction::VerifyNewAsset` in `src/assets/assets.cpp`; conservation follows
 `Consensus::CheckTxAssets` in `src/consensus/tx_verify.cpp`. Java tests are
@@ -68,9 +68,12 @@ and `ContextualCheckTransferAsset` functions. Four tagged-transaction scenarios
 and a signed issue/batch/transfer/channel block test cover positive and negative
 cases; they do not constitute independent Core block acceptance fixtures.
 It returns coin and metadata deltas suitable for a single atomic store commit.
-The asset signature adapter executes the checked P2PKH prefix while retaining
-the complete original asset scriptCode for signature hashing, matching Core's
-suffix-consuming OP_RVN_ASSET semantics. Tests reject prefix-only signatures.
+The asset signature adapter executes the original script in the explicit
+RAVENCOIN dialect. OP_RVN_ASSET consumes the entire suffix, including malformed
+push bytes and CODESEPARATOR bytes, with Core's operand-size/opcount behavior.
+Legacy hashing and FindAndDelete treat that suffix as opaque. P2SH and witness-v0
+propagate the dialect; existing Bitcoin APIs retain their original default.
+Tests cover all six legacy SIGHASH modes and reject prefix-only signatures.
 Caller supplies activation/enforced-value state from the validated branch.
 This explicit canonical subset is **not full historical asset block consensus**.
 Default replay still stops at assets. Opt-in canonical replay now connects the
@@ -96,9 +99,19 @@ data into a canonical payload. Decoding alone does not authorize a spend.
 null/zero-asset outputs. Tests are constructed scenarios, not a Core execution
 oracle or a corpus of accepted historical blocks.
 
-Remaining hard limits: historical noncanonical spending/signature-hash semantics
-are not integrated into admission; the verifier parser is not yet certified
-against LibBoolEE's malformed-expression quirks; removing a root qualifier held
+Opt-in replay now uses the historical positional decoder for inputs and outputs,
+including the branch-specific transfer offset and pre-RIP5 annotations. The
+canonical constructor/checker entry points remain strict. A signed synthetic
+block issues and spends a noncanonical envelope with an opaque CODESEPARATOR.
+
+`generate-verifier-vectors.ps1` builds the original pinned Core LibBoolEE using
+`verifier-reference.cpp` and MSVC. Its 280 committed cases cover 35 expressions
+under eight qualifier assignments, including malformed leading characters.
+`RvnLibBoolEvaluator` is adapted from Adam Streck's LGPL-3.0-or-later LibBoolEE;
+notices are in the source and full LGPL/GPL texts ship in META-INF/licenses.
+The oracle covers expression evaluation, not all asset-name or block rules.
+
+Remaining hard limits: removing a root qualifier held
 only through a subqualifier stops explicitly; pre-deployment asset coinbases
 are conservatively rejected. Vote assets are outside this implementation.
 These limits must be resolved and replayed against independent accepted fixtures

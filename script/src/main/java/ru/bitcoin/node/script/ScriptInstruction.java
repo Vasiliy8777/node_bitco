@@ -6,11 +6,15 @@ public final class ScriptInstruction {
 
     private final int opcode;
     private final byte[] data;
+    private final boolean pushData;
 
     private ScriptInstruction(
             int opcode,
             byte[] data
     ) {
+        this(opcode, data, data != null || opcode == Opcode.OP_0);
+    }
+    private ScriptInstruction(int opcode, byte[] data, boolean pushData) {
         if (opcode < 0 || opcode > 0xFF) {
             throw new IllegalArgumentException(
                     "opcode must be in range 0..255"
@@ -18,6 +22,7 @@ public final class ScriptInstruction {
         }
 
         this.opcode = opcode;
+        this.pushData = pushData;
         this.data =
                 data == null
                         ? null
@@ -26,6 +31,8 @@ public final class ScriptInstruction {
                         data.length
                 );
     }
+
+    static ScriptInstruction rvnAssetRemainder(byte[] data) { return new ScriptInstruction(0xc0, data, false); }
 
     public static ScriptInstruction opcode(
             int opcode
@@ -57,8 +64,7 @@ public final class ScriptInstruction {
     }
 
     public boolean isPushData() {
-        return data != null
-                || opcode == Opcode.OP_0;
+        return pushData;
     }
 
     public byte[] data() {

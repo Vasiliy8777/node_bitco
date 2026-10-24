@@ -4,7 +4,8 @@ import ru.bitcoin.node.protocol.transaction.Transaction;
 import ru.bitcoin.node.script.*;
 
 /** RVN adapter for shared legacy and witness-v0 primitives. Activation flags must
- * come from the candidate's RVN branch. Does not implement asset semantics.
+ * come from the candidate's RVN branch. Includes RVN suffix-consuming execution
+ * and signature serialization; asset state/authorization are separate checks.
  * Bitcoin Taproot/anchor shortcuts and policy flags are intentionally unavailable.
  */
 public final class RvnNativeScriptChecks {
@@ -29,7 +30,7 @@ public final class RvnNativeScriptChecks {
         if (ScriptVerifyFlags.has(flags, ScriptVerifyFlags.WITNESS)) {
             var nativeProgram = WitnessProgram.parse(script);
             if (nativeProgram.isPresent()) {
-                if (sig.length != 0 || !LegacyScriptVerifier.verify(tx, index, sig, script, flags)) fail();
+                if (sig.length != 0 || !LegacyScriptVerifier.verify(tx, index, sig, script, flags, ScriptDialect.RAVENCOIN)) fail();
                 witness(tx, index, coin, nativeProgram.get(), flags);
                 return;
             }
@@ -39,14 +40,14 @@ public final class RvnNativeScriptChecks {
                 if (program.isPresent()) {
                     if (P2shWitnessProgram.extract(sig).isEmpty()
                             || !ScriptNumber.castToBool(program.get().program())
-                            || !LegacyScriptVerifier.verifyP2shOuter(tx, index, sig, script, flags)) fail();
+                            || !LegacyScriptVerifier.verifyP2shOuter(tx, index, sig, script, flags, ScriptDialect.RAVENCOIN)) fail();
                     witness(tx, index, coin, program.get(), flags);
                     return;
                 }
             }
             if (!input.witness().isEmpty()) fail();
         }
-        if (!LegacyScriptVerifier.verify(tx, index, sig, script, flags)) fail();
+        if (!LegacyScriptVerifier.verify(tx, index, sig, script, flags, ScriptDialect.RAVENCOIN)) fail();
     }
 
     private static void witness(Transaction tx, int index, RvnCoin coin, WitnessProgram program, int flags) {
@@ -54,8 +55,8 @@ public final class RvnNativeScriptChecks {
         if (program.version() != 0) return;
         var witness = tx.inputs().get(index).witness();
         boolean valid = program.isP2wpkh()
-                ? WitnessV0ScriptVerifier.verifyP2wpkh(tx, index, new byte[0], witness, program, coin.output().value(), flags)
-                : program.isP2wsh() && WitnessV0ScriptVerifier.verifyP2wsh(tx, index, new byte[0], witness, program, coin.output().value(), flags);
+                ? WitnessV0ScriptVerifier.verifyP2wpkh(tx, index, new byte[0], witness, program, coin.output().value(), flags, ScriptDialect.RAVENCOIN)
+                : program.isP2wsh() && WitnessV0ScriptVerifier.verifyP2wsh(tx, index, new byte[0], witness, program, coin.output().value(), flags, ScriptDialect.RAVENCOIN);
         if (!valid) fail();
     }
 

@@ -9,10 +9,14 @@ public record ScriptExecutionContext(
         int flags,
         long amount,
         SignatureVersion signatureVersion,
-        TaprootExecutionData taprootData
+        TaprootExecutionData taprootData,
+        ScriptDialect dialect
 ) {
 
     public ScriptExecutionContext {
+        java.util.Objects.requireNonNull(dialect, "dialect");
+        if (dialect == ScriptDialect.RAVENCOIN && signatureVersion == SignatureVersion.TAPSCRIPT)
+            throw new IllegalArgumentException("RVN tapscript is not supported");
 
         if (transaction == null) {
             throw new IllegalArgumentException(
@@ -49,6 +53,15 @@ public record ScriptExecutionContext(
 
         scriptCode =
                 scriptCode.clone();
+    }
+
+    public ScriptExecutionContext(Transaction transaction, int inputIndex, byte[] scriptCode,
+                                  int flags, long amount, SignatureVersion signatureVersion, TaprootExecutionData taprootData) {
+        this(transaction, inputIndex, scriptCode, flags, amount, signatureVersion, taprootData, ScriptDialect.BITCOIN);
+    }
+
+    public ScriptExecutionContext withDialect(ScriptDialect dialect) {
+        return new ScriptExecutionContext(transaction, inputIndex, scriptCode, flags, amount, signatureVersion, taprootData, dialect);
     }
 
     public ScriptExecutionContext(Transaction transaction, int inputIndex, byte[] scriptCode,

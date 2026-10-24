@@ -14,8 +14,13 @@ public final class RvnQualifierIssueChecks {
     private RvnQualifierIssueChecks() {}
     public static Metadata verifyMainnet(List<? extends Payload> spent, List<Output> outputs,
                                          Activation activation, Function<String, Metadata> state) {
+        return verifyMainnet(spent, outputs, activation, state, RvnAssetScriptCodec::decodeCanonicalSpendable);
+    }
+    static Metadata verifyMainnet(List<? extends Payload> spent, List<Output> outputs,
+                                  Activation activation, Function<String, Metadata> state,
+                                  Function<byte[], Optional<Decoded>> decoder) {
         if (outputs.size() < 2) throw new SecurityException("RVN qualifier issue requires burn and issuance");
-        var decoded = outputs.stream().map(o -> decodeCanonicalSpendable(o.script()).map(Decoded::payload).orElse(null)).toList();
+        var decoded = outputs.stream().map(o -> decoder.apply(o.script()).map(Decoded::payload).orElse(null)).toList();
         if (!(decoded.getLast() instanceof Issue issue)) throw new SecurityException("RVN qualifier issuance must be last");
         var type = RvnAssetNames.requireValid(issue.name());
         if (type != RvnAssetNames.Type.QUALIFIER && type != RvnAssetNames.Type.SUB_QUALIFIER)

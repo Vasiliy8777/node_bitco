@@ -20,6 +20,11 @@ public final class WitnessV0ScriptVerifier {
             long amount,
             int flags
     ) {
+        return verifyP2wpkh(transaction, inputIndex, scriptSig, witness, witnessProgram, amount, flags, ScriptDialect.BITCOIN);
+    }
+    public static boolean verifyP2wpkh(Transaction transaction, int inputIndex, byte[] scriptSig, Witness witness,
+                                      WitnessProgram witnessProgram, long amount, int flags, ScriptDialect dialect) {
+        java.util.Objects.requireNonNull(dialect);
         if (transaction == null) {
             throw new IllegalArgumentException(
                     "transaction must not be null"
@@ -129,7 +134,7 @@ public final class WitnessV0ScriptVerifier {
                         flags,
                         amount,
                         SignatureVersion.WITNESS_V0
-                );
+                ).withDialect(dialect);
 
         try {
 
@@ -219,6 +224,11 @@ public final class WitnessV0ScriptVerifier {
             long amount,
             int flags
     ) {
+        return verifyP2wsh(transaction, inputIndex, scriptSig, witness, witnessProgram, amount, flags, ScriptDialect.BITCOIN);
+    }
+    public static boolean verifyP2wsh(Transaction transaction, int inputIndex, byte[] scriptSig, Witness witness,
+                                     WitnessProgram witnessProgram, long amount, int flags, ScriptDialect dialect) {
+        java.util.Objects.requireNonNull(dialect);
         if (transaction == null) {
             throw new IllegalArgumentException(
                     "transaction must not be null"
@@ -349,7 +359,7 @@ public final class WitnessV0ScriptVerifier {
                         flags,
                         amount,
                         SignatureVersion.WITNESS_V0
-                );
+                ).withDialect(dialect);
 
         try {
 

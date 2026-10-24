@@ -11,6 +11,11 @@ public final class ScriptParser {
     public static List<ScriptInstruction> parse(
             byte[] script
     ) {
+        return parse(script, ScriptDialect.BITCOIN);
+    }
+
+    public static List<ScriptInstruction> parse(byte[] script, ScriptDialect dialect) {
+        java.util.Objects.requireNonNull(dialect);
         if (script == null) {
             throw new IllegalArgumentException(
                     "script must not be null"
@@ -30,6 +35,11 @@ public final class ScriptParser {
                     );
 
             position++;
+
+            if (dialect == ScriptDialect.RAVENCOIN && opcode == 0xc0) {
+                result.add(ScriptInstruction.rvnAssetRemainder(java.util.Arrays.copyOfRange(script, position, script.length)));
+                break;
+            }
 
             if (opcode == Opcode.OP_0) {
                 result.add(

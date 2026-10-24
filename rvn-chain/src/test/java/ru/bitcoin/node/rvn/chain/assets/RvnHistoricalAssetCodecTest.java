@@ -43,6 +43,20 @@ class RvnHistoricalAssetCodecTest {
         assertEquals(1, partial.hasHash()); assertEquals(0, partial.hash().length);
         // Deserialization preserves this distinction for subsequent validity checks.
     }
+    @Test void admissionRetainsInvalidFlagsAndEraDependentAnnotations() {
+        var hash = new HashData(0x54, "01".repeat(32));
+        byte[] transfer = encodeCanonical(lock(), new Transfer("TOKEN", 100000000, hash, 123));
+        var before = (Transfer) RvnHistoricalAssetCodec.decodeSpendable(transfer, true, false).orElseThrow().payload();
+        assertNull(before.message()); assertEquals(0, before.expires());
+        var after = (Transfer) RvnHistoricalAssetCodec.decodeSpendable(transfer, true, true).orElseThrow().payload();
+        assertEquals(hash, after.message()); assertEquals(123, after.expires());
+        byte[] issue = encodeCanonical(lock(), new Issue("TOKEN", 100000000, 0, true, null));
+        issue[issue.length - 3] = 2;
+        assertThrows(SecurityException.class, () -> RvnHistoricalAssetCodec.decodeSpendable(issue, true, true));
+        issue[issue.length - 3] = 1; issue[issue.length - 2] = 1;
+        assertThrows(SecurityException.class, () -> RvnHistoricalAssetCodec.decodeSpendable(issue, true, true));
+    }
+
     @Test void nullFormsUseCoreFixedOffsetsAndDoNotValidateFlagsAtDecodeTime() {
         var out = new ByteArrayOutputStream(); out.write(0xc0); out.write(0x14); out.writeBytes(new byte[20]);
         out.write(8); out.write(5); out.writeBytes("#KYC1".getBytes(java.nio.charset.StandardCharsets.US_ASCII)); out.write(2);

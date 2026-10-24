@@ -76,14 +76,9 @@ public final class RvnNativeBlockReplay {
                 });
                 if (active) {
                     var deployment = assetContext.forNext(parent, headers);
-                    if (!deployment.transferSizeFix()) for (var tx : block.transactions()) for (var output : tx.outputs()) {
-                        var classified = RvnHistoricalAssetCodec.classify(output.scriptPubKey());
-                        if (classified.isPresent() && classified.get().kind() == RvnHistoricalAssetCodec.Kind.TRANSFER
-                                && classified.get().dataOffset() != 31)
-                            throw new UnsupportedOperationException("Historical transfer offset requires noncanonical admission path");
-                    }
-                    var plan = RvnCanonicalAssetBlockChecks.verifyMainnet(block, context, deployment.activation(),
-                            deployment.enforcedReissueValues(), coins, name -> coins.findAsset(name).orElse(null), coins);
+                    var plan = RvnCanonicalAssetBlockChecks.verifyHistoricalMainnet(block, context, deployment.activation(),
+                            deployment.enforcedReissueValues(), coins, name -> coins.findAsset(name).orElse(null), coins,
+                            deployment.transferSizeFix());
                     coins.connect(coins.tip(), next.id(), plan.coins(), plan.assets());
                 } else {
                     var changes = RvnNativeTransactionChecks.block(block, context, false, coins);

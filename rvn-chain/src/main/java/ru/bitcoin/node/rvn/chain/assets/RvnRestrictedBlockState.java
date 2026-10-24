@@ -13,10 +13,13 @@ import ru.bitcoin.node.rvn.chain.assets.RvnAssetIssueChecks.Output;
 /** Block-local rule plans with parent-only restricted transfer checks. This
  * canonical path retains explicit unsupported historical cases; not replay certification. */
 final class RvnRestrictedBlockState {
+    private final Function<byte[], Optional<Decoded>> decoder;
     private final RvnAssetRulesView parent;
     private final Function<String, Metadata> registry;
     private final Map<RvnAssetRuleKey, RvnAssetChanges.RuleUpdate> changes = new HashMap<>();
-    RvnRestrictedBlockState(RvnAssetRulesView parent, Function<String, Metadata> registry) {
+    RvnRestrictedBlockState(RvnAssetRulesView parent, Function<String, Metadata> registry,
+                            Function<byte[], Optional<Decoded>> decoder) {
+        this.decoder = Objects.requireNonNull(decoder);
         this.parent = Objects.requireNonNull(parent); this.registry = Objects.requireNonNull(registry);
     }
     Map<RvnAssetRuleKey, RvnAssetChanges.RuleUpdate> changes() { return Map.copyOf(changes); }
@@ -40,7 +43,7 @@ final class RvnRestrictedBlockState {
                 } else nulls.add(data.get());
                 continue;
             }
-            var asset = decodeCanonicalSpendable(output.script());
+            var asset = decoder.apply(output.script());
             if (asset.isEmpty()) continue;
             var payload = asset.get().payload();
             if (payload instanceof Transfer) transfers.add(payload.name());
@@ -62,7 +65,7 @@ final class RvnRestrictedBlockState {
             if (issue || amount > 0) {
                 if (expression == null) throw new SecurityException("RVN restricted verifier missing");
                 for (var output : outputs) {
-                    var asset = decodeCanonicalSpendable(output.script());
+                    var asset = decoder.apply(output.script());
                     if (asset.isPresent() && asset.get().payload().equals(creation))
                         RvnRestrictedRuleChecks.requireVerifier(parent, expression, address(output.script()), q -> registry.apply(q) != null);
                 }
@@ -96,7 +99,7 @@ final class RvnRestrictedBlockState {
         else changes.put(key, new RvnAssetChanges.RuleUpdate(before, value));
     }
     private static String address(byte[] script) {
-        // All spendable payloads reaching this helper were decoded canonically.
+        // Core Solver extracts these address bytes for positional asset scripts too.
         return HexFormat.of().formatHex(Arrays.copyOfRange(script, 3, 23));
     }
 }

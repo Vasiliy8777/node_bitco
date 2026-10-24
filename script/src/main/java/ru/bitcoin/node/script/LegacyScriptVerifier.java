@@ -29,6 +29,11 @@ public final class LegacyScriptVerifier {
             byte[] scriptPubKey,
             int flags
     ) {
+        return verify(transaction, inputIndex, scriptSig, scriptPubKey, flags, ScriptDialect.BITCOIN);
+    }
+    public static boolean verify(Transaction transaction, int inputIndex, byte[] scriptSig, byte[] scriptPubKey,
+                                 int flags, ScriptDialect dialect) {
+        java.util.Objects.requireNonNull(dialect);
         if (transaction == null) {
             throw new IllegalArgumentException(
                     "transaction must not be null"
@@ -98,7 +103,7 @@ public final class LegacyScriptVerifier {
                             inputIndex,
                             scriptSig,
                             flags
-                    );
+                    ).withDialect(dialect);
 
             ScriptInterpreter.execute(
                     scriptSig,
@@ -126,7 +131,7 @@ public final class LegacyScriptVerifier {
                             inputIndex,
                             scriptPubKey,
                             flags
-                    );
+                    ).withDialect(dialect);
 
             ScriptInterpreter.execute(
                     scriptPubKey,
@@ -186,7 +191,7 @@ public final class LegacyScriptVerifier {
                             inputIndex,
                             redeemScript,
                             flags
-                    );
+                    ).withDialect(dialect);
 
             ScriptInterpreter.execute(
                     redeemScript,
@@ -257,6 +262,11 @@ public final class LegacyScriptVerifier {
             byte[] scriptPubKey,
             int flags
     ) {
+        return verifyP2shOuter(transaction, inputIndex, scriptSig, scriptPubKey, flags, ScriptDialect.BITCOIN);
+    }
+    public static boolean verifyP2shOuter(Transaction transaction, int inputIndex, byte[] scriptSig, byte[] scriptPubKey,
+                                          int flags, ScriptDialect dialect) {
+        java.util.Objects.requireNonNull(dialect);
         if (transaction == null) {
             throw new IllegalArgumentException(
                     "transaction must not be null"
@@ -325,7 +335,7 @@ public final class LegacyScriptVerifier {
                             inputIndex,
                             scriptSig,
                             flags
-                    );
+                    ).withDialect(dialect);
 
             ScriptInterpreter.execute(
                     scriptSig,
@@ -354,7 +364,7 @@ public final class LegacyScriptVerifier {
                             inputIndex,
                             scriptPubKey,
                             flags
-                    );
+                    ).withDialect(dialect);
 
             ScriptInterpreter.execute(
                     scriptPubKey,

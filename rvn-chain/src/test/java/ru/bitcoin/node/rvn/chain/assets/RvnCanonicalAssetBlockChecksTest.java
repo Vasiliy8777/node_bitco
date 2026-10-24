@@ -29,7 +29,7 @@ class RvnCanonicalAssetBlockChecksTest {
         return new Transaction(2, points.stream().map(p -> new TxIn(p, new byte[0], TxIn.FINAL_SEQUENCE)).toList(), outputs, new UInt32(0));
     }
     private static Transaction sign(Transaction unsigned, int index, byte[] scriptCode) {
-        byte[] der = Secp256k1.sign(LegacySignatureHash.calculate(unsigned, index, scriptCode, 1), KEY).toDer();
+        byte[] der = Secp256k1.sign(LegacySignatureHash.calculate(unsigned, index, scriptCode, 1, ScriptDialect.RAVENCOIN), KEY).toDer();
         byte[] signature = Arrays.copyOf(der, der.length + 1); signature[der.length] = 1;
         var inputs = new ArrayList<>(unsigned.inputs()); var original = inputs.get(index);
         inputs.set(index, new TxIn(original.previousOutput(), P2pkhScript.scriptSig(signature, PUB), original.sequence()));
@@ -47,6 +47,28 @@ class RvnCanonicalAssetBlockChecksTest {
         return p -> p.equals(point(1)) ? Optional.of(new RvnCoin(new TxOut(500 * COIN, new byte[]{0x51}), 1, false))
                 : (p.equals(point(2)) || p.equals(point(3))) ? Optional.of(new RvnCoin(new TxOut(100 * COIN, new byte[]{0x51}), 1, false))
                 : Optional.empty();
+    }
+
+    @Test void historicalAdmissionSpendsOriginalNoncanonicalEnvelopeWithOpaqueCodeSeparator() {
+        var original = issue();
+        var outputs = new ArrayList<>(original.outputs());
+        byte[] historical = outputs.get(2).scriptPubKey();
+        historical[26] = (byte) 0xff;
+        historical[historical.length - 1] = (byte) 0xab;
+        outputs.set(2, new TxOut(0, historical));
+        var issuance = tx(List.of(point(1)), outputs);
+        var transfer = sign(tx(List.of(new OutPoint(issuance.txId(), new UInt32(2))),
+                List.of(asset(new Transfer("TOKEN", 10 * COIN, null, 0)))), 0, historical);
+        var candidate = block(List.of(issuance, transfer));
+        var plan = RvnCanonicalAssetBlockChecks.verifyHistoricalMainnet(candidate, CONTEXT, ACTIVE, true,
+                parent(), n -> null, rules(Map.of()), true);
+        assertEquals(10 * COIN, plan.assets().entries().get("TOKEN").after().orElseThrow().supply());
+        assertTrue(plan.coins().created().containsKey(new OutPoint(transfer.txId(), new UInt32(0))));
+        assertThrows(RuntimeException.class, () -> RvnCanonicalAssetBlockChecks.verifyMainnet(candidate,
+                CONTEXT, ACTIVE, true, parent(), n -> null));
+        var badSignature = sign(tx(List.of(new OutPoint(issuance.txId(), new UInt32(2))), transfer.outputs()), 0, LOCK);
+        assertThrows(SecurityException.class, () -> RvnCanonicalAssetBlockChecks.verifyHistoricalMainnet(
+                block(List.of(issuance, badSignature)), CONTEXT, ACTIVE, true, parent(), n -> null, rules(Map.of()), true));
     }
 
     @Test void signedIssueTransferAndReissueInOneBlockProduceNetAtomicPlans() {

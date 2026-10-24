@@ -38,6 +38,10 @@ public final class LegacyScriptCode {
             byte[] scriptCode,
             byte[] signatureWithHashType
     ) {
+        return findAndDeleteSignature(scriptCode, signatureWithHashType, ScriptDialect.BITCOIN);
+    }
+    public static byte[] findAndDeleteSignature(byte[] scriptCode, byte[] signatureWithHashType, ScriptDialect dialect) {
+        java.util.Objects.requireNonNull(dialect);
         if (scriptCode == null) {
             throw new IllegalArgumentException(
                     "scriptCode must not be null"
@@ -96,8 +100,8 @@ public final class LegacyScriptCode {
                 break;
             }
 
-            int instructionEnd =
-                    nextInstructionOffset(
+            int instructionEnd = dialect == ScriptDialect.RAVENCOIN && (scriptCode[position] & 255) == 0xc0
+                    ? scriptCode.length : nextInstructionOffset(
                             scriptCode,
                             position
                     );

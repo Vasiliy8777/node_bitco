@@ -35,6 +35,10 @@ public final class LegacySignatureHash {
             byte[] scriptCode,
             int hashType
     ) {
+        return calculate(transaction, inputIndex, scriptCode, hashType, ScriptDialect.BITCOIN);
+    }
+    public static byte[] calculate(Transaction transaction, int inputIndex, byte[] scriptCode, int hashType, ScriptDialect dialect) {
+        java.util.Objects.requireNonNull(dialect);
         if (transaction == null) {
             throw new IllegalArgumentException(
                     "transaction must not be null"
@@ -76,7 +80,7 @@ public final class LegacySignatureHash {
 
         byte[] normalizedScriptCode =
                 removeCodeSeparators(
-                        scriptCode
+                        scriptCode, dialect
                 );
 
         /*List<TxIn> inputs =
@@ -275,7 +279,7 @@ public final class LegacySignatureHash {
         return result;
     }
     private static byte[] removeCodeSeparators(
-            byte[] scriptCode
+            byte[] scriptCode, ScriptDialect dialect
     ) {
         if (scriptCode.length == 0) {
             return scriptCode;
@@ -307,6 +311,11 @@ public final class LegacySignatureHash {
             }
 
             out.write(opcode);
+
+            if (dialect == ScriptDialect.RAVENCOIN && opcode == 0xc0) {
+                out.writeBytes(java.util.Arrays.copyOfRange(scriptCode, position, scriptCode.length));
+                break;
+            }
 
             if (opcode >= 0x01
                     && opcode <= 0x4b) {

@@ -15,8 +15,13 @@ public final class RvnRestrictedIssueChecks {
     private RvnRestrictedIssueChecks() {}
     public static Metadata verifyMainnet(List<? extends Payload> spent, List<Output> outputs,
                                          Activation activation, Function<String, Metadata> state) {
+        return verifyMainnet(spent, outputs, activation, state, RvnAssetScriptCodec::decodeCanonicalSpendable);
+    }
+    static Metadata verifyMainnet(List<? extends Payload> spent, List<Output> outputs,
+                                  Activation activation, Function<String, Metadata> state,
+                                  Function<byte[], Optional<Decoded>> decoder) {
         if (outputs.size() < 4) throw new SecurityException("RVN restricted issuance requires four outputs");
-        var decoded = outputs.stream().map(o -> decodeCanonicalSpendable(o.script()).map(Decoded::payload).orElse(null)).toList();
+        var decoded = outputs.stream().map(o -> decoder.apply(o.script()).map(Decoded::payload).orElse(null)).toList();
         if (!(decoded.getLast() instanceof Issue issue) || RvnAssetNames.requireValid(issue.name()) != RvnAssetNames.Type.RESTRICTED)
             throw new SecurityException("RVN restricted issuance must be last");
         var metadata = issue(issue, activation, name -> state.apply(name) != null);

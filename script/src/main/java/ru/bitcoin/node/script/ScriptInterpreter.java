@@ -302,7 +302,7 @@ public final class ScriptInterpreter {
         }
 
         List<ScriptInstruction> instructions =
-                ScriptParser.parse(script);
+                ScriptParser.parse(script, context == null ? ScriptDialect.BITCOIN : context.dialect());
 
         int opCount = 0;
 
@@ -332,7 +332,8 @@ public final class ScriptInterpreter {
             opcodePosition++;
 
             int instructionLength =
-                    serializedLength(
+                    context != null && context.dialect() == ScriptDialect.RAVENCOIN && instruction.opcode() == 0xc0
+                    ? 1 + instruction.dataLength() : serializedLength(
                             instruction
                     );
 
@@ -342,7 +343,7 @@ public final class ScriptInterpreter {
                             instructionLength
                     );
 
-            if (instruction.isPushData()
+            if ((instruction.isPushData() || context != null && context.dialect() == ScriptDialect.RAVENCOIN && instruction.opcode() == 0xc0)
                     && instruction.dataLength()
                     > ScriptLimits.MAX_SCRIPT_ELEMENT_SIZE) {
 
@@ -619,6 +620,8 @@ public final class ScriptInterpreter {
             int lastCodeSeparatorOffset,
             int opCount
     ) {
+        if (context != null && context.dialect() == ScriptDialect.RAVENCOIN && instruction.opcode() == 0xc0)
+            return opCount;
 
         if (instruction.isPushData()) {
 
@@ -1473,7 +1476,7 @@ public final class ScriptInterpreter {
         byte[] signature = machine.pop();
         byte[] scriptCode = LegacyScriptCode.afterCodeSeparator(context.scriptCode(), lastCodeSeparatorOffset);
         if (context.signatureVersion() == SignatureVersion.LEGACY) {
-            byte[] filtered = LegacyScriptCode.findAndDeleteSignature(scriptCode, signature);
+            byte[] filtered = LegacyScriptCode.findAndDeleteSignature(scriptCode, signature, context.dialect());
             if (ScriptVerifyFlags.has(context.flags(), ScriptVerifyFlags.CONST_SCRIPTCODE)
                     && !Arrays.equals(scriptCode, filtered)) {
                 throw new ScriptExecutionException("CONST_SCRIPTCODE: signature found in scriptCode");
@@ -1656,7 +1659,7 @@ public final class ScriptInterpreter {
                 byte[] filteredScriptCode =
                         LegacyScriptCode.findAndDeleteSignature(
                                 originalScriptCode,
-                                signature
+                                signature, context.dialect()
                         );
 
                 if (ScriptVerifyFlags.has(
@@ -1801,7 +1804,7 @@ public final class ScriptInterpreter {
                                 context.transaction(),
                                 context.inputIndex(),
                                 scriptCode,
-                                hashType
+                                hashType, context.dialect()
                         );
             }
 

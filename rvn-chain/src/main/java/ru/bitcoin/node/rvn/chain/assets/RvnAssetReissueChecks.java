@@ -16,9 +16,14 @@ public final class RvnAssetReissueChecks {
 
     public static Metadata verifyMainnet(List<? extends Payload> spent, List<Output> outputs,
                                          Activation activation, Function<String, Metadata> state) {
+        return verifyMainnet(spent, outputs, activation, state, RvnAssetScriptCodec::decodeCanonicalSpendable);
+    }
+    static Metadata verifyMainnet(List<? extends Payload> spent, List<Output> outputs,
+                                  Activation activation, Function<String, Metadata> state,
+                                  Function<byte[], Optional<Decoded>> decoder) {
         Objects.requireNonNull(state);
         if (outputs.size() < 3) throw new SecurityException("RVN reissue requires burn/owner/reissue outputs");
-        var decoded = outputs.stream().map(o -> decodeCanonicalSpendable(o.script()).map(Decoded::payload).orElse(null)).toList();
+        var decoded = outputs.stream().map(o -> decoder.apply(o.script()).map(Decoded::payload).orElse(null)).toList();
         if (!(decoded.get(decoded.size() - 1) instanceof Reissue reissue))
             throw new SecurityException("RVN reissue must be last output");
         var type = RvnAssetNames.requireValid(reissue.name());

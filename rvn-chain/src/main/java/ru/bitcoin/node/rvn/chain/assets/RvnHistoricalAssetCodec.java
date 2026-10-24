@@ -19,6 +19,37 @@ public final class RvnHistoricalAssetCodec {
     public enum NullKind { ADDRESS, GLOBAL, VERIFIER }
     public record NullData(NullKind kind, String addressHash, String name, int flag, String verifier) {}
 
+    /** Adapts deserialized mainnet fields to validated-value carriers while retaining
+     * original script bytes outside the payload. Pre-RIP5 transfer annotations have
+     * no consensus effect; their wire parsing still happens before being discarded. */
+    public static Optional<RvnAssetScriptCodec.Decoded> decodeSpendable(byte[] script, boolean transferSizeFix, boolean messages) {
+        var parsed = decode(script, transferSizeFix);
+        if (parsed.isEmpty()) return Optional.empty();
+        var value = parsed.get();
+        var kind = value.classification().kind();
+        if ((kind == Kind.ISSUE || kind == Kind.REISSUE) && value.reissuable() != 0 && value.reissuable() != 1)
+            throw new SecurityException("RVN historical reissuable flag");
+        if (kind == Kind.ISSUE && (value.hasHash() != 0 && value.hasHash() != 1))
+            throw new SecurityException("RVN historical metadata presence flag");
+        RvnAssetScriptCodec.HashData hash = null;
+        if (!(kind == Kind.TRANSFER && !messages)) {
+            byte[] raw = value.hash();
+            if (raw.length == 34 && raw[0] == 0x12 && raw[1] == 0x20)
+                hash = new RvnAssetScriptCodec.HashData(0x12, HexFormat.of().formatHex(Arrays.copyOfRange(raw, 2, 34)));
+            else if (raw.length == 32) hash = new RvnAssetScriptCodec.HashData(0x54, HexFormat.of().formatHex(raw));
+            else if (raw.length != 0) throw new SecurityException("RVN historical metadata digest length");
+        }
+        if (kind == Kind.ISSUE && value.hasHash() == 1 && hash == null)
+            throw new SecurityException("RVN historical declared metadata missing");
+        RvnAssetScriptCodec.Payload payload = switch (kind) {
+            case OWNER -> new RvnAssetScriptCodec.Owner(value.name());
+            case ISSUE -> new RvnAssetScriptCodec.Issue(value.name(), value.amount(), value.units(), value.reissuable() == 1, hash);
+            case REISSUE -> new RvnAssetScriptCodec.Reissue(value.name(), value.amount(), value.units(), value.reissuable() == 1, hash);
+            case TRANSFER -> new RvnAssetScriptCodec.Transfer(value.name(), value.amount(), hash, messages ? value.expires() : 0);
+        };
+        return Optional.of(new RvnAssetScriptCodec.Decoded(Arrays.copyOf(script, 25), payload));
+    }
+
     public static Optional<Classification> classify(byte[] script) {
         Objects.requireNonNull(script);
         if (script.length <= 31 || (script[25] & 255) != 0xc0) return Optional.empty();
