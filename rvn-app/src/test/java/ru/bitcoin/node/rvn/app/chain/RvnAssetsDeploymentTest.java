@@ -14,7 +14,7 @@ class RvnAssetsDeploymentTest {
     private final RvnHeaderLookup lookup = entries::get;
 
     private RvnStoredHeader append(RvnStoredHeader parent, int version, long time) throws Exception {
-        byte[] raw = new byte[80];
+        byte[] raw = new byte[time >= ru.bitcoin.node.rvn.protocol.RvnActivation.MAINNET_KAWPOW_TIME ? 120 : 80];
         RvnKawpowWords.writeLE(version, raw, 0); RvnKawpowWords.writeLE((int) time, raw, 68);
         RvnKawpowWords.writeLE(0x1e00ffff, raw, 72);
         long height = parent == null ? 0 : parent.height() + 1;
@@ -67,5 +67,22 @@ class RvnAssetsDeploymentTest {
         assertEquals(RvnAssetsDeployment.State.STARTED, rip5.stateForNext(cursor, lookup));
         for (int height = 8; height < 12; height++) cursor = append(cursor, 0, 200 + height);
         assertTrue(value.activeForNext(cursor, lookup)); assertFalse(rip5.activeForNext(cursor, lookup));
+    }
+
+    @Test
+    void mainnetOverflowStartsAtBitElevenAndOnlyEnforcesAfterLockedInWindow() throws Exception {
+        var context = new RvnAssetDeploymentContext();
+        RvnStoredHeader cursor = null;
+        for (int height = 0; height < 2016; height++) cursor = append(cursor, 1 << 11, 1781222401L + height);
+        var fork = cursor;
+        assertFalse(context.forNext(cursor, lookup).activation().transferOverflow());
+        for (int height = 2016; height < 4032; height++) cursor = append(cursor, 1 << 11, 1781222401L + height);
+        assertFalse(context.forNext(cursor, lookup).activation().transferOverflow());
+        for (int height = 4032; height < 6048; height++) cursor = append(cursor, 0, 1781222401L + height);
+        assertTrue(context.forNext(cursor, lookup).activation().transferOverflow());
+        var alternate = fork;
+        for (int height = 2016; height < 6048; height++) alternate = append(alternate, 1 << 10, 1781223401L + height);
+        assertFalse(context.forNext(alternate, lookup).activation().transferOverflow());
+        assertTrue(context.forNext(cursor, lookup).activation().transferOverflow());
     }
 }

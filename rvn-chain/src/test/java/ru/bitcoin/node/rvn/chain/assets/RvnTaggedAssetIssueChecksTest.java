@@ -61,13 +61,15 @@ class RvnTaggedAssetIssueChecksTest {
         assertThrows(SecurityException.class, () -> verifyMainnet(spent, badParent, ACTIVE, STATE));
     }
 
-    @Test void uniqueAndChannelTransfersEnforceOneTokenAndBranchActivation() {
+    @Test void uniqueTransfersEnforceOneTokenAndChannelsEnforceBranchActivation() {
         for (String name : List.of("TOKEN#One", "TOKEN~NEWS")) {
             Function<String, Metadata> state = n -> new Metadata(n, COIN, 0, false, null);
             var valid = List.of(new Transfer(name, COIN, null, 0));
             assertEquals(Map.of(name, COIN), RvnAssetTransferChecks.verify(valid, valid, state, ACTIVE));
             var invalid = List.of(new Transfer(name, 2 * COIN, null, 0));
-            assertThrows(SecurityException.class, () -> RvnAssetTransferChecks.verify(invalid, invalid, state, ACTIVE));
+            if (name.contains("#"))
+                assertThrows(SecurityException.class, () -> RvnAssetTransferChecks.verify(invalid, invalid, state, ACTIVE));
+            else assertEquals(Map.of(name, 2 * COIN), RvnAssetTransferChecks.verify(invalid, invalid, state, ACTIVE));
             if (name.contains("~")) assertThrows(SecurityException.class, () -> RvnAssetTransferChecks.verify(valid, valid, state,
                     new Activation(true, false, false)));
         }

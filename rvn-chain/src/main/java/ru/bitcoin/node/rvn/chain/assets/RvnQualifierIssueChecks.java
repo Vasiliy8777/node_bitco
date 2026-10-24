@@ -19,13 +19,18 @@ public final class RvnQualifierIssueChecks {
     static Metadata verifyMainnet(List<? extends Payload> spent, List<Output> outputs,
                                   Activation activation, Function<String, Metadata> state,
                                   Function<byte[], Optional<Decoded>> decoder) {
+        return verifyMainnet(spent, outputs, activation, state, decoder, true);
+    }
+    static Metadata verifyMainnet(List<? extends Payload> spent, List<Output> outputs,
+            Activation activation, Function<String, Metadata> state,
+            Function<byte[], Optional<Decoded>> decoder, boolean contextual) {
         if (outputs.size() < 2) throw new SecurityException("RVN qualifier issue requires burn and issuance");
         var decoded = outputs.stream().map(o -> decoder.apply(o.script()).map(Decoded::payload).orElse(null)).toList();
         if (!(decoded.getLast() instanceof Issue issue)) throw new SecurityException("RVN qualifier issuance must be last");
         var type = RvnAssetNames.requireValid(issue.name());
         if (type != RvnAssetNames.Type.QUALIFIER && type != RvnAssetNames.Type.SUB_QUALIFIER)
             throw new UnsupportedOperationException("Expected qualifier/subqualifier issuance");
-        var result = issue(issue, activation, name -> state.apply(name) != null);
+        var result = issue(issue, activation, name -> contextual && state.apply(name) != null);
         var transfers = new ArrayList<Payload>();
         for (int i = 0; i < decoded.size() - 1; i++) {
             var payload = decoded.get(i);
@@ -44,7 +49,7 @@ public final class RvnQualifierIssueChecks {
             if (transfers.stream().noneMatch(p -> p.name().equals(parent)))
                 throw new SecurityException("RVN subqualifier requires parent qualifier return");
         }
-        RvnAssetTransferChecks.verify(spent, transfers, state, activation);
+        if (contextual) RvnAssetTransferChecks.verify(spent, transfers, state, activation);
         return result;
     }
 }

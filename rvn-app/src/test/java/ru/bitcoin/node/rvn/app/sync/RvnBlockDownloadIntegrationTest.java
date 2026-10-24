@@ -51,8 +51,11 @@ class RvnBlockDownloadIntegrationTest {
                         assertEquals(1, RvnCompactSize.read(inventory, 1));
                         assertEquals(0x40000002L, RvnWire.readU32(inventory));
                         assertArrayEquals(RvnWire.doubleSha(block.header().serialize()), inventory.readNBytes(32));
-                        RvnWire.write(out, RvnNetwork.MAINNET, new RvnMessage("block", RvnBlockCodec.serialize(block)));
                     }
+                    // Serve the child first: durable bodies and the contiguous cursor
+                    // must still resume correctly after pipelined, reordered replies.
+                    for (var block : List.of(second, first))
+                        RvnWire.write(out, RvnNetwork.MAINNET, new RvnMessage("block", RvnBlockCodec.serialize(block)));
                     assertEquals("getheaders", RvnWire.read(in, RvnNetwork.MAINNET).command());
                     RvnWire.write(out, RvnNetwork.MAINNET, new RvnMessage("headers", new byte[]{0}));
                     completed.countDown(); while (in.read() != -1) { }

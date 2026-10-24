@@ -4,11 +4,40 @@ import org.junit.jupiter.api.Test;
 import ru.bitcoin.node.rvn.protocol.*;
 import java.io.*;
 import java.net.*;
+import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class RvnBlockClientAndBudgetTest {
+    @Test void pipelineAcceptsOutOfOrderRepliesWithoutWaitingForEachRoundTrip() throws Exception {
+        var expected = new ArrayList<RvnBlockClient.Expected>();
+        for (int i = 1; i <= 5; i++) {
+            byte[] raw = new byte[80], id = new byte[32]; raw[0] = (byte) i; id[0] = (byte) i;
+            expected.add(new RvnBlockClient.Expected(id, RvnBlockHeader.parse(raw, RvnActivation.MAINNET_KAWPOW_TIME)));
+        }
+        var error = new AtomicReference<Throwable>();
+        try (var server = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+            var peer = Thread.ofPlatform().daemon(true).start(() -> {
+                try (var socket = server.accept()) {
+                    handshake(socket, server.getLocalPort());
+                    for (int i = 0; i < 4; i++) assertEquals("getdata", RvnWire.read(socket.getInputStream(), RvnNetwork.REGTEST).command());
+                    for (int i = 3; i >= 0; i--) RvnWire.write(socket.getOutputStream(), RvnNetwork.REGTEST,
+                            new RvnMessage("block", Arrays.copyOf(expected.get(i).header().serialize(), 81)));
+                    assertEquals("getdata", RvnWire.read(socket.getInputStream(), RvnNetwork.REGTEST).command());
+                    RvnWire.write(socket.getOutputStream(), RvnNetwork.REGTEST,
+                            new RvnMessage("block", Arrays.copyOf(expected.get(4).header().serialize(), 81)));
+                    while (socket.getInputStream().read() != -1) { }
+                } catch (Throwable failure) { error.set(failure); }
+            });
+            try (var session = RvnPeerSession.connect(RvnNetwork.REGTEST, "127.0.0.1", server.getLocalPort(), 1000, 16)) {
+                var received = new ArrayList<Integer>();
+                RvnBlockClient.requestBatch(session, expected, 3000, (item, payload) -> received.add(item.header().version()));
+                assertEquals(List.of(4, 3, 2, 1, 5), received);
+            }
+            peer.join(3000); assertFalse(peer.isAlive()); if (error.get() != null) fail(error.get());
+        }
+    }
     private static void handshake(Socket socket, int port) throws Exception {
         socket.setSoTimeout(8000);
         var in = socket.getInputStream(); var out = socket.getOutputStream();
@@ -43,7 +72,7 @@ class RvnBlockClientAndBudgetTest {
 
     @Test
     void wrongHeaderAndNotfoundCannotSatisfyBlockRequest() throws Exception {
-        for (String command : new String[]{"block", "notfound"}) {
+        for (String command : new String[]{"block", "notfound"}) for (boolean batch : new boolean[]{false, true}) {
             var error = new AtomicReference<Throwable>();
             try (var server = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
                 var peer = Thread.ofPlatform().daemon(true).start(() -> {
@@ -58,7 +87,11 @@ class RvnBlockClientAndBudgetTest {
                 });
                 try (var session = RvnPeerSession.connect(RvnNetwork.REGTEST, "127.0.0.1", server.getLocalPort(), 1000, 8)) {
                     var expected = RvnBlockHeader.parse(new byte[80], RvnActivation.MAINNET_KAWPOW_TIME);
-                    assertThrows(IOException.class, () -> RvnBlockClient.request(session, new byte[32], expected, 2000));
+                    assertThrows(IOException.class, () -> {
+                        if (batch) RvnBlockClient.requestBatch(session, List.of(new RvnBlockClient.Expected(new byte[32], expected)),
+                                2000, (item, body) -> fail("Bad block must not reach storage"));
+                        else RvnBlockClient.request(session, new byte[32], expected, 2000);
+                    });
                 }
                 peer.join(3000); assertFalse(peer.isAlive()); if (error.get() != null) fail(error.get());
             }

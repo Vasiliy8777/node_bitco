@@ -42,9 +42,30 @@ public final class RvnNativeBlockReplay {
 
     public record Progress(int connected, int disconnected, RvnCoinStore.Tip tip) {}
 
+    /** Capability of this validator, never an operator override or tip-height test.
+     * Inherited qualifier cache transitions and coinbase metadata/null rules still
+     * prevent certification of a complete asset-era history. */
+    public boolean completeHistoricalValidation() { return false; }
+
     /** Per-block atomic commits make restart resume at the last completed block,
      * including when a branch switch was interrupted between disconnects. */
     public Progress advance(int limit) throws IOException {
+        return advance(limit, null);
+    }
+
+    /** Mine admission uses the identical replay checks, with an atomic outbound
+     * marker only for this exact next block. Header/body must already be stored. */
+    public Progress connectMined(ru.bitcoin.node.rvn.consensus.RvnHash256 id) throws IOException {
+        Objects.requireNonNull(id);
+        synchronized (headers) { synchronized (coins) {
+            var next = headers.best(); var parent = coins.tip();
+            if (!next.id().equals(id) || next.height() != parent.height() + 1 || !next.parentId().equals(parent.id()))
+                throw new IllegalStateException("RVN mined block is not the next coin tip");
+            return advance(1, id);
+        } }
+    }
+
+    private Progress advance(int limit, ru.bitcoin.node.rvn.consensus.RvnHash256 mined) throws IOException {
         if (limit < 1 || limit > 128) throw new IllegalArgumentException("RVN replay batch limit");
         // Keep one header branch and one parent coin view throughout each batch.
         synchronized (headers) { synchronized (coins) {
@@ -78,11 +99,13 @@ public final class RvnNativeBlockReplay {
                     var deployment = assetContext.forNext(parent, headers);
                     var plan = RvnCanonicalAssetBlockChecks.verifyHistoricalMainnet(block, context, deployment.activation(),
                             deployment.enforcedReissueValues(), coins, name -> coins.findAsset(name).orElse(null), coins,
-                            deployment.transferSizeFix());
-                    coins.connect(coins.tip(), next.id(), plan.coins(), plan.assets());
+                            deployment.transferSizeFix(), deployment.coinbaseAssetCheck());
+                    if (next.id().equals(mined)) coins.connectMined(coins.tip(), next.id(), plan.coins(), plan.assets());
+                    else coins.connect(coins.tip(), next.id(), plan.coins(), plan.assets());
                 } else {
                     var changes = RvnNativeTransactionChecks.block(block, context, false, coins);
-                    coins.connect(coins.tip(), next.id(), changes);
+                    if (next.id().equals(mined)) coins.connectMined(coins.tip(), next.id(), changes, ru.bitcoin.node.rvn.chain.assets.RvnAssetChanges.EMPTY);
+                    else coins.connect(coins.tip(), next.id(), changes);
                 }
                 connected++;
             }

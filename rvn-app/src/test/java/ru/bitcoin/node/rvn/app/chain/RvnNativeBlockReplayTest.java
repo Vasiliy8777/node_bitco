@@ -148,7 +148,7 @@ class RvnNativeBlockReplayTest {
             assertEquals(10 * RvnBlockBodyChecks.COIN, coins.findAsset("TOKEN").orElseThrow().supply());
             assertTrue(coins.find(source).isEmpty());
             byte[] historical = ru.bitcoin.node.rvn.chain.assets.RvnAssetScriptCodec.encodeCanonical(PAYOUT.scriptPubKey(), issuance);
-            historical[26] = (byte) 0xff; // Core's positional classifier ignores this byte; canonical replay cannot admit it.
+            historical[26] = (byte) 0xff; // Historical decoding accepts the envelope; this coinbase lacks required burn/owner layout.
             var unsupported = block(id(assetBlock), 7, 0, 1514999494L + 60 * 7, original -> new Transaction(original.version(), original.inputs(),
                     List.of(original.outputs().getFirst(), new TxOut(0, historical)), original.lockTime()));
             accept(headers, unsupported); save(headers, unsupported);

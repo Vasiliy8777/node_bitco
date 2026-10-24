@@ -24,6 +24,34 @@ class RvnCoinStoreTest {
     }
     RvnCoinStore open(Path directory) throws IOException { return new RvnCoinStore(directory, id(0)); }
 
+    @Test void minedOutboxCommitsWithCoinsSurvivesRestartAndIsRemovedOnlyByAckOrItsDisconnect() throws Exception {
+        Path directory = temp.resolve("mined");
+        var first = new RvnCoinStore.Tip(id(1), 1);
+        try (var store = open(directory)) {
+            assertTrue(store.pendingMinedBlock().isEmpty());
+            store.connectMined(store.tip(), id(1), changes(Map.of(), Map.of(point(1), coin(1000, 1))),
+                    ru.bitcoin.node.rvn.chain.assets.RvnAssetChanges.EMPTY);
+            assertEquals(Optional.of(first), store.pendingMinedBlock());
+        }
+        try (var store = open(directory)) {
+            assertEquals(first, store.tip()); assertEquals(Optional.of(first), store.pendingMinedBlock());
+            assertThrows(IllegalStateException.class, () -> store.connectMined(store.tip(), id(2), changes(Map.of(), Map.of()),
+                    ru.bitcoin.node.rvn.chain.assets.RvnAssetChanges.EMPTY));
+            assertFalse(store.acknowledgeMinedBlock(new RvnCoinStore.Tip(id(9), 1)));
+            store.connect(store.tip(), id(2), changes(Map.of(), Map.of()));
+            store.disconnect(store.tip()); // A descendant reorg must retain the first candidate.
+            assertEquals(Optional.of(first), store.pendingMinedBlock());
+            assertTrue(store.acknowledgeMinedBlock(first)); assertTrue(store.pendingMinedBlock().isEmpty());
+            store.connectMined(store.tip(), id(3), changes(Map.of(), Map.of(point(3), coin(900, 2))),
+                    ru.bitcoin.node.rvn.chain.assets.RvnAssetChanges.EMPTY);
+            store.disconnect(store.tip()); // Its own reorg clears the marker atomically.
+            assertTrue(store.pendingMinedBlock().isEmpty()); assertEquals(first, store.tip());
+        }
+        try (var store = open(directory)) {
+            assertTrue(store.pendingMinedBlock().isEmpty()); assertEquals(first, store.tip());
+        }
+    }
+
     @Test
     void restartDisconnectAndAlternativeBranchRestoreExactCoins() throws Exception {
         Path directory = temp.resolve("coins");

@@ -10,7 +10,12 @@ import static ru.bitcoin.node.rvn.chain.assets.RvnAssetScriptCodec.*;
  * verifier expressions and atomic registry persistence remain separate checks. */
 public final class RvnAssetMetadataRules {
     private RvnAssetMetadataRules() {}
-    public record Activation(boolean assets, boolean messages, boolean restricted) {}
+    public record Activation(boolean assets, boolean messages, boolean restricted, boolean transferOverflow) {
+        /** Standalone callers use current rules; historical admission supplies branch state. */
+        public Activation(boolean assets, boolean messages, boolean restricted) {
+            this(assets, messages, restricted, true);
+        }
+    }
     public record Metadata(String name, long supply, int units, boolean reissuable, HashData hash) {
         public Metadata {
             if (RvnAssetNames.requireValid(name) == RvnAssetNames.Type.OWNER)

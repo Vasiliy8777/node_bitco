@@ -23,6 +23,7 @@ public final class RvnCoinStore implements RvnCoinView, RvnAssetRulesView, AutoC
     static { RocksDB.loadLibrary(); }
     private static final byte[] SCHEMA = {0}, TIP = {1};
     private static final byte[] EXTERNAL_UNDO = {4};
+    private static final byte[] PENDING_MINED = {7};
     private final RvnFlatFileStore undoFiles;
     private static final int MAX_UNDO_BYTES = 64 * 1024 * 1024;
     private final RocksDB db;
@@ -155,7 +156,39 @@ public final class RvnCoinStore implements RvnCoinView, RvnAssetRulesView, AutoC
      * synchronous batch. Caller supplies fully validated net block changes. */
     public synchronized Tip connect(Tip expectedParent, RvnHash256 id, RvnCoinAccounting.Changes changes,
                                     RvnAssetChanges assets) throws IOException {
+        return connect(expectedParent, id, changes, assets, false);
+    }
+
+    /** One durable outbound slot, committed atomically with the mined block's coins,
+     * assets, undo and tip. Caller must fully validate the block before this call. */
+    public synchronized Tip connectMined(Tip expectedParent, RvnHash256 id, RvnCoinAccounting.Changes changes,
+                                         RvnAssetChanges assets) throws IOException {
+        return connect(expectedParent, id, changes, assets, true);
+    }
+
+    public synchronized Optional<Tip> pendingMinedBlock() throws IOException {
+        ensureOpen();
+        try {
+            byte[] raw = db.get(PENDING_MINED);
+            if (raw == null) return Optional.empty();
+            var pending = decodeTip(raw);
+            if (pending.height() == 0 || pending.height() > tip.height() || pending.id().equals(genesis))
+                throw new IOException("Invalid RVN mined-block outbox tip");
+            return Optional.of(pending);
+        } catch (RocksDBException e) { throw new IOException("Cannot read RVN mined-block outbox", e); }
+    }
+
+    /** Acknowledge only the exact slot sent; a concurrent reorg/new slot is untouched. */
+    public synchronized boolean acknowledgeMinedBlock(Tip expected) throws IOException {
+        if (!pendingMinedBlock().equals(Optional.of(expected))) return false;
+        try (var batch = new WriteBatch()) { batch.delete(PENDING_MINED); write(batch); return true; }
+        catch (RocksDBException e) { throw new IOException("Cannot acknowledge RVN mined-block outbox", e); }
+    }
+
+    private Tip connect(Tip expectedParent, RvnHash256 id, RvnCoinAccounting.Changes changes,
+                        RvnAssetChanges assets, boolean mined) throws IOException {
         ensureOpen(); Objects.requireNonNull(id); Objects.requireNonNull(changes); Objects.requireNonNull(assets);
+        if (mined && pendingMinedBlock().isPresent()) throw new IllegalStateException("RVN mined-block outbox must be relayed first");
         if (!tip.equals(expectedParent)) throw new IllegalStateException("Stale RVN coin parent");
         if (id.equals(genesis) || id.equals(tip.id())) throw new IllegalArgumentException("Invalid RVN coin block ID");
         try {
@@ -188,6 +221,7 @@ public final class RvnCoinStore implements RvnCoinView, RvnAssetRulesView, AutoC
             // binaries must refuse this DB even after later native-only blocks.
             if (!assets.entries().isEmpty() || !assets.rules().isEmpty()) batch.put(SCHEMA, assetSchemaIdentity);
             batch.put(undoKey(id), undo); batch.put(TIP, encodeTip(next));
+            if (mined) batch.put(PENDING_MINED, encodeTip(next));
             write(batch);
             tip = next;
             return tip;
@@ -201,12 +235,14 @@ public final class RvnCoinStore implements RvnCoinView, RvnAssetRulesView, AutoC
         if (!tip.equals(expectedTip)) throw new IllegalStateException("Stale RVN coin disconnect");
         if (tip.height() == 0) throw new IllegalStateException("Cannot disconnect RVN genesis");
         Undo undo = readUndo(tip);
+        boolean discardMined = pendingMinedBlock().equals(Optional.of(tip));
         verifyUndoState(undo);
         try (var batch = new WriteBatch()) {
             for (var point : undo.changes().created().keySet()) batch.delete(coinKey(point));
             for (var entry : undo.changes().spent().entrySet()) batch.put(coinKey(entry.getKey()), encodeCoin(entry.getValue()));
             applyAssets(batch, undo.assets(), true);
             batch.delete(undoKey(tip.id())); batch.put(TIP, encodeTip(undo.parent()));
+            if (discardMined) batch.delete(PENDING_MINED);
             write(batch);
             tip = undo.parent();
             return tip;

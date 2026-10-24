@@ -21,6 +21,11 @@ public final class RvnTaggedAssetIssueChecks {
     static Map<String, Metadata> verifyMainnet(List<? extends Payload> spent, List<Output> outputs,
                                               Activation activation, Function<String, Metadata> state,
                                               Function<byte[], Optional<Decoded>> decoder) {
+        return verifyMainnet(spent, outputs, activation, state, decoder, true);
+    }
+    static Map<String, Metadata> verifyMainnet(List<? extends Payload> spent, List<Output> outputs,
+            Activation activation, Function<String, Metadata> state,
+            Function<byte[], Optional<Decoded>> decoder, boolean contextual) {
         Objects.requireNonNull(state);
         if (outputs.size() < 3) throw new SecurityException("RVN tagged issue requires burn/owner/issue outputs");
         var decoded = outputs.stream().map(o -> decoder.apply(o.script()).map(Decoded::payload).orElse(null)).toList();
@@ -37,7 +42,7 @@ public final class RvnTaggedAssetIssueChecks {
             if (payload instanceof Issue issue) {
                 if (RvnAssetNames.requireValid(issue.name()) != type || !parent.equals(parent(issue.name(), unique)))
                     throw new SecurityException("RVN tagged issue mixes families or parents");
-                var value = issue(issue, activation, n -> state.apply(n) != null || issued.containsKey(n));
+                var value = issue(issue, activation, n -> (contextual && state.apply(n) != null) || issued.containsKey(n));
                 issued.put(value.name(), value);
             } else if (payload instanceof Transfer) transfers.add(payload);
             else throw new SecurityException("Unexpected owner creation/reissue in tagged issuance");
@@ -51,7 +56,7 @@ public final class RvnTaggedAssetIssueChecks {
         long burn = Math.multiplyExact((unique ? 5L * issued.size() : 100L), COIN);
         if (outputs.stream().noneMatch(o -> o.value() == burn && Arrays.equals(o.script(), burnScript)))
             throw new SecurityException("RVN tagged issue requires exact single burn output");
-        RvnAssetTransferChecks.verify(spent, transfers, state, activation);
+        if (contextual) RvnAssetTransferChecks.verify(spent, transfers, state, activation);
         return Map.copyOf(issued);
     }
 

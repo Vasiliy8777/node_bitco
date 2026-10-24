@@ -21,6 +21,11 @@ public final class RvnAssetReissueChecks {
     static Metadata verifyMainnet(List<? extends Payload> spent, List<Output> outputs,
                                   Activation activation, Function<String, Metadata> state,
                                   Function<byte[], Optional<Decoded>> decoder) {
+        return verifyMainnet(spent, outputs, activation, state, decoder, true);
+    }
+    static Metadata verifyMainnet(List<? extends Payload> spent, List<Output> outputs,
+            Activation activation, Function<String, Metadata> state,
+            Function<byte[], Optional<Decoded>> decoder, boolean contextual) {
         Objects.requireNonNull(state);
         if (outputs.size() < 3) throw new SecurityException("RVN reissue requires burn/owner/reissue outputs");
         var decoded = outputs.stream().map(o -> decoder.apply(o.script()).map(Decoded::payload).orElse(null)).toList();
@@ -30,8 +35,18 @@ public final class RvnAssetReissueChecks {
         if (type != RvnAssetNames.Type.ROOT && type != RvnAssetNames.Type.SUB && type != RvnAssetNames.Type.RESTRICTED)
             throw new UnsupportedOperationException("Unsupported reissue family");
         var previous = state.apply(reissue.name());
-        if (previous == null) throw new SecurityException("RVN reissue asset missing");
-        var updated = reissue(reissue, previous, activation);
+        Metadata updated;
+        if (contextual) {
+            if (previous == null) throw new SecurityException("RVN reissue asset missing");
+            updated = reissue(reissue, previous, activation);
+        } else {
+            // CheckReissueAsset is stateless. AddReissueAsset logs a missing
+            // predecessor but does not fail ConnectBlock for a coinbase.
+            if (reissue.amount() < 0 || reissue.amount() >= ru.bitcoin.node.rvn.chain.RvnBlockBodyChecks.MAX_MONEY
+                    || reissue.units() < -1 || reissue.units() > 8)
+                throw new SecurityException("RVN coinbase reissue amount/units");
+            updated = previous == null ? null : historicalUpdate(reissue, previous);
+        }
         var transfers = new ArrayList<Payload>();
         for (int i = 0; i < decoded.size() - 1; i++) {
             var payload = decoded.get(i);
@@ -47,7 +62,17 @@ public final class RvnAssetReissueChecks {
             throw new SecurityException("RVN reissue burn output missing or incorrect");
         // Minted amount resides solely in the final reissue output. All transfer
         // outputs still conserve existing inputs using the pre-reissue units.
-        RvnAssetTransferChecks.verify(spent, transfers, state, activation);
+        if (contextual) RvnAssetTransferChecks.verify(spent, transfers, state, activation);
         return updated;
+    }
+
+    private static Metadata historicalUpdate(Reissue value, Metadata previous) {
+        try {
+            return new Metadata(previous.name(), previous.supply() + value.amount(),
+                    value.units() == -1 ? previous.units() : value.units(), value.reissuable(),
+                    value.hash() == null ? previous.hash() : value.hash());
+        } catch (IllegalArgumentException e) {
+            throw new UnsupportedOperationException("Legacy coinbase reissue requires nonstandard metadata supply/units", e);
+        }
     }
 }

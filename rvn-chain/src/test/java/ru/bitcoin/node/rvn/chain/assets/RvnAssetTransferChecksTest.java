@@ -48,4 +48,29 @@ class RvnAssetTransferChecksTest {
         var sub = transfer("TOKEN/SUB", COIN);
         assertEquals(Map.of("TOKEN/SUB", COIN), verify(List.of(sub), List.of(sub), STATE));
     }
+
+    @Test void bitElevenPreservesLegacyWrappingButBoundsCurrentInputsAndTotals() {
+        var legacy = new RvnAssetMetadataRules.Activation(true, true, true, false);
+        var current = new RvnAssetMetadataRules.Activation(true, true, true, true);
+        Function<String, RvnAssetMetadataRules.Metadata> unitsEight =
+                n -> new RvnAssetMetadataRules.Metadata(n, COIN, 8, true, null);
+        var inputs = List.of(transfer("TOKEN", Long.MAX_VALUE), transfer("TOKEN", Long.MAX_VALUE), transfer("TOKEN", 4));
+        var outputs = List.of(transfer("TOKEN", 2));
+        assertEquals(Map.of("TOKEN", 2L), verify(inputs, outputs, unitsEight, legacy));
+        assertThrows(SecurityException.class, () -> verify(inputs, outputs, unitsEight, current));
+        var maximum = transfer("TOKEN", MAX_MONEY);
+        assertEquals(Map.of("TOKEN", 2 * MAX_MONEY), verify(List.of(maximum, maximum), List.of(maximum, maximum), unitsEight, legacy));
+        assertThrows(SecurityException.class, () -> verify(List.of(maximum, maximum), List.of(maximum, maximum), unitsEight, current));
+        for (long amount : new long[] {0, -1}) {
+            var bad = List.of(transfer("TOKEN", amount));
+            assertThrows(SecurityException.class, () -> verify(bad, bad, unitsEight, legacy));
+        }
+    }
+
+    @Test void ownerTransferDoesNotRequireBaseMetadataAndChannelTransferIsDivisibleByItsUnits() {
+        var owner = List.of(transfer("TOKEN!", COIN));
+        assertEquals(Map.of("TOKEN!", COIN), verify(owner, owner, n -> null));
+        var channel = List.of(transfer("TOKEN~NEWS", 2 * COIN));
+        assertEquals(Map.of("TOKEN~NEWS", 2 * COIN), verify(channel, channel, STATE));
+    }
 }

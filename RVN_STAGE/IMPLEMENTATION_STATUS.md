@@ -382,3 +382,142 @@ supplies production mining jobs. Details: [CUDA worker](../rvn-pow/native/cuda/R
 These references describe the source inspected during this change. A pinned
 Core release and full external fixture corpus remain required for consensus
 release validation.
+
+
+## Solo job pipeline (not enabled for mainnet)
+
+`RvnSoloMining` connects bounded CUDA searches to immutable jobs, byte-order
+conversion, nonce accounting, overflow subrange retries, stale/expired work
+checks, candidate acceptance and relay retries. `RvnEmptyBlockMiningBackend`
+assembles fee-free empty blocks from a synchronized coin/header parent, derives
+branch difficulty, varies coinbase extraNonce and independently admits PoW,
+body and coins before relay. It requires an explicit full-validation readiness
+policy; it is deliberately not a production Spring bean while historical
+consensus cases remain unsupported. Header/coin tip equality alone cannot
+supply that policy. Mined candidates now have a single durable outbound slot committed with
+coins/undo/tip. The backend recovers it after restart and clears it after a peer
+returns the exact block via getdata. Reorgs remove disconnected candidates.
+Production startup wiring and full historical validation remain incomplete.
+
+`RVN_CUDA_JOB_SELF_TEST=true` together with `RVN_CUDA_ENABLED=true` and the
+configured `RVN_MINING_ADDRESS` exercises an actual locally assembled GPU job
+with a synthetic easy target, independent CPU proof and native block checks.
+It uses memory-only admission and sends nothing to peers. It is not mainnet
+mining and cannot earn a reward. The live mining startup guard stays in place.
+
+
+Hardware/launch check on 2026-10-24: the packaged application passed all four
+CUDA Core vectors and the local block-job self-test on RTX 4070, using the
+configured payout. Native/CPU validation accepted the synthetic job. Six mining
+pipeline tests cover durable connection/reopen, stale/expired work, retry after
+relay failure, nonce refresh, overflow subranges and header/mix byte order.
+
+The production-directory node was started with header/body sync and opt-in
+subset replay, mining/CUDA disabled. System DNS returned malformed-packet
+errors for the configured seeds. HTTPS resolution of official seed names
+returned addresses, but TCP connections to 24 sampled addresses on port 8767
+failed. No mainnet synchronization progress or mining readiness was established.
+This network check does not prove that all peers are unavailable or identify
+which network device is responsible. Resolve connectivity before claiming IBD
+has started; historical consensus and production relay integration also remain.
+
+
+## Synchronization recovery, 2026-10-24 (17:38 local)
+
+The earlier connectivity failure was resolved using reachable bootstrap peers.
+The node accepted real mainnet headers and replayed native blocks from its
+existing C:/RVNJavaNjde and K:/RVNJavaNjde stores. Observed progress exceeded
+260,000 headers and 1,500 fully replayed native-era blocks; these are distinct
+heights and do not establish a mining-ready tip.
+
+System DNS is bounded and has configurable HTTPS fallback. The full Jackson
+parser replaces the limited fallback parser, preserves all answer records and
+validates question/status/address data. Resolver closure rejects further calls;
+invalid endpoint configuration no longer allocates HTTP/DNS resources first.
+
+Block downloading now pipelines at most four outstanding requests with
+individual deadlines. A batch contains up to 128 bodies, received in arbitrary
+order and checked against their requested, validated headers. Bodies are saved
+immediately; the contiguous download cursor advances through cached reordered
+responses. Tests cover reordered responses, unknown headers/notfound, byte
+limits, malformed DNS, cancellation and restart. The complete Maven package
+build passed; the running node uses this updated artifact.
+
+`tools/rvn/Start-RvnSync.ps1` starts a hidden background node and records its
+process identity, paths and mode in an ignored target file. A repeated launch
+was verified to reject the still-running process. No payout value is written
+to the process metadata. See tools/rvn/README.md for launch and progress commands.
+
+The v4.8.0 recovery checkpoint at 4,487,775 is enforced at admission and on
+opening a tip beyond it. This does not certify the complete v4.8.0 asset rules:
+historical overflow/deployment compatibility, qualifier/coinbase cases and
+production candidate relay still require completion. Mining remains disabled.
+
+
+## Historical value accounting and durable candidate propagation (2026-10-24)
+
+Historical native accounting now follows Core v4.8.0 CTransaction::GetValueOut:
+before enforced-values deployment, positional asset outputs are excluded from
+fees/reward totals while their original native values remain in UTXO. Raw
+output ranges are still checked independently. The branch's enforced-values
+state reaches both accounting and script/lock validation. Tests cover ignored
+noncanonical envelopes, retained coins, overpaying coinbase, negative values,
+and a signed historical reissue admitted before deployment but rejected after.
+Root/sub issuance additionally checks that the owner and asset destinations
+match Core ExtractDestination, including historical noncanonical prefixes.
+
+RvnCoinStore stores the mined-block outbox marker in the same durable RocksDB
+batch as coins/assets/undo/tip. It cannot overwrite an unacknowledged slot.
+A disconnect clears its own candidate atomically; descendants preserve it.
+RvnNativeBlockReplay.connectMined uses the existing replay validator before
+committing this marker. The empty-block backend recovers pending bodies before
+issuing another job and never holds chain/store locks during network I/O.
+
+The P2P owner thread sends the block and requests it back from the peer. The
+outbox is acknowledged only after an identical full body returns, not merely
+when bytes enter a local socket. A notfound, disconnect, cancellation or timeout
+retains the durable candidate for retry. Peer possession does not establish
+network-wide acceptance or a block reward. Tests cover positive/negative peer
+confirmation, failed relay, durable reopen, stale acknowledgements and reorgs.
+
+The Maven RVN reactor test suite passed and the packaged node was restarted on
+its existing stores. This does not enable mainnet mining: remaining historical
+asset/qualifier/coinbase/overflow cases and the production readiness/startup
+connection are still explicit blockers. No full-validation certificate or
+mining enable flag was fabricated from header/coin height equality.
+
+## 2026-10-24: deployment accounting and guarded mining lifecycle
+
+Core v4.8.0 bit 11 is derived from each parent branch (2016/1411,
+1781222401..1812844799, ACTIVE only). Historical transfer totals wrap in
+64 bits; deployed checks bound each input/output and running total. Every
+issuance/reissue helper receives this activation through its transfer legs.
+Owner transfers do not require base metadata; channel transfers are not
+artificially restricted to one token. Non-coinbase assets before activation
+are rejected before native accounting can advance the coin tip.
+
+Bit 10 now reaches historical replay. It forbids asset/null coinbase outputs
+when active. Earlier transfers skip contextual conservation/metadata checks;
+root/sub/tagged/qualifier issuance and reissue have separate stateless
+layout/burn/owner checks. Duplicate coinbase issuance preserves existing
+metadata and a missing reissue predecessor does not fabricate metadata.
+
+RvnMiningConfiguration now wires the real worker/backend/service. The service
+waits for ApplicationReadyEvent, after CUDA ApplicationRunner self-tests, and
+stops before synchronization/stores. A failed validator/worker terminates it
+and releases GPU resources. Backend readiness additionally requires current
+matching header/coin tips, recent time and a responsive synchronization peer;
+old jobs are rechecked before and after search and before durable admission.
+
+IMPORTANT: replay.completeHistoricalValidation() intentionally still returns
+false. Enabling mining starts a waiting service, not GPU production work.
+There is no operator override. The inherited-only qualifier removal/cache/undo
+case, coinbase null/restricted updates, nonstandard legacy metadata and
+pre-asset-activation coinbases still prevent historical certification.
+See rvn-chain/reference/HISTORICAL_ASSET_GAPS.md for source-backed details.
+
+The complete RVN Maven reactor tests passed, including deployment branch
+switches, legacy overflow, stateless coinbase paths, startup prerequisites,
+readiness/peer shutdown and GPU-idle behavior before validation readiness.
+The artifact was packaged and synchronization restarted on existing C/K
+stores with mining disabled. No data reset or mainnet mining claim was made.

@@ -31,10 +31,12 @@ class RvnConfigurationGuardTest {
     }
 
     @Test
-    void environmentMiningSwitchStillRefusesUnimplementedLifecycle() {
+    void environmentMiningSwitchRequiresSynchronizationValidationAndCuda() {
         var app = application(Map.of("RVN_MINING_ENABLED", "true", "RVN_SYNC_BLOCKS", "false"));
-        var failure = assertThrows(IllegalStateException.class, () -> app.run(arguments()));
-        assertTrue(failure.getMessage().contains("mining NOT implemented"));
+        var failure = assertThrows(RuntimeException.class, () -> app.run(arguments()));
+        Throwable cause = failure;
+        while (cause.getCause() != null) cause = cause.getCause();
+        assertTrue(cause.getMessage().contains("RVN mining requires"));
     }
 
     @Test

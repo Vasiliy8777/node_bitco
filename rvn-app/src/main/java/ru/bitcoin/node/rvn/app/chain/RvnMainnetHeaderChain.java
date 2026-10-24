@@ -19,6 +19,12 @@ public final class RvnMainnetHeaderChain {
         this.store = Objects.requireNonNull(store);
         router = new RvnPowRouter(RvnPowSchedule.mainnet(), Objects.requireNonNull(engine));
         this.clock = Objects.requireNonNull(clock);
+        if (store.best().height() >= RvnMainnetCheckpoints.RECOVERY_HEIGHT) {
+            try {
+                var checkpoint = store.ancestor(store.best(), RvnMainnetCheckpoints.RECOVERY_HEIGHT);
+                RvnMainnetCheckpoints.require(checkpoint.height(), checkpoint.id());
+            } catch (IOException e) { throw new UncheckedIOException("RVN checkpoint ancestry could not be read", e); }
+        }
     }
 
     public synchronized BatchResult accept(List<RvnBlockHeader> headers) throws IOException {
@@ -60,6 +66,7 @@ public final class RvnMainnetHeaderChain {
                         header.compactBits(), RvnMainnetDifficulty.POW_LIMIT))
                     throw new SecurityException("Invalid RVN proof of work at " + height);
                 last[0] = new RvnHash256(proof.blockIdWire());
+                RvnMainnetCheckpoints.require(height, last[0]);
                 return last[0];
             } catch (RvnPowException e) { throw new SecurityException("RVN PoW calculation failed", e); }
         });

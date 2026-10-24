@@ -64,22 +64,29 @@ public final class RvnAssetTransferChecks {
         long amount = payload instanceof Transfer t ? t.amount()
                 : payload instanceof Issue i ? i.amount()
                 : payload instanceof Reissue r ? r.amount() : COIN;
-        if (amount < 0 || amount > MAX_MONEY || (output && amount == 0) || (owner && amount != COIN))
+        // ContextualCheckTransferAsset always requires positive output quantities.
+        // Core 4.8 bit 11 additionally bounds inputs and both running totals.
+        if ((activation.transferOverflow() && (amount < 0 || amount > MAX_MONEY))
+                || (output && amount <= 0) || (owner && amount != COIN))
             throw new SecurityException("RVN asset transfer amount");
-        if ((baseType == RvnAssetNames.Type.UNIQUE || baseType == RvnAssetNames.Type.CHANNEL) && amount != COIN)
+        if (output && baseType == RvnAssetNames.Type.UNIQUE && amount != COIN)
             throw new SecurityException("RVN unique/channel transfer must be one token");
-        if (qualifier && (amount < COIN || amount > 10 * COIN))
+        if (output && qualifier && (amount < COIN || amount > 10 * COIN))
             throw new SecurityException("RVN qualifier transfer amount range");
         if ((payload instanceof Owner) != owner && !(payload instanceof Transfer))
             throw new SecurityException("RVN asset payload/name mismatch");
-        var state = metadata.apply(base);
-        if (state == null || !base.equals(state.name()))
-            throw new SecurityException("RVN asset metadata missing or mismatched");
-        if (!owner && !RvnAssetMetadataRules.amountMatchesUnits(amount, state.units()))
-            throw new SecurityException("RVN asset transfer granularity");
+        // Core checks units/metadata on non-owner transfers being created, not spent coins.
+        if (output && !owner) {
+            var state = metadata.apply(base);
+            if (state == null || !base.equals(state.name()))
+                throw new SecurityException("RVN asset metadata missing or mismatched");
+            if (!RvnAssetMetadataRules.amountMatchesUnits(amount, state.units()))
+                throw new SecurityException("RVN asset transfer granularity");
+        }
         long previous = totals.getOrDefault(name, 0L);
-        if (previous > MAX_MONEY - amount)
+        if (activation.transferOverflow() && previous > MAX_MONEY - amount)
             throw new SecurityException("RVN asset transfer total exceeds money range");
+        // Java long addition gives the legacy signed 64-bit wrap deterministically.
         if (amount != 0) totals.put(name, previous + amount);
     }
 }

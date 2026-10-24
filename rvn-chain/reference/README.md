@@ -112,7 +112,18 @@ notices are in the source and full LGPL/GPL texts ship in META-INF/licenses.
 The oracle covers expression evaluation, not all asset-name or block rules.
 
 Remaining hard limits: removing a root qualifier held
-only through a subqualifier stops explicitly; pre-deployment asset coinbases
-are conservatively rejected. Vote assets are outside this implementation.
+only through a subqualifier stops explicitly; pre-deployment asset coinbase
+null-data and nonstandard metadata updates are still unsupported. Transfer,
+ordinary issuance and reissue coinbase paths now have separate stateless checks.
+Vote assets are outside this implementation. See [the detailed audit](HISTORICAL_ASSET_GAPS.md).
 These limits must be resolved and replayed against independent accepted fixtures
 before calling the pipeline full historical validation or enabling mining.
+
+
+Additional v4.8.0 accounting audit: historical GetValueOut(false) ignores
+IsAssetScript outputs when computing fees and coinbase reward. This is separate
+from CheckTransaction's range checks and the UTXO's original native value.
+The branch-dependent checker now propagates that flag throughout native checks.
+Source: https://github.com/RavenProject/Ravencoin/blob/v4.8.0/src/primitives/transaction.cpp
+Root/sub issuance also compares owner/issue key-hash destinations, as in
+IsNewOwnerTxValid; it does not require identical historical locking prefixes.

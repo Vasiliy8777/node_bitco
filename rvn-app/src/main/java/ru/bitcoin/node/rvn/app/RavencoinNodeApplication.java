@@ -32,7 +32,11 @@ public class RavencoinNodeApplication {
             @Value("${ravencoin.validation.native-replay-enabled:false}") boolean nativeReplay,
             @Value("${ravencoin.validation.canonical-asset-replay-enabled:false}") boolean canonicalAssets,
             @Value("${ravencoin.sync.enabled:false}") boolean sync,
-            @Value("${ravencoin.sync.blocks-enabled:false}") boolean blocks) {
+            @Value("${ravencoin.sync.blocks-enabled:false}") boolean blocks,
+            @Value("${ravencoin.mining.enabled:false}") boolean mining,
+            @Value("${ravencoin.mining.cuda.enabled:false}") boolean cuda) {
+        if (mining && (!sync || !blocks || !nativeReplay || !canonicalAssets || !cuda))
+            throw new IllegalArgumentException("RVN mining requires sync, block downloads, historical asset replay and CUDA");
         if (nativeReplay && (!sync || !blocks))
             throw new IllegalArgumentException("RVN native replay requires header sync and block download");
         if (canonicalAssets && !nativeReplay)
@@ -81,7 +85,7 @@ public class RavencoinNodeApplication {
                                  @Value("${ravencoin.p2p.session-duration-ms:5000}") int sessionDurationMs,
                                  @Value("${ravencoin.p2p.queue-capacity:64}") int queueCapacity) {
         return args -> {
-            if (mining) throw new IllegalStateException("RVN mining NOT implemented; refusing to claim it is active");
+            if (mining) miningSettings.requirePayout();
             if (blocks && !sync)
                 throw new IllegalArgumentException("RVN body download requires ravencoin.sync.enabled=true");
             RvnNetwork network = RvnNetwork.parse(networkName);
@@ -93,7 +97,7 @@ public class RavencoinNodeApplication {
             }
             System.out.println("RVN " + network + "; header sync=" + sync + "; P2P probe=" + probe
                     + "; body download=" + blocks + "; payout configured=" + miningSettings.payout().isPresent()
-                    + "; full-block validation and mining NOT implemented");
+                    + "; mining requested=" + mining + "; complete historical validation pending");
             if (probe && sessionEnabled) throw new IllegalArgumentException("Choose probe or session, not both");
             if (sessionEnabled) {
                 if (sessionDurationMs < 100 || sessionDurationMs > 60000)

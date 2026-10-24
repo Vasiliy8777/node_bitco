@@ -53,3 +53,12 @@ The current straightforward kernel prioritizes agreement with the Java verifier;
 production hashrate, Windows watchdog behavior across GPUs, long-duration fault
 recovery and GPU tuning still need measurement. The worker is not yet connected
 to a validated mainnet job service or candidate relay.
+
+
+To additionally exercise a locally assembled block job with the payout from
+`RVN_MINING_ADDRESS`, set `RVN_CUDA_JOB_SELF_TEST=true`. This runs the app's
+`RvnSoloMining` loop against the actual worker, installs its proof using explicit
+header/mix byte-order conversion, and checks proof/body/payout independently.
+The target is synthetic and easy; admission is memory-only, with no network
+submission and no mainnet reward. This diagnostic does not remove the production
+mining guard or certify historical chainstate.

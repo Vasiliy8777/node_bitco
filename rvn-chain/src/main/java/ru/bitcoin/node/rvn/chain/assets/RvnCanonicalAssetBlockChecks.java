@@ -30,7 +30,7 @@ public final class RvnCanonicalAssetBlockChecks {
                                     boolean enforcedReissueValues, RvnCoinView parent,
                                     Function<String, Metadata> registry, RvnAssetRulesView parentRules) {
         return verify(block, context, activation, enforcedReissueValues, parent, registry, parentRules,
-                RvnAssetScriptCodec::decodeCanonicalSpendable);
+                RvnAssetScriptCodec::decodeCanonicalSpendable, true);
     }
 
     /** Historical envelopes use Core positional decoding. Unsupported consensus cases still fail closed. */
@@ -38,20 +38,28 @@ public final class RvnCanonicalAssetBlockChecks {
                                     boolean enforcedReissueValues, RvnCoinView parent,
                                     Function<String, Metadata> registry, RvnAssetRulesView parentRules,
                                     boolean transferSizeFix) {
+        return verifyHistoricalMainnet(block, context, activation, enforcedReissueValues, parent, registry,
+                parentRules, transferSizeFix, true);
+    }
+
+    public static Plan verifyHistoricalMainnet(RvnBlock block, RvnSpendContext context, Activation activation,
+                                    boolean enforcedReissueValues, RvnCoinView parent,
+                                    Function<String, Metadata> registry, RvnAssetRulesView parentRules,
+                                    boolean transferSizeFix, boolean coinbaseAssetCheck) {
         return verify(block, context, activation, enforcedReissueValues, parent, registry, parentRules,
-                script -> RvnHistoricalAssetCodec.decodeSpendable(script, transferSizeFix, activation.messages()));
+                script -> RvnHistoricalAssetCodec.decodeSpendable(script, transferSizeFix, activation.messages()), coinbaseAssetCheck);
     }
 
     private static Plan verify(RvnBlock block, RvnSpendContext context, Activation activation,
                                     boolean enforcedReissueValues, RvnCoinView parent,
                                     Function<String, Metadata> registry, RvnAssetRulesView parentRules,
-                                    Function<byte[], Optional<Decoded>> decoder) {
+                                    Function<byte[], Optional<Decoded>> decoder, boolean coinbaseAssetCheck) {
         if (!activation.assets()) throw new IllegalArgumentException("Canonical asset block checks require activation");
         Objects.requireNonNull(registry);
         RvnCoinbase.requireHeight(block.transactions().getFirst(), context.height());
         // Check native values, signatures (full asset scriptCode), locks, sigops,
         // coinbase reward and body commitments before publishing any state plan.
-        var coinChanges = RvnNativeTransactionChecks.blockCanonicalAssets(block, context, parent);
+        var coinChanges = RvnNativeTransactionChecks.blockCanonicalAssets(block, context, parent, enforcedReissueValues);
         var overlay = new HashMap<OutPoint, RvnCoin>();
         var consumed = new HashSet<OutPoint>();
         var metadata = new HashMap<String, Metadata>();
@@ -59,6 +67,11 @@ public final class RvnCanonicalAssetBlockChecks {
         var reissued = new HashSet<String>();
         var rules = new RvnRestrictedBlockState(parentRules, registry, decoder);
         for (var tx : block.transactions()) {
+            if (tx.isCoinbase() && coinbaseAssetCheck)
+                for (var output : tx.outputs())
+                    if (RvnHistoricalAssetCodec.classify(output.scriptPubKey()).isPresent()
+                            || RvnHistoricalAssetCodec.decodeNull(output.scriptPubKey()).isPresent())
+                        throw new SecurityException("RVN coinbase contains assets after bit 10 activation");
             var spent = new ArrayList<Payload>();
             if (!tx.isCoinbase()) for (var input : tx.inputs()) {
                 var point = input.previousOutput();
@@ -74,16 +87,19 @@ public final class RvnCanonicalAssetBlockChecks {
                 outputs.add(new RvnAssetIssueChecks.Output(output.value(), output.scriptPubKey()));
                 var payload = classify(output.scriptPubKey(), decoder);
                 if (payload == null) continue;
-                if (tx.isCoinbase()) throw new UnsupportedOperationException("Asset coinbase outputs are outside canonical subset");
                 if (!(payload instanceof Reissue) || enforcedReissueValues)
                     if (output.value() != 0) throw new SecurityException("Nonzero native value in RVN asset output");
-                if (payload instanceof Transfer transfer) {
+                if (payload instanceof Transfer transfer && !tx.isCoinbase()) {
                     if (!activation.messages() && (transfer.message() != null || transfer.expires() != 0))
                         throw new UnsupportedOperationException("Pre-messaging transfer extensions require historical parsing");
                     if (activation.messages() && (transfer.expires() < 0 || (transfer.expires() > 0 && transfer.message() == null)))
                         throw new SecurityException("RVN transfer message expiration");
                 }
                 payloads.add(payload);
+            }
+            if (tx.isCoinbase()) {
+                metadata.putAll(RvnHistoricalAssetCoinbaseChecks.verify(outputs, payloads, view, decoder));
+                continue;
             }
             rules.transaction(outputs, activation, tx.isCoinbase());
             if (payloads.stream().anyMatch(p -> p instanceof Issue)) {

@@ -49,6 +49,80 @@ class RvnCanonicalAssetBlockChecksTest {
                 : Optional.empty();
     }
 
+    private static RvnBlock coinbaseWith(TxOut output) throws Exception {
+        return coinbaseWith(List.of(output));
+    }
+    private static RvnBlock coinbaseWith(List<TxOut> additions) throws Exception {
+        var template = block(List.of());
+        var original = template.transactions().getFirst();
+        var outputs = new ArrayList<>(original.outputs());
+        var payout = outputs.getFirst();
+        outputs.set(0, new TxOut(payout.value() - additions.stream().mapToLong(TxOut::value).sum(), payout.scriptPubKey()));
+        outputs.addAll(additions);
+        var coinbase = new Transaction(original.version(), original.inputs(), outputs, original.lockTime());
+        byte[] raw = template.header().serialize();
+        System.arraycopy(coinbase.txId().bytes(), 0, raw, 36, 32);
+        return new RvnBlock(RvnBlockHeader.parse(raw, RvnActivation.MAINNET_KAWPOW_TIME), List.of(coinbase));
+    }
+
+    @Test void historicalCoinbaseIssueUsesStatelessLayoutAndDoesNotReplaceExistingMetadata() throws Exception {
+        var outputs = new ArrayList<>(issue().outputs());
+        outputs.add(0, asset(new Transfer("UNKNOWN", -1, null, 0)));
+        var candidate = coinbaseWith(outputs);
+        var plan = RvnCanonicalAssetBlockChecks.verifyHistoricalMainnet(candidate, CONTEXT, ACTIVE, true,
+                parent(), n -> null, rules(Map.of()), true, false);
+        assertEquals(10 * COIN, plan.assets().entries().get("TOKEN").after().orElseThrow().supply());
+        var previous = new Metadata("TOKEN", COIN, 8, false, null);
+        var duplicate = RvnCanonicalAssetBlockChecks.verifyHistoricalMainnet(candidate, CONTEXT, ACTIVE, true,
+                parent(), n -> n.equals("TOKEN") ? previous : null, rules(Map.of()), true, false);
+        assertTrue(duplicate.assets().entries().isEmpty());
+        var malformed = new ArrayList<>(outputs); malformed.remove(malformed.size() - 2);
+        assertThrows(SecurityException.class, () -> RvnCanonicalAssetBlockChecks.verifyHistoricalMainnet(coinbaseWith(malformed),
+                CONTEXT, ACTIVE, true, parent(), n -> null, rules(Map.of()), true, false));
+    }
+
+    @Test void historicalCoinbaseReissueSkipsPermissionAndMissingMetadataButChecksBurn() throws Exception {
+        var outputs = List.of(burn("RXReissueAssetXXXXXXXXXXXXXXVEFAWu", 100),
+                asset(new Transfer("TOKEN!", COIN, null, 0)), asset(new Reissue("TOKEN", COIN, 0, true, null)));
+        var candidate = coinbaseWith(outputs);
+        var previous = new Metadata("TOKEN", COIN, 8, false, null);
+        var plan = RvnCanonicalAssetBlockChecks.verifyHistoricalMainnet(candidate, CONTEXT, ACTIVE, true,
+                parent(), n -> n.equals("TOKEN") ? previous : null, rules(Map.of()), true, false);
+        var updated = plan.assets().entries().get("TOKEN").after().orElseThrow();
+        assertEquals(2 * COIN, updated.supply()); assertEquals(0, updated.units()); assertTrue(updated.reissuable());
+        var missing = RvnCanonicalAssetBlockChecks.verifyHistoricalMainnet(candidate, CONTEXT, ACTIVE, true,
+                parent(), n -> null, rules(Map.of()), true, false);
+        assertTrue(missing.assets().entries().isEmpty());
+        var malformed = new ArrayList<>(outputs); malformed.set(0, new TxOut(0, new byte[]{0x51}));
+        assertThrows(SecurityException.class, () -> RvnCanonicalAssetBlockChecks.verifyHistoricalMainnet(coinbaseWith(malformed),
+                CONTEXT, ACTIVE, true, parent(), n -> previous, rules(Map.of()), true, false));
+    }
+
+    @Test void nativeReplayCannotAdmitNonCoinbaseAssetsBeforeDeployment() {
+        var error = assertThrows(SecurityException.class, () -> RvnNativeTransactionChecks.block(
+                block(List.of(issue())), CONTEXT, false, parent()));
+        assertTrue(error.getMessage().contains("before activation"));
+    }
+
+    @Test void historicalCoinbaseTransfersSkipContextualAccountingOnlyBeforeBitTen() throws Exception {
+        for (long amount : new long[] {COIN, -1, Long.MAX_VALUE}) {
+            var candidate = coinbaseWith(asset(new Transfer("UNKNOWN", amount, null, 0)));
+            var plan = RvnCanonicalAssetBlockChecks.verifyHistoricalMainnet(candidate, CONTEXT, ACTIVE, true,
+                    parent(), n -> null, rules(Map.of()), true, false);
+            assertTrue(plan.assets().entries().isEmpty());
+            var coinbase = candidate.transactions().getFirst();
+            assertTrue(plan.coins().created().containsKey(new OutPoint(coinbase.txId(), new UInt32(coinbase.outputs().size() - 1))));
+            assertThrows(SecurityException.class, () -> RvnCanonicalAssetBlockChecks.verifyHistoricalMainnet(candidate,
+                    CONTEXT, ACTIVE, true, parent(), n -> null, rules(Map.of()), true, true));
+        }
+        var badOwner = coinbaseWith(asset(new Transfer("TOKEN!", 2 * COIN, null, 0)));
+        assertThrows(SecurityException.class, () -> RvnCanonicalAssetBlockChecks.verifyHistoricalMainnet(badOwner,
+                CONTEXT, ACTIVE, true, parent(), n -> null, rules(Map.of()), true, false));
+        var nativeValue = coinbaseWith(new TxOut(1, encodeCanonical(LOCK, new Transfer("TOKEN", COIN, null, 0))));
+        assertThrows(SecurityException.class, () -> RvnCanonicalAssetBlockChecks.verifyHistoricalMainnet(nativeValue,
+                CONTEXT, ACTIVE, true, parent(), n -> null, rules(Map.of()), true, false));
+    }
+
     @Test void historicalAdmissionSpendsOriginalNoncanonicalEnvelopeWithOpaqueCodeSeparator() {
         var original = issue();
         var outputs = new ArrayList<>(original.outputs());
@@ -84,6 +158,38 @@ class RvnCanonicalAssetBlockChecksTest {
         assertTrue(plan.assets().entries().get("TOKEN").before().isEmpty());
         assertFalse(plan.coins().created().containsKey(new OutPoint(issue.txId(), new UInt32(2))));
         assertTrue(plan.coins().created().containsKey(new OutPoint(transfer.txId(), new UInt32(0))));
+    }
+
+    @Test void preEnforcementReissueUsesHistoricalNativeValueAccountingThroughoutBlockChecks() {
+        var issuance = issue();
+        var changed = new TxOut(COIN, encodeCanonical(LOCK, new Reissue("TOKEN", COIN, -1, true, null)));
+        var reissue = sign(tx(List.of(new OutPoint(issuance.txId(), new UInt32(1)), point(2)),
+                List.of(burn("RXReissueAssetXXXXXXXXXXXXXXVEFAWu", 100), asset(new Transfer("TOKEN!", COIN, null, 0)), changed)),
+                0, issuance.outputs().get(1).scriptPubKey());
+        var candidate = block(List.of(issuance, reissue));
+        var plan = RvnCanonicalAssetBlockChecks.verifyMainnet(candidate, CONTEXT, ACTIVE, false, parent(), n -> null);
+        assertEquals(0, plan.coins().fees());
+        assertEquals(COIN, plan.coins().created().get(new OutPoint(reissue.txId(), new UInt32(2))).output().value());
+        assertEquals(11 * COIN, plan.assets().entries().get("TOKEN").after().orElseThrow().supply());
+        assertThrows(SecurityException.class, () -> RvnCanonicalAssetBlockChecks.verifyMainnet(candidate,
+                CONTEXT, ACTIVE, true, parent(), n -> null));
+    }
+
+    @Test void issueAndOwnerMustHaveSameDestinationInBothEnvelopeModes() {
+        var original = issue(); var outputs = new ArrayList<>(original.outputs());
+        byte[] changed = outputs.get(1).scriptPubKey(); changed[3] ^= 1;
+        outputs.set(1, new TxOut(0, changed)); var bad = block(List.of(tx(List.of(point(1)), outputs)));
+        assertThrows(SecurityException.class, () -> RvnCanonicalAssetBlockChecks.verifyMainnet(bad,
+                CONTEXT, ACTIVE, true, parent(), n -> null));
+        assertThrows(SecurityException.class, () -> RvnCanonicalAssetBlockChecks.verifyHistoricalMainnet(bad,
+                CONTEXT, ACTIVE, true, parent(), n -> null, rules(Map.of()), true));
+        outputs = new ArrayList<>(original.outputs());
+        byte[] owner = outputs.get(1).scriptPubKey(); owner[0] = 0;
+        byte[] issued = outputs.get(2).scriptPubKey(); issued[0] = 0x51;
+        outputs.set(1, new TxOut(0, owner)); outputs.set(2, new TxOut(0, issued));
+        var valid = block(List.of(tx(List.of(point(1)), outputs)));
+        assertEquals(10 * COIN, RvnCanonicalAssetBlockChecks.verifyHistoricalMainnet(valid, CONTEXT, ACTIVE,
+                true, parent(), n -> null, rules(Map.of()), true).assets().entries().get("TOKEN").after().orElseThrow().supply());
     }
 
     @Test void signaturesCommitOriginalAssetSuffixAndTokenInflationIsRejected() {

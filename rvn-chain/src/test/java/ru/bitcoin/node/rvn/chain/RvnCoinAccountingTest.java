@@ -32,6 +32,23 @@ class RvnCoinAccountingTest {
         coins.put(source, new RvnCoin(new TxOut(value, new byte[]{0x51}), height, coinbase));
     }
 
+    @Test void historicalAssetValuesAreExcludedFromFeesButRetainedInCoins() {
+        fund(1000, HEIGHT - 1, false);
+        byte[] script = ru.bitcoin.node.rvn.chain.assets.RvnAssetScriptCodec.encodeCanonical(payout.scriptPubKey(),
+                new ru.bitcoin.node.rvn.chain.assets.RvnAssetScriptCodec.Reissue("TOKEN", 1, -1, true, null));
+        script[26] = (byte) 0xff; // Core's historical classifier ignores the envelope push length.
+        var tx = new Transaction(1, List.of(new TxIn(source, new byte[0], TxIn.FINAL_SEQUENCE)),
+                List.of(new TxOut(900, new byte[]{0x51}), new TxOut(5000, script)), new UInt32(0));
+        var legacy = RvnCoinAccounting.transactions(HEIGHT, List.of(tx), view, false);
+        assertEquals(100, legacy.fees());
+        assertEquals(5000, legacy.created().get(new OutPoint(tx.txId(), new UInt32(1))).output().value());
+        assertThrows(SecurityException.class, () -> RvnCoinAccounting.transactions(HEIGHT, List.of(tx), view, true));
+        assertEquals(100, RvnCoinAccounting.block(template(List.of(tx), 100), HEIGHT, true, view, false).fees());
+        assertThrows(SecurityException.class, () -> RvnCoinAccounting.block(template(List.of(tx), 101), HEIGHT, true, view, false));
+        var negative = new Transaction(1, tx.inputs(), List.of(new TxOut(-1, script)), new UInt32(0));
+        assertThrows(SecurityException.class, () -> RvnCoinAccounting.transactions(HEIGHT, List.of(negative), view, false));
+    }
+
     @Test
     void orderedDependenciesProduceNetChangesAndUndoWithoutMutatingParent() {
         fund(1000, HEIGHT - 200, true);

@@ -29,6 +29,17 @@ public final class RvnCoinAccounting {
     interface InputCheck { void requireValid(Transaction tx, int index, RvnCoin coin); }
 
     static Changes transactions(long height, List<Transaction> transactions, RvnCoinView parent, InputCheck check) {
+        return transactions(height, transactions, parent, check, true);
+    }
+
+    /** Core GetValueOut(enforcedValues). Historical asset outputs are excluded
+     * from fees before deployment; their original nValue still enters the UTXO.
+     * This does not validate asset layouts or authorize historical transactions. */
+    public static Changes transactions(long height, List<Transaction> transactions, RvnCoinView parent, boolean enforcedValues) {
+        return transactions(height, transactions, parent, (tx, index, coin) -> {}, enforcedValues);
+    }
+
+    static Changes transactions(long height, List<Transaction> transactions, RvnCoinView parent, InputCheck check, boolean enforcedValues) {
         requireHeight(height);
         Objects.requireNonNull(parent);
         var selected = List.copyOf(transactions);
@@ -57,7 +68,7 @@ public final class RvnCoinAccounting {
                 inputValue = addMoney(inputValue, coin.output().value());
                 check.requireValid(tx, index, coin);
             }
-            long outputValue = outputValue(tx);
+            long outputValue = outputValue(tx, enforcedValues);
             if (outputValue > inputValue) throw new SecurityException("RVN transaction spends more than inputs");
             fees = addMoney(fees, inputValue - outputValue);
             addOutputs(tx, height, false, parent, created);
@@ -66,15 +77,19 @@ public final class RvnCoinAccounting {
     }
 
     public static Changes block(RvnBlock block, long height, boolean assetsActive, RvnCoinView parent) {
+        return block(block, height, assetsActive, parent, true);
+    }
+
+    public static Changes block(RvnBlock block, long height, boolean assetsActive, RvnCoinView parent, boolean enforcedValues) {
         requireHeight(height);
         RvnBlockBodyChecks.requireValid(block, assetsActive);
         if (block.header().isKawpow() && block.header().declaredHeight() != height)
             throw new SecurityException("RVN block height mismatch");
         var txs = block.transactions();
         // Coinbase outputs are deliberately unavailable while processing the body.
-        var changes = transactions(height, txs.subList(1, txs.size()), parent);
+        var changes = transactions(height, txs.subList(1, txs.size()), parent, enforcedValues);
         long reward = addMoney(RvnCoinbase.subsidy(height), changes.fees());
-        if (outputValue(txs.getFirst()) > reward)
+        if (outputValue(txs.getFirst(), enforcedValues) > reward)
             throw new SecurityException("RVN coinbase exceeds subsidy and fees");
         var created = new HashMap<>(changes.created());
         addOutputs(txs.getFirst(), height, true, parent, created);
@@ -95,9 +110,15 @@ public final class RvnCoinAccounting {
         }
     }
 
-    private static long outputValue(Transaction tx) {
-        long total = 0;
-        for (var output : tx.outputs()) total = addMoney(total, output.value());
+    private static long outputValue(Transaction tx, boolean enforcedValues) {
+        long total = 0, checkedTotal = 0;
+        for (var output : tx.outputs()) {
+            // CheckTransaction ranges every output even when old GetValueOut skips it.
+            checkedTotal = addMoney(checkedTotal, output.value());
+            if (!enforcedValues && ru.bitcoin.node.rvn.chain.assets.RvnHistoricalAssetCodec.classify(output.scriptPubKey()).isPresent())
+                continue;
+            total = addMoney(total, output.value());
+        }
         return total;
     }
 

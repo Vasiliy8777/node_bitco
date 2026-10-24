@@ -24,10 +24,15 @@ public class RvnCudaConfiguration {
     }
 
     @Bean
-    ApplicationRunner rvnCudaSelfTest(RvnCudaKawpowWorker worker) {
+    ApplicationRunner rvnCudaSelfTest(RvnCudaKawpowWorker worker, RvnMiningSettings mining,
+            @Value("${ravencoin.mining.cuda.job-self-test-enabled:false}") boolean jobSelfTest) {
         return args -> {
             RvnCudaKawpowSelfTest.run(worker);
-            System.out.println("RVN CUDA KawPoW verified against Core vectors; production mining job lifecycle pending");
+            if (jobSelfTest) {
+                ru.bitcoin.node.rvn.app.mining.RvnCudaMiningRoundSelfTest.run(worker, mining.requirePayout());
+                System.out.println("RVN CUDA local job self-test OK: template, GPU search, independent CPU/native validation; no mainnet block submitted");
+            }
+            System.out.println("RVN CUDA KawPoW verified against Core vectors; mining waits for complete historical validation and synchronization");
         };
     }
 }
