@@ -8,7 +8,7 @@ import ru.bitcoin.node.rvn.chain.*;
 import static ru.bitcoin.node.rvn.chain.assets.RvnAssetScriptCodec.*;
 import static ru.bitcoin.node.rvn.chain.assets.RvnAssetMetadataRules.*;
 
-/** Explicit canonical mainnet root/sub/unique/channel block validator. NOT full historical
+/** Explicit canonical mainnet asset block validator (vote assets excluded). NOT full historical
  * asset consensus: rejects unsupported families/envelopes rather than admitting
  * them as native transactions. Header/PoW/deployment verification is external.
  * Returned plans can be committed atomically by RvnCoinStore; no state mutates here. */
@@ -19,6 +19,16 @@ public final class RvnCanonicalAssetBlockChecks {
     public static Plan verifyMainnet(RvnBlock block, RvnSpendContext context, Activation activation,
                                     boolean enforcedReissueValues, RvnCoinView parent,
                                     Function<String, Metadata> registry) {
+        RvnAssetRulesView rules = parent instanceof RvnAssetRulesView view ? view : new RvnAssetRulesView() {
+            public Optional<String> findRule(RvnAssetRuleKey key) { return Optional.empty(); }
+            public boolean hasQualifier(String name, String address) { return false; }
+        };
+        return verifyMainnet(block, context, activation, enforcedReissueValues, parent, registry, rules);
+    }
+
+    public static Plan verifyMainnet(RvnBlock block, RvnSpendContext context, Activation activation,
+                                    boolean enforcedReissueValues, RvnCoinView parent,
+                                    Function<String, Metadata> registry, RvnAssetRulesView parentRules) {
         if (!activation.assets()) throw new IllegalArgumentException("Canonical asset block checks require activation");
         Objects.requireNonNull(registry);
         RvnCoinbase.requireHeight(block.transactions().getFirst(), context.height());
@@ -30,6 +40,7 @@ public final class RvnCanonicalAssetBlockChecks {
         var metadata = new HashMap<String, Metadata>();
         Function<String, Metadata> view = name -> metadata.containsKey(name) ? metadata.get(name) : registry.apply(name);
         var reissued = new HashSet<String>();
+        var rules = new RvnRestrictedBlockState(parentRules, registry);
         for (var tx : block.transactions()) {
             var spent = new ArrayList<Payload>();
             if (!tx.isCoinbase()) for (var input : tx.inputs()) {
@@ -38,7 +49,7 @@ public final class RvnCanonicalAssetBlockChecks {
                 var coin = overlay.remove(point);
                 if (coin == null) coin = parent.find(point).orElseThrow(() -> new SecurityException("RVN missing asset input"));
                 var asset = classify(coin.output().scriptPubKey());
-                if (asset != null) spent.add(asset);
+                if (asset != null) { spent.add(asset); rules.source(asset, coin.output().scriptPubKey()); }
             }
             var outputs = new ArrayList<RvnAssetIssueChecks.Output>();
             var payloads = new ArrayList<Payload>();
@@ -57,11 +68,20 @@ public final class RvnCanonicalAssetBlockChecks {
                 }
                 payloads.add(payload);
             }
+            rules.transaction(outputs, activation, tx.isCoinbase());
             if (payloads.stream().anyMatch(p -> p instanceof Issue)) {
                 var last = payloads.getLast();
                 var type = RvnAssetNames.requireValid(last.name());
                 if (last instanceof Issue && (type == RvnAssetNames.Type.UNIQUE || type == RvnAssetNames.Type.CHANNEL))
                     metadata.putAll(RvnTaggedAssetIssueChecks.verifyMainnet(spent, outputs, activation, view));
+                else if (last instanceof Issue && (type == RvnAssetNames.Type.QUALIFIER || type == RvnAssetNames.Type.SUB_QUALIFIER)) {
+                    var issued = RvnQualifierIssueChecks.verifyMainnet(spent, outputs, activation, view);
+                    metadata.put(issued.name(), issued);
+                }
+                else if (last instanceof Issue && type == RvnAssetNames.Type.RESTRICTED) {
+                    var issued = RvnRestrictedIssueChecks.verifyMainnet(spent, outputs, activation, view);
+                    metadata.put(issued.name(), issued);
+                }
                 else {
                     var issued = RvnAssetIssueChecks.verifyMainnet(spent, outputs, activation, view);
                     metadata.put(issued.name(), issued);
@@ -75,7 +95,7 @@ public final class RvnCanonicalAssetBlockChecks {
             }
             if (!tx.isCoinbase()) for (int index = 0; index < tx.outputs().size(); index++) {
                 var output = tx.outputs().get(index); byte[] script = output.scriptPubKey();
-                if (script.length <= 10000 && (script.length == 0 || script[0] != 0x6a))
+                if (!RvnScriptSemantics.unspendable(script))
                     overlay.put(new OutPoint(tx.txId(), new UInt32(index)), new RvnCoin(output, context.height(), false));
             }
         }
@@ -85,12 +105,13 @@ public final class RvnCanonicalAssetBlockChecks {
             var after = Optional.of(entry.getValue());
             if (!before.equals(after)) changes.put(entry.getKey(), new RvnAssetChanges.Update(before, after));
         }
-        return new Plan(coinChanges, new RvnAssetChanges(changes));
+        return new Plan(coinChanges, new RvnAssetChanges(changes, rules.changes()));
     }
 
     private static Payload classify(byte[] script) {
-        var decoded = decodeCanonical(script);
+        var decoded = decodeCanonicalSpendable(script);
         if (decoded.isPresent()) return decoded.get().payload();
+        if (RvnHistoricalAssetCodec.decodeNull(script).isPresent()) return null;
         // Find OP_RVN_ASSET as an opcode, never as a byte inside pushed hashes.
         // Core's loose historical classifier needs a separate consensus path.
         int position = 0;

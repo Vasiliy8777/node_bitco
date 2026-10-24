@@ -6,9 +6,10 @@ import java.util.function.Function;
 import static ru.bitcoin.node.rvn.chain.RvnBlockBodyChecks.*;
 import static ru.bitcoin.node.rvn.chain.assets.RvnAssetScriptCodec.*;
 
-/** Accounting for canonical root/sub/unique/channel transfers, not block admission.
+/** Accounting for canonical asset transfers except vote assets, not block admission.
  * Callers must resolve each spent outpoint exactly once, verify signatures and classify
- * every script. Minting, restricted assets and historical script envelopes are excluded.
+ * every script. Minting and historical envelopes are separate; restricted transfers
+ * additionally require parent-snapshot freeze/verifier checks in the block validator.
  */
 public final class RvnAssetTransferChecks {
     private RvnAssetTransferChecks() {}
@@ -50,10 +51,16 @@ public final class RvnAssetTransferChecks {
         String base = owner ? name.substring(0, name.length() - 1) : name;
         var baseType = RvnAssetNames.requireValid(base);
         if (baseType != RvnAssetNames.Type.ROOT && baseType != RvnAssetNames.Type.SUB
-                && baseType != RvnAssetNames.Type.UNIQUE && baseType != RvnAssetNames.Type.CHANNEL)
+                && baseType != RvnAssetNames.Type.UNIQUE && baseType != RvnAssetNames.Type.CHANNEL
+                && baseType != RvnAssetNames.Type.QUALIFIER && baseType != RvnAssetNames.Type.SUB_QUALIFIER
+                && baseType != RvnAssetNames.Type.RESTRICTED)
             throw new UnsupportedOperationException("Unsupported RVN asset transfer family");
         if (baseType == RvnAssetNames.Type.CHANNEL && !activation.messages())
             throw new SecurityException("RVN channel transfer before messaging activation");
+        boolean qualifier = baseType == RvnAssetNames.Type.QUALIFIER || baseType == RvnAssetNames.Type.SUB_QUALIFIER;
+        if (qualifier && !activation.restricted()) throw new SecurityException("RVN qualifier transfer before activation");
+        if (baseType == RvnAssetNames.Type.RESTRICTED && !activation.restricted())
+            throw new SecurityException("RVN restricted transfer before activation");
         long amount = payload instanceof Transfer t ? t.amount()
                 : payload instanceof Issue i ? i.amount()
                 : payload instanceof Reissue r ? r.amount() : COIN;
@@ -61,6 +68,8 @@ public final class RvnAssetTransferChecks {
             throw new SecurityException("RVN asset transfer amount");
         if ((baseType == RvnAssetNames.Type.UNIQUE || baseType == RvnAssetNames.Type.CHANNEL) && amount != COIN)
             throw new SecurityException("RVN unique/channel transfer must be one token");
+        if (qualifier && (amount < COIN || amount > 10 * COIN))
+            throw new SecurityException("RVN qualifier transfer amount range");
         if ((payload instanceof Owner) != owner && !(payload instanceof Transfer))
             throw new SecurityException("RVN asset payload/name mismatch");
         var state = metadata.apply(base);

@@ -73,6 +73,19 @@ class RvnConfigurationGuardTest {
     }
 
     @Test
+    void canonicalAssetReplayRequiresNativeReplayBeforeOpeningAnyDatabase() {
+        var directory = temporary.resolve("invalid-asset-replay");
+        var app = application(Map.of("RVN_CANONICAL_ASSET_REPLAY", "true", "RVN_NATIVE_REPLAY", "false",
+                "RVN_MINING_ENABLED", "false", "RVN_SYNC_BLOCKS", "false", "RVN_DATA_DIRECTORY", directory.toString()));
+        var failure = assertThrows(RuntimeException.class, () -> app.run(arguments()));
+        Throwable cause = failure;
+        while (cause.getCause() != null) cause = cause.getCause();
+        assertInstanceOf(IllegalArgumentException.class, cause);
+        assertTrue(cause.getMessage().contains("canonical asset replay requires native replay"));
+        assertFalse(java.nio.file.Files.exists(directory));
+    }
+
+    @Test
     void changingToHotRootCannotSilentlyIgnoreAnExistingColdDatabase() throws Exception {
         var cold = temporary.resolve("legacy"); var hot = temporary.resolve("new-hot");
         java.nio.file.Files.createDirectories(cold.resolve("headers"));

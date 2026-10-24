@@ -131,10 +131,10 @@ public final class RvnHeaderSyncService implements SmartLifecycle {
         try {
             var progress = replay.advance(limit);
             if (progress.connected() + progress.disconnected() > 0)
-                log.info("RVN historical native replay: connected={}, disconnected={}, nativeHeight={}; assets/full-chain validation pending",
+                log.info("RVN supported-subset replay: connected={}, disconnected={}, checkedHeight={}; complete historical validation pending",
                         progress.connected(), progress.disconnected(), progress.tip().height());
             return progress.connected() + progress.disconnected();
-        } catch (IOException | SecurityException e) {
+        } catch (IOException | RuntimeException e) {
             // Stored-data replay failures are local validation failures, not peer retries.
             throw new IllegalStateException("RVN stored native-block replay failed", e);
         }

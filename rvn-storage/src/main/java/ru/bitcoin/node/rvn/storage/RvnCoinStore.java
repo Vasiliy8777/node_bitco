@@ -6,6 +6,8 @@ import ru.bitcoin.node.protocol.transaction.*;
 import ru.bitcoin.node.rvn.chain.*;
 import ru.bitcoin.node.rvn.chain.assets.RvnAssetChanges;
 import ru.bitcoin.node.rvn.chain.assets.RvnAssetMetadataRules.Metadata;
+import ru.bitcoin.node.rvn.chain.assets.RvnAssetRuleKey;
+import ru.bitcoin.node.rvn.chain.assets.RvnAssetRulesView;
 import ru.bitcoin.node.rvn.consensus.RvnHash256;
 import ru.bitcoin.node.rvn.protocol.RvnWire;
 
@@ -17,7 +19,7 @@ import java.util.*;
 /** Independent durable coin and asset-metadata state. This is a storage primitive, not a
  * full-block validator. Caller must validate consensus before connect; a stored
  * tip alone is never evidence of completed scripts/assets/header validation. */
-public final class RvnCoinStore implements RvnCoinView, AutoCloseable {
+public final class RvnCoinStore implements RvnCoinView, RvnAssetRulesView, AutoCloseable {
     static { RocksDB.loadLibrary(); }
     private static final byte[] SCHEMA = {0}, TIP = {1};
     private static final byte[] EXTERNAL_UNDO = {4};
@@ -47,7 +49,8 @@ public final class RvnCoinStore implements RvnCoinView, AutoCloseable {
         this.undoFiles = undoFiles;
         this.genesis = Objects.requireNonNull(genesis);
         byte[] identity = ("RVN-NATIVE-COINS-1\n" + genesis + "\n").getBytes(StandardCharsets.US_ASCII);
-        assetSchemaIdentity = ("RVN-COINS-ASSETS-2\n" + genesis + "\n").getBytes(StandardCharsets.US_ASCII);
+        assetSchemaIdentity = ("RVN-COINS-ASSETS-3\n" + genesis + "\n").getBytes(StandardCharsets.US_ASCII);
+        byte[] legacyAssetSchema = ("RVN-COINS-ASSETS-2\n" + genesis + "\n").getBytes(StandardCharsets.US_ASCII);
         guard(directory.toAbsolutePath().normalize(), identity);
         Cache openedCache = new LRUCache(256L * 1024 * 1024, -1, true);
         Options openedOptions = new Options().setCreateIfMissing(true).setParanoidChecks(true)
@@ -71,7 +74,7 @@ public final class RvnCoinStore implements RvnCoinView, AutoCloseable {
                     db.write(durable, batch);
                 }
             } else {
-                if (!Arrays.equals(identity, schema) && !Arrays.equals(assetSchemaIdentity, schema))
+                if (!Arrays.equals(identity, schema) && !Arrays.equals(assetSchemaIdentity, schema) && !Arrays.equals(legacyAssetSchema, schema))
                     throw new IOException("RVN coin DB identity mismatch");
                 tip = decodeTip(db.get(TIP));
                 if ((tip.height() == 0) != tip.id().equals(genesis)) throw new IOException("Invalid RVN coin tip");
@@ -101,6 +104,36 @@ public final class RvnCoinStore implements RvnCoinView, AutoCloseable {
             return Optional.of(metadata);
         } catch (RocksDBException | IOException e) {
             throw new UncheckedIOException(new IOException("Cannot read RVN asset registry", e));
+        }
+    }
+
+    @Override public synchronized Optional<String> findRule(RvnAssetRuleKey key) {
+        ensureOpen();
+        try {
+            byte[] value = db.get(ruleKey(key));
+            return value == null ? Optional.empty() : Optional.of(decodeRule(key, value));
+        } catch (RocksDBException | IOException e) {
+            throw new UncheckedIOException(new IOException("Cannot read RVN asset rule", e));
+        }
+    }
+
+    @Override public synchronized boolean hasQualifier(String name, String addressHash) {
+        var key = new RvnAssetRuleKey(RvnAssetRuleKey.Kind.QUALIFIER, name, addressHash);
+        if (findRule(key).isPresent()) return true;
+        if (name.contains("/")) return false;
+        byte[] base = ruleKey(key), prefix = Arrays.copyOf(base, base.length + 1); prefix[base.length] = '/';
+        try (var iterator = db.newIterator()) {
+            iterator.seek(prefix);
+            if (iterator.isValid() && iterator.key().length >= prefix.length
+                    && Arrays.equals(prefix, Arrays.copyOf(iterator.key(), prefix.length))) {
+                byte[] encoded = iterator.key(); int nameOffset = 3 + addressHash.length();
+                String child = new String(encoded, nameOffset, encoded.length - nameOffset, StandardCharsets.US_ASCII);
+                decodeRule(new RvnAssetRuleKey(RvnAssetRuleKey.Kind.QUALIFIER, child, addressHash), iterator.value());
+                return true;
+            }
+            iterator.status(); return false;
+        } catch (RocksDBException | IOException | IllegalArgumentException e) {
+            throw new UncheckedIOException(new IOException("Cannot read RVN subqualifier assignments", e));
         }
     }
 
@@ -142,6 +175,9 @@ public final class RvnCoinStore implements RvnCoinView, AutoCloseable {
         for (var entry : assets.entries().entrySet())
             if (!findAsset(entry.getKey()).equals(entry.getValue().before()))
                 throw new SecurityException("RVN asset before-value mismatch");
+        for (var entry : assets.rules().entrySet())
+            if (!findRule(entry.getKey()).equals(entry.getValue().before()))
+                throw new SecurityException("RVN asset rule before-value mismatch");
         byte[] undo = encodeUndo(tip, changes, assets);
         if (undoFiles != null) undo = undoFiles.append(undo);
         try (var batch = new WriteBatch()) {
@@ -150,7 +186,7 @@ public final class RvnCoinStore implements RvnCoinView, AutoCloseable {
             applyAssets(batch, assets, false);
             // Upgrade atomically on first asset mutation. Older native-only
             // binaries must refuse this DB even after later native-only blocks.
-            if (!assets.entries().isEmpty()) batch.put(SCHEMA, assetSchemaIdentity);
+            if (!assets.entries().isEmpty() || !assets.rules().isEmpty()) batch.put(SCHEMA, assetSchemaIdentity);
             batch.put(undoKey(id), undo); batch.put(TIP, encodeTip(next));
             write(batch);
             tip = next;
@@ -187,6 +223,9 @@ public final class RvnCoinStore implements RvnCoinView, AutoCloseable {
         for (var entry : undo.assets().entries().entrySet())
             if (!findAsset(entry.getKey()).equals(entry.getValue().after()))
                 throw new IOException("RVN undo asset state mismatch");
+        for (var entry : undo.assets().rules().entrySet())
+            if (!findRule(entry.getKey()).equals(entry.getValue().after()))
+                throw new IOException("RVN undo asset rule mismatch");
     }
 
     private record Undo(Tip parent, RvnCoinAccounting.Changes changes, RvnAssetChanges assets) {}
@@ -302,6 +341,25 @@ public final class RvnCoinStore implements RvnCoinView, AutoCloseable {
             if (value.isPresent()) batch.put(key, RvnAssetStateCodec.encode(value.get()));
             else batch.delete(key);
         }
+        for (var entry : changes.rules().entrySet()) {
+            var value = undo ? entry.getValue().before() : entry.getValue().after();
+            byte[] key = ruleKey(entry.getKey());
+            if (value.isPresent()) batch.put(key, value.get().getBytes(StandardCharsets.US_ASCII));
+            else batch.delete(key);
+        }
+    }
+    private static byte[] ruleKey(RvnAssetRuleKey key) {
+        byte[] address = key.addressHash().getBytes(StandardCharsets.US_ASCII), name = key.name().getBytes(StandardCharsets.US_ASCII);
+        byte[] encoded = new byte[3 + address.length + name.length]; encoded[0] = 6; encoded[1] = (byte) key.kind().ordinal();
+        System.arraycopy(address, 0, encoded, 2, address.length);
+        System.arraycopy(name, 0, encoded, 3 + address.length, name.length); return encoded;
+    }
+    private static String decodeRule(RvnAssetRuleKey key, byte[] bytes) throws IOException {
+        if (bytes.length == 0 || bytes.length > 80) throw new IOException("Invalid RVN rule value size");
+        for (byte b : bytes) if (b < 0) throw new IOException("Invalid RVN rule encoding");
+        String value = new String(bytes, StandardCharsets.US_ASCII);
+        try { key.requireValue(value); } catch (IllegalArgumentException e) { throw new IOException("Invalid RVN rule value", e); }
+        return value;
     }
     private static void requireDisjoint(RvnCoinAccounting.Changes changes) {
         if (changes.fees() < 0 || changes.fees() > RvnBlockBodyChecks.MAX_MONEY
@@ -310,7 +368,7 @@ public final class RvnCoinStore implements RvnCoinView, AutoCloseable {
     }
     private static void requireSpendable(OutPoint point, RvnCoin coin) throws IOException {
         byte[] script = coin.output().scriptPubKey();
-        if (point.isCoinbase() || script.length > 10_000 || (script.length > 0 && script[0] == 0x6a))
+        if (point.isCoinbase() || RvnScriptSemantics.unspendable(script))
             throw new IOException("Unspendable RVN coin in change plan");
     }
     private void write(WriteBatch batch) throws IOException {

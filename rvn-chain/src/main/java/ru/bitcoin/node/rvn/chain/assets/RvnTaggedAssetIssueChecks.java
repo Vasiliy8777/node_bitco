@@ -18,7 +18,7 @@ public final class RvnTaggedAssetIssueChecks {
                                                      Activation activation, Function<String, Metadata> state) {
         Objects.requireNonNull(state);
         if (outputs.size() < 3) throw new SecurityException("RVN tagged issue requires burn/owner/issue outputs");
-        var decoded = outputs.stream().map(o -> decodeCanonical(o.script()).map(Decoded::payload).orElse(null)).toList();
+        var decoded = outputs.stream().map(o -> decodeCanonicalSpendable(o.script()).map(Decoded::payload).orElse(null)).toList();
         if (!(decoded.getLast() instanceof Issue last)) throw new SecurityException("RVN tagged issue must end with issuance");
         var type = RvnAssetNames.requireValid(last.name());
         boolean unique = type == RvnAssetNames.Type.UNIQUE;

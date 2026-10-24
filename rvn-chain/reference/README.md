@@ -72,8 +72,34 @@ The asset signature adapter executes the checked P2PKH prefix while retaining
 the complete original asset scriptCode for signature hashing, matching Core's
 suffix-consuming OP_RVN_ASSET semantics. Tests reject prefix-only signatures.
 Caller supplies activation/enforced-value state from the validated branch.
-This explicit canonical subset is **not full historical asset block consensus**
-and is not enabled in native replay. Unsupported families/null data/envelopes
-fail closed; qualifier/restricted verifier state, era-dependent permissive
-parsing, complete deployment handling and accepted asset-era block fixtures
-remain required before removing the replay gate or enabling mainnet mining.
+This explicit canonical subset is **not full historical asset block consensus**.
+Default replay still stops at assets. Opt-in canonical replay now connects the
+checker to synchronized bodies and commits coin/metadata/rule plans together.
+Unsupported formats stop before tip commit; mining remains disabled.
+
+Qualifier/subqualifier issuance checks exact mainnet burns (1000/100 RVN), no
+owner creation, and spent/returned parent qualifier for a subqualifier. Restricted
+issuance checks its 1500 RVN burn, root owner return and one verifier. Restricted
+reissue normalizes `$TOKEN` authority to `TOKEN!`. Address tags, address/global
+freezes and verifiers produce immutable rule deltas; tagging adds a single exact
+0.1 RVN burn per added tag. Restricted transfers check the **parent snapshot**
+for source freezes, global freezes, qualifiers and verifier, regardless of the
+ordering of changes in the candidate. New issuance/reissue verifier updates have
+their own destination checks. Rule/coin/metadata undo and tip share one batch.
+
+`RvnHistoricalAssetCodec` implements Core's positional classification (without
+requiring P2PKH/push length/OP_DROP), the pre-fix transfer offset, ignored trailing
+bytes, optional hash length/marker/truncation semantics and fixed null-data
+offsets. It preserves raw flags/hash bytes instead of silently normalizing invalid
+data into a canonical payload. Decoding alone does not authorize a spend.
+`RvnScriptSemantics` adds suffix-consuming sigop counting and Core pruning of
+null/zero-asset outputs. Tests are constructed scenarios, not a Core execution
+oracle or a corpus of accepted historical blocks.
+
+Remaining hard limits: historical noncanonical spending/signature-hash semantics
+are not integrated into admission; the verifier parser is not yet certified
+against LibBoolEE's malformed-expression quirks; removing a root qualifier held
+only through a subqualifier stops explicitly; pre-deployment asset coinbases
+are conservatively rejected. Vote assets are outside this implementation.
+These limits must be resolved and replayed against independent accepted fixtures
+before calling the pipeline full historical validation or enabling mining.

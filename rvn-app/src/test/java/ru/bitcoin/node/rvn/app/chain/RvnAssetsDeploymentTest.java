@@ -55,4 +55,17 @@ class RvnAssetsDeploymentTest {
         assertEquals(RvnAssetsDeployment.State.DEFINED,
                 new RvnAssetsDeployment(4, 3, 1000, 2000).stateForNext(cursor, lookup));
     }
+
+    @Test
+    void deploymentBitsAreIndependentAndLockedInIsDistinctFromActive() throws Exception {
+        var rip5 = new RvnAssetsDeployment(4, 3, 100, 10000, 7);
+        var value = new RvnAssetsDeployment(4, 3, 100, 10000, 9);
+        RvnStoredHeader cursor = null;
+        for (int height = 0; height < 8; height++) cursor = append(cursor, 1 << 9, 200 + height);
+        assertEquals(RvnAssetsDeployment.State.LOCKED_IN, value.stateForNext(cursor, lookup));
+        assertFalse(value.activeForNext(cursor, lookup));
+        assertEquals(RvnAssetsDeployment.State.STARTED, rip5.stateForNext(cursor, lookup));
+        for (int height = 8; height < 12; height++) cursor = append(cursor, 0, 200 + height);
+        assertTrue(value.activeForNext(cursor, lookup)); assertFalse(rip5.activeForNext(cursor, lookup));
+    }
 }

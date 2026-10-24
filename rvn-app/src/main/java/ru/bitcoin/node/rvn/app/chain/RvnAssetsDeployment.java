@@ -5,13 +5,14 @@ import ru.bitcoin.node.rvn.storage.*;
 import java.io.IOException;
 import java.util.*;
 
-/** Branch-specific assets header-version activation. Raven's Condition checks bit 6
+/** Branch-specific header-version activation (default: assets bit 6). Raven checks the bit
  * alone (unlike Bitcoin's additional top-bit mask). Parameters and transitions
  * match pinned Core chainparams.cpp / versionbits.cpp, not a canonical-chain height.
  */
 public final class RvnAssetsDeployment {
     enum State { DEFINED, STARTED, LOCKED_IN, ACTIVE, FAILED }
     private final int period, threshold;
+    private final int bit;
     private final long start, timeout;
     private final Map<RvnHash256, State> cache = new LinkedHashMap<>(32, .75f, true) {
         @Override protected boolean removeEldestEntry(Map.Entry<RvnHash256, State> entry) { return size() > 512; }
@@ -19,9 +20,13 @@ public final class RvnAssetsDeployment {
 
     public RvnAssetsDeployment() { this(2016, 1814, 1540944000L, 1572480000L); }
     RvnAssetsDeployment(int period, int threshold, long start, long timeout) {
+        this(period, threshold, start, timeout, 6);
+    }
+    RvnAssetsDeployment(int period, int threshold, long start, long timeout, int bit) {
         if (period < 1 || threshold < 1 || threshold > period || start < 0 || timeout <= start)
             throw new IllegalArgumentException("Deployment parameters");
-        this.period = period; this.threshold = threshold; this.start = start; this.timeout = timeout;
+        if (bit < 0 || bit > 28) throw new IllegalArgumentException("Deployment bit");
+        this.period = period; this.threshold = threshold; this.start = start; this.timeout = timeout; this.bit = bit;
     }
 
     public boolean activeForNext(RvnStoredHeader parent, RvnHeaderLookup branch) throws IOException {
@@ -56,7 +61,7 @@ public final class RvnAssetsDeployment {
                     int signals = 0;
                     var block = end;
                     for (int j = 0; j < period; j++) {
-                        if ((block.version() & (1 << 6)) != 0) signals++;
+                        if ((block.version() & (1 << bit)) != 0) signals++;
                         if (j + 1 < period) block = branch.require(block.parentId());
                     }
                     if (signals >= threshold) state = State.LOCKED_IN;

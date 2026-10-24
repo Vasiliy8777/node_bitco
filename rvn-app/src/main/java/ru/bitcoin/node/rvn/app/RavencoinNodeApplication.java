@@ -30,10 +30,13 @@ public class RavencoinNodeApplication {
             @Value("${ravencoin.data-directory:" + RvnDataDirectories.DEFAULT_ROOT + "}") String directory,
             @Value("${ravencoin.storage.hot-directory:" + RvnDataDirectories.DEFAULT_HOT_ROOT + "}") String hotDirectory,
             @Value("${ravencoin.validation.native-replay-enabled:false}") boolean nativeReplay,
+            @Value("${ravencoin.validation.canonical-asset-replay-enabled:false}") boolean canonicalAssets,
             @Value("${ravencoin.sync.enabled:false}") boolean sync,
             @Value("${ravencoin.sync.blocks-enabled:false}") boolean blocks) {
         if (nativeReplay && (!sync || !blocks))
             throw new IllegalArgumentException("RVN native replay requires header sync and block download");
+        if (canonicalAssets && !nativeReplay)
+            throw new IllegalArgumentException("RVN canonical asset replay requires native replay");
         if (directory.isBlank() || hotDirectory.isBlank()) throw new IllegalArgumentException("RVN data directories must not be blank");
         var paths = new RvnDataDirectories(java.nio.file.Path.of(directory), java.nio.file.Path.of(hotDirectory));
         if (sync && !paths.root().equals(paths.hotRoot())

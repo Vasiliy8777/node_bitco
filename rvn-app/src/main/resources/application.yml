@@ -28,9 +28,12 @@ ravencoin:
       reserve-mib: ${RVN_CUDA_RESERVE_MIB:1024}
   validation:
     # Historical native-coin replay only; stops before asset activation.
-    # Canonical root/sub/unique/channel checks exist, but historical envelopes,
-    # qualifier/restricted state and deployment handling still block full replay.
+    # Optional canonical asset replay adds qualifier/restricted rules and atomic
+    # undo; unsupported historical formats/expressions stop before tip commit.
     native-replay-enabled: ${RVN_NATIVE_REPLAY:false}
+    # Experimental supported-subset replay, NOT complete historical consensus.
+    # Requires native replay, header sync and body downloads. Mining stays off.
+    canonical-asset-replay-enabled: ${RVN_CANONICAL_ASSET_REPLAY:false}
   pow:
     self-test-enabled: ${RVN_POW_SELF_TEST:false}
     cached-dag-items: 1024

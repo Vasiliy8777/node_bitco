@@ -9,7 +9,7 @@ import static ru.bitcoin.node.rvn.chain.assets.RvnAssetScriptCodec.*;
 import static ru.bitcoin.node.rvn.chain.assets.RvnAssetMetadataRules.*;
 import ru.bitcoin.node.rvn.chain.assets.RvnAssetIssueChecks.Output;
 
-/** Canonical mainnet ordinary root/sub reissue authorization plan. Signatures,
+/** Canonical mainnet root/sub/restricted reissue authorization plan. Signatures,
  * native accounting, block-wide reissue chaining and historical scripts are separate. */
 public final class RvnAssetReissueChecks {
     private RvnAssetReissueChecks() {}
@@ -18,12 +18,12 @@ public final class RvnAssetReissueChecks {
                                          Activation activation, Function<String, Metadata> state) {
         Objects.requireNonNull(state);
         if (outputs.size() < 3) throw new SecurityException("RVN reissue requires burn/owner/reissue outputs");
-        var decoded = outputs.stream().map(o -> decodeCanonical(o.script()).map(Decoded::payload).orElse(null)).toList();
+        var decoded = outputs.stream().map(o -> decodeCanonicalSpendable(o.script()).map(Decoded::payload).orElse(null)).toList();
         if (!(decoded.get(decoded.size() - 1) instanceof Reissue reissue))
             throw new SecurityException("RVN reissue must be last output");
         var type = RvnAssetNames.requireValid(reissue.name());
-        if (type != RvnAssetNames.Type.ROOT && type != RvnAssetNames.Type.SUB)
-            throw new UnsupportedOperationException("Only ordinary root/sub reissue supported");
+        if (type != RvnAssetNames.Type.ROOT && type != RvnAssetNames.Type.SUB && type != RvnAssetNames.Type.RESTRICTED)
+            throw new UnsupportedOperationException("Unsupported reissue family");
         var previous = state.apply(reissue.name());
         if (previous == null) throw new SecurityException("RVN reissue asset missing");
         var updated = reissue(reissue, previous, activation);
@@ -34,7 +34,8 @@ public final class RvnAssetReissueChecks {
             if (!(payload instanceof Transfer)) throw new SecurityException("Unexpected reissue asset output");
             transfers.add(payload);
         }
-        if (transfers.stream().noneMatch(p -> p.name().equals(reissue.name() + "!")))
+        String owner = (type == RvnAssetNames.Type.RESTRICTED ? reissue.name().substring(1) : reissue.name()) + "!";
+        if (transfers.stream().noneMatch(p -> p.name().equals(owner)))
             throw new SecurityException("RVN reissue requires owner return");
         byte[] burn = RvnPayoutAddress.parse("RXReissueAssetXXXXXXXXXXXXXXVEFAWu", RvnNetwork.MAINNET).scriptPubKey();
         if (outputs.stream().noneMatch(o -> o.value() == 100 * COIN && Arrays.equals(o.script(), burn)))

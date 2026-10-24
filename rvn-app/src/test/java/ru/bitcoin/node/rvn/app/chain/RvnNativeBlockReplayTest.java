@@ -119,6 +119,57 @@ class RvnNativeBlockReplayTest {
     }
 
     @Test
+    void optInCanonicalReplayCommitsAssetPlansAndReorgRestoresCoinsAndMetadata() throws Exception {
+        var source = new OutPoint(new ru.bitcoin.node.common.types.Hash256(new byte[32]), new UInt32(1));
+        var fund = new RvnCoin(new TxOut(500 * RvnBlockBodyChecks.COIN, new byte[]{0x51}), 1, false);
+        RvnHash256 fork;
+        try (var headers = open(temp.resolve("headers")); var coins = coins()) {
+            var parent = RvnMainnetExpectedBits.GENESIS_ID;
+            for (int height = 1; height <= 5; height++) {
+                var block = next(parent, height, 0); accept(headers, block); save(headers, block); parent = id(block);
+                // Synthetic storage fixture supplies an already validated native
+                // funding coin without requiring 100 historical maturity blocks.
+                if (height == 1) coins.connect(coins.tip(), parent, new RvnCoinAccounting.Changes(0, Map.of(), Map.of(source, fund)));
+            }
+            fork = parent;
+            var owner = new ru.bitcoin.node.rvn.chain.assets.RvnAssetScriptCodec.Owner("TOKEN!");
+            var issuance = new ru.bitcoin.node.rvn.chain.assets.RvnAssetScriptCodec.Issue("TOKEN", 10 * RvnBlockBodyChecks.COIN, 0, true, null);
+            var burn = RvnPayoutAddress.parse("RXissueAssetXXXXXXXXXXXXXXXXXhhZGt", RvnNetwork.MAINNET);
+            var issue = new Transaction(2, List.of(new TxIn(source, new byte[0], TxIn.FINAL_SEQUENCE)), List.of(
+                    new TxOut(500 * RvnBlockBodyChecks.COIN, burn.scriptPubKey()),
+                    new TxOut(0, ru.bitcoin.node.rvn.chain.assets.RvnAssetScriptCodec.encodeCanonical(PAYOUT.scriptPubKey(), owner)),
+                    new TxOut(0, ru.bitcoin.node.rvn.chain.assets.RvnAssetScriptCodec.encodeCanonical(PAYOUT.scriptPubKey(), issuance))), new UInt32(0));
+            var txs = List.of(RvnCoinbase.create(6, 0, 0, PAYOUT), issue);
+            byte[] raw = child(parent, 1514999494L + 60 * 6); raw[0] = 0x44;
+            System.arraycopy(MerkleTree.calculateRoot(txs.stream().map(Transaction::txId).toList()).bytes(), 0, raw, 36, 32);
+            var assetBlock = new RvnBlock(parsed(raw), txs); accept(headers, assetBlock); save(headers, assetBlock);
+            var replay = new RvnNativeBlockReplay(headers, coins, new RvnAssetsDeployment(2, 1, 0, Long.MAX_VALUE), true);
+            assertEquals(5, replay.advance(16).connected());
+            assertEquals(10 * RvnBlockBodyChecks.COIN, coins.findAsset("TOKEN").orElseThrow().supply());
+            assertTrue(coins.find(source).isEmpty());
+            byte[] historical = ru.bitcoin.node.rvn.chain.assets.RvnAssetScriptCodec.encodeCanonical(PAYOUT.scriptPubKey(), issuance);
+            historical[26] = (byte) 0xff; // Core's positional classifier ignores this byte; canonical replay cannot admit it.
+            var unsupported = block(id(assetBlock), 7, 0, 1514999494L + 60 * 7, original -> new Transaction(original.version(), original.inputs(),
+                    List.of(original.outputs().getFirst(), new TxOut(0, historical)), original.lockTime()));
+            accept(headers, unsupported); save(headers, unsupported);
+            assertThrows(RuntimeException.class, () -> replay.advance(16));
+            assertEquals(6, coins.tip().height()); assertTrue(coins.findAsset("TOKEN").isPresent());
+        }
+        try (var headers = open(temp.resolve("headers")); var coins = coins()) {
+            assertTrue(coins.findAsset("TOKEN").isPresent());
+            var parent = fork;
+            for (int height = 6; height <= 8; height++) {
+                var block = next(parent, height, 9); accept(headers, block); save(headers, block); parent = id(block);
+            }
+            var replay = new RvnNativeBlockReplay(headers, coins, new RvnAssetsDeployment(2, 1, 0, Long.MAX_VALUE), true);
+            var progress = replay.advance(16);
+            assertEquals(1, progress.disconnected()); assertEquals(3, progress.connected());
+            assertEquals(8, coins.tip().height()); assertTrue(coins.findAsset("TOKEN").isEmpty());
+            assertEquals(Optional.of(fund), coins.find(source));
+        }
+    }
+
+    @Test
     void interruptedReplayAndHeaderCoinHeightMismatchAreRejected() throws Exception {
         var first = next(RvnMainnetExpectedBits.GENESIS_ID, 1, 0);
         try (var headers = open(temp.resolve("headers")); var coins = coins()) {

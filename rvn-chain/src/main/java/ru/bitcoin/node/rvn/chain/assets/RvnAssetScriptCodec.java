@@ -28,6 +28,12 @@ public final class RvnAssetScriptCodec {
         @Override public byte[] lockingScript() { return lockingScript.clone(); }
     }
 
+    /** For transaction layouts that may also contain separately validated null data. */
+    public static Optional<Decoded> decodeCanonicalSpendable(byte[] script) {
+        if (RvnHistoricalAssetCodec.decodeNull(script).isPresent()) return Optional.empty();
+        return decodeCanonical(script);
+    }
+
     public static Optional<Decoded> decodeCanonical(byte[] script) {
         Objects.requireNonNull(script);
         if (script.length > 0 && (script[0] & 255) == 0xc0)

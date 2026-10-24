@@ -115,7 +115,9 @@ worker, data and configuration are not changed by this work.
   branch, checks exact BIP34 coinbase height, native scripts/amounts/locks/sigops
   with parent-branch MTP, and commits coins/undo. It rewinds during header reorgs
   and resumes after restart. Cached bodies are replayed before DNS/handshake.
-  It stops before assets activation; stored replay failures stop the sync worker
+  Default replay stops before assets activation; opt-in canonical subset replay
+  checks supported asset blocks and commits metadata/rules with coins. Unsupported
+  historical rules still stop it. Stored replay failures stop the sync worker
   rather than repeatedly blaming another peer. No mining lifecycle is enabled.
 - Asset foundation: `RvnAssetNames` classifies root/sub/unique/channel/owner/vote/
   qualifier/restricted names against pinned Core grammar. `RvnAssetScriptCodec`
@@ -126,10 +128,10 @@ worker, data and configuration are not changed by this work.
   duplicate names, integer amount precision, unit bounds, special unique/channel/
   qualifier supply parameters, activation gates, cumulative supply and permanent
   disabling of reissuance. It retains metadata on a no-change reissue. These
-  rules alone do not authorize transactions. Canonical root/sub transfer, issue
-  and reissue checks add burns, ownership and conservation; null restrictions,
-  verifier expressions and historical acceptance still need implementation.
-  The replay stop before asset activation remains enabled.
+  rules alone do not authorize transactions. Canonical asset block checks now
+  include qualifier/restricted issuance and transfers, null rule authorization,
+  tag burns, parent-snapshot freeze/verifier checks and atomic undo. Historical
+  acceptance gaps remain; default replay still stops before asset activation.
 
 ## Verification and limits
 
@@ -319,21 +321,34 @@ Mainnet root/sub issuance plans validate exact burn outputs, the final owner/iss
 pair, and spent/returned parent ownership for subassets. Reissue plans check the
 exact 100 RVN mainnet burn, owner input/return, metadata transitions and conservation
 of existing transfer balances. Eight transaction scenarios cover these rules.
-Five asset/coin storage tests cover restart, reorg, stale-plan rejection,
+Seven asset/coin storage tests cover restart, reorg, stale-plan rejection,
 registry tampering, schema upgrade and abrupt child-process termination with
 external shared undo. These are synthetic fixtures, not accepted mainnet blocks.
-Historical script handling, remaining asset families
-and integrating validated deltas into admission still block asset-era replay
-and production mining. A canonical mainnet root/sub/unique/channel block validator now combines
+Complete historical script/qualifier/verifier compatibility still blocks full
+asset-era replay and production mining. A canonical mainnet asset block validator combines
 native checks, full-script asset signatures, intra-block coin/metadata overlays
 and net atomic plans; it rejects repeated reissues and unsupported script forms.
-Six signed/synthetic block tests exercise this subset. Unique issuance supports
+Ten signed/synthetic block tests exercise this subset. Unique issuance supports
 multi-token batches with a shared immediate parent, distinct names, exact 5 RVN
 burn per token and spent/returned parent ownership. Channels require an exact
 100 RVN burn, one issuance and messaging activation. Both families transfer as
 one indivisible token. Four additional tagged-transaction tests check these
 rules, duplicate/existing names, mixed parents, burns and activation. Full historical asset
-consensus is not claimed and the replay activation stop remains.
+consensus is not claimed. Default replay stops before activation; explicit
+`ravencoin.validation.canonical-asset-replay-enabled=true` now connects the
+supported checker to synchronized bodies and atomic coin/metadata/rule commits.
+It requires native replay, sync and bodies. Branch-derived RIP5/transfer-size/
+value/coinbase deployment state is available (value enforcement includes LOCKED_IN
+as in Core). Unsupported historical formats fail before tip commit. A synthetic
+replay/restart/reorg test verifies that asset admission and undo share the coin tip.
+
+Historical positional/null decoding is implemented separately, preserving ignored
+tails, pre-fix transfer offsets, raw flags and hash truncation. RVN-specific sigop
+counting consumes the asset suffix, and null/zero-asset outputs are pruned. This
+decoder is not yet a historical signature interpreter. Remaining blockers are
+arbitrary historical asset spends, LibBoolEE malformed-expression compatibility,
+removing inherited-only root qualifiers and pre-deployment asset coinbase cases,
+plus independent accepted-block replay. See [asset reference scope](../rvn-chain/reference/README.md).
 
 CUDA KawPoW now has a real local worker: GPU DAG generation, height/3 generated
 programs, bounded uint64 nonce search and full 256-bit target comparison. The

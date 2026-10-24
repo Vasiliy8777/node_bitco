@@ -3,26 +3,39 @@ package ru.bitcoin.node.rvn.app.chain;
 import ru.bitcoin.node.rvn.chain.*;
 import ru.bitcoin.node.rvn.storage.*;
 import ru.bitcoin.node.script.ScriptVerifyFlags;
+import ru.bitcoin.node.rvn.chain.assets.RvnCanonicalAssetBlockChecks;
+import ru.bitcoin.node.rvn.chain.assets.RvnHistoricalAssetCodec;
 import java.io.*;
 import java.util.*;
 
-/** Bounded replay of stored bodies through native checks and durable coins.
- * Stops before asset activation. This is not a mining-ready full chainstate. */
+/** Bounded replay through native checks and durable coins. Default stops before
+ * assets; opt-in canonical subset stops at unsupported historical rules instead.
+ * Neither mode establishes a mining-ready full historical chainstate. */
 public final class RvnNativeBlockReplay {
     private final RvnHeaderStore headers;
     private final RvnCoinStore coins;
     private final RvnAssetsDeployment assets;
+    private final boolean canonicalAssets;
+    private final RvnAssetDeploymentContext assetContext = new RvnAssetDeploymentContext();
     private static final int FLAGS = ScriptVerifyFlags.P2SH | ScriptVerifyFlags.DERSIG
             | ScriptVerifyFlags.CHECKLOCKTIMEVERIFY | ScriptVerifyFlags.CHECKSEQUENCEVERIFY
             | ScriptVerifyFlags.WITNESS | ScriptVerifyFlags.NULLDUMMY;
 
     public RvnNativeBlockReplay(RvnHeaderStore headers, RvnCoinStore coins) throws IOException {
-        this(headers, coins, new RvnAssetsDeployment());
+        this(headers, coins, false);
+    }
+
+    public RvnNativeBlockReplay(RvnHeaderStore headers, RvnCoinStore coins, boolean canonicalAssets) throws IOException {
+        this(headers, coins, new RvnAssetsDeployment(), canonicalAssets);
     }
 
     RvnNativeBlockReplay(RvnHeaderStore headers, RvnCoinStore coins, RvnAssetsDeployment assets) throws IOException {
+        this(headers, coins, assets, false);
+    }
+    RvnNativeBlockReplay(RvnHeaderStore headers, RvnCoinStore coins, RvnAssetsDeployment assets, boolean canonicalAssets) throws IOException {
         this.headers = Objects.requireNonNull(headers); this.coins = Objects.requireNonNull(coins);
         this.assets = Objects.requireNonNull(assets);
+        this.canonicalAssets = canonicalAssets;
         var tip = coins.tip();
         if (headers.require(tip.id()).height() != tip.height()) throw new IOException("RVN coin/header tip mismatch");
     }
@@ -49,19 +62,33 @@ public final class RvnNativeBlockReplay {
                 if (!next.parentId().equals(parent.id())) throw new IOException("RVN replay branch mismatch");
                 byte[] body = headers.blockBody(next.id());
                 if (body == null) break;
-                if (assets.activeForNext(parent, headers)) throw new AssetsNotImplementedException(next.height());
+                boolean active = assets.activeForNext(parent, headers);
+                if (active && !canonicalAssets) throw new AssetsNotImplementedException(next.height());
                 var block = RvnBlockCodec.parse(body);
                 if (!Arrays.equals(block.header().serialize(), next.raw()))
                     throw new IOException("RVN replay body/header mismatch");
-                RvnBlockBodyChecks.requireValid(block, false);
+                RvnBlockBodyChecks.requireValid(block, active);
                 RvnCoinbase.requireHeight(block.transactions().getFirst(), next.height());
                 long mtp = median(parent);
                 var context = new RvnSpendContext(next.height(), mtp, mtp, true, FLAGS, height -> {
                     try { return median(headers.ancestor(parent, height)); }
                     catch (IOException e) { throw new UncheckedIOException(e); }
                 });
-                var changes = RvnNativeTransactionChecks.block(block, context, false, coins);
-                coins.connect(coins.tip(), next.id(), changes);
+                if (active) {
+                    var deployment = assetContext.forNext(parent, headers);
+                    if (!deployment.transferSizeFix()) for (var tx : block.transactions()) for (var output : tx.outputs()) {
+                        var classified = RvnHistoricalAssetCodec.classify(output.scriptPubKey());
+                        if (classified.isPresent() && classified.get().kind() == RvnHistoricalAssetCodec.Kind.TRANSFER
+                                && classified.get().dataOffset() != 31)
+                            throw new UnsupportedOperationException("Historical transfer offset requires noncanonical admission path");
+                    }
+                    var plan = RvnCanonicalAssetBlockChecks.verifyMainnet(block, context, deployment.activation(),
+                            deployment.enforcedReissueValues(), coins, name -> coins.findAsset(name).orElse(null), coins);
+                    coins.connect(coins.tip(), next.id(), plan.coins(), plan.assets());
+                } else {
+                    var changes = RvnNativeTransactionChecks.block(block, context, false, coins);
+                    coins.connect(coins.tip(), next.id(), changes);
+                }
                 connected++;
             }
             return new Progress(connected, disconnected, coins.tip());

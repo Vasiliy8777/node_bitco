@@ -11,8 +11,8 @@ public final class RvnSigOpCost {
 
     public static long legacy(Transaction tx) {
         long count = 0;
-        for (var input : tx.inputs()) count += SigOpCounter.count(input.scriptSig(), false);
-        for (var output : tx.outputs()) count += SigOpCounter.count(output.scriptPubKey(), false);
+        for (var input : tx.inputs()) count += RvnScriptSemantics.sigops(input.scriptSig(), false);
+        for (var output : tx.outputs()) count += RvnScriptSemantics.sigops(output.scriptPubKey(), false);
         return count * 4;
     }
 
@@ -22,7 +22,7 @@ public final class RvnSigOpCost {
         byte[] script = coin.output().scriptPubKey();
         byte[] redeem = ScriptVerifyFlags.has(flags, ScriptVerifyFlags.P2SH) && P2shScript.isPayToScriptHash(script)
                 ? SigOpCounter.lastPush(input.scriptSig()) : null;
-        long cost = redeem == null ? 0 : 4 * SigOpCounter.count(redeem, true);
+        long cost = redeem == null ? 0 : 4 * RvnScriptSemantics.sigops(redeem, true);
         if (ScriptVerifyFlags.has(flags, ScriptVerifyFlags.WITNESS)) {
             cost += witness(script, input.witness());
             if (redeem != null) cost += witness(redeem, input.witness());
@@ -35,7 +35,7 @@ public final class RvnSigOpCost {
         if (program.isEmpty() || program.get().version() != 0) return 0;
         if (program.get().isP2wpkh()) return 1;
         if (program.get().isP2wsh() && !witness.isEmpty())
-            return SigOpCounter.count(witness.item(witness.size() - 1), true);
+            return RvnScriptSemantics.sigops(witness.item(witness.size() - 1), true);
         return 0;
     }
 }

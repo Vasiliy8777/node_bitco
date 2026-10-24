@@ -44,7 +44,7 @@ class RvnAssetTransferChecksTest {
     @Test void failsClosedForMintingAndRestrictedFamilies() {
         assertThrows(UnsupportedOperationException.class, () -> verify(List.of(), List.of(new Owner("TOKEN!")), STATE));
         var restricted = transfer("$TOKEN", COIN);
-        assertThrows(UnsupportedOperationException.class, () -> verify(List.of(restricted), List.of(restricted), STATE));
+        assertThrows(SecurityException.class, () -> verify(List.of(restricted), List.of(restricted), STATE));
         var sub = transfer("TOKEN/SUB", COIN);
         assertEquals(Map.of("TOKEN/SUB", COIN), verify(List.of(sub), List.of(sub), STATE));
     }

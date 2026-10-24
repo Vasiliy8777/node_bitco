@@ -9,8 +9,9 @@ Memory/storage analysis and the current C: NVMe / K: HDD layout:
 The current code includes independent Java X16R/X16RV2/KawPoW engines and opt-in
 mainnet header synchronization and optional commitment-checked body download
 backed by an independent RocksDB store. Mining payout uses `RVN_MINING_ADDRESS`.
-Historical native checks, atomic coin/asset storage and a canonical root/sub/unique/channel
-block checker are implemented, but full historical asset admission is incomplete.
+Historical native checks, atomic coin/asset/rule storage and a canonical asset
+block checker including qualifier/restricted rules are implemented. Full historical
+asset admission remains incomplete.
 The separate CUDA KawPoW worker passes real GPU Core-vector checks; production
 mining jobs and candidate relay are not yet connected.
 
@@ -24,6 +25,11 @@ IntelliJ Spring Boot configurations:
 - `RavencoinNodeApplication (mainnet block download)`: headers and candidate bodies.
 - `RavencoinNodeApplication (historical native replay)`: persistent native coin
   checks of downloaded bodies, stopping before asset activation; mining stays off.
+
+For experimental canonical asset replay, set `RVN_SYNC_ENABLED=true`,
+`RVN_SYNC_BLOCKS=true`, `RVN_NATIVE_REPLAY=true` and
+`RVN_CANONICAL_ASSET_REPLAY=true`. This mode stops before committing unsupported
+historical cases; it is not full mainnet validation and does not enable mining.
 
 Build and test without `clean`:
 

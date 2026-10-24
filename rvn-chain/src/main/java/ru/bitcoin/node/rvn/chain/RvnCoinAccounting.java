@@ -90,7 +90,7 @@ public final class RvnCoinAccounting {
             var output = tx.outputs().get(index);
             // Match Core's unspendable-output pruning, including oversized scripts.
             byte[] script = output.scriptPubKey();
-            if (script.length > 10_000 || (script.length > 0 && script[0] == 0x6a)) continue;
+            if (RvnScriptSemantics.unspendable(script)) continue;
             created.put(point, new RvnCoin(output, height, coinbase));
         }
     }

@@ -63,8 +63,9 @@ public class RvnSyncConfiguration {
 
     @Bean
     @ConditionalOnProperty(name = "ravencoin.validation.native-replay-enabled", havingValue = "true")
-    RvnNativeBlockReplay rvnNativeBlockReplay(RvnHeaderStore headers, RvnCoinStore coins) throws Exception {
-        return new RvnNativeBlockReplay(headers, coins);
+    RvnNativeBlockReplay rvnNativeBlockReplay(RvnHeaderStore headers, RvnCoinStore coins,
+            @Value("${ravencoin.validation.canonical-asset-replay-enabled:false}") boolean canonicalAssets) throws Exception {
+        return new RvnNativeBlockReplay(headers, coins, canonicalAssets);
     }
 
     @Bean
