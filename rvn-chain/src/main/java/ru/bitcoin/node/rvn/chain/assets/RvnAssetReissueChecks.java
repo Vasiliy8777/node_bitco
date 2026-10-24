@@ -67,12 +67,8 @@ public final class RvnAssetReissueChecks {
     }
 
     private static Metadata historicalUpdate(Reissue value, Metadata previous) {
-        try {
-            return new Metadata(previous.name(), previous.supply() + value.amount(),
-                    value.units() == -1 ? previous.units() : value.units(), value.reissuable(),
-                    value.hash() == null ? previous.hash() : value.hash());
-        } catch (IllegalArgumentException e) {
-            throw new UnsupportedOperationException("Legacy coinbase reissue requires nonstandard metadata supply/units", e);
-        }
+        return new Metadata(previous.name(), previous.supply() + value.amount(),
+                value.units() == -1 ? previous.units() : value.units(), value.reissuable(),
+                value.hash() == null ? previous.hash() : value.hash());
     }
 }

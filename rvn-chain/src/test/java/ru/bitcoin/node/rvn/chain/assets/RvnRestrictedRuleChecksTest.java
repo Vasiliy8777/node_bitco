@@ -7,6 +7,31 @@ import static ru.bitcoin.node.rvn.chain.assets.RvnAssetRuleKey.Kind.*;
 
 class RvnRestrictedRuleChecksTest {
     private static final String ADDRESS = "ab".repeat(20);
+    @Test void durableParentMembershipMatchesExecutedCoreFlushedVectors() throws Exception {
+        var resource = getClass().getResourceAsStream("/core-reference/qualifier-vectors.tsv");
+        assertNotNull(resource);
+        var expected = new HashMap<String, String[]>();
+        try (var reader = new java.io.BufferedReader(new java.io.InputStreamReader(resource, java.nio.charset.StandardCharsets.UTF_8))) {
+            reader.lines().filter(line -> !line.startsWith("#")).forEach(line -> {
+                var fields = line.split("\t"); expected.put(fields[0], fields);
+            });
+        }
+        var child = new RvnAssetRuleKey(QUALIFIER, "#KYC/#ID", ADDRESS);
+        var root = new RvnAssetRuleKey(QUALIFIER, "#KYC", ADDRESS);
+        var state = new HashMap<RvnAssetRuleKey, String>();
+        for (String stage : List.of("empty", "child-flushed", "root-remove-flushed")) {
+            if (stage.equals("child-flushed")) state.put(child, "1");
+            if (stage.equals("root-remove-flushed")) {
+                assertTrue(RvnRestrictedRuleChecks.toggle(snapshot(state), root, 0).isEmpty()); state.remove(root);
+            }
+            var fields = expected.get(stage); assertNotNull(fields);
+            assertEquals(fields[1].equals("1"), snapshot(state).hasQualifier("#KYC", ADDRESS), stage);
+            assertEquals(fields[2].equals("1"), snapshot(state).hasQualifier("#KYC/#ID", ADDRESS), stage);
+        }
+        // The executed native vectors expose why a dirty cache must not be used
+        // as the Java durable parent, or treated as a universal consensus oracle.
+        assertNotEquals(expected.get("root-remove-dirty")[1], expected.get("root-remove-flushed")[1]);
+    }
     private static RvnAssetRulesView snapshot(Map<RvnAssetRuleKey, String> map) {
         var stable = Map.copyOf(map);
         return new RvnAssetRulesView() {
@@ -46,11 +71,22 @@ class RvnRestrictedRuleChecksTest {
     }
     @Test void togglesRejectInvalidAndRedundantChangesAndProduceExactUndoValues() {
         var key = new RvnAssetRuleKey(GLOBAL_FREEZE, "$TOKEN", "");
-        var change = RvnRestrictedRuleChecks.toggle(snapshot(Map.of()), key, 1);
+        var change = RvnRestrictedRuleChecks.toggle(snapshot(Map.of()), key, 1).orElseThrow();
         assertTrue(change.before().isEmpty()); assertEquals(Optional.of("1"), change.after());
         assertThrows(SecurityException.class, () -> RvnRestrictedRuleChecks.toggle(snapshot(Map.of()), key, 0));
         assertThrows(SecurityException.class, () -> RvnRestrictedRuleChecks.toggle(snapshot(Map.of(key, "1")), key, 1));
         assertThrows(SecurityException.class, () -> RvnRestrictedRuleChecks.toggle(snapshot(Map.of()), key, 2));
-        assertTrue(RvnRestrictedRuleChecks.toggle(snapshot(Map.of(key, "1")), key, 0).after().isEmpty());
+        assertTrue(RvnRestrictedRuleChecks.toggle(snapshot(Map.of(key, "1")), key, 0).orElseThrow().after().isEmpty());
+    }
+
+    @Test void inheritedRootRemovalIsAuthorizedButNeverDeletesTheChildOrInventsUndo() {
+        var root = new RvnAssetRuleKey(QUALIFIER, "#KYC", ADDRESS);
+        var child = new RvnAssetRuleKey(QUALIFIER, "#KYC/#ID", ADDRESS);
+        var parent = snapshot(Map.of(child, "1"));
+        assertTrue(parent.hasQualifier("#KYC", ADDRESS));
+        assertTrue(RvnRestrictedRuleChecks.toggle(parent, root, 0).isEmpty());
+        assertTrue(parent.findRule(child).isPresent());
+        assertTrue(parent.hasQualifier("#KYC", ADDRESS));
+        assertThrows(SecurityException.class, () -> RvnRestrictedRuleChecks.toggle(parent, root, 1));
     }
 }

@@ -76,9 +76,11 @@ public class RvnSyncConfiguration {
             @Value("${ravencoin.sync.response-timeout-ms:30000}") long responseTimeout,
             @Value("${ravencoin.sync.poll-ms:10000}") long poll,
             @Value("${ravencoin.sync.dns-over-https:}") String dnsOverHttps,
-            @Value("${ravencoin.sync.blocks-enabled:false}") boolean blocks) {
+            @Value("${ravencoin.sync.blocks-enabled:false}") boolean blocks,
+            @Value("${ravencoin.sync.header-lead-blocks:4096}") int headerLead,
+            @Value("${ravencoin.sync.block-in-flight:16}") int inFlight) {
         return new RvnHeaderSyncService(chain, Arrays.stream(peers.split(",")).map(String::trim).toList(),
                 port == 0 ? RvnNetwork.MAINNET.port() : port, timeout, responseTimeout, poll,
-                blocks ? new RvnBlockDownloader(store, responseTimeout) : null, replay.getIfAvailable(), new RvnSeedResolver(dnsOverHttps));
+                blocks ? new RvnBlockDownloader(store, responseTimeout, inFlight) : null, replay.getIfAvailable(), new RvnSeedResolver(dnsOverHttps), headerLead);
     }
 }

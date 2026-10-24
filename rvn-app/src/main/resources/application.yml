@@ -16,13 +16,18 @@ ravencoin:
     peers: ${RVN_SYNC_PEERS:79.137.67.110,51.79.161.39,5.196.79.95,seed-raven.bitactivate.com,seed-raven.ravencoin.com,seed-raven.ravencoin.org}
     response-timeout-ms: 30000
     poll-ms: 10000
+    # Prefer body download/replay when verified headers already lead by this much.
+    header-lead-blocks: ${RVN_SYNC_HEADER_LEAD_BLOCKS:4096}
+    # The receive queue keeps its 32 MiB bound; budget failures reduce this window.
+    block-in-flight: ${RVN_SYNC_BLOCK_IN_FLIGHT:16}
     # Fallback for broken system DNS; only peer addresses, never trusted chain data.
     # An empty RVN_SYNC_DOH disables HTTPS DNS.
     dns-over-https: '${RVN_SYNC_DOH:https://dns.google/resolve}'
   mining:
     # Starts a waiting mining service after CUDA self-tests. Work additionally
     # requires complete historical validation, current chainstate and a live peer.
-    # Historical coverage is still incomplete: enabling this cannot bypass it.
+    # Existing unversioned state is revalidated from genesis; enabling this cannot
+    # bypass initial block download or authorize work on a header-only tip.
     enabled: ${RVN_MINING_ENABLED:false}
     address: ${RVN_MINING_ADDRESS:}
     batch-size: ${RVN_MINING_BATCH_SIZE:4096}
@@ -38,11 +43,11 @@ ravencoin:
       reserve-mib: ${RVN_CUDA_RESERVE_MIB:1024}
   validation:
     # Historical native-coin replay only; stops before asset activation.
-    # Optional canonical asset replay adds qualifier/restricted rules and atomic
-    # undo; unsupported historical formats/expressions stop before tip commit.
+    # Historical asset replay adds qualifier/restricted rules and atomic undo.
+    # The parent qualifier snapshot is durable at every block boundary.
     native-replay-enabled: ${RVN_NATIVE_REPLAY:false}
-    # Experimental supported-subset replay, NOT complete historical consensus.
-    # Requires native replay, header sync and body downloads. Mining stays off.
+    # Requires native replay, header sync and body downloads. Mining additionally
+    # requires contiguous versioned validation from genesis and a current tip.
     canonical-asset-replay-enabled: ${RVN_CANONICAL_ASSET_REPLAY:false}
   pow:
     self-test-enabled: ${RVN_POW_SELF_TEST:false}

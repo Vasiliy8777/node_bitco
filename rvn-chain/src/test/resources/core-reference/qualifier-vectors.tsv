@@ -1,0 +1,7 @@
+# Core v4.8.0 source SHA256 887A2886FC3BC8456DE1CD23D4280D3D7FC50AFCB4811DED77DFD784D649B94F; label root child
+empty	0	0
+child-flushed	1	1
+root-remove-dirty	0	1
+root-remove-flushed	1	1
+root-remove-core-inverse-undo	1	1
+child-remove-after-core-inverse	1	0

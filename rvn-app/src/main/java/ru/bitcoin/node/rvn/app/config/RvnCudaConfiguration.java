@@ -9,10 +9,11 @@ import ru.bitcoin.node.rvn.pow.*;
 import java.io.IOException;
 import java.nio.file.Path;
 
-/** Explicit GPU diagnostic/worker lifecycle, independent of production mining. */
+/** GPU worker and mandatory self-tests, completed before mining can start. */
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(name = "ravencoin.mining.cuda.enabled", havingValue = "true")
 public class RvnCudaConfiguration {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(RvnCudaConfiguration.class);
     @Bean(destroyMethod = "close")
     RvnCudaKawpowWorker rvnCudaWorker(RvnDataDirectories directories,
             @Value("${ravencoin.mining.cuda.python:python}") String python,
@@ -27,12 +28,13 @@ public class RvnCudaConfiguration {
     ApplicationRunner rvnCudaSelfTest(RvnCudaKawpowWorker worker, RvnMiningSettings mining,
             @Value("${ravencoin.mining.cuda.job-self-test-enabled:false}") boolean jobSelfTest) {
         return args -> {
+            log.info("RVN CUDA mandatory Core-vector self-tests starting");
             RvnCudaKawpowSelfTest.run(worker);
             if (jobSelfTest) {
                 ru.bitcoin.node.rvn.app.mining.RvnCudaMiningRoundSelfTest.run(worker, mining.requirePayout());
-                System.out.println("RVN CUDA local job self-test OK: template, GPU search, independent CPU/native validation; no mainnet block submitted");
+                log.info("RVN CUDA local job self-test OK: template, GPU search, independent CPU/native validation; no mainnet block submitted");
             }
-            System.out.println("RVN CUDA KawPoW verified against Core vectors; mining waits for complete historical validation and synchronization");
+            log.info("RVN CUDA KawPoW verified against Core vectors; mining waits for versioned genesis-to-tip validation and synchronization");
         };
     }
 }

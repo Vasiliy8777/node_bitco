@@ -11,10 +11,15 @@ import java.io.*;
 public final class RvnBlockDownloader {
     private final RvnHeaderStore store;
     private final long timeoutMs;
+    private int inFlight;
     private final RvnAssetsDeployment assets = new RvnAssetsDeployment();
     public RvnBlockDownloader(RvnHeaderStore store, long timeoutMs) {
+        this(store, timeoutMs, 4);
+    }
+    public RvnBlockDownloader(RvnHeaderStore store, long timeoutMs, int inFlight) {
         if (timeoutMs < 1 || timeoutMs > 120000) throw new IllegalArgumentException("RVN block timeout");
-        this.store = java.util.Objects.requireNonNull(store); this.timeoutMs = timeoutMs;
+        if (inFlight < 1 || inFlight > 16) throw new IllegalArgumentException("RVN block in-flight limit");
+        this.store = java.util.Objects.requireNonNull(store); this.timeoutMs = timeoutMs; this.inFlight = inFlight;
     }
     public int downloadBatch(RvnPeerSession session, int limit) throws IOException, InterruptedException {
         if (limit < 1 || limit > 128) throw new IllegalArgumentException("RVN block batch limit");
@@ -30,7 +35,7 @@ public final class RvnBlockDownloader {
             }
         }
         int[] added = {0};
-        RvnBlockClient.requestBatch(session, requested, timeoutMs, (next, payload) -> {
+        RvnBlockClient.requestBatch(session, requested, timeoutMs, inFlight, (next, payload) -> {
             if (store.saveDownloadedBody(new ru.bitcoin.node.rvn.consensus.RvnHash256(next.id()), payload, (bytes, header) -> {
                 boolean active = assets.activeForNext(store.require(header.parentId()), store);
                 RvnBlockBodyChecks.requireValid(RvnBlockCodec.parse(bytes), active);
@@ -40,4 +45,12 @@ public final class RvnBlockDownloader {
         return added[0];
     }
     public long downloadedHeight() throws IOException { return store.downloadedBodyTip().height(); }
+    public int inFlight() { return inFlight; }
+    /** Larger windows never relax the transport's byte budget. Retry with a
+     * smaller window if large legitimate blocks filled that bounded queue. */
+    public boolean reduceWindowAfterBudgetFailure(IOException failure) {
+        if (failure == null || failure.getMessage() == null || !failure.getMessage().contains("byte/count limit") || inFlight <= 4)
+            return false;
+        inFlight = Math.max(4, inFlight / 2); return true;
+    }
 }

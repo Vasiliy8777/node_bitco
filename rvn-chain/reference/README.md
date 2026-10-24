@@ -111,13 +111,14 @@ under eight qualifier assignments, including malformed leading characters.
 notices are in the source and full LGPL/GPL texts ship in META-INF/licenses.
 The oracle covers expression evaluation, not all asset-name or block rules.
 
-Remaining hard limits: removing a root qualifier held
-only through a subqualifier stops explicitly; pre-deployment asset coinbase
-null-data and nonstandard metadata updates are still unsupported. Transfer,
-ordinary issuance and reissue coinbase paths now have separate stateless checks.
-Vote assets are outside this implementation. See [the detailed audit](HISTORICAL_ASSET_GAPS.md).
-These limits must be resolved and replayed against independent accepted fixtures
-before calling the pipeline full historical validation or enabling mining.
+Current historical replay supports inherited-only root removal, coinbase
+null/restricted updates and nonstandard signed metadata under an explicit
+per-block-flushed parent-snapshot policy. The executed native qualifier oracle
+also demonstrates a difference from Core dirty caches and inverse undo; Java
+restores the verified branch snapshot instead. See the current
+[validation and compatibility audit](HISTORICAL_VALIDATION.md). Vote issuance
+remains unsupported and stops replay. Mining readiness requires actual
+current-version genesis-to-tip coverage; it cannot be inferred from heights.
 
 
 Additional v4.8.0 accounting audit: historical GetValueOut(false) ignores

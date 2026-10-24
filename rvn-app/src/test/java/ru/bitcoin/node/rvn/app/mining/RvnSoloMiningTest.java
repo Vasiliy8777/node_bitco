@@ -43,6 +43,28 @@ class RvnSoloMiningTest {
     static RvnCudaKawpowWorker.Batch hit(long nonce, int count) {
         return new RvnCudaKawpowWorker.Batch(List.of(new RvnCudaKawpowWorker.Candidate(nonce, new byte[32], new byte[32])), false, count);
     }
+    @Test void peerLossInvalidatesJobsAndExplainsWaiting() throws Exception {
+        try (var h = headers(); var c = coins()) {
+            var coverage = new AtomicBoolean(false); var peer = new AtomicBoolean(false);
+            var clock = new AtomicLong(NOW);
+            var backend = new RvnEmptyBlockMiningBackend(h, c, new RvnMainnetHeaderChain(h, POW, clock::get),
+                    new RvnNativeBlockReplay(h, c), PAYOUT, coverage::get, peer::get, clock::get,
+                    (id, block) -> fail("No relay expected"));
+            assertTrue(backend.next().isEmpty());
+            assertTrue(backend.waitingReason().contains("coverage"));
+            coverage.set(true);
+            assertTrue(backend.next().isEmpty());
+            assertTrue(backend.waitingReason().contains("peer"));
+            peer.set(true);
+            var job = backend.next().orElseThrow();
+            assertTrue(backend.current(job));
+            peer.set(false);
+            assertFalse(backend.current(job));
+            assertTrue(backend.accept(job, job.template()).isEmpty());
+            clock.addAndGet(721);
+            assertTrue(backend.waitingReason().contains("timestamp"));
+        }
+    }
     @Test void equalFreshTipsCannotCertifyAnIncompleteHistoricalValidator() throws Exception {
         try (var h = headers(); var c = coins()) {
             var replay = new RvnNativeBlockReplay(h, c, true);

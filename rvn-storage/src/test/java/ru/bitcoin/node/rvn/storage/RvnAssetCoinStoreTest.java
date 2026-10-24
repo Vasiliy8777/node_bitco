@@ -85,7 +85,7 @@ class RvnAssetCoinStoreTest {
             store.connect(store.tip(), id(2), changes(Map.of(), Map.of()));
         }
         try (var options = new Options(); var db = RocksDB.open(options, dbPath.toString())) {
-            assertTrue(new String(db.get(new byte[]{0}), java.nio.charset.StandardCharsets.US_ASCII).startsWith("RVN-COINS-ASSETS-3\n"));
+            assertTrue(new String(db.get(new byte[]{0}), java.nio.charset.StandardCharsets.US_ASCII).startsWith("RVN-COINS-ASSETS-4\n"));
         }
         try (var store = open(dbPath)) {
             assertEquals(Optional.of(FIRST), store.findAsset("TOKEN"));
@@ -108,6 +108,8 @@ class RvnAssetCoinStoreTest {
         try (var files = new RvnFlatFileStore(undo, "asset-test", 64 * 1024 * 1024);
              var store = new RvnCoinStore(db, id(0), files)) {
             assertEquals(id(1), store.tip().id());
+            assertEquals(store.tip(), store.validation().orElseThrow().tip());
+            assertEquals(Optional.of(store.tip()), store.pendingMinedBlock());
             assertEquals(Optional.of(FIRST), store.findAsset("TOKEN"));
             assertEquals(Optional.of(coin(1000, 1)), store.find(point(1)));
             var verifier = new RvnAssetRuleKey(RvnAssetRuleKey.Kind.VERIFIER, "$TOKEN", "");
@@ -122,9 +124,10 @@ class RvnAssetCoinStoreTest {
         public static void main(String[] args) throws Exception {
             var files = new RvnFlatFileStore(Path.of(args[1]), "asset-test", 64 * 1024 * 1024);
             var store = new RvnCoinStore(Path.of(args[0]), id(0), files);
-            store.connect(store.tip(), id(1), changes(Map.of(), Map.of(point(1), coin(1000, 1))),
+            store.anchorValidation("crash-v1");
+            store.connectValidated(store.tip(), id(1), changes(Map.of(), Map.of(point(1), coin(1000, 1))),
                     new RvnAssetChanges(delta(null, FIRST).entries(), Map.of(
-                            new RvnAssetRuleKey(RvnAssetRuleKey.Kind.VERIFIER, "$TOKEN", ""), rule(null, "true"))));
+                            new RvnAssetRuleKey(RvnAssetRuleKey.Kind.VERIFIER, "$TOKEN", ""), rule(null, "true"))), "crash-v1", true);
             Runtime.getRuntime().halt(23);
         }
     }
@@ -172,5 +175,59 @@ class RvnAssetCoinStoreTest {
 
     private static RvnAssetChanges.RuleUpdate rule(String before, String after) {
         return new RvnAssetChanges.RuleUpdate(Optional.ofNullable(before), Optional.ofNullable(after));
+    }
+
+    @Test void nonstandardSignedSupplyAndUnitsRoundTripAndUndoExactly() throws Exception {
+        var path = temp.resolve("legacy-metadata");
+        var first = new Metadata("TOKEN", Long.MAX_VALUE, 0, false, null);
+        var second = new Metadata("TOKEN", Long.MIN_VALUE, 0, true, new HashData(0x54, "12".repeat(32)));
+        try (var store = open(path)) {
+            store.connect(store.tip(), id(1), changes(Map.of(), Map.of()), delta(null, first));
+            store.connect(store.tip(), id(2), changes(Map.of(), Map.of()), delta(first, second));
+        }
+        try (var store = open(path)) {
+            assertEquals(Optional.of(second), store.findAsset("TOKEN"));
+            store.disconnect(store.tip()); assertEquals(Optional.of(first), store.findAsset("TOKEN"));
+            store.disconnect(store.tip()); assertTrue(store.findAsset("TOKEN").isEmpty());
+        }
+    }
+
+    @Test void opaqueGlobalNamesKeepByteIdentityAcrossDiskAndUndo() throws Exception {
+        var path = temp.resolve("opaque-global");
+        var binary = new RvnAssetRuleKey(RvnAssetRuleKey.Kind.GLOBAL_FREEZE, "\u00ffTOKEN", "");
+        var ascii = new RvnAssetRuleKey(RvnAssetRuleKey.Kind.GLOBAL_FREEZE, "?TOKEN", "");
+        try (var store = open(path)) {
+            store.connect(store.tip(), id(1), changes(Map.of(), Map.of()), new RvnAssetChanges(Map.of(),
+                    Map.of(binary, rule(null, "1"), ascii, rule(null, "1"))));
+            store.connect(store.tip(), id(2), changes(Map.of(), Map.of()), new RvnAssetChanges(Map.of(), Map.of(binary, rule("1", null))));
+        }
+        try (var store = open(path)) {
+            assertTrue(store.findRule(binary).isEmpty()); assertEquals(Optional.of("1"), store.findRule(ascii));
+            store.disconnect(store.tip()); assertEquals(Optional.of("1"), store.findRule(binary));
+            store.disconnect(store.tip()); assertTrue(store.findRule(ascii).isEmpty()); assertTrue(store.findRule(binary).isEmpty());
+        }
+    }
+
+    @Test void qualifierMembershipCacheIsBoundToOneDurableParentIncludingNoOpAndUndo() throws Exception {
+        var path = temp.resolve("qualifier-cache"); var address = "ab".repeat(20);
+        var child = new RvnAssetRuleKey(RvnAssetRuleKey.Kind.QUALIFIER, "#KYC/#ID", address);
+        var root = new RvnAssetRuleKey(RvnAssetRuleKey.Kind.QUALIFIER, "#KYC", address);
+        try (var store = open(path)) {
+            assertFalse(store.hasQualifier("#KYC", address)); // Cache a negative lookup.
+            store.connect(store.tip(), id(1), changes(Map.of(), Map.of()), new RvnAssetChanges(Map.of(), Map.of(child, rule(null, "1"))));
+            assertTrue(store.hasQualifier("#KYC", address));
+            assertTrue(ru.bitcoin.node.rvn.chain.assets.RvnRestrictedRuleChecks.toggle(store, root, 0).isEmpty());
+            store.connect(store.tip(), id(2), changes(Map.of(), Map.of())); // Accepted exact-key no-op.
+            assertTrue(store.findRule(root).isEmpty()); assertTrue(store.hasQualifier("#KYC", address));
+        }
+        try (var store = open(path)) {
+            assertTrue(store.hasQualifier("#KYC", address));
+            store.disconnect(store.tip());
+            assertTrue(store.findRule(root).isEmpty()); assertTrue(store.hasQualifier("#KYC", address));
+            store.disconnect(store.tip()); assertFalse(store.hasQualifier("#KYC", address));
+            store.connect(store.tip(), id(3), changes(Map.of(), Map.of()), new RvnAssetChanges(Map.of(), Map.of(root, rule(null, "1"))));
+            assertTrue(store.hasQualifier("#KYC", address));
+            store.disconnect(store.tip()); assertFalse(store.hasQualifier("#KYC", address));
+        }
     }
 }

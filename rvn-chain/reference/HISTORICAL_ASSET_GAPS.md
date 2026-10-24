@@ -1,5 +1,11 @@
 # Historical assets: remaining certification gaps
 
+Historical audit retained for context. The current implementation and its
+explicit cache/undo compatibility boundary are documented in
+[HISTORICAL_VALIDATION.md](HISTORICAL_VALIDATION.md). The stops listed below
+were removed for the versioned per-block-flushed snapshot profile; this does
+not erase the demonstrated difference from Core dirty-cache/inverse-undo state.
+
 Audited against Ravencoin Core v4.8.0. This file is a list of unresolved
 consensus differences, not a claim that the Java validator is complete.
 

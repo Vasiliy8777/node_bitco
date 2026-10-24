@@ -34,12 +34,19 @@ public final class RvnMiningService implements SmartLifecycle, ApplicationListen
     }
     private void run() {
         RvnSoloMining.State previous = null;
+        long lastReport = System.nanoTime(), hashes = 0, accepted = 0;
         try {
             while (running) {
                 var progress = miner.advance();
-                if (progress.state() != previous) {
-                    log.info("RVN solo miner: {} (WAITING requires complete historical validation, current tip and responsive peer)", progress.state());
+                hashes += progress.hashes(); accepted += progress.accepted();
+                long now = System.nanoTime();
+                if (progress.state() != previous || now - lastReport >= java.util.concurrent.TimeUnit.SECONDS.toNanos(30)) {
+                    if (progress.state() == RvnSoloMining.State.WAITING)
+                        log.info("RVN solo miner: WAITING; {}", miner.waitingReason());
+                    else log.info("RVN solo miner: {}; hashes={}, accepted={}, elapsedMs={}", progress.state(), hashes, accepted,
+                            java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(now - lastReport));
                     previous = progress.state();
+                    lastReport = now; hashes = 0; accepted = 0;
                 }
                 if (progress.state() == RvnSoloMining.State.WAITING || progress.state() == RvnSoloMining.State.STALE)
                     Thread.sleep(250);

@@ -22,6 +22,7 @@ public final class RvnSoloMining {
         Optional<Accepted> accept(Job job, RvnBlock block) throws IOException;
         /** Announces a durably accepted block. Failures must be retried by the backend. */
         void relay(Accepted block) throws IOException;
+        default String waitingReason() throws IOException { return "no validated mining job available"; }
     }
     @FunctionalInterface public interface Search {
         RvnCudaKawpowWorker.Batch search(long height, byte[] headerHash, long nonce, int count, BigInteger target) throws IOException;
@@ -39,6 +40,7 @@ public final class RvnSoloMining {
         BigInteger target() { return RvnDifficultyScreen.requireWithinLimit(template.header().compactBits(), powLimit); }
     }
     public enum State { WAITING, STALE, SEARCHED, ACCEPTED }
+    public synchronized String waitingReason() throws IOException { return backend.waitingReason(); }
     public record Progress(State state, int hashes, int accepted) {}
     private final Backend backend;
     private final Search search;

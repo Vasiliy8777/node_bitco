@@ -11,8 +11,8 @@ import java.util.function.*;
 
 /** Local empty-block solo backend. No fees or mempool dependency. The readiness
  * policy must certify FULL parent validation, not just equality of header/coin
- * tips. Spring registration keeps the validator capability gate closed until
- * complete historical admission is implemented and independently verified. */
+ * tips. Production requires versioned genesis coverage, the recovery checkpoint,
+ * a current matching tip, and a responsive synchronization peer. */
 public final class RvnEmptyBlockMiningBackend implements RvnSoloMining.Backend {
     @FunctionalInterface public interface Relay { void publish(RvnHash256 id, RvnBlock block) throws IOException; }
     private final RvnHeaderStore headers;
@@ -21,6 +21,7 @@ public final class RvnEmptyBlockMiningBackend implements RvnSoloMining.Backend {
     private final RvnNativeBlockReplay replay;
     private final RvnPayoutAddress payout;
     private final BooleanSupplier fullyValidated;
+    private final BooleanSupplier peerReady;
     private final LongSupplier clock;
     private final Relay relay;
     private long extraNonce = new SecureRandom().nextLong() >>> 1;
@@ -30,9 +31,15 @@ public final class RvnEmptyBlockMiningBackend implements RvnSoloMining.Backend {
     public RvnEmptyBlockMiningBackend(RvnHeaderStore headers, RvnCoinStore coins,
             RvnMainnetHeaderChain chain, RvnNativeBlockReplay replay, RvnPayoutAddress payout,
             BooleanSupplier fullyValidated, LongSupplier clock, Relay relay) {
+        this(headers, coins, chain, replay, payout, fullyValidated, () -> true, clock, relay);
+    }
+    public RvnEmptyBlockMiningBackend(RvnHeaderStore headers, RvnCoinStore coins,
+            RvnMainnetHeaderChain chain, RvnNativeBlockReplay replay, RvnPayoutAddress payout,
+            BooleanSupplier fullyValidated, BooleanSupplier peerReady, LongSupplier clock, Relay relay) {
         this.headers = Objects.requireNonNull(headers); this.coins = Objects.requireNonNull(coins);
         this.chain = Objects.requireNonNull(chain); this.replay = Objects.requireNonNull(replay);
         this.payout = Objects.requireNonNull(payout); this.fullyValidated = Objects.requireNonNull(fullyValidated);
+        this.peerReady = Objects.requireNonNull(peerReady);
         this.clock = Objects.requireNonNull(clock); this.relay = Objects.requireNonNull(relay);
     }
     @Override public Optional<RvnSoloMining.Job> next() throws IOException {
@@ -77,8 +84,21 @@ public final class RvnEmptyBlockMiningBackend implements RvnSoloMining.Backend {
     }
     private boolean ready() throws IOException {
         var tip = coins.tip(); var best = headers.best(); long now = clock.getAsLong();
-        return fullyValidated.getAsBoolean() && tip.height() == best.height() && tip.id().equals(best.id())
+        return fullyValidated.getAsBoolean() && peerReady.getAsBoolean() && tip.height() == best.height() && tip.id().equals(best.id())
                 && best.timestamp() >= now - 720 && best.timestamp() <= now + 720;
+    }
+    @Override public String waitingReason() throws IOException {
+        synchronized (chain) { synchronized (headers) { synchronized (coins) {
+            var tip = coins.tip(); var best = headers.best();
+            if (tip.height() != best.height()) return "initial block download: checked=" + tip.height()
+                    + ", knownHeaders=" + best.height() + ", gap=" + Math.max(0, best.height() - tip.height());
+            if (!tip.id().equals(best.id())) return "chain reorganization: checked tip differs from best header";
+            if (!fullyValidated.getAsBoolean()) return "genesis validation coverage or recovery checkpoint incomplete: checked=" + tip.height();
+            long age = clock.getAsLong() - best.timestamp();
+            if (age > 720 || age < -720) return "best block timestamp is not current: ageSeconds=" + age;
+            if (!peerReady.getAsBoolean()) return "no responsive synchronization peer";
+            return "waiting for a valid template timestamp";
+        } } }
     }
     @Override public Optional<RvnSoloMining.Accepted> accept(RvnSoloMining.Job job, RvnBlock block) throws IOException {
         synchronized (chain) { synchronized (headers) { synchronized (coins) {

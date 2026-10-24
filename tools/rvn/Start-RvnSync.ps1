@@ -3,7 +3,8 @@ param(
     [string] $ColdDirectory = 'K:/RVNJavaNjde',
     [string] $HotDirectory = 'C:/RVNJavaNjde',
     [string] $Peers = '',
-    [string] $Java = 'java'
+    [string] $Java = 'java',
+    [switch] $Mining
 )
 
 $ErrorActionPreference = 'Stop'
@@ -39,7 +40,9 @@ $rvnArguments = @(
     '--ravencoin.sync.enabled=true', '--ravencoin.sync.blocks-enabled=true',
     '--ravencoin.validation.native-replay-enabled=true',
     '--ravencoin.validation.canonical-asset-replay-enabled=true',
-    '--ravencoin.mining.enabled=false', '--ravencoin.mining.cuda.enabled=false',
+    "--ravencoin.mining.enabled=$($Mining.IsPresent.ToString().ToLowerInvariant())",
+    "--ravencoin.mining.cuda.enabled=$($Mining.IsPresent.ToString().ToLowerInvariant())",
+    "--ravencoin.mining.cuda.job-self-test-enabled=$($Mining.IsPresent.ToString().ToLowerInvariant())",
     '--ravencoin.p2p.probe-enabled=false', '--ravencoin.p2p.session-enabled=false'
 )
 if (-not [string]::IsNullOrWhiteSpace($Peers)) { $rvnArguments += "--ravencoin.sync.peers=$Peers" }
@@ -55,8 +58,10 @@ if ($null -eq $rvnIdentity) { throw 'RVN process exited immediately; check the J
     hotDirectory = $rvnHot
     coldDirectory = $rvnCold
     log = [IO.Path]::Combine($rvnCold, 'logs', 'rvn-node.log')
-    mode = 'sync-and-supported-subset-replay; mining disabled'
+    mode = $(if ($Mining) { 'sync-and-versioned-replay; GPU miner armed, waiting for validated current chainstate' }
+             else { 'sync-and-versioned-replay; mining disabled' })
 } | ConvertTo-Json | Set-Content -LiteralPath $rvnRunFile -Encoding utf8
 Write-Output "RVN sync started: PID $($rvnProcess.Id)"
 Write-Output "Log: $([IO.Path]::Combine($rvnCold, 'logs', 'rvn-node.log'))"
-Write-Output 'Mainnet mining remains disabled until full chainstate validation and production relay are complete.'
+if ($Mining) { Write-Output 'GPU miner armed: self-tests first, then waiting for versioned genesis-to-tip validation, checkpoint, current tip and responsive peer.' }
+else { Write-Output 'Mining disabled. Use -Mining to arm the guarded GPU miner after synchronization and validation.' }

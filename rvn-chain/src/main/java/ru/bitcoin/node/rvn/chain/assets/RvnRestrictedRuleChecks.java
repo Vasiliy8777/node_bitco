@@ -9,16 +9,17 @@ import static ru.bitcoin.node.rvn.chain.assets.RvnAssetRuleKey.Kind.*;
 public final class RvnRestrictedRuleChecks {
     private RvnRestrictedRuleChecks() {}
 
-    public static RvnAssetChanges.RuleUpdate toggle(RvnAssetRulesView parent, RvnAssetRuleKey key, int flag) {
+    public static Optional<RvnAssetChanges.RuleUpdate> toggle(RvnAssetRulesView parent, RvnAssetRuleKey key, int flag) {
         if (key.kind() == VERIFIER || (flag != 0 && flag != 1)) throw new SecurityException("RVN invalid rule flag/kind");
         var before = parent.findRule(key);
         // Core's qualifier transition checks use aggregate root/sub membership.
         boolean present = key.kind() == QUALIFIER ? parent.hasQualifier(key.name(), key.addressHash()) : before.isPresent();
         if (present == (flag == 1)) throw new SecurityException("RVN rule toggle does not change parent status");
         var after = flag == 1 ? Optional.of("1") : Optional.<String>empty();
-        if (before.equals(after))
-            throw new UnsupportedOperationException("Removing inherited qualifier needs separate aggregate-state handling");
-        return new RvnAssetChanges.RuleUpdate(before, after);
+        // Under the per-block durable/cleared-cache policy, REMOVE erases only
+        // the exact assignment. Inherited children remain. An accepted command
+        // can therefore have no exact-key mutation and needs no synthetic undo.
+        return before.equals(after) ? Optional.empty() : Optional.of(new RvnAssetChanges.RuleUpdate(before, after));
     }
 
     public static void requireDestination(RvnAssetRulesView parent, String name, String addressHash, Predicate<String> qualifierExists) {

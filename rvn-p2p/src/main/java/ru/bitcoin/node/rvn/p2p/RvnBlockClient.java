@@ -14,12 +14,17 @@ public final class RvnBlockClient {
     }
     @FunctionalInterface public interface Receiver { void accept(Expected expected, byte[] payload) throws IOException; }
 
-    /** Four in-flight requests hide network latency. Responses may arrive in any
+    /** Bounded in-flight requests hide network latency. Responses may arrive in any
      * order and are consumed immediately, not accumulated as a full batch in RAM. */
     public static void requestBatch(RvnPeerSession session, List<Expected> supplied, long timeoutMs, Receiver receiver)
             throws IOException, InterruptedException {
+        requestBatch(session, supplied, timeoutMs, 4, receiver);
+    }
+
+    public static void requestBatch(RvnPeerSession session, List<Expected> supplied, long timeoutMs,
+                                    int inFlight, Receiver receiver) throws IOException, InterruptedException {
         var expected = List.copyOf(supplied);
-        if (expected.isEmpty() || expected.size() > 128 || timeoutMs < 1 || timeoutMs > 120000)
+        if (expected.isEmpty() || expected.size() > 128 || timeoutMs < 1 || timeoutMs > 120000 || inFlight < 1 || inFlight > 16)
             throw new IllegalArgumentException("RVN block batch parameters");
         var all = new HashSet<String>();
         for (var item : expected) if (!all.add(HexFormat.of().formatHex(item.header().serialize())))
@@ -27,7 +32,7 @@ public final class RvnBlockClient {
         record Pending(Expected expected, long deadline) {}
         var pending = new LinkedHashMap<String, Pending>(); int sent = 0, received = 0, ignored = 0;
         while (received < expected.size()) {
-            while (sent < expected.size() && pending.size() < 4) {
+            while (sent < expected.size() && pending.size() < inFlight) {
                 var item = expected.get(sent++);
                 var inventory = new ByteArrayOutputStream();
                 RvnCompactSize.write(inventory, 1); RvnWire.writeU32(inventory, 0x40000002L); inventory.writeBytes(item.id());
@@ -46,7 +51,13 @@ public final class RvnBlockClient {
                 var actual = RvnBlockHeader.read(new ByteArrayInputStream(payload), RvnActivation.MAINNET_KAWPOW_TIME);
                 var matched = pending.remove(HexFormat.of().formatHex(actual.serialize()));
                 if (matched == null) throw new IOException("Unrequested or duplicate RVN block header");
-                receiver.accept(matched.expected(), payload); received++;
+                long processingStart = System.nanoTime();
+                receiver.accept(matched.expected(), payload);
+                long processingNanos = System.nanoTime() - processingStart;
+                // Signature/body checks and synchronous archive writes are our
+                // work. They must not consume other requests' network deadlines.
+                pending.replaceAll((key, value) -> new Pending(value.expected(), value.deadline() + processingNanos));
+                received++;
             } else if (++ignored > 64) throw new IOException("Too many unrelated RVN batch messages");
         }
     }

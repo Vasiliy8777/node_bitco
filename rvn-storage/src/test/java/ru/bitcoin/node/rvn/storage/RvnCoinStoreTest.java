@@ -16,6 +16,32 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Storage mechanics only; synthetic deltas do not claim consensus validity. */
 class RvnCoinStoreTest {
     @TempDir Path temp;
+    @Test void validationCoverageIsAtomicContiguousAndSurvivesReorgAndRestart() throws Exception {
+        var path = temp.resolve("coverage");
+        var empty = new RvnCoinAccounting.Changes(0, Map.of(), Map.of());
+        try (var store = new RvnCoinStore(path, id(0))) {
+            assertThrows(IOException.class, () -> store.connectValidated(store.tip(), id(1), empty,
+                    ru.bitcoin.node.rvn.chain.assets.RvnAssetChanges.EMPTY, "v1", false));
+            store.anchorValidation("v1");
+            store.connectValidated(store.tip(), id(1), empty, ru.bitcoin.node.rvn.chain.assets.RvnAssetChanges.EMPTY, "v1", false);
+            assertEquals(store.tip(), store.validation().orElseThrow().tip());
+            assertThrows(IllegalStateException.class, () -> store.anchorValidation("v2"));
+            assertThrows(IOException.class, () -> store.connectValidated(store.tip(), id(2), empty,
+                    ru.bitcoin.node.rvn.chain.assets.RvnAssetChanges.EMPTY, "v2", false));
+        }
+        try (var store = new RvnCoinStore(path, id(0))) {
+            assertEquals("v1", store.validation().orElseThrow().version());
+            store.connectValidated(store.tip(), id(2), empty, ru.bitcoin.node.rvn.chain.assets.RvnAssetChanges.EMPTY, "v1", true);
+            assertEquals(Optional.of(store.tip()), store.pendingMinedBlock());
+            assertEquals(store.tip(), store.validation().orElseThrow().tip());
+            store.disconnect(store.tip());
+            assertTrue(store.pendingMinedBlock().isEmpty()); assertEquals(store.tip(), store.validation().orElseThrow().tip());
+            store.connect(store.tip(), id(3), empty); // A generic/old writer cannot extend validation coverage.
+            assertTrue(store.validation().isEmpty());
+            store.disconnect(store.tip()); store.disconnect(store.tip());
+            store.anchorValidation("v2"); assertEquals(0, store.validation().orElseThrow().tip().height());
+        }
+    }
     static RvnHash256 id(int marker) { byte[] bytes = new byte[32]; bytes[0] = (byte) marker; return new RvnHash256(bytes); }
     static OutPoint point(int marker) { return new OutPoint(new Hash256(id(marker).wire()), new UInt32(0)); }
     static RvnCoin coin(long amount, long height) { return new RvnCoin(new TxOut(amount, new byte[]{0x51}), height, false); }

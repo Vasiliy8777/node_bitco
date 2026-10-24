@@ -10,6 +10,69 @@ import java.util.concurrent.atomic.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class RvnBlockClientAndBudgetTest {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(ints = {1, 4, 16})
+    void configuredWindowRefillsAndMatchesOutOfOrderReplies(int window) throws Exception {
+        var expected = new ArrayList<RvnBlockClient.Expected>();
+        for (int i = 1; i <= 20; i++) {
+            byte[] raw = new byte[80]; raw[0] = (byte) i;
+            expected.add(new RvnBlockClient.Expected(RvnWire.doubleSha(raw), RvnBlockHeader.parse(raw, RvnActivation.MAINNET_KAWPOW_TIME)));
+        }
+        var error = new AtomicReference<Throwable>();
+        try (var server = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+            var peer = Thread.ofPlatform().daemon(true).start(() -> {
+                try (var socket = server.accept()) {
+                    handshake(socket, server.getLocalPort());
+                    for (int offset = 0; offset < expected.size(); offset += window) {
+                        int end = Math.min(offset + window, expected.size());
+                        for (int i = offset; i < end; i++) {
+                            var request = RvnWire.read(socket.getInputStream(), RvnNetwork.REGTEST);
+                            assertEquals("getdata", request.command());
+                            assertArrayEquals(expected.get(i).id(), Arrays.copyOfRange(request.payload(), 5, 37));
+                        }
+                        for (int i = end - 1; i >= offset; i--)
+                            RvnWire.write(socket.getOutputStream(), RvnNetwork.REGTEST,
+                                    new RvnMessage("block", Arrays.copyOf(expected.get(i).header().serialize(), 81)));
+                    }
+                    while (socket.getInputStream().read() != -1) { }
+                } catch (Throwable failure) { error.set(failure); }
+            });
+            try (var session = RvnPeerSession.connect(RvnNetwork.REGTEST, "127.0.0.1", server.getLocalPort(), 1000, 32)) {
+                var received = new HashSet<Integer>();
+                RvnBlockClient.requestBatch(session, expected, 3000, window, (item, payload) -> assertTrue(received.add(item.header().version())));
+                assertEquals(20, received.size());
+            }
+            peer.join(3000); assertFalse(peer.isAlive()); if (error.get() != null) fail(error.get());
+        }
+    }
+
+    @Test void localValidationTimeDoesNotExpireAnAlreadyReceivedPipelinedBlock() throws Exception {
+        var expected = new ArrayList<RvnBlockClient.Expected>();
+        for (int i = 1; i <= 2; i++) {
+            byte[] raw = new byte[80]; raw[0] = (byte) i;
+            expected.add(new RvnBlockClient.Expected(RvnWire.doubleSha(raw), RvnBlockHeader.parse(raw, RvnActivation.MAINNET_KAWPOW_TIME)));
+        }
+        var error = new AtomicReference<Throwable>();
+        try (var server = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+            var peer = Thread.ofPlatform().daemon(true).start(() -> {
+                try (var socket = server.accept()) {
+                    handshake(socket, server.getLocalPort());
+                    for (int i = 0; i < 2; i++) RvnWire.read(socket.getInputStream(), RvnNetwork.REGTEST);
+                    for (var item : expected) RvnWire.write(socket.getOutputStream(), RvnNetwork.REGTEST,
+                            new RvnMessage("block", Arrays.copyOf(item.header().serialize(), 81)));
+                    while (socket.getInputStream().read() != -1) { }
+                } catch (Throwable failure) { error.set(failure); }
+            });
+            try (var session = RvnPeerSession.connect(RvnNetwork.REGTEST, "127.0.0.1", server.getLocalPort(), 1000, 8)) {
+                var received = new AtomicInteger();
+                RvnBlockClient.requestBatch(session, expected, 500, 2, (item, payload) -> {
+                    if (received.incrementAndGet() == 1) java.util.concurrent.locks.LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(900));
+                });
+                assertEquals(2, received.get());
+            }
+            peer.join(3000); assertFalse(peer.isAlive()); if (error.get() != null) fail(error.get());
+        }
+    }
     @Test void pipelineAcceptsOutOfOrderRepliesWithoutWaitingForEachRoundTrip() throws Exception {
         var expected = new ArrayList<RvnBlockClient.Expected>();
         for (int i = 1; i <= 5; i++) {

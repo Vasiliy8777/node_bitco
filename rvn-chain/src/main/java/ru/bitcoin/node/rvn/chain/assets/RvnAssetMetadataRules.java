@@ -20,8 +20,11 @@ public final class RvnAssetMetadataRules {
         public Metadata {
             if (RvnAssetNames.requireValid(name) == RvnAssetNames.Type.OWNER)
                 throw new IllegalArgumentException("Owner token has no issuance metadata");
-            if (supply <= 0 || supply > RvnBlockBodyChecks.MAX_MONEY || !amountMatchesUnits(supply, units))
-                throw new IllegalArgumentException("Invalid RVN asset supply/units");
+            // A stored CNewAsset is state, not a newly authorized issuance.
+            // Historical coinbase reissues can change units downwards, break
+            // divisibility and wrap the signed supply. Admission checks belong
+            // in issue/reissue, not in the durable value carrier or undo codec.
+            if (units < 0 || units > 8) throw new IllegalArgumentException("Invalid RVN asset units");
         }
     }
 
@@ -49,7 +52,7 @@ public final class RvnAssetMetadataRules {
         activeType(reissue.name(), activation);
         if (!reissue.name().equals(previous.name()) || !previous.reissuable()) fail("reissue name/permission");
         if (reissue.amount() < 0 || reissue.amount() >= RvnBlockBodyChecks.MAX_MONEY
-                || previous.supply() > RvnBlockBodyChecks.MAX_MONEY - reissue.amount()) fail("reissue supply");
+                || previous.supply() + reissue.amount() > RvnBlockBodyChecks.MAX_MONEY) fail("reissue supply");
         if (!amountMatchesUnits(reissue.amount(), previous.units())) fail("reissue amount granularity");
         if (reissue.units() < -1 || reissue.units() > 8
                 || (reissue.units() != -1 && reissue.units() < previous.units())) fail("reissue units decrease");

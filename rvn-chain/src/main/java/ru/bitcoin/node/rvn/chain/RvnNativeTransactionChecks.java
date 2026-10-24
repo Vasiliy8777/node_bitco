@@ -22,7 +22,7 @@ public final class RvnNativeTransactionChecks {
 
     public static RvnCoinAccounting.Changes block(RvnBlock block, RvnSpendContext context,
             boolean assetsActive, RvnCoinView parent) {
-        return block(block, context, assetsActive, parent, false, true);
+        return block(block, context, assetsActive, parent, false, assetsActive);
     }
 
     /** Native part of the explicit canonical-asset validator; not general asset admission. */
@@ -37,13 +37,8 @@ public final class RvnNativeTransactionChecks {
 
     private static RvnCoinAccounting.Changes block(RvnBlock block, RvnSpendContext context,
             boolean assetsActive, RvnCoinView parent, boolean canonicalAssets, boolean enforcedValues) {
-        if (!assetsActive) for (var tx : block.transactions()) for (var output : tx.outputs()) {
-            byte[] script = output.scriptPubKey();
-            boolean asset = ru.bitcoin.node.rvn.chain.assets.RvnHistoricalAssetCodec.classify(script).isPresent()
-                    || ru.bitcoin.node.rvn.chain.assets.RvnHistoricalAssetCodec.decodeNull(script).isPresent();
-            if (asset && !tx.isCoinbase()) throw new SecurityException("RVN asset transaction before activation");
-            if (asset) throw new UnsupportedOperationException("Pre-asset-activation coinbase asset rules require historical validation");
-        }
+        if (!assetsActive) for (var tx : block.transactions())
+            ru.bitcoin.node.rvn.chain.assets.RvnCanonicalAssetBlockChecks.requireBeforeAssets(tx);
         var changes = RvnCoinAccounting.block(block, context.height(), assetsActive, parent, enforcedValues);
         var txs = block.transactions();
         check(context, txs.subList(1, txs.size()), parent, RvnSigOpCost.legacy(txs.getFirst()), canonicalAssets, enforcedValues);

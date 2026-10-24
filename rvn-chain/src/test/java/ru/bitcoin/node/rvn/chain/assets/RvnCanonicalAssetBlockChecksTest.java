@@ -104,6 +104,77 @@ class RvnCanonicalAssetBlockChecksTest {
         assertTrue(error.getMessage().contains("before activation"));
     }
 
+    @Test void historicalCoinbaseNullRulesKeepStatelessAuthorizationWithoutParentStatusChecks() throws Exception {
+        var address = HexFormat.of().formatHex(Hash160.hash(PUB));
+        var tag = new RvnAssetRuleKey(RvnAssetRuleKey.Kind.QUALIFIER, "#KYC", address);
+        var freeze = new RvnAssetRuleKey(RvnAssetRuleKey.Kind.ADDRESS_FREEZE, "$TOKEN", address);
+        var global = new RvnAssetRuleKey(RvnAssetRuleKey.Kind.GLOBAL_FREEZE, "$TOKEN", "");
+        var outputs = List.of(new TxOut(COIN / 10, RvnPayoutAddress.parse("RXaddTagBurnXXXXXXXXXXXXXXXXZQm5ya", RvnNetwork.MAINNET).scriptPubKey()),
+                asset(new Transfer("#KYC", COIN, null, 0)), asset(new Transfer("TOKEN!", COIN, null, 0)),
+                nullRule("#KYC", false, 1), nullRule("$TOKEN", false, 1), nullRule("$TOKEN", true, 1));
+        var candidate = coinbaseWith(outputs);
+        var plan = RvnCanonicalAssetBlockChecks.verifyHistoricalMainnet(candidate, CONTEXT,
+                new Activation(true, false, false, false), false, parent(), n -> null, rules(Map.of()), true, false);
+        for (var key : List.of(tag, freeze, global)) assertEquals(Optional.of("1"), plan.assets().rules().get(key).after());
+        var redundant = RvnCanonicalAssetBlockChecks.verifyHistoricalMainnet(candidate, CONTEXT, ACTIVE, true,
+                parent(), n -> null, rules(Map.of(tag, "1", freeze, "1", global, "1")), true, false);
+        assertTrue(redundant.assets().rules().isEmpty());
+        var bad = new ArrayList<>(outputs); bad.remove(0);
+        assertThrows(SecurityException.class, () -> RvnCanonicalAssetBlockChecks.verifyHistoricalMainnet(coinbaseWith(bad),
+                CONTEXT, ACTIVE, true, parent(), n -> null, rules(Map.of()), true, false));
+        var badFlag = new ArrayList<>(outputs); badFlag.set(3, nullRule("#KYC", false, 2));
+        assertThrows(SecurityException.class, () -> RvnCanonicalAssetBlockChecks.verifyHistoricalMainnet(coinbaseWith(badFlag),
+                CONTEXT, ACTIVE, true, parent(), n -> null, rules(Map.of()), true, false));
+    }
+
+    @Test void historicalRestrictedCoinbaseChecksVerifierSyntaxButSkipsExistenceAndDestination() throws Exception {
+        var candidate = coinbaseWith(List.of(burn("RXissueRestrictedXXXXXXXXXXXXzJZ1q", 1500),
+                asset(new Transfer("TOKEN!", COIN, null, 0)), nullVerifier("MISSING"),
+                asset(new Issue("$TOKEN", COIN, 0, true, null))));
+        var plan = RvnCanonicalAssetBlockChecks.verifyHistoricalMainnet(candidate, CONTEXT, ACTIVE, true,
+                parent(), n -> null, rules(Map.of()), true, false);
+        assertEquals(COIN, plan.assets().entries().get("$TOKEN").after().orElseThrow().supply());
+        var verifier = new RvnAssetRuleKey(RvnAssetRuleKey.Kind.VERIFIER, "$TOKEN", "");
+        assertEquals(Optional.of("MISSING"), plan.assets().rules().get(verifier).after());
+        assertThrows(SecurityException.class, () -> RvnCanonicalAssetBlockChecks.verifyHistoricalMainnet(candidate,
+                CONTEXT, ACTIVE, true, parent(), n -> null, rules(Map.of()), true, true));
+    }
+
+    @Test void historicalReissuePreservesWrappedSupplyAndNonDivisibleUnits() throws Exception {
+        var candidate = coinbaseWith(List.of(burn("RXReissueAssetXXXXXXXXXXXXXXVEFAWu", 100),
+                asset(new Transfer("TOKEN!", COIN, null, 0)), asset(new Reissue("TOKEN", 1, 0, true, null))));
+        for (long supply : new long[] {COIN, Long.MAX_VALUE}) {
+            var previous = new Metadata("TOKEN", supply, 8, false, null);
+            var plan = RvnCanonicalAssetBlockChecks.verifyHistoricalMainnet(candidate, CONTEXT, ACTIVE, true,
+                    parent(), n -> n.equals("TOKEN") ? previous : null, rules(Map.of()), true, false);
+            var value = plan.assets().entries().get("TOKEN").after().orElseThrow();
+            assertEquals(supply + 1, value.supply()); assertEquals(0, value.units());
+        }
+    }
+
+    @Test void preAssetCoinbaseRunsStatelessRulesWithoutInstallingAnAssetRegistry() throws Exception {
+        var candidate = coinbaseWith(issue().outputs());
+        var changes = RvnNativeTransactionChecks.block(candidate, CONTEXT, false, parent());
+        var coinbase = candidate.transactions().getFirst();
+        assertTrue(changes.created().containsKey(new OutPoint(coinbase.txId(), new UInt32(coinbase.outputs().size() - 1))));
+        var malformed = coinbaseWith(List.of(asset(new Transfer("TOKEN!", 2 * COIN, null, 0))));
+        assertThrows(SecurityException.class, () -> RvnNativeTransactionChecks.block(malformed, CONTEXT, false, parent()));
+        var opaque = coinbaseWith(new TxOut(0, new byte[]{(byte) 0xc0, 1, 2}));
+        assertDoesNotThrow(() -> RvnNativeTransactionChecks.block(opaque, CONTEXT, false, parent()));
+    }
+
+    @Test void historicalCoinbasePersistsOpaqueGlobalAndIgnoresOrdinaryAddressNullCommands() throws Exception {
+        var candidate = coinbaseWith(List.of(asset(new Transfer("TOKEN!", COIN, null, 0)),
+                asset(new Transfer("TOKEN", COIN, null, 0)), nullRule("XTOKEN", true, 1), nullRule("TOKEN", false, 1)));
+        var plan = RvnCanonicalAssetBlockChecks.verifyHistoricalMainnet(candidate, CONTEXT, ACTIVE, true,
+                parent(), n -> null, rules(Map.of()), true, false);
+        assertEquals(1, plan.assets().rules().size());
+        assertEquals(Optional.of("1"), plan.assets().rules().get(new RvnAssetRuleKey(RvnAssetRuleKey.Kind.GLOBAL_FREEZE, "XTOKEN", "")).after());
+        var missing = coinbaseWith(List.of(asset(new Transfer("OTHER!", COIN, null, 0)), nullRule("XTOKEN", true, 1)));
+        assertThrows(SecurityException.class, () -> RvnCanonicalAssetBlockChecks.verifyHistoricalMainnet(missing, CONTEXT, ACTIVE, true,
+                parent(), n -> null, rules(Map.of()), true, false));
+    }
+
     @Test void historicalCoinbaseTransfersSkipContextualAccountingOnlyBeforeBitTen() throws Exception {
         for (long amount : new long[] {COIN, -1, Long.MAX_VALUE}) {
             var candidate = coinbaseWith(asset(new Transfer("UNKNOWN", amount, null, 0)));

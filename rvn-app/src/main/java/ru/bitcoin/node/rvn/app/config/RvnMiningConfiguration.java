@@ -21,7 +21,7 @@ public class RvnMiningConfiguration {
             @Value("${ravencoin.mining.batch-size:4096}") int batchSize) {
         if (!assets) throw new IllegalArgumentException("RVN mining requires historical asset replay");
         var backend = new RvnEmptyBlockMiningBackend(headers, coins, chain, replay, settings.requirePayout(),
-                () -> replay.completeHistoricalValidation() && sync.miningPeerReady(),
+                replay::completeHistoricalValidation, sync::miningPeerReady,
                 () -> System.currentTimeMillis() / 1000, sync::publishMinedBlock);
         var miner = new RvnSoloMining(backend, worker::search, () -> System.currentTimeMillis() / 1000, batchSize);
         return new RvnMiningService(miner, worker);

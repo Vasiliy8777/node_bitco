@@ -35,11 +35,12 @@ final class RvnRestrictedBlockState {
         for (var output : outputs) {
             var data = RvnHistoricalAssetCodec.decodeNull(output.script());
             if (data.isPresent()) {
-                if (!activation.restricted() || coinbase) throw new SecurityException("RVN null data before activation/in coinbase");
+                if (!activation.restricted() && !coinbase) throw new SecurityException("RVN null data before activation");
                 if (data.get().kind() == RvnHistoricalAssetCodec.NullKind.VERIFIER) {
                     if (verifier != null) throw new SecurityException("RVN duplicate verifier in transaction");
                     verifier = data.get().verifier();
-                    RvnRestrictedRuleChecks.requireVerifier(parent, verifier, null, q -> registry.apply(q) != null);
+                    if (coinbase) RvnRestrictedVerifier.fromOutput(verifier);
+                    else RvnRestrictedRuleChecks.requireVerifier(parent, verifier, null, q -> registry.apply(q) != null);
                 } else nulls.add(data.get());
                 continue;
             }
@@ -48,10 +49,10 @@ final class RvnRestrictedBlockState {
             var payload = asset.get().payload();
             if (payload instanceof Transfer) transfers.add(payload.name());
             if (RvnAssetNames.requireValid(payload.name()) != RvnAssetNames.Type.RESTRICTED) continue;
-            if (!activation.restricted()) throw new SecurityException("RVN restricted assets before activation");
-            if (payload instanceof Transfer)
+            if (!activation.restricted() && !coinbase) throw new SecurityException("RVN restricted assets before activation");
+            if (payload instanceof Transfer && !coinbase)
                 RvnRestrictedRuleChecks.requireDestination(parent, payload.name(), address(output.script()), q -> registry.apply(q) != null);
-            else restrictedCreations.add(payload);
+            else if (!(payload instanceof Transfer)) restrictedCreations.add(payload);
         }
         if (verifier != null && restrictedCreations.size() != 1)
             throw new SecurityException("RVN verifier must belong to one restricted issuance/reissue");
@@ -62,7 +63,7 @@ final class RvnRestrictedBlockState {
             String current = changes.containsKey(key) ? changes.get(key).after().orElse(null) : parent.findRule(key).orElse(null);
             String expression = verifier != null ? verifier : current;
             long amount = issue ? ((Issue) creation).amount() : ((Reissue) creation).amount();
-            if (issue || amount > 0) {
+            if (!coinbase && (issue || amount > 0)) {
                 if (expression == null) throw new SecurityException("RVN restricted verifier missing");
                 for (var output : outputs) {
                     var asset = decoder.apply(output.script());
@@ -70,20 +71,36 @@ final class RvnRestrictedBlockState {
                         RvnRestrictedRuleChecks.requireVerifier(parent, expression, address(output.script()), q -> registry.apply(q) != null);
                 }
             }
-            if (verifier != null) put(key, Optional.of(verifier));
+            if (verifier != null && !(coinbase && !issue && registry.apply(creation.name()) == null))
+                put(key, Optional.of(verifier));
         }
-        var touched = new HashSet<RvnAssetRuleKey>(); int tags = 0;
+        var touched = new HashSet<String>(); int tags = 0;
         for (var data : nulls) {
-            var type = RvnAssetNames.requireValid(data.name());
+            if (data.flag() != 0 && data.flag() != 1) throw new SecurityException("RVN invalid null data flag");
+            var type = coinbase ? RvnAssetNames.classify(data.name()).orElse(null) : RvnAssetNames.requireValid(data.name());
             boolean qualifier = type == RvnAssetNames.Type.QUALIFIER || type == RvnAssetNames.Type.SUB_QUALIFIER;
-            RvnAssetRuleKey.Kind kind = data.kind() == RvnHistoricalAssetCodec.NullKind.GLOBAL ? GLOBAL_FREEZE
+            boolean global = data.kind() == RvnHistoricalAssetCodec.NullKind.GLOBAL;
+            if (data.name().isEmpty()) throw new SecurityException("RVN empty null asset name");
+            if (!coinbase && !qualifier && type != RvnAssetNames.Type.RESTRICTED)
+                throw new SecurityException("RVN invalid null asset family");
+            if (!coinbase && global && type != RvnAssetNames.Type.RESTRICTED)
+                throw new SecurityException("RVN global restriction requires restricted name");
+            if (!touched.add(global + ":" + data.name() + ":" + data.addressHash()))
+                throw new SecurityException("RVN repeated address/global rule in transaction");
+            String authorization = global || data.name().startsWith("$") ? data.name().substring(1) + "!" : data.name();
+            if (!transfers.contains(authorization)) throw new SecurityException("RVN rule change lacks authorizing transfer");
+            // AddCoins ignores ordinary/unknown address-null families. Their
+            // flags, duplicates and transfer authorization are still stateless rules.
+            if (coinbase && !global && !qualifier && type != RvnAssetNames.Type.RESTRICTED) continue;
+            RvnAssetRuleKey.Kind kind = global ? GLOBAL_FREEZE
                     : qualifier ? QUALIFIER : ADDRESS_FREEZE;
             var key = new RvnAssetRuleKey(kind, data.name(), data.addressHash());
-            if (!touched.add(key)) throw new SecurityException("RVN repeated address/global rule in transaction");
-            String authorization = qualifier ? data.name() : data.name().substring(1) + "!";
-            if (!transfers.contains(authorization)) throw new SecurityException("RVN rule change lacks authorizing transfer");
-            var update = RvnRestrictedRuleChecks.toggle(parent, key, data.flag());
-            changes.put(key, update);
+            if (coinbase) put(key, data.flag() == 1 ? Optional.of("1") : Optional.empty());
+            else {
+                var update = RvnRestrictedRuleChecks.toggle(parent, key, data.flag());
+                if (update.isPresent()) changes.put(key, update.get());
+                else changes.remove(key);
+            }
             if (qualifier && data.flag() == 1) tags++;
         }
         if (tags > 0) {

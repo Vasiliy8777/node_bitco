@@ -16,6 +16,27 @@ import static ru.bitcoin.node.rvn.app.chain.RvnMainnetHeaderChainTest.*;
 
 /** Synthetic proofs test replay/storage plumbing, not accepted mainnet blocks. */
 class RvnNativeBlockReplayTest {
+    @Test void importedTipRewindsAndResumesGenesisValidationAfterInterruptedRestart() throws Exception {
+        var a1 = next(RvnMainnetExpectedBits.GENESIS_ID, 1, 0); var a2 = next(id(a1), 2, 0); var a3 = next(id(a2), 3, 0);
+        try (var headers = open(temp.resolve("headers")); var coins = coins()) {
+            accept(headers, a1, a2); save(headers, a1); save(headers, a2);
+            var replay = new RvnNativeBlockReplay(headers, coins);
+            assertEquals(2, replay.advance(16).connected());
+            assertEquals(coins.tip(), coins.validation().orElseThrow().tip());
+            accept(headers, a3); save(headers, a3);
+            coins.connect(coins.tip(), id(a3), new RvnCoinAccounting.Changes(0, Map.of(), Map.of()));
+            assertTrue(coins.validation().isEmpty());
+            assertEquals(1, new RvnNativeBlockReplay(headers, coins).advance(1).disconnected());
+            assertEquals(2, coins.tip().height()); assertTrue(coins.validation().isEmpty());
+        }
+        try (var headers = open(temp.resolve("headers")); var coins = coins()) {
+            var result = new RvnNativeBlockReplay(headers, coins).advance(16);
+            assertEquals(2, result.disconnected()); assertEquals(3, result.connected());
+            assertEquals(coins.tip(), coins.validation().orElseThrow().tip());
+            assertTrue(coins.validation().orElseThrow().version().startsWith(RvnNativeBlockReplay.VALIDATOR_VERSION));
+            assertEquals(3, coins.tip().height());
+        }
+    }
     @TempDir Path temp;
     private static final RvnPayoutAddress PAYOUT = RvnPayoutAddress.parse("RXBurnXXXXXXXXXXXXXXXXXXXXXXWUo9FV", RvnNetwork.MAINNET);
     private static RvnHash256 id(RvnBlock block) { return new RvnHash256(RvnWire.doubleSha(block.header().serialize())); }

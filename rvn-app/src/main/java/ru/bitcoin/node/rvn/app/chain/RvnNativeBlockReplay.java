@@ -8,14 +8,16 @@ import ru.bitcoin.node.rvn.chain.assets.RvnHistoricalAssetCodec;
 import java.io.*;
 import java.util.*;
 
-/** Bounded replay through native checks and durable coins. Default stops before
- * assets; opt-in canonical subset stops at unsupported historical rules instead.
- * Neither mode establishes a mining-ready full historical chainstate. */
+/** Bounded replay through scripts/assets into durable state. Native-only mode
+ * stops before assets. Historical mode records contiguous genesis coverage
+ * under its versioned, per-block-flushed qualifier snapshot policy. */
 public final class RvnNativeBlockReplay {
+    public static final String VALIDATOR_VERSION = "rvn-core-4.8.0-flushed-v1";
     private final RvnHeaderStore headers;
     private final RvnCoinStore coins;
     private final RvnAssetsDeployment assets;
     private final boolean canonicalAssets;
+    private final boolean trackValidation;
     private final RvnAssetDeploymentContext assetContext = new RvnAssetDeploymentContext();
     private static final int FLAGS = ScriptVerifyFlags.P2SH | ScriptVerifyFlags.DERSIG
             | ScriptVerifyFlags.CHECKLOCKTIMEVERIFY | ScriptVerifyFlags.CHECKSEQUENCEVERIFY
@@ -26,26 +28,40 @@ public final class RvnNativeBlockReplay {
     }
 
     public RvnNativeBlockReplay(RvnHeaderStore headers, RvnCoinStore coins, boolean canonicalAssets) throws IOException {
-        this(headers, coins, new RvnAssetsDeployment(), canonicalAssets);
+        this(headers, coins, new RvnAssetsDeployment(), canonicalAssets, true);
     }
 
     RvnNativeBlockReplay(RvnHeaderStore headers, RvnCoinStore coins, RvnAssetsDeployment assets) throws IOException {
         this(headers, coins, assets, false);
     }
     RvnNativeBlockReplay(RvnHeaderStore headers, RvnCoinStore coins, RvnAssetsDeployment assets, boolean canonicalAssets) throws IOException {
+        this(headers, coins, assets, canonicalAssets, false);
+    }
+    private RvnNativeBlockReplay(RvnHeaderStore headers, RvnCoinStore coins, RvnAssetsDeployment assets,
+            boolean canonicalAssets, boolean trackValidation) throws IOException {
         this.headers = Objects.requireNonNull(headers); this.coins = Objects.requireNonNull(coins);
         this.assets = Objects.requireNonNull(assets);
         this.canonicalAssets = canonicalAssets;
+        this.trackValidation = trackValidation;
         var tip = coins.tip();
         if (headers.require(tip.id()).height() != tip.height()) throw new IOException("RVN coin/header tip mismatch");
     }
 
     public record Progress(int connected, int disconnected, RvnCoinStore.Tip tip) {}
 
-    /** Capability of this validator, never an operator override or tip-height test.
-     * Inherited qualifier cache transitions and coinbase metadata/null rules still
-     * prevent certification of a complete asset-era history. */
-    public boolean completeHistoricalValidation() { return false; }
+    /** Actual contiguous genesis-to-tip coverage, never inferred from height alone.
+     * Unsupported or invalid blocks cannot advance this versioned watermark. */
+    public boolean completeHistoricalValidation() {
+        if (!trackValidation || !canonicalAssets) return false;
+        synchronized (coins) {
+            try {
+                var tip = coins.tip();
+                return tip.height() >= ru.bitcoin.node.rvn.consensus.RvnMainnetCheckpoints.RECOVERY_HEIGHT
+                        && coins.validation().filter(v -> v.version().equals(version()) && v.tip().equals(tip)).isPresent();
+            } catch (IOException e) { throw new UncheckedIOException(e); }
+        }
+    }
+    private String version() { return VALIDATOR_VERSION + (canonicalAssets ? "" : "-native"); }
 
     /** Per-block atomic commits make restart resume at the last completed block,
      * including when a branch switch was interrupted between disconnects. */
@@ -70,6 +86,15 @@ public final class RvnNativeBlockReplay {
         // Keep one header branch and one parent coin view throughout each batch.
         synchronized (headers) { synchronized (coins) {
             int connected = 0, disconnected = 0;
+            if (trackValidation && coins.validation().filter(v -> v.version().equals(version()) && v.tip().equals(coins.tip())).isEmpty()) {
+                // An old/imported tip is not coverage under the new rules. Use
+                // durable undo, preserving all headers and archived block bodies.
+                while (coins.tip().height() > 0 && disconnected < limit) {
+                    interrupted(); coins.disconnect(coins.tip()); disconnected++;
+                }
+                if (coins.tip().height() > 0) return new Progress(0, disconnected, coins.tip());
+                coins.anchorValidation(version());
+            }
             var best = headers.best();
             var current = headers.require(coins.tip().id());
             var fork = headers.commonAncestor(current, best);
@@ -100,11 +125,14 @@ public final class RvnNativeBlockReplay {
                     var plan = RvnCanonicalAssetBlockChecks.verifyHistoricalMainnet(block, context, deployment.activation(),
                             deployment.enforcedReissueValues(), coins, name -> coins.findAsset(name).orElse(null), coins,
                             deployment.transferSizeFix(), deployment.coinbaseAssetCheck());
-                    if (next.id().equals(mined)) coins.connectMined(coins.tip(), next.id(), plan.coins(), plan.assets());
+                    if (trackValidation) coins.connectValidated(coins.tip(), next.id(), plan.coins(), plan.assets(), version(), next.id().equals(mined));
+                    else if (next.id().equals(mined)) coins.connectMined(coins.tip(), next.id(), plan.coins(), plan.assets());
                     else coins.connect(coins.tip(), next.id(), plan.coins(), plan.assets());
                 } else {
                     var changes = RvnNativeTransactionChecks.block(block, context, false, coins);
-                    if (next.id().equals(mined)) coins.connectMined(coins.tip(), next.id(), changes, ru.bitcoin.node.rvn.chain.assets.RvnAssetChanges.EMPTY);
+                    if (trackValidation) coins.connectValidated(coins.tip(), next.id(), changes, ru.bitcoin.node.rvn.chain.assets.RvnAssetChanges.EMPTY,
+                            version(), next.id().equals(mined));
+                    else if (next.id().equals(mined)) coins.connectMined(coins.tip(), next.id(), changes, ru.bitcoin.node.rvn.chain.assets.RvnAssetChanges.EMPTY);
                     else coins.connect(coins.tip(), next.id(), changes);
                 }
                 connected++;

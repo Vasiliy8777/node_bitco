@@ -521,3 +521,72 @@ switches, legacy overflow, stateless coinbase paths, startup prerequisites,
 readiness/peer shutdown and GPU-idle behavior before validation readiness.
 The artifact was packaged and synchronization restarted on existing C/K
 stores with mining disabled. No data reset or mainnet mining claim was made.
+
+## 2026-10-24: historical state profile, coverage and armed GPU service
+
+Historical coinbase null/restricted checks and state updates are now connected,
+including pre-asset-activation stateless checking without installing an asset
+registry. Authorization transfers, burn fees, duplicate/flag checks and
+verifier syntax are enforced; contextual qualifier/existence/freeze checks
+are skipped only for historical coinbase. Opaque global names preserve their
+Latin-1 byte identity. Bit 10 still rejects asset/null coinbase outputs.
+
+Metadata now preserves signed/wrapped supply and non-divisible units as state,
+without weakening new issuance rules. Schema 4 prevents old binaries opening
+new asset state; old schemas remain readable for replay. Round-trip, restart,
+undo and abrupt-halt tests cover atomic coverage/coins/assets/mined outbox.
+
+Inherited-only root REMOVE is accepted as an exact-key no-op without deleting
+children. A 4096-entry parent membership cache is cleared on commit/undo.
+The native MSVC oracle executes unchanged Core qualifier methods and commits
+six dirty/flushed/inverse observations. IMPORTANT: the selected Java profile
+is per-block-flushed forward state with verified-snapshot rollback, not full
+emulation of Core's cache-sensitive inverse-undo side effects. The difference
+is exposed in the fixtures and HISTORICAL_VALIDATION.md, not silently hidden.
+
+The old constant-false readiness gate is replaced by versioned coverage bound
+to the exact tip. Only an empty genesis state can anchor it; validated commits
+extend it atomically and generic commits invalidate it. An unversioned/wrong
+version tip rewinds via durable undo and replays stored bodies. Restart during
+rewind is tested. Native-only or test-deployment profiles cannot arm mainnet
+work. Full mainnet history must actually replay without a failed block, pass
+the recovery checkpoint and reach the recent matching best header/coin tip
+with a responsive peer before GPU production search is allowed.
+
+RVN reactor tests passed: rvn-chain 90, rvn-storage 31, rvn-app 44 (plus reactor
+dependencies). Package build passed. Start-RvnSync.ps1 -Mining was executed
+on the existing C/K stores. Launcher PID 85056, actual JVM 99216, Python CUDA
+worker 110068 at launch. Logs 2026-10-24 19:17:55 +07 confirmed real RTX 4070
+Core-vector tests and the local GPU job/independent CPU/native validation test.
+At 19:17:56 the solo service entered WAITING. Old headers (height 652000) and
+block archives were retained; replay rolled chainstate through undo to genesis
+and began versioned revalidation of the saved bodies. This is not active
+mainnet hashing or a mining reward. Initial sync remains in progress and the
+guarded service stays running for automatic readiness checks.
+# 2026-10-24: body-first initial sync and mining diagnostics
+
+Initial download was growing the header/body gap: each 2000-header admission
+was followed by only 128 bodies, with four outstanding requests. Sync now
+prefers bodies when the lead exceeds 4096, after requiring an initial header
+response from each connection. The production window is configurable, default
+16, maximum 16; the existing 32 MiB receive budget remains enforced. Queue
+budget failures reduce the window to 8 then 4. Local body processing time no
+longer consumes deadlines for other pending responses.
+
+Mining reports its concrete waiting reason every 30 seconds. Peer readiness is
+checked independently of versioned validation, and peer loss invalidates jobs.
+Tests cover windows 1/4/16 with reordered responses, local-processing timeout
+accounting, body backlog scheduling, and peer loss. `mvn -pl rvn-app -am test
+-B -q` and package succeeded; app 46 tests, P2P 21, chain 90, storage 31.
+
+Deployed at 20:27 +07, launcher PID 114840 / JVM 114788. CUDA Core vectors and
+the local easy-target job passed at 20:27:38. Existing versioned state resumed
+without rewind. First two 128-body batches took 22470 and 22049 ms; replay of
+the first took about 4.3 seconds. Before this change a cycle also spent about
+20 seconds admitting the next 2000 headers. This is an initial observation,
+not an extrapolated completion time or a mainnet hashrate measurement.
+
+Known headers: 776000; checked state advanced beyond 34304 while observing the
+deployment. The miner remains WAITING for full verified current chainstate.
+Historical compatibility boundaries in `rvn-chain/reference/HISTORICAL_VALIDATION.md`
+remain applicable; no consensus version change or validation bypass was made.

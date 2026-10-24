@@ -27,6 +27,54 @@ class RvnBlockDownloadIntegrationTest {
     }
 
     @Test
+    void bodyBacklogIsDrainedBeforeAnotherHeaderRequest() throws Exception {
+        var bodies = new HashMap<RvnHash256, RvnBlock>();
+        var rawHeaders = new ArrayList<byte[]>();
+        var parent = RvnMainnetExpectedBits.GENESIS_ID;
+        for (int height = 1; height <= 257; height++) {
+            var body = block(parent, height);
+            byte[] raw = body.header().serialize(); rawHeaders.add(raw);
+            parent = new RvnHash256(RvnWire.doubleSha(raw)); bodies.put(parent, body);
+        }
+        var error = new AtomicReference<Throwable>(); var completed = new CountDownLatch(1);
+        try (var server = new ServerSocket(0, 1, InetAddress.getLoopbackAddress()); var store = open(temp.resolve("backlog"))) {
+            // Synthetic PoW fixture: this test checks scheduling and body commitments.
+            store.accept(rawHeaders, (raw, branch) -> new RvnHash256(RvnWire.doubleSha(raw)));
+            var peer = Thread.ofPlatform().daemon(true).start(() -> {
+                try (var socket = server.accept()) {
+                    socket.setSoTimeout(8000);
+                    var in = socket.getInputStream(); var out = socket.getOutputStream();
+                    assertEquals("version", RvnWire.read(in, RvnNetwork.MAINNET).command());
+                    RvnWire.write(out, RvnNetwork.MAINNET, new RvnMessage("version", RvnVersion.outbound(70028, server.getLocalPort(), 0)));
+                    assertEquals("verack", RvnWire.read(in, RvnNetwork.MAINNET).command());
+                    RvnWire.write(out, RvnNetwork.MAINNET, new RvnMessage("verack", new byte[0]));
+                    assertEquals("getheaders", RvnWire.read(in, RvnNetwork.MAINNET).command());
+                    RvnWire.write(out, RvnNetwork.MAINNET, new RvnMessage("headers", new byte[]{0}));
+                    for (int i = 0; i < 256; i++) {
+                        var request = RvnWire.read(in, RvnNetwork.MAINNET);
+                        assertEquals("getdata", request.command(), "Headers must wait for the body backlog");
+                        var inventory = new ByteArrayInputStream(request.payload());
+                        assertEquals(1, RvnCompactSize.read(inventory, 1)); RvnWire.readU32(inventory);
+                        var body = bodies.get(new RvnHash256(inventory.readNBytes(32))); assertNotNull(body);
+                        RvnWire.write(out, RvnNetwork.MAINNET, new RvnMessage("block", RvnBlockCodec.serialize(body)));
+                    }
+                    assertEquals("getheaders", RvnWire.read(in, RvnNetwork.MAINNET).command());
+                    completed.countDown(); while (in.read() != -1) { }
+                } catch (Throwable failure) { error.set(failure); completed.countDown(); }
+            });
+            var chain = new RvnMainnetHeaderChain(store, TEST_POW, () -> 1516000000L);
+            var sync = new RvnHeaderSyncService(chain, List.of("127.0.0.1"), server.getLocalPort(),
+                    1000, 3000, 5000, new RvnBlockDownloader(store, 3000, 16), null, new RvnSeedResolver(""), 1);
+            try {
+                sync.start(); assertTrue(completed.await(20, TimeUnit.SECONDS));
+                if (error.get() != null) fail(error.get());
+                assertEquals(256, store.downloadedBodyTip().height());
+            } finally { sync.stop(); }
+            peer.join(3000); assertFalse(peer.isAlive()); if (error.get() != null) fail(error.get());
+        }
+    }
+
+    @Test
     void headersWitnessGetdataBodiesAndRestartStaySeparateFromUtxoValidation() throws Exception {
         var first = block(RvnMainnetExpectedBits.GENESIS_ID, 1);
         var firstId = new RvnHash256(RvnWire.doubleSha(first.header().serialize()));

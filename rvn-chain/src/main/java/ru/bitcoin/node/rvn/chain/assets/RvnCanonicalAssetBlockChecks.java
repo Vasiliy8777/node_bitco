@@ -16,6 +16,32 @@ public final class RvnCanonicalAssetBlockChecks {
     private RvnCanonicalAssetBlockChecks() {}
     public record Plan(RvnCoinAccounting.Changes coins, RvnAssetChanges assets) {}
 
+    /** CheckTransaction still runs for coinbase before initial asset deployment;
+     * AddCoins does not yet apply any asset metadata/rules in that era. */
+    public static void requireBeforeAssets(Transaction tx) {
+        Function<byte[], Optional<Decoded>> decoder = script -> RvnHistoricalAssetCodec.decodeSpendable(script, false, false);
+        var outputs = new ArrayList<RvnAssetIssueChecks.Output>(); var payloads = new ArrayList<Payload>();
+        for (var output : tx.outputs()) {
+            byte[] script = output.scriptPubKey(); var payload = classify(script, decoder);
+            if (!tx.isCoinbase() && (payload != null || RvnHistoricalAssetCodec.decodeNull(script).isPresent()))
+                throw new SecurityException("RVN asset transaction before activation");
+            if (payload != null) {
+                if (!(payload instanceof Reissue) && output.value() != 0)
+                    throw new SecurityException("Nonzero native value in RVN asset output");
+                payloads.add(payload);
+            }
+            outputs.add(new RvnAssetIssueChecks.Output(output.value(), script));
+        }
+        if (tx.isCoinbase()) {
+            var empty = new RvnAssetRulesView() {
+                public Optional<String> findRule(RvnAssetRuleKey key) { return Optional.empty(); }
+                public boolean hasQualifier(String name, String address) { return false; }
+            };
+            RvnHistoricalAssetCoinbaseChecks.verify(outputs, payloads, name -> null, decoder);
+            new RvnRestrictedBlockState(empty, name -> null, decoder).transaction(outputs, new Activation(false, false, false, false), true);
+        }
+    }
+
     public static Plan verifyMainnet(RvnBlock block, RvnSpendContext context, Activation activation,
                                     boolean enforcedReissueValues, RvnCoinView parent,
                                     Function<String, Metadata> registry) {
@@ -99,6 +125,7 @@ public final class RvnCanonicalAssetBlockChecks {
             }
             if (tx.isCoinbase()) {
                 metadata.putAll(RvnHistoricalAssetCoinbaseChecks.verify(outputs, payloads, view, decoder));
+                rules.transaction(outputs, activation, true);
                 continue;
             }
             rules.transaction(outputs, activation, tx.isCoinbase());
@@ -145,6 +172,9 @@ public final class RvnCanonicalAssetBlockChecks {
         var decoded = decoder.apply(script);
         if (decoded.isPresent()) return decoded.get().payload();
         if (RvnHistoricalAssetCodec.decodeNull(script).isPresent()) return null;
+        // Core permits opaque unclassified leading OP_RVN_ASSET scripts; they
+        // are unspendable. Only misplaced unclassified opcodes are forbidden.
+        if (script.length > 0 && (script[0] & 255) == 0xc0) return null;
         // Find OP_RVN_ASSET as an opcode, never as a byte inside pushed hashes.
         // Core's loose historical classifier needs a separate consensus path.
         int position = 0;
