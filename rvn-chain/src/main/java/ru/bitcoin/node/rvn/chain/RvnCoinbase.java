@@ -15,7 +15,8 @@ public final class RvnCoinbase {
         return halvings >= 64 ? 0 : (5000 * RvnBlockBodyChecks.COIN) >>> (int) halvings;
     }
     public static Transaction create(long height, long extraNonce, long fees, RvnPayoutAddress payout) {
-        if (height < 1 || extraNonce < 0 || fees < 0 || fees > RvnBlockBodyChecks.MAX_MONEY)
+        // extraNonce contains unsigned uint64 bits; pushNumber uses unsigned shifts.
+        if (height < 1 || fees < 0 || fees > RvnBlockBodyChecks.MAX_MONEY)
             throw new IllegalArgumentException("RVN coinbase height/extraNonce/fees");
         Objects.requireNonNull(payout);
         long value = Math.addExact(subsidy(height), fees);

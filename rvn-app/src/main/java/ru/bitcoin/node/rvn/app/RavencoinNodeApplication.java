@@ -59,7 +59,7 @@ public class RavencoinNodeApplication {
     }
 
     @Bean
-    RvnKawpowLightEngine rvnKawpowEngine(@Value("${ravencoin.pow.cached-dag-items:1024}") int capacity) {
+    RvnKawpowLightEngine rvnKawpowEngine(@Value("${ravencoin.pow.cached-dag-items:65536}") int capacity) {
         return new RvnKawpowLightEngine(capacity);
     }
 

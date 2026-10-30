@@ -36,6 +36,7 @@ public final class StratumServer implements AutoCloseable {
     private final LongAdder rejectedShares = new LongAdder();
     private final LongAdder blocks = new LongAdder();
     private volatile MiningJob current;
+    private long lastDifficultyRefresh;
     private volatile boolean closed;
 
     public StratumServer(InetSocketAddress address, MiningBackend backend, String user, String password,
@@ -73,7 +74,7 @@ public final class StratumServer implements AutoCloseable {
         try { listener.bind(address, maximumConnections); }
         catch (IOException | RuntimeException exception) { listener.close(); throw exception; }
         acceptor = Thread.ofPlatform().daemon().name("stratum-accept").start(this::accept);
-        updater.scheduleWithFixedDelay(this::refresh, 0, 1, TimeUnit.SECONDS);
+        updater.scheduleWithFixedDelay(this::refresh, 0, 50, TimeUnit.MILLISECONDS);
     }
 
     public int port() { return listener.getLocalPort(); }
@@ -131,8 +132,13 @@ public final class StratumServer implements AutoCloseable {
             var work = backend.work();
             if (work.isEmpty()) { unavailable(); return; }
             MiningJob next = jobs.update(work.get());
+            boolean changed = current != next;
             current = next;
-            for (var session : sessions) session.requestRefresh(workers);
+            long now = monotonicNanos();
+            boolean difficultyDue = varDiff.enabled() && now - lastDifficultyRefresh >= TimeUnit.SECONDS.toNanos(1);
+            if (difficultyDue) lastDifficultyRefresh = now;
+            if (changed || difficultyDue)
+                for (var session : sessions) session.requestRefresh(workers);
         } catch (RuntimeException exception) {
             unavailable();
             LOG.log(System.Logger.Level.ERROR, "Unable to build Stratum work", exception);
@@ -140,6 +146,7 @@ public final class StratumServer implements AutoCloseable {
     }
 
     private void unavailable() {
+        if (current == null) return;
         current = null;
         jobs.clear();
         for (var session : sessions) session.requestRefresh(workers);

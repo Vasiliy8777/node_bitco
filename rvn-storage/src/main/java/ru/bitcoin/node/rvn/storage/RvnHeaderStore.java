@@ -239,35 +239,57 @@ public final class RvnHeaderStore implements AutoCloseable, RvnHeaderLookup {
 
     /** Body and contiguous download cursor commit together after commitment/shape checks. */
     public synchronized boolean saveDownloadedBody(RvnHash256 id, byte[] supplied, BodyChecks checks) throws IOException {
+        return saveDownloadedBodies(Collections.singletonMap(id, supplied), checks) > 0;
+    }
+
+    /** Bounded group commit: check all bodies, force archive segments, then
+     * publish their references/digests and contiguous cursor in one sync batch. */
+    public synchronized int saveDownloadedBodies(Map<RvnHash256, byte[]> supplied, BodyChecks checks) throws IOException {
         ensureOpen(); Objects.requireNonNull(checks);
-        if (supplied == null || supplied.length > 8_000_000) throw new IOException("RVN block body size");
-        byte[] payload = supplied.clone();
-        var header = require(id); byte[] rawHeader = header.raw();
-        if (payload.length <= rawHeader.length || !Arrays.equals(rawHeader, Arrays.copyOf(payload, rawHeader.length)))
-            throw new SecurityException("RVN block body/header mismatch");
-        checks.verify(payload.clone(), header);
-        if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException("RVN body commit interrupted");
-        byte[] hash = RvnWire.doubleSha(payload);
+        if (supplied == null || supplied.isEmpty() || supplied.size() > 128) throw new IOException("RVN block body batch count");
+        var payloads = new LinkedHashMap<RvnHash256, byte[]>();
+        var hashes = new LinkedHashMap<RvnHash256, byte[]>(); long total = 0;
         try {
-            byte[] previous = db.get(bodyKey(3, id));
-            if (previous != null) {
-                if (previous.length != 32) { failed = true; throw new IOException("Invalid RVN body metadata"); }
-                if (!Arrays.equals(previous, hash)) throw new SecurityException("Conflicting RVN block body");
-                return false;
+            for (var entry : supplied.entrySet()) {
+                var id = Objects.requireNonNull(entry.getKey()); byte[] bytes = entry.getValue();
+                if (bytes == null || bytes.length > 8_000_000) throw new IOException("RVN block body size");
+                total += bytes.length;
+                if (total > 32L * 1024 * 1024) throw new IOException("RVN block body batch byte limit");
+                byte[] payload = bytes.clone(); var header = require(id); byte[] rawHeader = header.raw();
+                if (payload.length <= rawHeader.length || !Arrays.equals(rawHeader, Arrays.copyOf(payload, rawHeader.length)))
+                    throw new SecurityException("RVN block body/header mismatch");
+                checks.verify(payload.clone(), header);
+                if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException("RVN body commit interrupted");
+                byte[] hash = RvnWire.doubleSha(payload), previous = db.get(bodyKey(3, id));
+                if (previous != null) {
+                    if (previous.length != 32) { failed = true; throw new IOException("Invalid RVN body metadata"); }
+                    if (!Arrays.equals(previous, hash)) throw new SecurityException("Conflicting RVN block body");
+                } else { payloads.put(id, payload); hashes.put(id, hash); }
             }
-            var cursor = downloadedBodyTip();
-            boolean advance = header.parentId().equals(cursor.id())
-                    && header.height() <= best.height() && ancestor(best, header.height()).id().equals(id);
-            // Publish metadata only after the HDD record has been forced to disk.
-            byte[] reference = bodyFiles == null ? null : bodyFiles.append(payload);
+            if (payloads.isEmpty()) return 0;
+            var cursor = commonAncestor(downloadedBodyTip(), best);
+            while (cursor.height() < best.height()) {
+                var next = ancestor(best, cursor.height() + 1);
+                if (!payloads.containsKey(next.id()) && !hasBlockBody(next.id())) break;
+                cursor = next;
+            }
+            List<byte[]> references = null;
+            if (bodyFiles != null) {
+                try { references = bodyFiles.appendBatch(new ArrayList<>(payloads.values())); }
+                catch (IOException e) { failed = true; throw e; }
+            }
             try (var batch = new WriteBatch()) {
-                if (reference == null) batch.put(bodyKey(2, id), payload);
-                else batch.put(bodyKey(4, id), reference);
-                batch.put(bodyKey(3, id), hash);
-                if (advance) batch.put(BODY_CURSOR, id.wire());
+                int index = 0;
+                for (var entry : payloads.entrySet()) {
+                    var id = entry.getKey();
+                    if (references == null) batch.put(bodyKey(2, id), entry.getValue());
+                    else batch.put(bodyKey(4, id), references.get(index));
+                    batch.put(bodyKey(3, id), hashes.get(id)); index++;
+                }
+                batch.put(BODY_CURSOR, cursor.id().wire());
                 db.write(durable, batch);
             }
-            return true;
+            return payloads.size();
         } catch (RocksDBException e) { failed = true; throw new IOException("RVN block body commit failed", e); }
     }
 

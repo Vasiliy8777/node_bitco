@@ -12,13 +12,18 @@ import java.util.function.LongSupplier;
 public final class RvnMainnetHeaderChain {
     private final RvnHeaderStore store;
     private final RvnPowRouter router;
+    private final RvnHeaderPowBatch parallelPow;
     private final LongSupplier clock;
     private final RvnAssetsDeployment assets = new RvnAssetsDeployment();
 
     public RvnMainnetHeaderChain(RvnHeaderStore store, RvnPowEngine engine, LongSupplier clock) {
+        this(store, engine, clock, null);
+    }
+    public RvnMainnetHeaderChain(RvnHeaderStore store, RvnPowEngine engine, LongSupplier clock, RvnHeaderPowBatch parallelPow) {
         this.store = Objects.requireNonNull(store);
         router = new RvnPowRouter(RvnPowSchedule.mainnet(), Objects.requireNonNull(engine));
         this.clock = Objects.requireNonNull(clock);
+        this.parallelPow = parallelPow;
         if (store.best().height() >= RvnMainnetCheckpoints.RECOVERY_HEIGHT) {
             try {
                 var checkpoint = store.ancestor(store.best(), RvnMainnetCheckpoints.RECOVERY_HEIGHT);
@@ -29,8 +34,16 @@ public final class RvnMainnetHeaderChain {
 
     public synchronized BatchResult accept(List<RvnBlockHeader> headers) throws IOException {
         if (headers == null || headers.size() > 2000) throw new IllegalArgumentException("RVN header batch limit");
+        var raws = headers.stream().map(RvnBlockHeader::serialize).toList();
+        List<RvnPowResult> proofs = null;
+        if (parallelPow != null && !raws.isEmpty()) {
+            var parent = new RvnHash256(Arrays.copyOfRange(raws.getFirst(), 4, 36));
+            long firstHeight = Math.addExact(store.require(parent).height(), 1);
+            proofs = parallelPow.calculate(raws, firstHeight);
+        }
+        final var computed = proofs; int[] proofIndex = {0};
         RvnHash256[] last = {null};
-        int added = store.accept(headers.stream().map(RvnBlockHeader::serialize).toList(), (raw, branch) -> {
+        int added = store.accept(raws, (raw, branch) -> {
             if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException("RVN admission interrupted");
             var header = RvnBlockHeader.parse(raw, RvnActivation.MAINNET_KAWPOW_TIME);
             var parent = branch.require(new RvnHash256(header.previousHashWire()));
@@ -61,7 +74,7 @@ public final class RvnMainnetHeaderChain {
             if (assets.activeForNext(parent, branch) && header.version() < 0x30000000)
                 throw new SecurityException("Outdated RVN assets header version");
             try {
-                var proof = router.calculate(height, raw);
+                var proof = computed == null ? router.calculate(height, raw) : computed.get(proofIndex[0]++);
                 if (!RvnPowDigest.meetsTarget(proof.powDigestWire(), RvnPowDigest.ByteOrder.LITTLE_ENDIAN,
                         header.compactBits(), RvnMainnetDifficulty.POW_LIMIT))
                     throw new SecurityException("Invalid RVN proof of work at " + height);

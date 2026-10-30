@@ -82,7 +82,7 @@ public final class RvnNativeBlockReplay {
     }
 
     private Progress advance(int limit, ru.bitcoin.node.rvn.consensus.RvnHash256 mined) throws IOException {
-        if (limit < 1 || limit > 128) throw new IllegalArgumentException("RVN replay batch limit");
+        if (limit < 1 || limit > 512) throw new IllegalArgumentException("RVN replay batch limit");
         // Keep one header branch and one parent coin view throughout each batch.
         synchronized (headers) { synchronized (coins) {
             int connected = 0, disconnected = 0;

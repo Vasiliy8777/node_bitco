@@ -2,7 +2,7 @@ package ru.bitcoin.node.rvn.app.config;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationRunner;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import ru.bitcoin.node.rvn.pow.*;
@@ -11,7 +11,7 @@ import java.nio.file.Path;
 
 /** GPU worker and mandatory self-tests, completed before mining can start. */
 @Configuration(proxyBeanMethods = false)
-@ConditionalOnProperty(name = "ravencoin.mining.cuda.enabled", havingValue = "true")
+@ConditionalOnExpression("${ravencoin.mining.cuda.enabled:false} or (${ravencoin.sync.enabled:false} and ${ravencoin.sync.gpu-pow-enabled:false})")
 public class RvnCudaConfiguration {
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(RvnCudaConfiguration.class);
     @Bean(destroyMethod = "close")
@@ -19,9 +19,10 @@ public class RvnCudaConfiguration {
             @Value("${ravencoin.mining.cuda.python:python}") String python,
             @Value("${ravencoin.mining.cuda.worker:rvn-pow/native/cuda/worker.py}") String worker,
             @Value("${ravencoin.mining.cuda.device:0}") int device,
-            @Value("${ravencoin.mining.cuda.reserve-mib:1024}") long reserveMiB) throws IOException {
+            @Value("${ravencoin.mining.cuda.reserve-mib:1024}") long reserveMiB,
+            @Value("${ravencoin.pow.cached-dag-items:65536}") int cacheItems) throws IOException {
         if (reserveMiB < 256 || reserveMiB > 65536) throw new IllegalArgumentException("CUDA reserve must be 256..65536 MiB");
-        return new RvnCudaKawpowWorker(python, Path.of(worker), directories.temporary(), device, reserveMiB * 1024 * 1024);
+        return new RvnCudaKawpowWorker(python, Path.of(worker), directories.temporary(), device, reserveMiB * 1024 * 1024, cacheItems);
     }
 
     @Bean
@@ -34,7 +35,7 @@ public class RvnCudaConfiguration {
                 ru.bitcoin.node.rvn.app.mining.RvnCudaMiningRoundSelfTest.run(worker, mining.requirePayout());
                 log.info("RVN CUDA local job self-test OK: template, GPU search, independent CPU/native validation; no mainnet block submitted");
             }
-            log.info("RVN CUDA KawPoW verified against Core vectors; mining waits for versioned genesis-to-tip validation and synchronization");
+            log.info("RVN CUDA KawPoW verified against Core vectors; GPU header verification may start after application readiness; mining waits for versioned genesis-to-tip validation and synchronization");
         };
     }
 }

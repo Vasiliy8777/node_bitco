@@ -7,6 +7,26 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.*;
 
 class RvnSeedResolverTest {
+    @Test void ipv6AnswersAreValidatedWithoutHostnameResolution() throws Exception {
+        String answer = """
+            {"Status":0,"TC":false,"Question":[{"name":"seed.example.","type":28}],
+             "Answer":[{"type":28,"data":"2001:db8::7"},{"type":28,"data":"2001:db8::7"}]}
+            """;
+        assertEquals(List.of("2001:db8::7"), RvnSeedResolver.parse("seed.example", answer, 28));
+        for (String invalid : List.of("attacker.example", "2001:db8::xyz", "fe80::1%12", "203.0.113.7"))
+            assertThrows(IOException.class, () -> RvnSeedResolver.parse("seed.example",
+                    answer.replace("2001:db8::7", invalid), 28));
+        assertThrows(IOException.class, () -> RvnSeedResolver.parse("seed.example", answer, 1));
+        assertEquals(List.of(), RvnSeedResolver.parse("seed.example",
+                "{\"Status\":0,\"TC\":false,\"Question\":[{\"name\":\"seed.example\",\"type\":28}]}", 28));
+    }
+    @Test void addressFamiliesAlternateAndIpv6LiteralsBypassDns() throws Exception {
+        assertEquals(List.of("2001:db8::1", "203.0.113.1", "2001:db8::2", "203.0.113.2", "203.0.113.3"),
+                RvnSeedResolver.interleave(List.of("203.0.113.1", "203.0.113.2", "203.0.113.3", "2001:db8::1", "2001:db8::2")));
+        try (var resolver = new RvnSeedResolver(h -> { throw new AssertionError("Literal must bypass DNS"); }, null)) {
+            assertTrue(resolver.resolve("2001:db8::7").getFirst().contains(":"));
+        }
+    }
     private static final String ANSWER = """
         {"Status":0,"TC":false,"Question":[{"name":"seed.example.","type":1}],
          "Answer":[{"name":"seed.example.","type":1,"TTL":300,"data":"203.0.113.7"},

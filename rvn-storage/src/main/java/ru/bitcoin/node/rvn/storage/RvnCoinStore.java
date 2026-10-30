@@ -51,6 +51,12 @@ public final class RvnCoinStore implements RvnCoinView, RvnAssetRulesView, AutoC
     }
 
     public RvnCoinStore(Path directory, RvnHash256 genesis, RvnFlatFileStore undoFiles) throws IOException {
+        this(directory, genesis, undoFiles, 256);
+    }
+
+    /** Native block cache is outside the Java heap; synchronous commits remain enabled. */
+    public RvnCoinStore(Path directory, RvnHash256 genesis, RvnFlatFileStore undoFiles, int cacheMiB) throws IOException {
+        if (cacheMiB < 16 || cacheMiB > 4096) throw new IllegalArgumentException("RVN coin cache MiB must be 16..4096");
         this.undoFiles = undoFiles;
         this.genesis = Objects.requireNonNull(genesis);
         byte[] identity = ("RVN-NATIVE-COINS-1\n" + genesis + "\n").getBytes(StandardCharsets.US_ASCII);
@@ -58,7 +64,7 @@ public final class RvnCoinStore implements RvnCoinView, RvnAssetRulesView, AutoC
         byte[] legacyRulesSchema = ("RVN-COINS-ASSETS-3\n" + genesis + "\n").getBytes(StandardCharsets.US_ASCII);
         byte[] legacyAssetSchema = ("RVN-COINS-ASSETS-2\n" + genesis + "\n").getBytes(StandardCharsets.US_ASCII);
         guard(directory.toAbsolutePath().normalize(), identity);
-        Cache openedCache = new LRUCache(256L * 1024 * 1024, -1, true);
+        Cache openedCache = new LRUCache(cacheMiB * 1024L * 1024, -1, true);
         Options openedOptions = new Options().setCreateIfMissing(true).setParanoidChecks(true)
                 .setWriteBufferSize(32L * 1024 * 1024).setMaxWriteBufferNumber(2)
                 .setTableFormatConfig(new BlockBasedTableConfig().setBlockCache(openedCache).setCacheIndexAndFilterBlocks(true));

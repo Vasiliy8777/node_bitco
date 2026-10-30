@@ -11,15 +11,29 @@ ravencoin:
   sync:
     enabled: ${RVN_SYNC_ENABLED:false}
     blocks-enabled: ${RVN_SYNC_BLOCKS:false}
-    # Bootstrap peers checked 2026-10-24; DNS seeds remain available afterward.
+    # Discover verified headers to a recent peer tip before downloading new bodies.
+    headers-first: ${RVN_SYNC_HEADERS_FIRST:true}
+    # Independent CPU light verifiers, each retaining one epoch cache; 1..8.
+    pow-workers: ${RVN_SYNC_POW_WORKERS:4}
+    # Share the mining GPU context; starts only after mandatory CUDA self-tests.
+    gpu-pow-enabled: ${RVN_SYNC_GPU_POW:${ravencoin.mining.cuda.enabled:false}}
+    # IPv6 bootstrap handshake/getheaders checked 2026-10-28, from RavenProject's
+    # src/chainparamsseeds.h. DNS seeds may currently return only IPv4 addresses.
     # Peer discovery is untrusted: every header/body is independently checked.
-    peers: ${RVN_SYNC_PEERS:79.137.67.110,51.79.161.39,5.196.79.95,seed-raven.bitactivate.com,seed-raven.ravencoin.com,seed-raven.ravencoin.org}
+    peers: ${RVN_SYNC_PEERS:2602:ffb8::208:72:56:214,51.79.161.39,79.137.67.110,5.196.79.95,seed-raven.bitactivate.com,seed-raven.ravencoin.com,seed-raven.ravencoin.org}
     response-timeout-ms: 30000
-    poll-ms: 10000
+    poll-ms: ${RVN_SYNC_POLL_MS:2000}
     # Prefer body download/replay when verified headers already lead by this much.
     header-lead-blocks: ${RVN_SYNC_HEADER_LEAD_BLOCKS:4096}
+    # Always request more headers after at most this many body batches.
+    body-batches-per-header: ${RVN_SYNC_BODY_BATCHES_PER_HEADER:4}
+    # Rotate after two slow body batches, excluding local checks/writes.
+    # At least 5 s transport allowance per batch; 0 disables slow-peer rotation.
+    minimum-peer-kib-per-second: ${RVN_SYNC_MINIMUM_PEER_KIB_PER_SECOND:64}
     # The receive queue keeps its 32 MiB bound; budget failures reduce this window.
-    block-in-flight: ${RVN_SYNC_BLOCK_IN_FLIGHT:16}
+    block-in-flight: ${RVN_SYNC_BLOCK_IN_FLIGHT:32}
+    # Native RocksDB cache, outside -Xmx. Does not change durability.
+    coin-cache-mib: ${RVN_SYNC_COIN_CACHE_MIB:1024}
     # Fallback for broken system DNS; only peer addresses, never trusted chain data.
     # An empty RVN_SYNC_DOH disables HTTPS DNS.
     dns-over-https: '${RVN_SYNC_DOH:https://dns.google/resolve}'
@@ -30,7 +44,8 @@ ravencoin:
     # bypass initial block download or authorize work on a header-only tip.
     enabled: ${RVN_MINING_ENABLED:false}
     address: ${RVN_MINING_ADDRESS:}
-    batch-size: ${RVN_MINING_BATCH_SIZE:4096}
+    # Amortize Java/Python/CUDA overhead; at most 65536 nonce per call.
+    batch-size: ${RVN_MINING_BATCH_SIZE:65536}
     cuda:
       # Enables the worker and real GPU Core-vector tests. Live work additionally
       # requires mining.enabled and every validation/readiness gate.
@@ -51,7 +66,8 @@ ravencoin:
     canonical-asset-replay-enabled: ${RVN_CANONICAL_ASSET_REPLAY:false}
   pow:
     self-test-enabled: ${RVN_POW_SELF_TEST:false}
-    cached-dag-items: 1024
+    # 16 MiB of DAG payload per CPU verifier, plus map overhead and light-cache.
+    cached-dag-items: ${RVN_CACHED_DAG_ITEMS:65536}
   p2p:
     probe-enabled: ${RVN_P2P_PROBE:false}
     host: ${RVN_P2P_HOST:127.0.0.1}

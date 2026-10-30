@@ -7,6 +7,7 @@ import miner
 from decimal import Decimal
 from miner import Connection, DIFF1, MAX_TARGET, compact_target, difficulty_target, header_for
 from cuda_backend import sha256d, CudaHasher
+from nonce_permutation import extra_nonce, inverse32, mix32
 
 
 class ProtocolTest(unittest.TestCase):
@@ -69,12 +70,13 @@ class WorkCacheTest(unittest.TestCase):
             if events and len(calls) in events:
                 events[len(calls)](connection)
             return [], False
-        gpu = SimpleNamespace(search=search)
+        gpu = SimpleNamespace(search_permuted=search)
         args = SimpleNamespace(host='unused', port=0, worker='test', max_blocks=0,
                                block_only=False, batch_size=batch)
         with patch.object(miner, 'Connection', return_value=connection), \
              patch.object(miner, 'header_for', wraps=header_for) as headers, \
-             patch.object(miner, 'difficulty_target', wraps=difficulty_target) as targets:
+             patch.object(miner, 'difficulty_target', wraps=difficulty_target) as targets, \
+             patch.object(miner.secrets, 'randbits', return_value=0):
             with self.assertRaises(StopIteration):
                 miner.mine(gpu, args)
             return calls, headers.call_count, targets.call_count
@@ -90,7 +92,7 @@ class WorkCacheTest(unittest.TestCase):
         self.assertEqual((2, 1), (headers, targets))
         self.assertEqual([0, 1 << 31, 0], [c[2] for c in calls])
         self.assertNotEqual(calls[0][0], calls[2][0])
-        self.assertEqual(header_for(self.job(), '03', '00000001'), calls[2][0])
+        self.assertEqual(header_for(self.job(), '03', extra_nonce(1, 4, 0)), calls[2][0])
 
     def test_new_time_version_bits_parent_and_merkle_rebuild_work(self):
         for field, value in [(1, '01'*32), (4, ['01'*32]), (5, '20000001'),
@@ -105,7 +107,7 @@ class WorkCacheTest(unittest.TestCase):
                 self.assertEqual(0, calls[2][2])
                 new_job = self.job()
                 new_job[field] = value
-                self.assertEqual(header_for(new_job, '03', '00000000'), calls[2][0])
+                self.assertEqual(header_for(new_job, '03', extra_nonce(1, 4, 0)), calls[2][0])
 
     def test_new_job_id_and_difficulty_reuse_header_but_update_target(self):
         def notify(connection):
@@ -117,7 +119,7 @@ class WorkCacheTest(unittest.TestCase):
         self.assertEqual((1, 2), (headers, targets))
         self.assertEqual(calls[0][0], calls[2][0])
         self.assertEqual(DIFF1 // 2, calls[2][1])
-        self.assertNotEqual(0, calls[2][2])
+        self.assertEqual(2 * 2097152, calls[2][2])
 
     def test_changed_extranonce_prefix_and_size_rebuild_header(self):
         def notify(connection):
@@ -126,7 +128,7 @@ class WorkCacheTest(unittest.TestCase):
             connection.generation += 1
         calls, headers, targets = self.run_mine(events={2: notify})
         self.assertEqual(2, headers)
-        self.assertEqual(header_for(self.job(), '0304', '00'*8), calls[2][0])
+        self.assertEqual(header_for(self.job(), '0304', extra_nonce(1, 8, 0)), calls[2][0])
 
     def test_cuda_uploads_target_only_when_it_changes(self):
         gpu = CudaHasher.__new__(CudaHasher)

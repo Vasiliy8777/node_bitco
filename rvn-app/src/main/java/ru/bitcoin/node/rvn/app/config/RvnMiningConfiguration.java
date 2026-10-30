@@ -18,12 +18,14 @@ public class RvnMiningConfiguration {
             RvnMainnetHeaderChain chain, RvnNativeBlockReplay replay, RvnHeaderSyncService sync,
             RvnMiningSettings settings,
             @Value("${ravencoin.validation.canonical-asset-replay-enabled:false}") boolean assets,
-            @Value("${ravencoin.mining.batch-size:4096}") int batchSize) {
+            @Value("${ravencoin.mining.batch-size:65536}") int batchSize) {
         if (!assets) throw new IllegalArgumentException("RVN mining requires historical asset replay");
         var backend = new RvnEmptyBlockMiningBackend(headers, coins, chain, replay, settings.requirePayout(),
                 replay::completeHistoricalValidation, sync::miningPeerReady,
                 () -> System.currentTimeMillis() / 1000, sync::publishMinedBlock);
-        var miner = new RvnSoloMining(backend, worker::search, () -> System.currentTimeMillis() / 1000, batchSize);
+        var miner = new RvnSoloMining(backend, RvnSoloMining.permutedSearch(worker), () -> System.currentTimeMillis() / 1000, batchSize);
+        org.slf4j.LoggerFactory.getLogger(RvnMiningConfiguration.class)
+                .info("RVN nonce order: bijective64 on GPU; extraNonce: keyed uint64 bijection");
         return new RvnMiningService(miner, worker);
     }
 }

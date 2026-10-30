@@ -5,7 +5,7 @@ import ru.bitcoin.node.rvn.chain.*;
 import ru.bitcoin.node.rvn.consensus.*;
 import ru.bitcoin.node.rvn.storage.*;
 import java.io.*;
-import java.security.SecureRandom;
+import ru.bitcoin.node.common.ExtraNonceSequence;
 import java.util.*;
 import java.util.function.*;
 
@@ -24,7 +24,7 @@ public final class RvnEmptyBlockMiningBackend implements RvnSoloMining.Backend {
     private final BooleanSupplier peerReady;
     private final LongSupplier clock;
     private final Relay relay;
-    private long extraNonce = new SecureRandom().nextLong() >>> 1;
+    private final ExtraNonceSequence extraNonces = new ExtraNonceSequence();
     private long generation;
     private RvnSoloMining.Job active;
 
@@ -50,7 +50,7 @@ public final class RvnEmptyBlockMiningBackend implements RvnSoloMining.Backend {
             var parent = headers.best();
             long now = clock.getAsLong();
             long timestamp = Math.max(now, median(parent) + 1);
-            if (timestamp >= now + 30) return Optional.empty();
+            if (timestamp > now + 720) return Optional.empty();
             if (timestamp < ru.bitcoin.node.rvn.protocol.RvnActivation.MAINNET_KAWPOW_TIME)
                 return Optional.empty();
             List<RvnStoredHeader> history = new ArrayList<>(); history.add(parent);
@@ -67,11 +67,12 @@ public final class RvnEmptyBlockMiningBackend implements RvnSoloMining.Backend {
             } catch (UncheckedIOException e) { throw e.getCause(); }
             // Core's versionbits top bits after assets activation; no invented votes.
             var template = RvnBlockTemplateBuilder.build(0x30000000, parent.id().wire(), parent.height() + 1,
-                    timestamp, bits, extraNonce, payout, List.of(), 0, true);
-            extraNonce = Math.incrementExact(extraNonce);
+                    timestamp, bits, extraNonces.next(), payout, List.of(), 0, true);
             RvnNativeTransactionChecks.block(template, context(parent), true, coins);
+            // No periodic job expiry. Parent identity and ready() are checked
+            // around every GPU batch; unchanged-parent mainnet DGW stays fixed.
             active = new RvnSoloMining.Job(generation = Math.incrementExact(generation), template,
-                    RvnMainnetDifficulty.POW_LIMIT, now + 30);
+                    RvnMainnetDifficulty.POW_LIMIT, Long.MAX_VALUE);
             return Optional.of(active);
         } } }
     }
@@ -80,6 +81,7 @@ public final class RvnEmptyBlockMiningBackend implements RvnSoloMining.Backend {
     }
     private boolean currentLocked(RvnSoloMining.Job job) throws IOException {
         return active == job && ready() && clock.getAsLong() < job.expiresAtSeconds()
+                && job.template().header().timestamp() <= clock.getAsLong() + 720
                 && headers.best().id().equals(new RvnHash256(job.template().header().previousHashWire()));
     }
     private boolean ready() throws IOException {

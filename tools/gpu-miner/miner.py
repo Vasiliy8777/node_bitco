@@ -6,8 +6,10 @@ import select
 import socket
 import struct
 import time
+import secrets
 from decimal import Decimal
 from cuda_backend import CudaHasher, sha256d
+from nonce_permutation import extra_nonce, inverse32, mix32
 
 DIFF1 = 0xffff << 208
 MAX_TARGET = (1 << 256) - 1
@@ -162,6 +164,28 @@ def self_test(gpu):
             continue
         raise RuntimeError('CUDA accepted an invalid nonce range')
     print('CUDA self-test passed: 513 hashes including genesis, endian/target, nonce boundary and result overflow', flush=True)
+    for header in (genesis, os.urandom(80)):
+        key = int.from_bytes(sha256d(header[:76])[:4], 'big')
+        for start in (0, 0xffffff80):
+            nonces = [mix32(start+i+key) for i in range(128)]
+            expected = [sha256d(header[:76] + struct.pack('<I', n)) for n in nonces]
+            target = int.from_bytes(expected[117], 'little')
+            wanted = {n for n, h in zip(nonces, expected) if int.from_bytes(h, 'little') <= target}
+            found, overflow = gpu.search_permuted(header, target, start, 128)
+            if overflow or set(found) != wanted:
+                raise RuntimeError('CUDA permuted nonces differ from CPU SHA-256d')
+    key = int.from_bytes(sha256d(genesis[:76])[:4], 'big')
+    counter = inverse32(0x7c2bac1d, key)
+    if gpu.search_permuted(genesis, compact_target('1d00ffff'), counter, 1) != ([0x7c2bac1d], False):
+        raise RuntimeError('CUDA permuted genesis proof mismatch')
+    found, overflow = gpu.search_permuted(genesis, MAX_TARGET, 0, 256)
+    if not overflow or len(found) != gpu.CAPACITY:
+        raise RuntimeError('CUDA permuted overflow mismatch')
+    first, overflow1 = gpu.search_permuted(genesis, MAX_TARGET, 0, 128)
+    second, overflow2 = gpu.search_permuted(genesis, MAX_TARGET, 128, 128)
+    if overflow1 or overflow2 or len(set(first + second)) != 256:
+        raise RuntimeError('CUDA permuted retry subranges overlap or skip nonces')
+    print('CUDA permutation PASS: CPU hashes/targets, uint32 boundary, known genesis nonce', flush=True)
 
 
 def mine(gpu, args):
@@ -172,7 +196,8 @@ def mine(gpu, args):
             connection = Connection(args.host, args.port)
             connection.send('mining.subscribe', ['bitcoin-node-cuda/1.0'])
             connection.send('mining.authorize', [args.worker, os.environ.get('BITCOIN_STRATUM_PASSWORD', '')])
-            generation, extra2, nonce = -1, 0, 0
+            generation, extra2, nonce = -1, -1, 0
+            extra_key = secrets.randbits(256)
             material = None
             header = None
             batch = args.batch_size
@@ -190,7 +215,10 @@ def mine(gpu, args):
                 if generation != connection.generation:
                     next_material = json.dumps(connection.job[1:8]) + connection.extra1 + ':' + str(connection.extra2_size)
                     if next_material != material:
-                        extra2, nonce, material = 0, 0, next_material
+                        extra2 += 1
+                        if extra2 >= 1 << (8 * connection.extra2_size):
+                            raise ConnectionError('Extranonce exhausted; reconnecting')
+                        nonce, material = 0, next_material
                         header = None
                     job = connection.job
                     network_target = compact_target(job[6])
@@ -200,14 +228,24 @@ def mine(gpu, args):
                     generation = connection.generation
                     retry = 1
                 if header is None:
-                    extra = extra2.to_bytes(connection.extra2_size, 'big').hex()
+                    extra = extra_nonce(extra2, connection.extra2_size, extra_key)
                     header = header_for(job, connection.extra1, extra)
                     prefix = header[:76]
                 count = min(batch, (1 << 32) - nonce)
-                found, overflow = gpu.search(header, target, nonce, count)
+                found, overflow = gpu.search_permuted(header, target, nonce, count)
                 hashes += count
                 connection.pump(0)
                 if generation != connection.generation:
+                    # A new wire id/difficulty may retain exactly the same header.
+                    # Consume this completed range instead of silently hashing it twice.
+                    if not overflow:
+                        nonce += count
+                        if nonce == 1 << 32:
+                            nonce = 0
+                            extra2 += 1
+                            header = None
+                            if extra2 == 1 << (8 * connection.extra2_size):
+                                raise ConnectionError('Extranonce exhausted; reconnecting')
                     continue
                 if overflow:
                     batch = max(1, count // 2)
@@ -280,11 +318,12 @@ def main():
             hashes, start, nonce = 0, time.monotonic(), 0
             while time.monotonic() - start < args.benchmark_seconds:
                 count = min(args.batch_size, (1 << 32) - nonce)
-                gpu.search(header, 0, nonce, count)
+                gpu.search_permuted(header, 0, nonce, count)
                 hashes += count
                 nonce = (nonce + count) % (1 << 32)
             print(f'CUDA benchmark: {hashes/(time.monotonic()-start)/1e6:.2f} MH/s', flush=True)
         else:
+            print('Nonce order: bijective32 on GPU; extraNonce: keyed bijection without counter resets', flush=True)
             mine(gpu, args)
 
 

@@ -65,21 +65,39 @@ public final class RvnFlatFileStore implements AutoCloseable {
 
     /** Immutable opaque reference: segment, payload offset, length and checksum. */
     public synchronized byte[] append(byte[] supplied) throws IOException {
+        return appendBatch(List.of(supplied)).getFirst();
+    }
+
+    /** Every affected segment is forced before any reference is returned.
+     * Batching amortizes HDD flushes without publishing unflushed records. */
+    public synchronized List<byte[]> appendBatch(List<byte[]> supplied) throws IOException {
         ensureOpen(); Objects.requireNonNull(supplied);
-        if (supplied.length < 1 || supplied.length > maximum) throw new IOException("RVN archive payload limit");
-        byte[] payload = supplied.clone(), hash = RvnWire.doubleSha(payload);
+        if (supplied.isEmpty() || supplied.size() > 128) throw new IOException("RVN archive batch count");
+        var payloads = new ArrayList<byte[]>(supplied.size()); long total = 0;
+        for (byte[] bytes : supplied) {
+            if (bytes == null || bytes.length < 1 || bytes.length > maximum) throw new IOException("RVN archive payload limit");
+            total += bytes.length;
+            if (supplied.size() > 1 && total > 32L * 1024 * 1024) throw new IOException("RVN archive batch byte limit");
+            payloads.add(bytes.clone());
+        }
+        var references = new ArrayList<byte[]>(payloads.size());
         try {
-            if (writer == null) writer = FileChannel.open(path(segment), StandardOpenOption.CREATE, StandardOpenOption.READ, StandardOpenOption.WRITE);
-            if (writer.size() + HEADER + payload.length > segmentBytes && writer.size() != 0) {
-                writer.close(); writer = null;
-                if (++segment > 99_999_999) throw new IOException("RVN archive segment limit");
-                writer = FileChannel.open(path(segment), StandardOpenOption.CREATE, StandardOpenOption.READ, StandardOpenOption.WRITE);
+            for (byte[] payload : payloads) {
+                byte[] hash = RvnWire.doubleSha(payload);
+                if (writer == null) writer = FileChannel.open(path(segment), StandardOpenOption.CREATE, StandardOpenOption.READ, StandardOpenOption.WRITE);
+                if (writer.size() + HEADER + payload.length > segmentBytes && writer.size() != 0) {
+                    writer.force(true);
+                    writer.close(); writer = null;
+                    if (++segment > 99_999_999) throw new IOException("RVN archive segment limit");
+                    writer = FileChannel.open(path(segment), StandardOpenOption.CREATE, StandardOpenOption.READ, StandardOpenOption.WRITE);
+                }
+                long offset = writer.size(); writer.position(offset);
+                writeFully(writer, ByteBuffer.allocate(HEADER).putInt(MAGIC).putInt(payload.length).put(hash).flip());
+                writeFully(writer, ByteBuffer.wrap(payload));
+                references.add(ByteBuffer.allocate(REFERENCE).putInt(segment).putLong(offset + HEADER).putInt(payload.length).put(hash).array());
             }
-            long offset = writer.size(); writer.position(offset);
-            writeFully(writer, ByteBuffer.allocate(HEADER).putInt(MAGIC).putInt(payload.length).put(hash).flip());
-            writeFully(writer, ByteBuffer.wrap(payload));
             writer.force(true);
-            return ByteBuffer.allocate(REFERENCE).putInt(segment).putLong(offset + HEADER).putInt(payload.length).put(hash).array();
+            return List.copyOf(references);
         } catch (IOException e) { failed = true; throw e; }
     }
 

@@ -22,13 +22,22 @@ public final class RvnKawpowLightEngine implements RvnKawpowMixEngine {
         int[] seed = RvnKawpowHash.seed(headerHash, nonce);
         long requested = RvnKawpowEpoch.fromHeight(height);
         if (rounds == null || epoch != requested) {
-            rounds = null;
-            var dag = RvnKawpowLightDag.forEpoch(requested, maxCachedItems);
-            rounds = new RvnProgpowRoundEngine(dag, RvnProgpowL1Cache.fromDag(dag));
-            epoch = requested;
+            prepareEpoch(requested, RvnKawpowCache.forEpoch(requested));
         }
         byte[] mix = rounds.calculate(height, seed[0], seed[1]);
         return new Computation(mix, RvnKawpowHash.finish(seed, mix));
+    }
+
+    /** Reuse a locally generated immutable cache, never an imported GPU dataset.
+     * Epoch provenance excludes reduced test caches and mismatched seeds. */
+    synchronized void prepareEpoch(long requested, RvnKawpowCache cache) {
+        if (cache == null || requested < 0 || cache.epoch() != requested
+                || cache.size() != RvnKawpowDatasetSizes.cacheBytes(requested) / RvnKawpowCache.ROW_BYTES)
+            throw new IllegalArgumentException("Invalid prepared KawPoW light-cache epoch");
+        rounds = null;
+        var dag = new RvnKawpowLightDag(cache, RvnKawpowDatasetSizes.datasetBytes(requested), maxCachedItems);
+        rounds = new RvnProgpowRoundEngine(dag, RvnProgpowL1Cache.fromDag(dag));
+        epoch = requested;
     }
 
     @Override

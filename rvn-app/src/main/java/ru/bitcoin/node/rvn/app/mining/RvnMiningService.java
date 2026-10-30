@@ -35,11 +35,26 @@ public final class RvnMiningService implements SmartLifecycle, ApplicationListen
     private void run() {
         RvnSoloMining.State previous = null;
         long lastReport = System.nanoTime(), hashes = 0, accepted = 0;
+        long lastStats = lastReport, intervalHashes = 0, sessionHashes = 0;
         try {
             while (running) {
                 var progress = miner.advance();
                 hashes += progress.hashes(); accepted += progress.accepted();
+                intervalHashes += progress.hashes(); sessionHashes += progress.hashes();
                 long now = System.nanoTime();
+                // Keep a wall-clock measurement window across template refreshes,
+                // new chain tips and idle periods. State logs reset independently.
+                long statsNanos = now - lastStats;
+                if (statsNanos >= java.util.concurrent.TimeUnit.SECONDS.toNanos(30) || progress.accepted() > 0) {
+                    double megaHashesPerSecond = statsNanos > 0 ? intervalHashes * 1000.0 / statsNanos : 0;
+                    var stats = miner.statistics();
+                    log.info("RVN mining stats: hashrate={} MH/s, targetCandidatesSession={}, staleCandidatesSession={}, minedBlocksSession={}, relayedBlocksSession={}, admissionFailuresSession={}, relayFailuresSession={}, hashesSession={}, intervalMs={}",
+                            String.format(java.util.Locale.ROOT, "%.3f", megaHashesPerSecond), stats.targetCandidates(),
+                            stats.staleCandidates(), stats.locallyAcceptedBlocks(), stats.relayedBlocks(),
+                            stats.admissionFailures(), stats.relayFailures(), sessionHashes,
+                            java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(statsNanos));
+                    lastStats = now; intervalHashes = 0;
+                }
                 if (progress.state() != previous || now - lastReport >= java.util.concurrent.TimeUnit.SECONDS.toNanos(30)) {
                     if (progress.state() == RvnSoloMining.State.WAITING)
                         log.info("RVN solo miner: WAITING; {}", miner.waitingReason());
@@ -48,15 +63,16 @@ public final class RvnMiningService implements SmartLifecycle, ApplicationListen
                     previous = progress.state();
                     lastReport = now; hashes = 0; accepted = 0;
                 }
-                if (progress.state() == RvnSoloMining.State.WAITING || progress.state() == RvnSoloMining.State.STALE)
-                    Thread.sleep(250);
+                if (progress.state() == RvnSoloMining.State.WAITING) Thread.sleep(25);
+                else if (progress.state() == RvnSoloMining.State.STALE && progress.hashes() == 0)
+                    Thread.sleep(1); // Avoid spinning if a job changes before any GPU work starts.
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } catch (Exception e) {
             // A broken worker/validator must not produce further work. Restart
             // requires new self-tests; durable relay markers survive this exit.
-            if (running) log.error("RVN solo miner stopped after a local failure", e);
+            if (running) log.error("RVN solo miner stopped after a local failure; session statistics=" + miner.statistics(), e);
         } finally { running = false; closeWorker(); }
     }
     @Override public void stop() {

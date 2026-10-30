@@ -14,10 +14,11 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.*;
 
 class RvnPeerSessionTest {
-    @Test
-    void persistentSessionReceivesMessageAndAnswersPing() throws Exception {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"127.0.0.1", "::1"})
+    void persistentSessionReceivesMessageAndAnswersPing(String host) throws Exception {
         AtomicReference<Throwable> serverError = new AtomicReference<>();
-        try (ServerSocket server = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+        try (ServerSocket server = new ServerSocket(0, 1, InetAddress.getByName(host))) {
             Thread peer = new Thread(() -> {
                 try (Socket socket = server.accept()) {
                     socket.setSoTimeout(3000);
@@ -27,9 +28,13 @@ class RvnPeerSessionTest {
                     RvnWire.write(out, RvnNetwork.REGTEST,
                             new RvnMessage("version", RvnVersion.outbound(70028, 18444, 0)));
                     assertEquals("verack", RvnWire.read(in, RvnNetwork.REGTEST).command());
-                    RvnWire.write(out, RvnNetwork.REGTEST, new RvnMessage("verack", new byte[0]));
                     byte[] nonce = {1, 2, 3, 4, 5, 6, 7, 8};
-                    RvnWire.write(out, RvnNetwork.REGTEST, new RvnMessage("ping", nonce));
+                    // A single read may prefetch ping while finishing the
+                    // handshake. The persistent reader must keep that buffer.
+                    var combined = new java.io.ByteArrayOutputStream();
+                    RvnWire.write(combined, RvnNetwork.REGTEST, new RvnMessage("verack", new byte[0]));
+                    RvnWire.write(combined, RvnNetwork.REGTEST, new RvnMessage("ping", nonce));
+                    out.write(combined.toByteArray()); out.flush();
                     assertArrayEquals(nonce, RvnWire.read(in, RvnNetwork.REGTEST).payload());
                     RvnWire.write(out, RvnNetwork.REGTEST, new RvnMessage("inv", new byte[]{42}));
                     // Wait for the client to close before ending the server thread.
@@ -38,7 +43,7 @@ class RvnPeerSessionTest {
             });
             peer.start();
             try (RvnPeerSession session = RvnPeerSession.connect(
-                    RvnNetwork.REGTEST, "127.0.0.1", server.getLocalPort(), 3000, 4)) {
+                    RvnNetwork.REGTEST, host, server.getLocalPort(), 3000, 4)) {
                 assertEquals(70028, session.peerVersion());
                 RvnMessage message = session.poll(2500);
                 assertNotNull(message);

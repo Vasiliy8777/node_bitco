@@ -1,0 +1,22 @@
+spring:
+  application:
+    name: rvn-gpu-target-benchmark
+  main:
+    web-application-type: none
+
+ravencoin:
+  benchmark:
+    snapshot: '${RVN_BENCHMARK_SNAPSHOT:target/rvn-real-target-20261029/snapshot-latest.bin}'
+    worker: '${RVN_CUDA_WORKER:rvn-pow/native/cuda/worker.py}'
+    python: '${RVN_CUDA_PYTHON:python}'
+    output-directory: '${RVN_BENCHMARK_OUTPUT:target/rvn-benchmarks}'
+    seconds: ${RVN_BENCHMARK_SECONDS:3600}
+    dry-run: false
+
+logging:
+  file:
+    name: '${ravencoin.benchmark.output-directory}/benchmark.log'
+  logback:
+    rollingpolicy:
+      max-file-size: 20MB
+      max-history: 14

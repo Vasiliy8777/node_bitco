@@ -24,7 +24,7 @@ public final class RvnBlockClient {
     public static void requestBatch(RvnPeerSession session, List<Expected> supplied, long timeoutMs,
                                     int inFlight, Receiver receiver) throws IOException, InterruptedException {
         var expected = List.copyOf(supplied);
-        if (expected.isEmpty() || expected.size() > 128 || timeoutMs < 1 || timeoutMs > 120000 || inFlight < 1 || inFlight > 16)
+        if (expected.isEmpty() || expected.size() > 512 || timeoutMs < 1 || timeoutMs > 120000 || inFlight < 1 || inFlight > 32)
             throw new IllegalArgumentException("RVN block batch parameters");
         var all = new HashSet<String>();
         for (var item : expected) if (!all.add(HexFormat.of().formatHex(item.header().serialize())))
@@ -32,13 +32,19 @@ public final class RvnBlockClient {
         record Pending(Expected expected, long deadline) {}
         var pending = new LinkedHashMap<String, Pending>(); int sent = 0, received = 0, ignored = 0;
         while (received < expected.size()) {
-            while (sent < expected.size() && pending.size() < inFlight) {
-                var item = expected.get(sent++);
+            // Refill in groups, so Core can serve several blocks from one
+            // getdata rather than receiving one tiny P2P message per block.
+            if (sent < expected.size() && pending.size() <= inFlight / 2) {
+                int count = Math.min(inFlight - pending.size(), expected.size() - sent);
                 var inventory = new ByteArrayOutputStream();
-                RvnCompactSize.write(inventory, 1); RvnWire.writeU32(inventory, 0x40000002L); inventory.writeBytes(item.id());
+                RvnCompactSize.write(inventory, count);
+                for (int i = 0; i < count; i++) {
+                    var item = expected.get(sent++);
+                    RvnWire.writeU32(inventory, 0x40000002L); inventory.writeBytes(item.id());
+                    pending.put(HexFormat.of().formatHex(item.header().serialize()),
+                            new Pending(item, System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs)));
+                }
                 session.send(new RvnMessage("getdata", inventory.toByteArray()));
-                pending.put(HexFormat.of().formatHex(item.header().serialize()),
-                        new Pending(item, System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs)));
             }
             long remaining = pending.values().stream().mapToLong(Pending::deadline).min().orElseThrow() - System.nanoTime();
             if (remaining <= 0) throw new IOException("Timed out waiting for pipelined RVN block");

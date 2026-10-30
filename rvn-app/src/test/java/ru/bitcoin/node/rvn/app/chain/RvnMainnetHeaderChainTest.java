@@ -29,10 +29,11 @@ public class RvnMainnetHeaderChainTest {
         return RvnBlockHeader.parse(raw, RvnActivation.MAINNET_KAWPOW_TIME);
     }
 
-    @Test
-    void contextualBatchRejectsWrongBitsTimeParentAndHeightWithoutPartialCommit() throws Exception {
-        try (var store = open(temp.resolve("headers"))) {
-            var chain = new RvnMainnetHeaderChain(store, TEST_POW, () -> 1515000000L);
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void contextualBatchRejectsWrongBitsTimeParentAndHeightWithoutPartialCommit(boolean parallel) throws Exception {
+        try (var pool = new RvnHeaderPowBatch(4, () -> TEST_POW); var store = open(temp.resolve("headers"))) {
+            var chain = new RvnMainnetHeaderChain(store, TEST_POW, () -> 1515000000L, parallel ? pool : null);
             byte[] first = child(RvnMainnetExpectedBits.GENESIS_ID, 1514999554L);
             byte[] second = child(new RvnHash256(RvnWire.doubleSha(first)), 1514999614L);
             byte[] badBits = second.clone(); RvnKawpowWords.writeLE(0x1e00fffe, badBits, 72);

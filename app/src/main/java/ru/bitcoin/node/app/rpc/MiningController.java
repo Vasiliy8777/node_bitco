@@ -56,9 +56,13 @@ public final class MiningController {
         ensureReady();
         String previous = request.get("longpollid") instanceof String id ? id : null;
         long deadline = System.nanoTime() + java.time.Duration.ofSeconds(30).toNanos();
-        while (previous != null && previous.equals(longPollId()) && System.nanoTime() < deadline) {
+        while (previous != null && System.nanoTime() < deadline) {
+            // Capture before comparing the id so a revision between comparison and
+            // wait cannot be missed. awaitRevision returns immediately on change.
+            long revision = validation.revision();
+            if (!previous.equals(longPollId())) break;
             ensureReady();
-            validation.awaitRevision(validation.revision(), 1_000);
+            validation.awaitRevision(revision, 100);
         }
         ensureReady();
         var snapshot = validation.miningSnapshot(

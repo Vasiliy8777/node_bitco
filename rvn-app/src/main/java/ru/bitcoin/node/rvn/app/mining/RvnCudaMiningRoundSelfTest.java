@@ -20,6 +20,7 @@ public final class RvnCudaMiningRoundSelfTest {
         var cpu = new RvnKawpowLightEngine(1024);
         boolean[] accepted = {false}, relayed = {false};
         var backend = new RvnSoloMining.Backend() {
+            public boolean diagnostic() { return true; }
             public Optional<RvnSoloMining.Job> next() { return accepted[0] ? Optional.empty() : Optional.of(job); }
             public boolean current(RvnSoloMining.Job value) { return !accepted[0] && value == job; }
             public Optional<RvnSoloMining.Accepted> accept(RvnSoloMining.Job value, RvnBlock block) throws IOException {
@@ -45,8 +46,18 @@ public final class RvnCudaMiningRoundSelfTest {
                 relayed[0] = true; // Deliberately no external network relay.
             }
         };
-        var miner = new RvnSoloMining(backend, worker::search, () -> timestamp, 4);
+        var miner = new RvnSoloMining(backend, RvnSoloMining.permutedSearch(worker), () -> timestamp, 4);
         for (int i = 0; i < 16 && !relayed[0]; i++) miner.advance();
         if (!accepted[0] || !relayed[0]) throw new IOException("GPU job self-test did not find and validate a candidate");
+    }
+
+    public static void main(String[] args) throws Exception {
+        if (args.length != 3) throw new IllegalArgumentException("worker.py temporary-directory python");
+        try (var worker = new RvnCudaKawpowWorker(args[2], java.nio.file.Path.of(args[0]),
+                java.nio.file.Path.of(args[1]), 0, 1L << 30)) {
+            RvnCudaKawpowSelfTest.run(worker);
+            run(worker, RvnPayoutAddress.parse("RXBurnXXXXXXXXXXXXXXXXXXXXXXWUo9FV", ru.bitcoin.node.rvn.protocol.RvnNetwork.MAINNET));
+            System.out.println("CUDA permuted mining round PASS: real GPU proof, independent CPU/native admission, no network relay");
+        }
     }
 }

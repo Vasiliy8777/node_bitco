@@ -5,6 +5,7 @@ import hashlib
 import os
 from pathlib import Path
 import struct
+from nonce_permutation import inverse32
 
 MASK = 0xffffffff
 INITIAL = (0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19)
@@ -153,6 +154,7 @@ class CudaHasher:
             data=(c.c_uint32*11)(*words)
             self._call('cuMemcpyHtoD_v2',self.data,data,c.sizeof(data))
             self.prepared=prefix
+            self.nonce_key=int.from_bytes(sha256d(prefix)[:4], 'big')
         if target is not None and target != self.prepared_target:
             if not 0<=target<1<<256: raise ValueError('Invalid target')
             words=(c.c_uint32*8)(*struct.unpack('>8I',target.to_bytes(32,'big')))
@@ -170,12 +172,22 @@ class CudaHasher:
         self._call('cuCtxSynchronize')
 
     def search(self,header,target,start,count):
+        return self._search(header,target,start,count,False)
+
+    def search_permuted(self,header,target,start,count):
+        return self._search(header,target,start,count,True)
+
+    def _search(self,header,target,start,count,permuted):
         self._range(start,count); self._prepare(header,target)
         self._call('cuMemsetD32_v2',self.results,0,1)
-        self._launch(self.search_function,count,[self.data,c.c_uint(start),c.c_uint(count),self.target,self.results,c.c_uint(self.CAPACITY)])
+        key=self.nonce_key if permuted else 0
+        self._launch(self.search_function,count,[self.data,c.c_uint(start),c.c_uint(count),self.target,self.results,c.c_uint(self.CAPACITY),c.c_uint(key),c.c_uint(int(permuted))])
         output=(c.c_uint32*(self.CAPACITY+1))()
         self._call('cuMemcpyDtoH_v2',output,self.results,c.sizeof(output))
-        return list(output[1:1+min(output[0],self.CAPACITY)]),output[0]>self.CAPACITY
+        found=list(output[1:1+min(output[0],self.CAPACITY)])
+        if len(set(found))!=len(found) or any(not start <= (inverse32(n,key) if permuted else n) < start+count for n in found):
+            raise RuntimeError('CUDA returned a duplicate/out-of-range nonce')
+        return found,output[0]>self.CAPACITY
 
     def hashes(self,header,start,count):
         self._range(start,count)

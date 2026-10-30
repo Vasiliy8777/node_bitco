@@ -39,7 +39,7 @@ public final class NodeLifecycleService
             );
 
     private static final Duration HEADER_RACE_RETRY_BACKOFF =
-            Duration.ofSeconds(1);
+            Duration.ofMillis(100);
 
     private final NodeValidationService validationService;
     private final NodeSyncInfrastructure syncInfrastructure;

@@ -35,11 +35,63 @@ public final class RvnCudaKawpowSelfTest {
                 || !worker.search(30000, vectorHeader, vectorNonce, 1, exactTarget.subtract(BigInteger.ONE)).candidates().isEmpty())
             throw new IOException("CUDA target equality/boundary mismatch");
         System.out.println("CUDA nonce/target boundary PASS");
+        long logical = ru.bitcoin.node.common.NoncePermutation.inverse64(vectorNonce,
+                ru.bitcoin.node.common.NoncePermutation.key64(vectorHeader));
+        var permutedVector = worker.searchPermuted(30000, vectorHeader, logical, 1, exactTarget);
+        if (permutedVector.overflow() || permutedVector.candidates().size() != 1
+                || permutedVector.candidates().getFirst().nonce() != vectorNonce
+                || !worker.searchPermuted(30000, vectorHeader, logical, 1, exactTarget.subtract(BigInteger.ONE)).candidates().isEmpty())
+            throw new IOException("CUDA permuted Core vector/target mismatch");
+        for (long start : new long[]{0, Long.MAX_VALUE - 1, -3L}) {
+            var permutationBoundary = worker.searchPermuted(30000, vectorHeader, start, 3, maximum);
+            if (permutationBoundary.overflow() || permutationBoundary.candidates().size() != 3)
+                throw new IOException("CUDA permuted uint64 boundary mismatch");
+        }
+        System.out.println("CUDA permutation PASS: Core proof, exact target, uint64 boundaries, CPU verified");
         long started = System.nanoTime();
         var bounded = worker.search(30000, vectorHeader, vectorNonce, 4096, BigInteger.ZERO);
         if (bounded.overflow()) throw new IOException("Unexpected CUDA zero-target overflow");
         System.out.printf(java.util.Locale.ROOT, "CUDA bounded batch tested=%d elapsedMs=%.1f%n",
                 bounded.tested(), (System.nanoTime() - started) / 1_000_000.0);
+        verifyBatch(worker);
+    }
+
+    private static void verifyBatch(RvnCudaKawpowWorker worker) throws IOException {
+        var hex = HexFormat.of();
+        long[] heights = {0, 49, 50, 30000};
+        String[] headers = {"00".repeat(32),
+                "63155f732f2bf556967f906155b510c917e48e99685ead76ea83f4eca03ab12b",
+                "9e7248f20914913a73d80a70174c331b1d34f260535ac3631d770e656b5dd922",
+                "d34519f72c97cae8892c277776259db3320820cb5279a299d0ef1e155e5c6454"};
+        String[] nonces = {"0", "7073c07", "76e482e", "005db8607994ff30"};
+        String[] mixes = {"6e97b47b134fda0c7888802988e1a373affeb28bcd813b6e9a0fc669c935d03a",
+                "d36f7e815ee09e74eceb9c96993a3d681edf2bf0921fc7bb710364042db99777",
+                "d6dc634ae837e2785b347648ea515e25e5d8821ae0b95e1c2a9c2d497e0dcfbd",
+                "de0348b69bf91dfe2c3d3dba6f0132e9048a5284e57b8d9d20adc5f3dc0d3236"};
+        String[] hashes = {"e601a7257a70dc48fccc97a7330d704d776047623b92883d77111fb36870f3d1",
+                "e7ced124598fd2500a55ad9f9f48e3569327fe50493c77a4ac9799b96efb9463",
+                "ab0ad7ef8d8ee317dd12d10310aceed7321d34fb263791c2de5776a6658d177e",
+                "c7953d848cda6e304f77b4c6d735645c8e8508a5e74c9e9814ef37b19087cd6c"};
+        var jobs = new java.util.ArrayList<RvnCudaKawpowWorker.Work>();
+        for (int i = 0; i < heights.length; i++) jobs.add(new RvnCudaKawpowWorker.Work(heights[i], hex.parseHex(headers[i]), Long.parseUnsignedLong(nonces[i], 16)));
+        var actual = worker.hashBatch(jobs);
+        for (int i = 0; i < heights.length; i++)
+            if (!hex.formatHex(actual.get(i).mix()).equals(mixes[i]) || !hex.formatHex(actual.get(i).hash()).equals(hashes[i]))
+                throw new IOException("CUDA generic verification Core vector failed at " + heights[i]);
+        // Multiple lanes/warps, changing periods, and unsigned nonce values.
+        jobs.clear();
+        for (int i = 0; i < 17; i++) {
+            byte[] header = new byte[32]; header[0] = (byte) i;
+            jobs.add(new RvnCudaKawpowWorker.Work(30000 + i, header, i == 0 ? -1L : i));
+        }
+        actual = worker.hashBatch(jobs);
+        var cpu = new RvnKawpowLightEngine(65536);
+        for (int i = 0; i < jobs.size(); i++) {
+            var job = jobs.get(i); var expected = cpu.compute(job.height(), job.headerHash(), job.nonce());
+            if (!java.util.Arrays.equals(expected.mixHash(), actual.get(i).mix()) || !java.util.Arrays.equals(expected.finalHash(), actual.get(i).hash()))
+                throw new IOException("CUDA generic verification CPU mismatch at " + job.height());
+        }
+        System.out.println("CUDA generic header verification PASS: Core vectors, periods, epochs, unsigned nonces, all diagnostic results checked on CPU");
     }
     private static void check(RvnCudaKawpowWorker worker, long height, String header, String nonce,
                               String mix, String hash) throws IOException {
@@ -56,6 +108,27 @@ public final class RvnCudaKawpowSelfTest {
         if (args.length != 3) throw new IllegalArgumentException("worker.py temporary-directory python-executable");
         try (var worker = new RvnCudaKawpowWorker(args[2], Path.of(args[0]), Path.of(args[1]), 0, 1L << 30)) {
             run(worker);
+            fullVerificationBatch(worker);
         }
+    }
+
+    /** Explicit standalone diagnostic: independently check all 2000 outputs,
+     * including hundreds of different programs. Not repeated at every startup. */
+    private static void fullVerificationBatch(RvnCudaKawpowWorker worker) throws IOException {
+        var jobs = new java.util.ArrayList<RvnCudaKawpowWorker.Work>();
+        for (int i = 0; i < 2000; i++) {
+            byte[] header = new byte[32]; RvnKawpowWords.writeLE(i, header, 0);
+            jobs.add(new RvnCudaKawpowWorker.Work(30000 + i, header, Integer.toUnsignedLong(i) << 32 | i));
+        }
+        long started = System.nanoTime(); var actual = worker.hashBatch(jobs);
+        double gpuMs = (System.nanoTime() - started) / 1_000_000.0;
+        var cpu = new RvnKawpowLightEngine(65536); started = System.nanoTime();
+        for (int i = 0; i < jobs.size(); i++) {
+            var job = jobs.get(i); var expected = cpu.compute(job.height(), job.headerHash(), job.nonce());
+            if (!java.util.Arrays.equals(expected.mixHash(), actual.get(i).mix()) || !java.util.Arrays.equals(expected.finalHash(), actual.get(i).hash()))
+                throw new IOException("CUDA full verification batch mismatch at " + job.height());
+        }
+        System.out.printf(java.util.Locale.ROOT, "CUDA full verification PASS count=2000 gpuWithAuditMs=%.1f independentCpuAllMs=%.1f%n",
+                gpuMs, (System.nanoTime() - started) / 1_000_000.0);
     }
 }

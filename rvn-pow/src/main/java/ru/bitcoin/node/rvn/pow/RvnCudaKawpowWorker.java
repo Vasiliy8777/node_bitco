@@ -1,5 +1,7 @@
 package ru.bitcoin.node.rvn.pow;
 
+import ru.bitcoin.node.common.NoncePermutation;
+
 import java.io.*;
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
@@ -21,7 +23,8 @@ public final class RvnCudaKawpowWorker implements AutoCloseable {
     private final Path temporary;
     private final int device;
     private final long reserve;
-    private final RvnKawpowLightEngine verifier = new RvnKawpowLightEngine(1024);
+    private final RvnKawpowLightEngine verifier;
+    private final java.security.SecureRandom auditRandom = new java.security.SecureRandom();
     private long epoch = -1;
     private volatile boolean closed;
 
@@ -33,11 +36,73 @@ public final class RvnCudaKawpowWorker implements AutoCloseable {
     public record Batch(List<Candidate> candidates, boolean overflow, int tested) {
         public Batch { candidates = List.copyOf(candidates); }
     }
+    public record Work(long height, byte[] headerHash, long nonce) {
+        public Work {
+            if (height < 0 || height > Integer.MAX_VALUE || headerHash == null || headerHash.length != 32)
+                throw new IllegalArgumentException("CUDA verification job");
+            headerHash = headerHash.clone();
+        }
+        @Override public byte[] headerHash() { return headerHash.clone(); }
+    }
+    public record Hash(byte[] mix, byte[] hash) {
+        public Hash {
+            if (mix == null || hash == null || mix.length != 32 || hash.length != 32) throw new IllegalArgumentException("CUDA verification hash size");
+            mix = mix.clone(); hash = hash.clone();
+        }
+        @Override public byte[] mix() { return mix.clone(); }
+        @Override public byte[] hash() { return hash.clone(); }
+    }
+
+    /** Computes every input on GPU. Audit every result in small diagnostic
+     * batches; in large batches independently recompute endpoints and two
+     * unpredictable samples per epoch group. Caller still checks every mix/target. */
+    public synchronized List<Hash> hashBatch(List<Work> supplied) throws IOException {
+        var jobs = List.copyOf(supplied);
+        if (jobs.isEmpty() || jobs.size() > 2000) throw new IllegalArgumentException("CUDA verification batch bounds");
+        ensureOpen(); var result = new ArrayList<Hash>(jobs.size());
+        for (int first = 0; first < jobs.size();) {
+            int end = first + 1;
+            long requested = RvnKawpowEpoch.fromHeight(jobs.get(first).height());
+            while (end < jobs.size() && RvnKawpowEpoch.fromHeight(jobs.get(end).height()) == requested) end++;
+            var group = jobs.subList(first, end); prepare(group.getFirst().height());
+            var hashes = exchange(() -> {
+                output.writeByte(3); output.writeInt(group.size());
+                for (var job : group) { output.writeInt((int) job.height()); output.writeLong(job.nonce()); output.write(job.headerHash()); }
+                output.flush(); status();
+                if (input.readInt() != group.size()) throw new IOException("CUDA verification response count mismatch");
+                var computed = new ArrayList<Hash>(group.size());
+                for (int i = 0; i < group.size(); i++) computed.add(new Hash(exact(32), exact(32)));
+                return computed;
+            }, Duration.ofSeconds(30));
+            var audit = new HashSet<Integer>();
+            if (group.size() <= 8) { for (int i = 0; i < group.size(); i++) audit.add(i); }
+            else {
+                audit.add(0); audit.add(group.size() - 1);
+                while (audit.size() < 4) audit.add(auditRandom.nextInt(group.size()));
+            }
+            try {
+                for (int index : audit) {
+                    ensureOpen();
+                    var job = group.get(index); var expected = verifier.compute(job.height(), job.headerHash(), job.nonce());
+                    var actual = hashes.get(index);
+                    if (!Arrays.equals(expected.mixHash(), actual.mix()) || !Arrays.equals(expected.finalHash(), actual.hash()))
+                        throw new IOException("CUDA header batch failed independent CPU audit at index " + (first + index));
+                }
+            } catch (IOException | RuntimeException e) { close(); throw e; }
+            result.addAll(hashes); first = end;
+        }
+        ensureOpen();
+        return List.copyOf(result);
+    }
 
     public RvnCudaKawpowWorker(String python, Path worker, Path temporary, int device, long reserve) throws IOException {
+        this(python, worker, temporary, device, reserve, 65536);
+    }
+    public RvnCudaKawpowWorker(String python, Path worker, Path temporary, int device, long reserve, int cacheItems) throws IOException {
         if (device < 0 || reserve < 256L * 1024 * 1024) throw new IllegalArgumentException("CUDA device/reserve");
         if (!Files.isRegularFile(worker)) throw new IOException("CUDA worker script not found: " + worker);
         this.temporary = temporary.toAbsolutePath(); this.device = device; this.reserve = reserve;
+        verifier = new RvnKawpowLightEngine(cacheItems);
         Files.createDirectories(this.temporary);
         process = new ProcessBuilder(python, "-u", worker.toAbsolutePath().toString(), "--binary")
                 .redirectError(ProcessBuilder.Redirect.INHERIT).start();
@@ -46,6 +111,15 @@ public final class RvnCudaKawpowWorker implements AutoCloseable {
     }
 
     public synchronized Batch search(long height, byte[] headerHash, long start, int count, BigInteger target) throws IOException {
+        return search(height, headerHash, start, count, target, false);
+    }
+
+    /** start/count identify logical counters; returned candidates contain actual permuted nonces. */
+    public synchronized Batch searchPermuted(long height, byte[] headerHash, long start, int count, BigInteger target) throws IOException {
+        return search(height, headerHash, start, count, target, true);
+    }
+
+    private Batch search(long height, byte[] headerHash, long start, int count, BigInteger target, boolean permuted) throws IOException {
         if (height < 0 || height > Integer.MAX_VALUE || headerHash == null || headerHash.length != 32
                 || count < 1 || count > 65536 || target == null || target.signum() < 0 || target.bitLength() > 256
                 || Long.compareUnsigned(start + count - 1L, start) < 0)
@@ -53,17 +127,19 @@ public final class RvnCudaKawpowWorker implements AutoCloseable {
         ensureOpen();
         prepare(height);
         byte[] header = headerHash.clone();
+        long key = NoncePermutation.key64(header);
         byte[] targetBytes = new byte[32], raw = target.toByteArray();
         System.arraycopy(raw, Math.max(0, raw.length - 32), targetBytes, Math.max(0, 32 - raw.length), Math.min(32, raw.length));
         var batch = exchange(() -> {
-            output.writeByte(2); output.writeInt((int) height); output.writeLong(start); output.writeInt(count);
+            output.writeByte(permuted ? 4 : 2); output.writeInt((int) height); output.writeLong(start); output.writeInt(count);
             output.write(header); output.write(targetBytes); output.flush(); status();
             boolean overflow = input.readBoolean(); int size = input.readInt();
             if (size < 0 || size > 128 || size > count) throw new IOException("Invalid CUDA result count");
             var candidates = new ArrayList<Candidate>(); var seen = new HashSet<Long>();
             for (int i = 0; i < size; i++) {
                 long nonce = input.readLong(); byte[] mix = exact(32), hash = exact(32);
-                if (Long.compareUnsigned(nonce - start, count) >= 0 || !seen.add(nonce))
+                long counter = permuted ? NoncePermutation.inverse64(nonce, key) : nonce;
+                if (Long.compareUnsigned(counter - start, count) >= 0 || !seen.add(nonce))
                     throw new IOException("CUDA returned duplicate/out-of-range nonce");
                 candidates.add(new Candidate(nonce, mix, hash));
             }
@@ -100,6 +176,7 @@ public final class RvnCudaKawpowWorker implements AutoCloseable {
             if (bytes != RvnKawpowDatasetSizes.datasetBytes(requested) / 256 * 256) {
                 close(); throw new IOException("CUDA DAG size mismatch");
             }
+            verifier.prepareEpoch(requested, cache);
             epoch = requested;
         } finally { Files.deleteIfExists(cacheFile); }
     }

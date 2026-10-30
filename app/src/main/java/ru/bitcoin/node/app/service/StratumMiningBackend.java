@@ -8,11 +8,10 @@ import ru.bitcoin.node.mempool.FeeRate;
 import ru.bitcoin.node.protocol.block.Block;
 import ru.bitcoin.node.protocol.network.*;
 import ru.bitcoin.node.stratum.job.*;
-import java.time.Duration;
 import java.util.*;
 import java.util.function.BooleanSupplier;
 
-/** Shares one validated candidate across sessions and throttles mempool-only refreshes. */
+/** Shares one validated candidate across sessions until its inputs change. */
 public final class StratumMiningBackend implements MiningBackend {
     private final NodeValidationService validation;
     private final NodeRelayService relay;
@@ -23,7 +22,6 @@ public final class StratumMiningBackend implements MiningBackend {
     private final long maximumWeight;
     private final FeeRate minimumFee;
     private MiningWork cached;
-    private long builtAt;
 
     public StratumMiningBackend(NodeValidationService validation, NodeRelayService relay, NetworkParameters parameters,
                                AdjustedTime time, BooleanSupplier ready, byte[] payout, long maximumWeight, FeeRate minimumFee) {
@@ -44,17 +42,20 @@ public final class StratumMiningBackend implements MiningBackend {
         if (!ready.getAsBoolean()) { cached = null; return Optional.empty(); }
         var tip = validation.activeTip();
         if (!isCurrent(tip.hash())) { cached = null; return Optional.empty(); }
-        long elapsed = System.nanoTime() - builtAt;
+        long now = time.currentTimeSeconds();
+        long minimumDifficultyTime = tip.header().timestamp().value() + 2 * parameters.targetSpacingSeconds();
         if (cached != null && cached.block().header().previousBlockHash().equals(tip.hash())
-                && elapsed < Duration.ofSeconds(30).toNanos()
-                && (cached.revision() == validation.revision() || elapsed < Duration.ofSeconds(5).toNanos()))
+                && cached.revision() == validation.revision()
+                && cached.block().header().timestamp().value() <= now + 7200
+                // Testnet difficulty can change with time even with an unchanged parent.
+                && (cached.timeRolling() || (cached.block().header().timestamp().value() > minimumDifficultyTime)
+                        == (now > minimumDifficultyTime)))
             return Optional.of(cached);
         var snapshot = validation.miningSnapshot(payout,
                 new byte[ExtraNonceManager.EXTRANONCE1_SIZE + ExtraNonceManager.EXTRANONCE2_SIZE], maximumWeight, minimumFee);
         if (!isCurrent(snapshot.block().header().previousBlockHash())) { cached = null; return Optional.empty(); }
         cached = new MiningWork(snapshot.block(), snapshot.minimumTimestamp(), snapshot.revision(),
                 !parameters.allowMinDifficultyBlocks() || parameters.noRetargeting());
-        builtAt = System.nanoTime();
         return Optional.of(cached);
     }
 

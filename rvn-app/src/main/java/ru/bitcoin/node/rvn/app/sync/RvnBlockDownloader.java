@@ -12,17 +12,20 @@ public final class RvnBlockDownloader {
     private final RvnHeaderStore store;
     private final long timeoutMs;
     private int inFlight;
+    public record Timing(long transportMs, long checkStoreMs, long bytes) {}
+    private Timing lastTiming = new Timing(0, 0, 0);
+    public Timing lastTiming() { return lastTiming; }
     private final RvnAssetsDeployment assets = new RvnAssetsDeployment();
     public RvnBlockDownloader(RvnHeaderStore store, long timeoutMs) {
         this(store, timeoutMs, 4);
     }
     public RvnBlockDownloader(RvnHeaderStore store, long timeoutMs, int inFlight) {
         if (timeoutMs < 1 || timeoutMs > 120000) throw new IllegalArgumentException("RVN block timeout");
-        if (inFlight < 1 || inFlight > 16) throw new IllegalArgumentException("RVN block in-flight limit");
+        if (inFlight < 1 || inFlight > 32) throw new IllegalArgumentException("RVN block in-flight limit");
         this.store = java.util.Objects.requireNonNull(store); this.timeoutMs = timeoutMs; this.inFlight = inFlight;
     }
     public int downloadBatch(RvnPeerSession session, int limit) throws IOException, InterruptedException {
-        if (limit < 1 || limit > 128) throw new IllegalArgumentException("RVN block batch limit");
+        if (limit < 1 || limit > 512) throw new IllegalArgumentException("RVN block batch limit");
         var requested = new java.util.ArrayList<RvnBlockClient.Expected>();
         synchronized (store) {
             var first = store.nextMissingBlockBody();
@@ -35,12 +38,41 @@ public final class RvnBlockDownloader {
             }
         }
         int[] added = {0};
-        RvnBlockClient.requestBatch(session, requested, timeoutMs, inFlight, (next, payload) -> {
-            if (store.saveDownloadedBody(new ru.bitcoin.node.rvn.consensus.RvnHash256(next.id()), payload, (bytes, header) -> {
-                boolean active = assets.activeForNext(store.require(header.parentId()), store);
-                RvnBlockBodyChecks.requireValid(RvnBlockCodec.parse(bytes), active);
-            })) added[0]++;
-        });
+        long[] processing = {0}, bytesReceived = {0};
+        class StagedBodies {
+            final java.util.Map<ru.bitcoin.node.rvn.consensus.RvnHash256, byte[]> bodies = new java.util.LinkedHashMap<>();
+            long bytes;
+            void flush() throws IOException {
+                if (bodies.isEmpty()) return;
+                long processingStart = System.nanoTime();
+                try {
+                    added[0] += store.saveDownloadedBodies(bodies, (payload, header) -> {
+                        boolean active = assets.activeForNext(store.require(header.parentId()), store);
+                        RvnBlockBodyChecks.requireValid(RvnBlockCodec.parse(payload), active);
+                    });
+                    bodies.clear(); bytes = 0;
+                } finally { processing[0] += System.nanoTime() - processingStart; }
+            }
+        }
+        var staged = new StagedBodies();
+        long requestStart = System.nanoTime();
+        try {
+            RvnBlockClient.requestBatch(session, requested, timeoutMs, inFlight, (next, payload) -> {
+                // Large bodies commit earlier; historical small bodies share a
+                // flush. Staging remains bounded independently of queue limits.
+                if (staged.bytes + payload.length > 8L * 1024 * 1024) staged.flush();
+                staged.bodies.put(new ru.bitcoin.node.rvn.consensus.RvnHash256(next.id()), payload);
+                staged.bytes += payload.length; bytesReceived[0] += payload.length;
+                if (staged.bodies.size() >= 128) staged.flush();
+            });
+        } finally {
+            // Preserve received bodies on peer loss. Interrupted shutdown can
+            // discard only the bounded, unpublished staging buffer.
+            if (!Thread.currentThread().isInterrupted()) staged.flush();
+        }
+        long total = System.nanoTime() - requestStart;
+        lastTiming = new Timing(java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(Math.max(0, total - processing[0])),
+                java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(processing[0]), bytesReceived[0]);
         store.nextMissingBlockBody(); // Advance the contiguous cursor after out-of-order replies.
         return added[0];
     }

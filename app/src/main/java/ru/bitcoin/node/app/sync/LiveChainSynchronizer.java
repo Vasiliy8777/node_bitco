@@ -95,7 +95,7 @@ public final class LiveChainSynchronizer implements AutoCloseable {
                 }
                 boolean signalled = wakeup.tryAcquire();
                 if (signalled || System.nanoTime() >= nextPoll) {
-                    nextPoll = System.nanoTime() + Duration.ofSeconds(30).toNanos();
+                    nextPoll = System.nanoTime() + Duration.ofSeconds(5).toNanos();
                     for (Peer peer : ready) {
                         if (closed) break;
                         if (!peer.isReady()) continue;
@@ -133,7 +133,7 @@ public final class LiveChainSynchronizer implements AutoCloseable {
                     }
                 }
                 synchronized (this) {
-                    if (!closed && wakeup.availablePermits() == 0) wait(1_000);
+                    if (!closed && wakeup.availablePermits() == 0) wait(100);
                 }
             }
         } catch (InterruptedException exception) {

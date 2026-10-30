@@ -50,11 +50,16 @@ extern "C" __global__ void hash_headers(const u32* data, u32 start, u32 count, u
   #pragma unroll
   for(int j=0;j<8;j++) output[i*8+j]=digest[j];
 }
+__device__ __forceinline__ u32 nonce_mix32(u32 x) {
+  x^=x>>16;x*=0x7feb352du;x^=x>>15;x*=0x846ca68bu;return x^(x>>16);
+}
 extern "C" __global__ void search(const u32* data, u32 start, u32 count,
-                                  const u32* target, u32* output, u32 capacity) {
+                                  const u32* target, u32* output, u32 capacity,u32 key,u32 permuted) {
   u32 i=blockIdx.x*blockDim.x+threadIdx.x;
   if(i>=count) return;
-  u32 digest[8];hash_header(data,start+i,digest);
+  u32 nonce=start+i;
+  if(permuted) nonce=nonce_mix32(nonce+key);
+  u32 digest[8];hash_header(data,nonce,digest);
   bool valid=true;
   #pragma unroll
   for(int j=0;j<8;j++) {
@@ -64,6 +69,6 @@ extern "C" __global__ void search(const u32* data, u32 start, u32 count,
   }
   if(valid) {
     u32 slot=atomicAdd(output,1);
-    if(slot<capacity) output[1+slot]=start+i;
+    if(slot<capacity) output[1+slot]=nonce;
   }
 }

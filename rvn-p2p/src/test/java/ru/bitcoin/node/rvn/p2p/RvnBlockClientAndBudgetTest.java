@@ -11,11 +11,11 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class RvnBlockClientAndBudgetTest {
     @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.ValueSource(ints = {1, 4, 16})
+    @org.junit.jupiter.params.provider.ValueSource(ints = {1, 4, 16, 32})
     void configuredWindowRefillsAndMatchesOutOfOrderReplies(int window) throws Exception {
         var expected = new ArrayList<RvnBlockClient.Expected>();
-        for (int i = 1; i <= 20; i++) {
-            byte[] raw = new byte[80]; raw[0] = (byte) i;
+        for (int i = 1; i <= 512; i++) {
+            byte[] raw = new byte[80]; java.nio.ByteBuffer.wrap(raw).order(java.nio.ByteOrder.LITTLE_ENDIAN).putInt(i);
             expected.add(new RvnBlockClient.Expected(RvnWire.doubleSha(raw), RvnBlockHeader.parse(raw, RvnActivation.MAINNET_KAWPOW_TIME)));
         }
         var error = new AtomicReference<Throwable>();
@@ -25,10 +25,12 @@ class RvnBlockClientAndBudgetTest {
                     handshake(socket, server.getLocalPort());
                     for (int offset = 0; offset < expected.size(); offset += window) {
                         int end = Math.min(offset + window, expected.size());
-                        for (int i = offset; i < end; i++) {
+                        for (int i = offset; i < end;) {
                             var request = RvnWire.read(socket.getInputStream(), RvnNetwork.REGTEST);
-                            assertEquals("getdata", request.command());
-                            assertArrayEquals(expected.get(i).id(), Arrays.copyOfRange(request.payload(), 5, 37));
+                            for (var id : inventory(request)) {
+                                assertTrue(i < end);
+                                assertArrayEquals(expected.get(i++).id(), id);
+                            }
                         }
                         for (int i = end - 1; i >= offset; i--)
                             RvnWire.write(socket.getOutputStream(), RvnNetwork.REGTEST,
@@ -40,7 +42,7 @@ class RvnBlockClientAndBudgetTest {
             try (var session = RvnPeerSession.connect(RvnNetwork.REGTEST, "127.0.0.1", server.getLocalPort(), 1000, 32)) {
                 var received = new HashSet<Integer>();
                 RvnBlockClient.requestBatch(session, expected, 3000, window, (item, payload) -> assertTrue(received.add(item.header().version())));
-                assertEquals(20, received.size());
+                assertEquals(512, received.size());
             }
             peer.join(3000); assertFalse(peer.isAlive()); if (error.get() != null) fail(error.get());
         }
@@ -49,7 +51,7 @@ class RvnBlockClientAndBudgetTest {
     @Test void localValidationTimeDoesNotExpireAnAlreadyReceivedPipelinedBlock() throws Exception {
         var expected = new ArrayList<RvnBlockClient.Expected>();
         for (int i = 1; i <= 2; i++) {
-            byte[] raw = new byte[80]; raw[0] = (byte) i;
+            byte[] raw = new byte[80]; java.nio.ByteBuffer.wrap(raw).order(java.nio.ByteOrder.LITTLE_ENDIAN).putInt(i);
             expected.add(new RvnBlockClient.Expected(RvnWire.doubleSha(raw), RvnBlockHeader.parse(raw, RvnActivation.MAINNET_KAWPOW_TIME)));
         }
         var error = new AtomicReference<Throwable>();
@@ -57,7 +59,7 @@ class RvnBlockClientAndBudgetTest {
             var peer = Thread.ofPlatform().daemon(true).start(() -> {
                 try (var socket = server.accept()) {
                     handshake(socket, server.getLocalPort());
-                    for (int i = 0; i < 2; i++) RvnWire.read(socket.getInputStream(), RvnNetwork.REGTEST);
+                    assertEquals(2, inventory(RvnWire.read(socket.getInputStream(), RvnNetwork.REGTEST)).size());
                     for (var item : expected) RvnWire.write(socket.getOutputStream(), RvnNetwork.REGTEST,
                             new RvnMessage("block", Arrays.copyOf(item.header().serialize(), 81)));
                     while (socket.getInputStream().read() != -1) { }
@@ -76,7 +78,7 @@ class RvnBlockClientAndBudgetTest {
     @Test void pipelineAcceptsOutOfOrderRepliesWithoutWaitingForEachRoundTrip() throws Exception {
         var expected = new ArrayList<RvnBlockClient.Expected>();
         for (int i = 1; i <= 5; i++) {
-            byte[] raw = new byte[80], id = new byte[32]; raw[0] = (byte) i; id[0] = (byte) i;
+            byte[] raw = new byte[80], id = new byte[32]; java.nio.ByteBuffer.wrap(raw).order(java.nio.ByteOrder.LITTLE_ENDIAN).putInt(i); id[0] = (byte) i;
             expected.add(new RvnBlockClient.Expected(id, RvnBlockHeader.parse(raw, RvnActivation.MAINNET_KAWPOW_TIME)));
         }
         var error = new AtomicReference<Throwable>();
@@ -84,7 +86,7 @@ class RvnBlockClientAndBudgetTest {
             var peer = Thread.ofPlatform().daemon(true).start(() -> {
                 try (var socket = server.accept()) {
                     handshake(socket, server.getLocalPort());
-                    for (int i = 0; i < 4; i++) assertEquals("getdata", RvnWire.read(socket.getInputStream(), RvnNetwork.REGTEST).command());
+                    assertEquals(4, inventory(RvnWire.read(socket.getInputStream(), RvnNetwork.REGTEST)).size());
                     for (int i = 3; i >= 0; i--) RvnWire.write(socket.getOutputStream(), RvnNetwork.REGTEST,
                             new RvnMessage("block", Arrays.copyOf(expected.get(i).header().serialize(), 81)));
                     assertEquals("getdata", RvnWire.read(socket.getInputStream(), RvnNetwork.REGTEST).command());
@@ -108,6 +110,17 @@ class RvnBlockClientAndBudgetTest {
         RvnWire.write(out, RvnNetwork.REGTEST, new RvnMessage("version", RvnVersion.outbound(70028, port, 0)));
         assertEquals("verack", RvnWire.read(in, RvnNetwork.REGTEST).command());
         RvnWire.write(out, RvnNetwork.REGTEST, new RvnMessage("verack", new byte[0]));
+    }
+
+    private static List<byte[]> inventory(RvnMessage request) throws Exception {
+        assertEquals("getdata", request.command());
+        var in = new ByteArrayInputStream(request.payload());
+        int count = (int) RvnCompactSize.read(in, 32); assertTrue(count > 0);
+        var ids = new ArrayList<byte[]>();
+        for (int i = 0; i < count; i++) {
+            assertEquals(0x40000002L, RvnWire.readU32(in)); ids.add(in.readNBytes(32));
+        }
+        assertEquals(-1, in.read()); return ids;
     }
 
     @Test

@@ -43,6 +43,32 @@ class RvnSoloMiningTest {
     static RvnCudaKawpowWorker.Batch hit(long nonce, int count) {
         return new RvnCudaKawpowWorker.Batch(List.of(new RvnCudaKawpowWorker.Candidate(nonce, new byte[32], new byte[32])), false, count);
     }
+    @Test void permutedCandidatesAreCheckedByLogicalCounterAndInstalledAsActualNonce() throws Exception {
+        for (boolean outside : new boolean[]{false, true}) {
+            try (var h = headers(); var c = coins()) {
+                var backend = backend(h, c, new AtomicBoolean(true), new AtomicLong(NOW), (id, block) -> {});
+                var actual = new AtomicLong();
+                var search = new RvnSoloMining.Search() {
+                    public RvnCudaKawpowWorker.Batch search(long height, byte[] hash, long counter, int count, java.math.BigInteger target) {
+                        actual.set(ru.bitcoin.node.common.NoncePermutation.permute64(counter + (outside ? count : 0),
+                                ru.bitcoin.node.common.NoncePermutation.key64(hash)));
+                        return hit(actual.get(), count);
+                    }
+                    public long counter(byte[] hash, long nonce) {
+                        return ru.bitcoin.node.common.NoncePermutation.inverse64(nonce,
+                                ru.bitcoin.node.common.NoncePermutation.key64(hash));
+                    }
+                };
+                var miner = new RvnSoloMining(backend, search, () -> NOW, 64);
+                if (outside) assertThrows(IOException.class, miner::advance);
+                else {
+                    assertEquals(RvnSoloMining.State.ACCEPTED, miner.advance().state());
+                    var block = RvnBlockCodec.parse(h.blockBody(c.tip().id()));
+                    assertEquals(actual.get(), block.header().nonce64Bits());
+                }
+            }
+        }
+    }
     @Test void peerLossInvalidatesJobsAndExplainsWaiting() throws Exception {
         try (var h = headers(); var c = coins()) {
             var coverage = new AtomicBoolean(false); var peer = new AtomicBoolean(false);
@@ -88,6 +114,7 @@ class RvnSoloMiningTest {
             assertEquals(0, c.tip().height()); assertEquals(0, h.best().height());
             var miner = new RvnSoloMining(backend, (height, hash, nonce, count, target) -> hit(nonce, count), () -> NOW, 64);
             assertEquals(RvnSoloMining.State.ACCEPTED, miner.advance().state());
+            assertEquals(new RvnSoloMining.Statistics(1, 0, 1, 1, 0, 0), miner.statistics());
             assertEquals(1, relayed.get()); accepted = c.tip().id();
             assertTrue(backend.accept(job, job.template()).isEmpty());
         }
@@ -106,10 +133,14 @@ class RvnSoloMiningTest {
                 searches.incrementAndGet(); ready.set(false); return hit(nonce, count);
             }, clock::get, 64);
             assertEquals(RvnSoloMining.State.STALE, miner.advance().state());
+            assertEquals(new RvnSoloMining.Statistics(1, 1, 0, 0, 0, 0), miner.statistics());
             assertEquals(1, searches.get()); assertEquals(0, c.tip().height());
             assertEquals(RvnSoloMining.State.WAITING, miner.advance().state());
-            ready.set(true); var expired = backend.next().orElseThrow(); clock.addAndGet(30);
-            assertFalse(backend.current(expired)); assertTrue(backend.accept(expired, expired.template()).isEmpty());
+            ready.set(true); var job = backend.next().orElseThrow(); clock.addAndGet(31);
+            assertTrue(backend.current(job), "Unchanged parent must not expire after 30 seconds");
+            clock.addAndGet(720);
+            assertFalse(backend.current(job), "A stale chain tip must still disable mining");
+            assertTrue(backend.accept(job, job.template()).isEmpty());
         }
     }
     @Test void failedRelayRetriesCommittedCandidateWithoutSearchingOrConnectingAgain() throws Exception {
@@ -122,10 +153,30 @@ class RvnSoloMiningTest {
                 searches.incrementAndGet(); return hit(nonce, count);
             }, () -> NOW, 64);
             assertThrows(IOException.class, miner::advance); assertEquals(1, c.tip().height());
+            assertEquals(new RvnSoloMining.Statistics(1, 0, 1, 0, 0, 1), miner.statistics());
             assertEquals(Optional.of(c.tip()), c.pendingMinedBlock());
             assertEquals(RvnSoloMining.State.ACCEPTED, miner.advance().state());
             assertEquals(1, searches.get()); assertEquals(1, c.tip().height()); assertEquals(2, calls.get());
+            assertEquals(new RvnSoloMining.Statistics(1, 0, 1, 1, 0, 1), miner.statistics());
             assertTrue(c.pendingMinedBlock().isEmpty());
+        }
+    }
+    @Test void admissionFailureRetainsTargetHitBeforeProgressCanBeReturned() throws Exception {
+        try (var h = headers(); var c = coins()) {
+            var source = backend(h, c, new AtomicBoolean(true), new AtomicLong(NOW), (id, block) -> fail());
+            var job = source.next().orElseThrow();
+            var failing = new RvnSoloMining.Backend() {
+                public Optional<RvnSoloMining.Job> next() { return Optional.of(job); }
+                public boolean current(RvnSoloMining.Job value) { return true; }
+                public Optional<RvnSoloMining.Accepted> accept(RvnSoloMining.Job value, RvnBlock block) {
+                    throw new SecurityException("Synthetic admission failure");
+                }
+                public void relay(RvnSoloMining.Accepted block) { fail("Must not relay rejected block"); }
+            };
+            var miner = new RvnSoloMining(failing, (height, hash, nonce, count, target) -> hit(nonce, count), () -> NOW, 64);
+            assertThrows(SecurityException.class, miner::advance);
+            assertEquals(new RvnSoloMining.Statistics(1, 0, 0, 0, 1, 0), miner.statistics());
+            assertEquals(0, c.tip().height());
         }
     }
     @Test void restartRecoversDurableCandidateBeforeStartingAnotherJob() throws Exception {
@@ -144,16 +195,63 @@ class RvnSoloMiningTest {
             assertTrue(c.pendingMinedBlock().isEmpty());
         }
     }
-    @Test void nonceRangesAdvanceAndRefreshChangesCoinbaseAndInputDigest() throws Exception {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(ints = {64, 65536})
+    void unchangedTipKeepsTemplateAndNonceAcrossFormerExpiry(int batchSize) throws Exception {
         try (var h = headers(); var c = coins()) {
             var clock = new AtomicLong(NOW); var starts = new ArrayList<Long>(); var hashes = new ArrayList<byte[]>();
             var backend = backend(h, c, new AtomicBoolean(true), clock, (id, b) -> fail());
             var miner = new RvnSoloMining(backend, (height, hash, nonce, count, target) -> {
                 starts.add(nonce); hashes.add(hash); return new RvnCudaKawpowWorker.Batch(List.of(), false, count);
-            }, clock::get, 64);
-            miner.advance(); miner.advance(); clock.incrementAndGet(); clock.addAndGet(30); miner.advance();
-            assertEquals(List.of(0L, 64L, 0L), starts);
-            assertArrayEquals(hashes.get(0), hashes.get(1)); assertFalse(Arrays.equals(hashes.get(1), hashes.get(2)));
+            }, clock::get, batchSize);
+            miner.advance(); miner.advance(); clock.addAndGet(31); miner.advance();
+            clock.addAndGet(299); miner.advance();
+            assertEquals(List.of(0L, (long) batchSize, 2L * batchSize, 3L * batchSize), starts);
+            for (var hash : hashes) assertArrayEquals(hashes.getFirst(), hash);
+        }
+    }
+    @Test void tipChangeDuringGpuSearchDiscardsResultAndCreatesJobOnNewParent() throws Exception {
+        try (var h = headers(); var c = coins()) {
+            var ready = new AtomicBoolean(true); var clock = new AtomicLong(NOW);
+            var starts = new ArrayList<Long>(); var heights = new ArrayList<Long>();
+            var digests = new ArrayList<byte[]>(); var calls = new AtomicInteger();
+            var backend = backend(h, c, ready, clock, (id, block) -> {});
+            var competing = backend(h, c, ready, clock, (id, block) -> {});
+            var miner = new RvnSoloMining(backend, (height, hash, nonce, count, target) -> {
+                starts.add(nonce); heights.add(height); digests.add(hash);
+                if (calls.getAndIncrement() == 0) {
+                    var competingJob = competing.next().orElseThrow();
+                    assertTrue(competing.accept(competingJob,
+                            RvnBlockTemplateBuilder.withProof(competingJob.template(), 0, new byte[32])).isPresent());
+                    // A valid candidate for the old parent must now be discarded.
+                    return hit(nonce, count);
+                }
+                return new RvnCudaKawpowWorker.Batch(List.of(), false, count);
+            }, clock::get, 65536);
+            assertEquals(RvnSoloMining.State.STALE, miner.advance().state());
+            assertEquals(1, c.tip().height());
+            assertEquals(RvnSoloMining.State.SEARCHED, miner.advance().state());
+            assertEquals(List.of(1L, 2L), heights);
+            assertEquals(List.of(0L, 0L), starts);
+            assertFalse(Arrays.equals(digests.get(0), digests.get(1)));
+            assertEquals(1, c.tip().height(), "Old-parent GPU candidate must never connect");
+        }
+    }
+    @Test void clockRollbackRefreshesOnlyWhenTemplateExceedsFutureTimeLimit() throws Exception {
+        try (var h = headers(); var c = coins()) {
+            var clock = new AtomicLong(NOW);
+            var backend = backend(h, c, new AtomicBoolean(true), clock, (id, block) -> fail());
+            var job = backend.next().orElseThrow();
+            clock.addAndGet(-720);
+            assertTrue(backend.current(job), "Future timestamp equality is still allowed");
+            clock.decrementAndGet();
+            assertFalse(backend.current(job), "Template timestamp is now too far in the future");
+            assertTrue(backend.accept(job, job.template()).isEmpty());
+            var replacement = backend.next().orElseThrow();
+            assertTrue(backend.current(replacement));
+            assertTrue(replacement.generation() > job.generation());
+            assertArrayEquals(job.template().header().previousHashWire(), replacement.template().header().previousHashWire());
+            assertNotEquals(job.template().header().timestamp(), replacement.template().header().timestamp());
         }
     }
     @Test void workerOverflowRetriesSmallerRangesWithoutSkippingNonces() throws Exception {

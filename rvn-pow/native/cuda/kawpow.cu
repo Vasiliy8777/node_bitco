@@ -23,6 +23,29 @@ __device__ void keccak800(u32 *a) {
   a[0]^=(u32)RC[r];
  }
 }
+
+// Runtime instruction stream for header batches. No NVRTC compilation per
+// height/3; instructions are generated locally from the claimed height.
+__device__ void execute_program(u32 *m,const u32 *l1,u32 *data,const u32 *steps) {
+ for(int i=0;i<33;i++) {
+  const u32 *s=steps+i*6;
+  u32 value=0,a=m[s[2]],b=m[s[3]],sel=s[5];
+  if(s[0]==0) value=l1[a%4096u];
+  else if(s[0]==2) value=data[s[2]];
+  else switch(s[4]) {
+   case 0:value=a+b;break; case 1:value=a*b;break;
+   case 2:value=__umulhi(a,b);break; case 3:value=min(a,b);break;
+   case 4:value=rol(a,b);break; case 5:value=rol(a,32-(b&31));break;
+   case 6:value=a&b;break; case 7:value=a|b;break; case 8:value=a^b;break;
+   case 9:value=__clz(a)+__clz(b);break; case 10:value=__popc(a)+__popc(b);break;
+  }
+  u32 d=s[1],r=((sel>>16)%31)+1;
+  switch(sel%4) {
+   case 0:m[d]=m[d]*33u+value;break; case 1:m[d]=(m[d]^value)*33u;break;
+   case 2:m[d]=rol(m[d],r)^value;break; case 3:m[d]=rol(m[d],32-r)^value;break;
+  }
+ }
+}
 __device__ void keccak512(u32 *words) {
  u64 a[25]={0},b[25],c[5],d[5];
  for(int i=0;i<8;i++) a[i]=(u64)words[2*i]|((u64)words[2*i+1]<<32);
@@ -59,14 +82,22 @@ __device__ u32 kiss(u32 &z,u32 &w,u32 &jsr,u32 &jcong) {
 __device__ __forceinline__ void program(u32 *m,const u32 *dag,u32 *data) {
  /*PROGRAM*/
 }
+__device__ __forceinline__ u32 nonce_mix32(u32 x) {
+ x^=x>>16;x*=0x7feb352du;x^=x>>15;x*=0x846ca68bu;return x^(x>>16);
+}
 extern "C" __global__ void search(const u32 *dag,u32 items,const u32 *header,u64 start,u32 count,
-                                  const u32 *target,u32 *output,u32 capacity) {
+                                  const u32 *target,u32 *output,u32 capacity,u32 key0,u32 key1,u32 permuted) {
  __shared__ u32 l1[4096];
  for(int i=threadIdx.x;i<4096;i+=blockDim.x) l1[i]=dag[i];
  __syncthreads();
  u32 gid=(blockIdx.x*blockDim.x+threadIdx.x)/16,lane=threadIdx.x%16;
  if(gid>=count) return;
  u32 mask=__activemask(); u64 nonce=start+gid; u32 a[25]={0},seed[8],m[32];
+ // All 16 cooperative lanes must use the same permuted nonce.
+ if(permuted) {
+  u32 lo=nonce_mix32((u32)nonce+key0),hi=nonce_mix32((u32)(nonce>>32)^lo^key1);
+  nonce=((u64)hi<<32)|lo;
+ }
  for(int i=0;i<8;i++) a[i]=header[i];
  a[8]=(u32)nonce; a[9]=(u32)(nonce>>32);
  for(int i=0;i<15;i++) a[10+i]=DOMAIN[i];
@@ -96,4 +127,35 @@ extern "C" __global__ void search(const u32 *dag,u32 items,const u32 *header,u64
    for(int i=0;i<8;i++) {out[2+i]=mix[i];out[10+i]=a[i];}
   }
  }
+}
+
+extern "C" __global__ void verify_headers(const u32 *dag,u32 items,const u32 *jobs,
+                                          const u32 *programs,u32 count,u32 *output) {
+ __shared__ u32 l1[4096];
+ for(int i=threadIdx.x;i<4096;i+=blockDim.x) l1[i]=dag[i];
+ __syncthreads();
+ u32 gid=(blockIdx.x*blockDim.x+threadIdx.x)/16,lane=threadIdx.x%16;
+ if(gid>=count) return;
+ const u32 *job=jobs+gid*11,*steps=programs+job[10]*33*6;
+ u32 mask=__activemask(),a[25]={0},seed[8],m[32];
+ for(int i=0;i<8;i++) a[i]=job[i];
+ a[8]=job[8];a[9]=job[9];
+ for(int i=0;i<15;i++) a[10+i]=DOMAIN[i];
+ keccak800(a);for(int i=0;i<8;i++) seed[i]=a[i];
+ u32 z=fnv(0x811c9dc5u,seed[0]),w=fnv(z,seed[1]),jsr=fnv(w,lane),jcong=fnv(jsr,lane);
+ for(int i=0;i<32;i++) m[i]=kiss(z,w,jsr,jcong);
+ for(int r=0;r<64;r++) {
+  u32 index=__shfl_sync(mask,m[0],r%16,16)%items;
+  u64 base=(u64)index*64+((lane^r)%16)*4;
+  u32 data[4];for(int i=0;i<4;i++) data[i]=dag[base+i];
+  execute_program(m,l1,data,steps);
+ }
+ u32 h=0x811c9dc5u;for(int i=0;i<32;i++) h=fnv(h,m[i]);
+ for(int i=0;i<25;i++) a[i]=0;
+ for(int i=0;i<8;i++) a[i]=seed[i];
+ for(int i=0;i<8;i++) a[8+i]=fnv(fnv(0x811c9dc5u,__shfl_sync(mask,h,i,16)),__shfl_sync(mask,h,i+8,16));
+ u32 mix[8];for(int i=0;i<8;i++) mix[i]=a[8+i];
+ for(int i=0;i<9;i++) a[16+i]=DOMAIN[i];
+ keccak800(a);
+ if(lane==0) for(int i=0;i<8;i++) {output[gid*16+i]=mix[i];output[gid*16+8+i]=a[i];}
 }

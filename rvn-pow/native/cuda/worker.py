@@ -87,6 +87,41 @@ def sized(epoch, initial, growth, row):
     return rows * row
 
 
+def program_steps(height):
+    """Same deterministic instruction stream as program(), encoded for batching."""
+    period = height // 3
+    z = fnv(0x811c9dc5, period & MASK)
+    w = fnv(z, period >> 32)
+    jsr = fnv(w, period & MASK)
+    rng = Kiss(z, w, jsr, fnv(jsr, period >> 32))
+    dst, src = list(range(32)), list(range(32))
+    for i in range(32, 1, -1):
+        a = rng.next() % i
+        dst[i-1], dst[a] = dst[a], dst[i-1]
+        b = rng.next() % i
+        src[i-1], src[b] = src[b], src[i-1]
+    di, si, steps = 0, 0, []
+    for i in range(18):
+        if i < 11:
+            s, d = src[si % 32], dst[di % 32]
+            si += 1
+            di += 1
+            steps.append((0, d, s, 0, 0, rng.next()))
+        source = rng.next() % (32 * 31)
+        s1, s2 = source % 32, source // 32
+        if s2 >= s1:
+            s2 += 1
+        op, d = rng.next() % 11, dst[di % 32]
+        di += 1
+        steps.append((1, d, s1, s2, op, rng.next()))
+    for i in range(4):
+        d = 0 if i == 0 else dst[di % 32]
+        if i != 0:
+            di += 1
+        steps.append((2, d, i, 0, 0, rng.next()))
+    return b''.join(struct.pack('<6I', *step) for step in steps)
+
+
 class Cuda:
     def __init__(self, device):
         self.context, self.module = c.c_void_p(), c.c_void_p()
@@ -182,9 +217,10 @@ class Cuda:
                 self.call('cuModuleUnload', self.module)
                 self.module = c.c_void_p()
             self.call('cuModuleLoadData', c.byref(self.module), ptx)
-            self.generate, self.search_function = c.c_void_p(), c.c_void_p()
+            self.generate, self.search_function, self.verify_function = c.c_void_p(), c.c_void_p(), c.c_void_p()
             self.call('cuModuleGetFunction', c.byref(self.generate), self.module, b'generate_dag')
             self.call('cuModuleGetFunction', c.byref(self.search_function), self.module, b'search')
+            self.call('cuModuleGetFunction', c.byref(self.verify_function), self.module, b'verify_headers')
             self.period = height // 3
         finally:
             self.nvrtc.nvrtcDestroyProgram(c.byref(handle))
@@ -209,7 +245,7 @@ class Cuda:
         dag_bytes = sized(epoch, 1 << 30, 1 << 23, 128) // 256 * 256
         free, total = c.c_size_t(), c.c_size_t()
         self.call('cuMemGetInfo_v2', c.byref(free), c.byref(total))
-        if dag_bytes + cache_bytes + reserve + 65536 > free.value:
+        if dag_bytes + cache_bytes + reserve + 2 * 1024 * 1024 > free.value:
             raise MemoryError('DAG/light-cache/reserve do not fit free VRAM; no host-memory spill')
         path = Path(cache_path)
         if path.stat().st_size != cache_bytes:
@@ -220,15 +256,39 @@ class Cuda:
         self.dag = self.allocate(dag_bytes)
         self.items = dag_bytes // 256
         # Short synchronous launches avoid one unbounded Windows watchdog kernel.
-        for start in range(0, self.items * 4, 8192):
-            count = min(8192, self.items * 4 - start)
+        for start in range(0, self.items * 4, 65536):
+            count = min(65536, self.items * 4 - start)
             self.launch(self.generate, count, [cache, c.c_uint(cache_bytes // 64), self.dag, c.c_uint(start), c.c_uint(count)])
         self.call('cuMemFree_v2', cache)
         self.allocations.remove(cache)
         self.header, self.target, self.output = self.allocate(32), self.allocate(32), self.allocate(4 * (1 + 128 * 18))
+        self.verify_jobs = self.allocate(2000 * 44)
+        self.verify_programs = self.allocate(2000 * 33 * 24)
+        self.verify_output = self.allocate(2000 * 64)
         self.epoch = epoch
 
-    def search(self, height, header_hex, start, count, target_hex):
+    def verify(self, jobs):
+        if not 1 <= len(jobs) <= 2000:
+            raise ValueError('Invalid verification batch size')
+        periods, programs, encoded = {}, bytearray(), bytearray()
+        for height, nonce, header in jobs:
+            if not 0 <= height <= 0x7fffffff or height // 7500 != self.epoch or len(header) != 32:
+                raise ValueError('Verification job epoch/header mismatch')
+            period = height // 3
+            if period not in periods:
+                periods[period] = len(periods)
+                programs.extend(program_steps(height))
+            encoded.extend(struct.pack('<8IQI', *struct.unpack('<8I', header), nonce, periods[period]))
+        job_data, program_data = bytes(encoded), bytes(programs)
+        self.call('cuMemcpyHtoD_v2', self.verify_jobs, c.c_char_p(job_data), len(job_data))
+        self.call('cuMemcpyHtoD_v2', self.verify_programs, c.c_char_p(program_data), len(program_data))
+        self.launch(self.verify_function, len(jobs) * 16, [self.dag, c.c_uint(self.items),
+                    self.verify_jobs, self.verify_programs, c.c_uint(len(jobs)), self.verify_output])
+        result = c.create_string_buffer(len(jobs) * 64)
+        self.call('cuMemcpyDtoH_v2', result, self.verify_output, len(jobs) * 64)
+        return result.raw
+
+    def search(self, height, header_hex, start, count, target_hex, permuted=False):
         if self.epoch != height // 7500:
             raise ValueError('Epoch not prepared')
         if not 0 <= start < 1 << 64 or not 1 <= count <= 65536 or start + count > 1 << 64:
@@ -241,8 +301,10 @@ class Cuda:
         target_words = (c.c_uint32 * 8)(*struct.unpack('>8I', target))
         self.call('cuMemcpyHtoD_v2', self.target, target_words, 32)
         self.call('cuMemsetD32_v2', self.output, 0, 1)
+        key = int.from_bytes(header[:8], 'big')
         self.launch(self.search_function, count * 16, [self.dag, c.c_uint(self.items), self.header, c.c_uint64(start),
-                    c.c_uint(count), self.target, self.output, c.c_uint(128)])
+                    c.c_uint(count), self.target, self.output, c.c_uint(128),
+                    c.c_uint(key & MASK), c.c_uint(key >> 32), c.c_uint(int(permuted))])
         result = (c.c_uint32 * (1 + 128 * 18))()
         self.call('cuMemcpyDtoH_v2', result, self.output, c.sizeof(result))
         found = []
@@ -288,14 +350,24 @@ def binary_main():
                     gpu = Cuda(device)
                 gpu.prepare(height, path, reserve)
                 sink.write(struct.pack('>iQ', 0, gpu.items * 256))
-            elif command == b'\x02' and gpu is not None:
+            elif command in (b'\x02', b'\x04') and gpu is not None:
                 height, start, count = struct.unpack('>iQI', read(16))
                 header, target = read(32).hex(), read(32).hex()
-                result = gpu.search(height, header, start, count, target)
+                result = gpu.search(height, header, start, count, target, command == b'\x04')
                 sink.write(struct.pack('>i?I', 0, result['overflow'], len(result['candidates'])))
                 for candidate in result['candidates']:
                     sink.write(struct.pack('>Q', int(candidate['nonce'])))
                     sink.write(bytes.fromhex(candidate['mix']) + bytes.fromhex(candidate['hash']))
+            elif command == b'\x03' and gpu is not None:
+                count, = struct.unpack('>I', read(4))
+                if not 1 <= count <= 2000:
+                    raise ValueError('Invalid verification count')
+                jobs = []
+                for _ in range(count):
+                    height, nonce = struct.unpack('>iQ', read(12))
+                    jobs.append((height, nonce, read(32)))
+                result = gpu.verify(jobs)
+                sink.write(struct.pack('>iI', 0, count) + result)
             else:
                 raise ValueError('Unknown binary worker operation')
             sink.flush()
@@ -326,7 +398,7 @@ def main():
                 gpu.prepare(int(request['height']), request['cache'], int(request.get('reserve', 1 << 30)))
                 result = {'ready': True, 'device': gpu.name, 'epoch': gpu.epoch, 'dagBytes': gpu.items * 256}
             elif op == 'search' and gpu is not None:
-                result = gpu.search(int(request['height']), request['header'], int(request['start']), int(request['count']), request['target'])
+                result = gpu.search(int(request['height']), request['header'], int(request['start']), int(request['count']), request['target'], request.get('permuted', False))
             else:
                 raise ValueError('Unknown operation or uninitialized worker')
             print(json.dumps(result, separators=(',', ':')), flush=True)

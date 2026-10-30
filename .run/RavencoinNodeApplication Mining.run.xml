@@ -1,0 +1,10 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="RavencoinNodeApplication (mainnet mining)" type="SpringBootApplicationConfigurationType" factoryName="Spring Boot">
+    <option name="ENABLE_LAUNCH_OPTIMIZATION" value="false" />
+    <module name="rvn-app" />
+    <option name="SPRING_BOOT_MAIN_CLASS" value="ru.bitcoin.node.rvn.app.RavencoinNodeApplication" />
+    <option name="VM_PARAMETERS" value="-Xms256m -Xmx4g -XX:MaxDirectMemorySize=512m -Djava.io.tmpdir=C:/RVNJavaNjde/tmp -Dravencoin.network=mainnet -Dravencoin.sync.enabled=true -Dravencoin.sync.blocks-enabled=true -Dravencoin.validation.native-replay-enabled=true -Dravencoin.validation.canonical-asset-replay-enabled=true -Dravencoin.mining.enabled=true -Dravencoin.mining.cuda.enabled=true -Dravencoin.mining.cuda.job-self-test-enabled=true -Dravencoin.p2p.probe-enabled=false -Dravencoin.p2p.session-enabled=false" />
+    <option name="WORKING_DIRECTORY" value="file://$PROJECT_DIR$" />
+    <method v="2"><option name="Make" enabled="true" /></method>
+  </configuration>
+</component>

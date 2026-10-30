@@ -60,6 +60,12 @@ class RvnPayoutAndCoinbaseTest {
         assertTrue(sig.length >= 2 && sig.length <= 100);
         assertThrows(IllegalArgumentException.class, () -> RvnCoinbase.create(0, 0, 0, payout));
         assertThrows(IllegalArgumentException.class, () -> RvnCoinbase.create(1, 0, -1, payout));
+        for (long extra : new long[]{Long.MIN_VALUE, Long.MAX_VALUE, -1L}) {
+            var unsigned = RvnCoinbase.create(4_200_000, extra, 0, payout);
+            RvnCoinbase.requireHeight(unsigned, 4_200_000);
+            assertEquals(unsigned, TransactionParser.parse(TransactionSerializer.serialize(unsigned)));
+            assertTrue(unsigned.inputs().getFirst().scriptSig().length <= 100);
+        }
         assertThrows(IllegalArgumentException.class, () -> RvnCoinbase.create(1, 0, RvnBlockBodyChecks.MAX_MONEY, payout));
     }
 }

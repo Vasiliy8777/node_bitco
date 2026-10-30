@@ -5,7 +5,7 @@ import ru.bitcoin.node.rvn.protocol.RvnNetwork;
 import ru.bitcoin.node.rvn.protocol.RvnVersion;
 import ru.bitcoin.node.rvn.protocol.RvnWire;
 
-import java.io.IOException;
+import java.io.*;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.SocketException;
@@ -25,6 +25,8 @@ public final class RvnPeerSession implements AutoCloseable {
     public static final int DEFAULT_QUEUE_CAPACITY = 64;
     private final RvnNetwork network;
     private final Socket socket;
+    private final InputStream input;
+    private final OutputStream output;
     private final BlockingQueue<RvnMessage> incoming;
     private final AtomicBoolean closed = new AtomicBoolean();
     private final AtomicReference<IOException> failure = new AtomicReference<>();
@@ -33,9 +35,10 @@ public final class RvnPeerSession implements AutoCloseable {
     private final Thread reader;
     private final int peerVersion;
 
-    private RvnPeerSession(RvnNetwork network, Socket socket, int peerVersion, int capacity) {
+    private RvnPeerSession(RvnNetwork network, Socket socket, InputStream input, OutputStream output, int peerVersion, int capacity) {
         this.network = network;
         this.socket = socket;
+        this.input = input; this.output = output;
         this.peerVersion = peerVersion;
         this.incoming = new ArrayBlockingQueue<>(capacity);
         this.reader = new Thread(this::readLoop, "rvn-peer-reader");
@@ -55,7 +58,12 @@ public final class RvnPeerSession implements AutoCloseable {
             socket.connect(new InetSocketAddress(host, port), timeoutMillis);
             socket.setSoTimeout(timeoutMillis);
             socket.setTcpNoDelay(true);
-            RvnWire.write(socket.getOutputStream(), network,
+            // Keep these same buffers across the handshake: input may already
+            // contain bytes from the first post-handshake message. RvnWire's
+            // per-field writes must not become individual TCP packets.
+            var input = new BufferedInputStream(socket.getInputStream(), 64 * 1024);
+            var output = new BufferedOutputStream(socket.getOutputStream(), 64 * 1024);
+            RvnWire.write(output, network,
                     new RvnMessage("version", RvnVersion.outbound(70028, port, 0)));
             long handshakeDeadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis);
             boolean gotVersion = false;
@@ -66,7 +74,7 @@ public final class RvnPeerSession implements AutoCloseable {
                 if (remainingNanos <= 0) throw new SocketTimeoutException("RVN handshake deadline exceeded");
                 long remainingMillis = Math.max(1, TimeUnit.NANOSECONDS.toMillis(remainingNanos));
                 socket.setSoTimeout((int) Math.min(timeoutMillis, remainingMillis));
-                RvnMessage message = RvnWire.read(socket.getInputStream(), network);
+                RvnMessage message = RvnWire.read(input, network);
                 switch (message.command()) {
                     case "version" -> {
                         if (gotVersion) throw new IOException("Duplicate version");
@@ -76,7 +84,7 @@ public final class RvnPeerSession implements AutoCloseable {
                                 | ((payload[2] & 255L) << 16) | ((payload[3] & 255L) << 24));
                         if (remoteVersion <= 0) throw new IOException("Invalid peer version");
                         gotVersion = true;
-                        RvnWire.write(socket.getOutputStream(), network, new RvnMessage("verack", new byte[0]));
+                        RvnWire.write(output, network, new RvnMessage("verack", new byte[0]));
                     }
                     case "verack" -> {
                         if (!gotVersion || gotVerack || message.payload().length != 0)
@@ -85,7 +93,7 @@ public final class RvnPeerSession implements AutoCloseable {
                     }
                     case "ping" -> {
                         if (message.payload().length == 8)
-                            RvnWire.write(socket.getOutputStream(), network, new RvnMessage("pong", message.payload()));
+                            RvnWire.write(output, network, new RvnMessage("pong", message.payload()));
                     }
                     default -> { /* pre-handshake noncritical messages are ignored */ }
                 }
@@ -95,7 +103,7 @@ public final class RvnPeerSession implements AutoCloseable {
             // socket timeout. Request deadlines live in RvnHeadersClient; closing
             // the session always unblocks this reader, even on an idle connection.
             socket.setSoTimeout(0);
-            return new RvnPeerSession(network, socket, remoteVersion, queueCapacity);
+            return new RvnPeerSession(network, socket, input, output, remoteVersion, queueCapacity);
         } catch (IOException | RuntimeException e) {
             try {
                 socket.close();
@@ -110,7 +118,7 @@ public final class RvnPeerSession implements AutoCloseable {
             while (!closed.get()) {
                 RvnMessage message;
                 try {
-                    message = RvnWire.read(socket.getInputStream(), network);
+                    message = RvnWire.read(input, network);
                 } catch (SocketTimeoutException e) {
                     continue; // read timeout permits checking shutdown; not an idle disconnect policy
                 }
@@ -136,7 +144,7 @@ public final class RvnPeerSession implements AutoCloseable {
 
     public synchronized void send(RvnMessage message) throws IOException {
         if (closed.get()) throw new IOException("RVN peer session closed");
-        RvnWire.write(socket.getOutputStream(), network, message);
+        RvnWire.write(output, network, message);
     }
 
     /**

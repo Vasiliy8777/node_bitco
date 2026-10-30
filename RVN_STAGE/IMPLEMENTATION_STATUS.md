@@ -590,3 +590,192 @@ Known headers: 776000; checked state advanced beyond 34304 while observing the
 deployment. The miner remains WAITING for full verified current chainstate.
 Historical compatibility boundaries in `rvn-chain/reference/HISTORICAL_VALIDATION.md`
 remain applicable; no consensus version change or validation bypass was made.
+# 2026-10-24: fair header discovery and measured slow-peer replacement
+
+The previous body-first scheduling could starve headers indefinitely when the
+backlog exceeded 4096. A debugger run of the isolated backlog scenario confirmed
+the request order. Header requests now run after at most four body batches;
+the integration test keeps 257 bodies missing at that boundary and verifies
+another getheaders request. Three empty responses from a historical/short peer
+now cause rotation even while its body downloads make progress.
+
+Transport retains 64 KiB input/output buffers across handshake and persistent
+reading. Multi-item getdata requests refill at half the bounded window; maximum
+outstanding blocks (16), maximum payload and 32 MiB receive budget are unchanged.
+Tests cover grouped/reordered replies, retained handshake read-ahead and local
+processing deadlines. Batch logs separate transport time from body checks and
+storage, and report bytes. Transport time is elapsed request time excluding the
+receiver callback, not an independent wire-throughput measurement.
+
+After two consecutive slow batches of at least 32 blocks, sync selects the next
+peer. Allowance is max(5 seconds, bytes / configured minimum throughput), default
+64 KiB/s; zero disables this policy. No local-check/store time is charged to the
+peer. An integration test with intentionally delayed responses verified rotation
+and retained height 256. Full reactor tests passed (app 47, P2P 21, chain 90,
+storage 31), as did packaging.
+
+Real deployment: the IntelliJ mainnet mining configuration was gracefully
+restarted through its local Spring admin MBean; current JVM PID 114208.
+At 21:17:11 the old peer 79.137.67.110 rotated after 23985/28382 ms transport
+on small historical batches. Peer 51.79.161.39 connected at 21:17:13; subsequent
+128-body batches showed 65–67 ms transport, 3.6–4.4 seconds body check/store,
+and about 4 seconds replay. Headers advanced from 778000 through 794000 and
+continued growing, with new 2000-header admission around 0.5 seconds on this peer.
+This is evidence for a slow-peer bottleneck, not a claim that buffering alone
+caused the improvement. The remaining observed cost is local check/store/replay;
+durable HDD force and atomic chainstate commits remain enforced.
+
+The faster observed peer is now first in the YAML defaults. No consensus checks,
+validation version, archives or undo history were changed. The node is still in
+IBD and the production miner remains WAITING.
+# 2026-10-24: Bitcoin sync comparison, headers-first and durable body group commit
+
+Compared Bitcoin's NodeLifecycleService/HeaderSyncCoordinator, bounded 1024-block
+scheduler and processInitialSyncBatch chainstate write-back. RVN now defaults to
+headers-first discovery, requiring end-of-headers at a recent peer tip before
+new body downloads. Stale header endpoints rotate peers. Existing stored bodies
+can still replay at startup. Header-only progress does not arm production mining.
+
+Cold archive appendBatch forces each rotated segment and the final segment before
+returning references. Header-store group commit validates all supplied bodies,
+then atomically publishes references, digests and contiguous cursor with one
+sync RocksDB write. Downloader staging is bounded to 128 bodies / 8 MiB, with
+partial received data flushed on peer failure. Archive/index formats unchanged;
+undo/coin/asset/coverage commits remain per-block. No validator version change.
+
+Full `mvn -pl rvn-app -am package -B -q` passed. Integration tests include both
+recent and stale headers-first endpoints. Storage tests cover batch rotation,
+reopen, last-body conflicts without partial publication and JVM hard crashes
+before/after body index publication (RvnTieredStorageTest: 8 passing tests).
+
+Live benchmark around body height 128000: body check/store fell from about
+4 seconds/128 bodies to 39–45 ms; receive/store was 626–755 ms; replay remained
+about 4 seconds. End-to-end improvement in these samples is about 1.5–2x,
+not an assertion of sustained 130 blocks/s or a full-history completion estimate.
+
+The IntelliJ mining configuration was gracefully restarted through Spring admin.
+Benchmark override headers-first=false was temporary, not saved to configuration.
+Final JVM PID 119180 runs normal YAML headers-first=true and passed CUDA tests.
+Headers advanced above 1220000 while bodies pause at 129197 pending discovery.
+The next 2000-header KawPoW batch took about 35 seconds on the CPU light verifier,
+an additional computational bottleneck distinct from HDD flushing. Detailed
+comparison, limits and measured results: RVN_STAGE/SYNC_PERFORMANCE.md.
+# 2026-10-24: full RVN tests and bounded parallel header PoW
+
+Baseline full RVN reactor: 340 tests, zero failures/errors/skips. The ERROR
+"validator unavailable" is intentionally produced by RvnMiningServiceTest's
+fail-stop scenario; no baseline test failure was reproduced.
+
+Added RvnHeaderPowBatch, a bounded 1..8-thread pool (default 4), per-thread
+all-era engine and single-epoch light cache, at most one 2000-header batch.
+PoW/mix calculations execute independently; results are consumed in original
+order. The existing contextual/target/checkpoint validator and one atomic
+header-store commit remain authoritative. Batch interruption/closure cancels
+running and queued futures; shutdown races normalize to an I/O cancellation.
+No consensus rule, validator version, undo or covered chainstate was changed.
+
+Final `mvn -pl rvn-app -am package -B -q`: 346 RVN tests, zero failures/errors/
+skips (app 55, chain 90, consensus 54, P2P 21, PoW 72, protocol 20, storage 34).
+Tests exercise concurrency, ordered results, interruption/reuse, shutdown with
+queued work, invalid PoW atomic rejection/retry, context checks in both modes,
+and real independent KawPoW engines versus serial results with a Core vector.
+
+The previous node process was already absent. Started the IntelliJ mainnet
+mining configuration, JVM 112140; CUDA mandatory vectors and local easy-target
+job passed at 23:07:35 +07. Historical chainstate resumed at 129197, headers
+at 1236000. Warm batches of 2000 KawPoW headers took 10.3–11.6 seconds versus
+34–40 seconds previously; an epoch change took 15.8 seconds. JVM stack snapshot
+confirmed four active worker threads; observed heap ~660 MiB / 4 GiB limit.
+Headers advanced through 1250000. Bodies wait for headers-first completion;
+production miner remains WAITING. See SYNC_PERFORMANCE.md for remaining
+per-block undo/chainstate bottleneck and scope of these measurements.
+# 2026-10-24: larger CPU cache and real GPU header verification
+
+Implemented bounded generic CUDA header verification (binary operation 3),
+locally generated runtime instruction tables for different height/3 programs,
+and a shared mining/verification CUDA context. GPU computes every header;
+Java checks every mix and retains ordered target/context/checkpoint admission.
+CPU audits endpoints plus two secure random samples per large epoch group,
+all results for small diagnostic groups. GPU errors fail locally; unsupported
+old-era/mixed batches use the existing CPU path. Activation waits for mandatory
+startup self-tests and ApplicationReadyEvent.
+
+CPU DAG LRU default is now 65536 entries / 16 MiB payload per verifier.
+GPU full DAG remains in VRAM, bounded workspace ~2 MiB and reserve >=1 GiB by
+default. Generation chunks increased 8192 -> 65536 nodes. A locally generated
+immutable light-cache with epoch provenance is reused by the CPU audit engine,
+avoiding duplicate construction; reduced test or wrong-epoch caches are rejected.
+No consensus/schema/validator-version/coverage changes or archive deletions.
+
+Final full reactor package gate passed: 351 RVN tests, zero failures/errors/skips
+(app 59, chain 90, consensus 54, P2P 21, PoW 73, protocol 20, storage 34).
+Standalone RTX 4070 diagnostics passed Core vectors, changing programs/epochs,
+unsigned boundaries and independent CPU verification of all 2000 GPU outputs.
+Final standalone batch: 120.9 ms GPU+sample audit versus 27618.6 ms CPU-all.
+Startup diagnostics, including generic batches and local mining job, also passed.
+
+Deployed through the IntelliJ mainnet mining configuration, final JVM 118688.
+Warm mainnet batches: about 245–270 ms/2000; epoch-changing batches about
+11–11.6 s (formerly ~16 s without shared cache). Observed 24-batch window:
+46000 headers / 77.4 s = 594.4 headers/s including epoch preparation/network.
+Headers passed 1820000; checked block state remains 129197 during headers-first.
+One CUDA subprocess confirmed. Miner still WAITING for full verified chainstate.
+See SYNC_PERFORMANCE.md for audit semantics, memory bounds and measurement scope.
+
+2026-10-25 body pass/cache tuning: production JVM 125468 resumed mainnet at checked
+1289133. Body/replay pass limit 512, request window default/max 32, coin RocksDB
+native block cache default 1024 MiB (configurable 16..4096). Archive group size,
+8 MiB staging, receive budgets, synchronous WAL and undo durability unchanged.
+Replay elapsed milliseconds now logged. First two real passes: download/store
+2219/1888 ms, ordered replay 22424/21590 ms, about 21 blocks/sec end-to-end.
+These are nearby historical blocks, not a controlled same-input benchmark; no
+claim of fourfold speedup. Main remaining cost is ordered validation/commit.
+352 RVN JUnit tests passing across reports; integration fixtures updated to
+exercise four 512-block passes and slow-peer rotation after two full passes.
+CUDA startup vectors/local-job checks passed after restart; miner still WAITING
+for validated genesis-to-tip coverage.
+
+2026-10-27 GPU mining throughput tuning (RTX 4070, current mainnet epoch 613):
+Isolated Java -> Python -> CUDA search benchmark, three alternating sweeps,
+one second per size per sweep, zero target, no network submission. Core vectors,
+nonce/target/overflow checks and CPU verification of diagnostic candidates passed.
+Mean MH/s: 4096=11.803, 8192=15.938, 16384=19.228, 32768=21.614,
+65536=23.035. Maximum measured 65536-call time 5.649 ms (short-sample result,
+not a latency guarantee). Default mining batch changed 4096 -> 65536 in both
+Spring fallback and application.yml; RVN_MINING_BATCH_SIZE can still override.
+No additional RAM/VRAM allocations, target relaxation or candidate validation
+changes. Standalone RvnCudaKawpowBenchmark reproduces tuning without block
+submission; stop live miner first to avoid sharing GPU/allocating another DAG.
+Mining tests cover nonce ranges and template refresh at the maximum batch size.
+Live confirmation 2026-10-27 14:00 +07: JVM 28148, one CUDA worker 3936. 460521472 hashes/19603 ms = 23.49 MH/s, then 712245248/29521 ms = 24.13 MH/s. GPU snapshot 92%, 71.83 C, 191.37 W, total VRAM 7991 MiB. Real mainnet mining resumed at checked/header height 4599147. Targeted mining/service/settings tests and IntelliJ build passed; startup CUDA Core vectors and local-job CPU/native checks passed.
+
+2026-10-27: removed unconditional 30-second production mining job expiry.
+Empty-block Mainnet jobs now have no wall-clock TTL; each batch still checks
+parent identity, genesis validation readiness, peer freshness and chain-tip age.
+Unchanged-parent modern Mainnet DGW and MTP do not require periodic retiming.
+Clock rollback invalidates a template only if it exceeds the 720-second future
+limit; replacement creation uses the same bound. Nonce exhaustion still creates
+a new extraNonce/template. Diagnostic Job deadlines remain supported.
+Tests prove continuous generation/digest/nonce at +31 and +330 seconds (64 and
+65536 batches), invalidation on tip change, chain staleness, readiness loss and
+future-time boundary/rollback. Debugger observed generation=1 and nonce
+0,64,128,192 at time offsets 0,0,31,330. Mining tests and IDE build passed.
+Thirty-second statistics reporting is unchanged; session counters reset on restart.
+
+2026-10-27 target-hit/relay diagnostics and lower switching latency:
+RVN mining stats now separate targetCandidatesSession (CPU-verified candidates
+from completed non-overflow search responses), staleCandidatesSession,
+minedBlocksSession (durable local admission), relayedBlocksSession (relay method
+completed), admissionFailuresSession and relayFailuresSession. Counters live in
+RvnSoloMining and are included in fatal error logs even when advance() throws.
+Candidate discovery and local admission/relay completion also log immediately.
+Overflow retries do not count discarded partial responses; counters are session
+only. Successful production relay confirms peer possession, not network-wide
+consensus acceptance or confirmations. Recovery of a prior session's outbox
+inside backend startup is not counted as a new mined block in this session.
+No sleep after a stale GPU result; only a 1 ms backoff for stale jobs before GPU
+work and the existing 250 ms WAITING backoff. Header poll default is 2000 ms,
+overridable with RVN_SYNC_POLL_MS. Mining/service and body integration tests pass;
+assertions cover stale target hits, admission failure and relay retry without
+counting a locally accepted block twice. IDE build/inspections pass.
+Final deployment: 2026-10-27 23:55 +07 JVM 95560. WAITING backoff reduced to 25 ms (supersedes the earlier 250 ms note), no post-GPU STALE sleep. Local CUDA job diagnostics suppress production candidate/admission/relay event logs and use their own counters. Startup Core/local-job self-tests pass. At 23:57:14, header -> SEARCHED 128 ms, replay completion -> SEARCHED 4 ms. At 23:57:43 live stats 23.965 MH/s, all candidate/admission/relay counters zero. Header polling configured at 2000 ms.

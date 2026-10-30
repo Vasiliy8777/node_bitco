@@ -24,6 +24,10 @@ public final class RvnHeaderSyncService implements SmartLifecycle {
     private final RvnNativeBlockReplay replay;
     private final RvnSeedResolver resolver;
     private final int headerLeadBlocks;
+    private final int bodyBatchesPerHeader;
+    private final int minimumPeerKiBPerSecond;
+    private final boolean headersFirst;
+    private int slowBodyBatches;
     private final Map<String, Long> addressCursor = new HashMap<>();
     private final ThreadPoolExecutor connector = new ThreadPoolExecutor(1, 1, 0, TimeUnit.SECONDS,
             new ArrayBlockingQueue<>(1), Thread.ofPlatform().daemon(true).name("rvn-connect").factory());
@@ -58,12 +62,32 @@ public final class RvnHeaderSyncService implements SmartLifecycle {
     public RvnHeaderSyncService(RvnMainnetHeaderChain chain, List<String> peers, int port,
                                 int timeoutMs, long responseTimeoutMs, long pollMs, RvnBlockDownloader blocks,
                                 RvnNativeBlockReplay replay, RvnSeedResolver resolver, int headerLeadBlocks) {
+        this(chain, peers, port, timeoutMs, responseTimeoutMs, pollMs, blocks, replay, resolver, headerLeadBlocks, 4);
+    }
+    public RvnHeaderSyncService(RvnMainnetHeaderChain chain, List<String> peers, int port,
+                                int timeoutMs, long responseTimeoutMs, long pollMs, RvnBlockDownloader blocks,
+                                RvnNativeBlockReplay replay, RvnSeedResolver resolver, int headerLeadBlocks, int bodyBatchesPerHeader) {
+        this(chain, peers, port, timeoutMs, responseTimeoutMs, pollMs, blocks, replay, resolver,
+                headerLeadBlocks, bodyBatchesPerHeader, 64);
+    }
+    public RvnHeaderSyncService(RvnMainnetHeaderChain chain, List<String> peers, int port,
+                                int timeoutMs, long responseTimeoutMs, long pollMs, RvnBlockDownloader blocks,
+                                RvnNativeBlockReplay replay, RvnSeedResolver resolver, int headerLeadBlocks,
+                                int bodyBatchesPerHeader, int minimumPeerKiBPerSecond) {
+        this(chain, peers, port, timeoutMs, responseTimeoutMs, pollMs, blocks, replay, resolver,
+                headerLeadBlocks, bodyBatchesPerHeader, minimumPeerKiBPerSecond, false);
+    }
+    public RvnHeaderSyncService(RvnMainnetHeaderChain chain, List<String> peers, int port,
+                                int timeoutMs, long responseTimeoutMs, long pollMs, RvnBlockDownloader blocks,
+                                RvnNativeBlockReplay replay, RvnSeedResolver resolver, int headerLeadBlocks,
+                                int bodyBatchesPerHeader, int minimumPeerKiBPerSecond, boolean headersFirst) {
         this.chain = Objects.requireNonNull(chain);
         this.peers = List.copyOf(peers);
         if (peers.isEmpty() || peers.size() > 64 || peers.stream().anyMatch(s -> s == null || s.isBlank())
                 || port < 1 || port > 65535 || timeoutMs < 100 || timeoutMs > 60000
                 || responseTimeoutMs < 100 || responseTimeoutMs > 120000 || pollMs < 100 || pollMs > 60000
-                || headerLeadBlocks < 1 || headerLeadBlocks > 65536)
+                || headerLeadBlocks < 1 || headerLeadBlocks > 65536 || bodyBatchesPerHeader < 1 || bodyBatchesPerHeader > 32
+                || minimumPeerKiBPerSecond < 0 || minimumPeerKiBPerSecond > 16384)
             throw new IllegalArgumentException("Invalid RVN sync settings");
         this.port = port; this.timeoutMs = timeoutMs; this.responseTimeoutMs = responseTimeoutMs; this.pollMs = pollMs;
         this.blocks = blocks;
@@ -71,6 +95,9 @@ public final class RvnHeaderSyncService implements SmartLifecycle {
         this.replay = replay;
         this.resolver = Objects.requireNonNull(resolver);
         this.headerLeadBlocks = headerLeadBlocks;
+        this.bodyBatchesPerHeader = bodyBatchesPerHeader;
+        this.minimumPeerKiBPerSecond = minimumPeerKiBPerSecond;
+        this.headersFirst = headersFirst;
     }
 
     @Override public synchronized void start() {
@@ -85,38 +112,51 @@ public final class RvnHeaderSyncService implements SmartLifecycle {
         int peerIndex = 0; long backoff = 1000;
         try {
             // Resume cached bodies before DNS/network access after a restart.
-            while (running && replayBodies(128) > 0) { }
+            while (running && replayBodies(512) > 0) { }
             while (running) {
                 String peer = peers.get(Math.floorMod(peerIndex++, peers.size()));
                 try (RvnPeerSession session = connectBounded(peer)) {
                     active = session;
                     lastHeaderResponseNanos = 0;
+                    slowBodyBatches = 0;
                     if (!running) break;
                     log.info("RVN header peer connected: {}:{}; local header height={}", peer, port, chain.best().height());
                     RvnHash256 cursor = chain.best().id();
                     long cursorTime = chain.best().timestamp();
-                    int stagnant = 0, empty = 0;
+                    int stagnant = 0, empty = 0, bodyBatches = 0;
+                    boolean headersCaughtUp = !headersFirst;
+                    if (headersFirst) log.info("RVN sync phase=HEADERS; downloading and verifying headers before new block bodies");
                     while (running) {
                         drainMinedRelays(session);
                         // A responsive peer must first answer getheaders. Once
                         // known headers lead bodies far enough, spend IBD time
-                        // fetching/validating bodies instead of growing the gap.
-                        if (lastHeaderResponseNanos != 0 && blocks != null
+                        // fetching/validating bodies, but bound that preference
+                        // so a large backlog cannot starve header discovery.
+                        if (headersCaughtUp && lastHeaderResponseNanos != 0 && blocks != null
+                                && bodyBatches < bodyBatchesPerHeader
                                 && chain.best().height() - blocks.downloadedHeight() > headerLeadBlocks
-                                && downloadBodies(session, 128) > 0) continue;
+                                && downloadBodies(session, 512) > 0) { bodyBatches++; continue; }
                         var headers = RvnHeadersClient.request(session, 70028, chain.locators(cursor),
                                 new byte[32], RvnActivation.MAINNET_KAWPOW_TIME, responseTimeoutMs);
                         lastHeaderResponseNanos = System.nanoTime();
+                        bodyBatches = 0;
                         if (headers.isEmpty()) {
-                            if (downloadBodies(session, 128) > 0) { empty = 0; continue; }
+                            if (!headersCaughtUp) {
+                                if (cursorTime < System.currentTimeMillis() / 1000 - 7200)
+                                    throw new IOException("RVN headers ended at a stale tip; trying another peer before block download");
+                                headersCaughtUp = true;
+                                log.info("RVN sync phase=BODIES; header discovery reached a recent tip, knownHeaders={}; full block validation still required", chain.best().height());
+                            }
                             // Keep this peer's verified cursor even when it is on a shorter
                             // branch; resetting to best would repeatedly download old batches.
                             if (++empty >= 3 && cursorTime < System.currentTimeMillis() / 1000 - 7200)
                                 throw new IOException("RVN peer has no recent headers; trying another peer");
+                            if (downloadBodies(session, 512) > 0) { bodyBatches++; continue; }
                             backoff = 1000;
                             Thread.sleep(pollMs);
                             continue;
                         }
+                        long validationStarted = System.nanoTime();
                         var result = chain.accept(headers);
                         empty = 0;
                         if (cursor.equals(result.lastId())) {
@@ -124,9 +164,10 @@ public final class RvnHeaderSyncService implements SmartLifecycle {
                         } else stagnant = 0;
                         cursor = result.lastId(); backoff = 1000;
                         cursorTime = headers.getLast().timestamp();
-                        log.info("RVN headers: received={}, added={}, bestHeight={}, bestId={}",
-                                headers.size(), result.added(), result.best().height(), result.best().id());
-                        downloadBodies(session, 128);
+                        log.info("RVN headers: received={}, added={}, bestHeight={}, bestId={}, validationMs={}",
+                                headers.size(), result.added(), result.best().height(), result.best().id(),
+                                TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - validationStarted));
+                        if (headersCaughtUp && downloadBodies(session, 512) > 0) bodyBatches++;
                     }
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt(); break;
@@ -157,19 +198,32 @@ public final class RvnHeaderSyncService implements SmartLifecycle {
         int added = blocks.downloadBatch(session, limit);
         if (added > 0) {
             lastHeaderResponseNanos = System.nanoTime(); // A verified body is also evidence of peer responsiveness.
-            log.info("RVN candidate block bodies: added={}, downloadedHeight={}, downloadMs={}, inFlight={}; UTXO validation pending",
-                    added, blocks.downloadedHeight(), TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - downloadStart), blocks.inFlight());
+            var timing = blocks.lastTiming();
+            log.info("RVN candidate block bodies: added={}, downloadedHeight={}, downloadMs={}, transportMs={}, checkStoreMs={}, bytes={}, inFlight={}; UTXO validation pending",
+                    added, blocks.downloadedHeight(), TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - downloadStart),
+                    timing.transportMs(), timing.checkStoreMs(), timing.bytes(), blocks.inFlight());
         }
-        return added + replayed + replayBodies(limit);
+        int progress = added + replayed + replayBodies(limit);
+        if (minimumPeerKiBPerSecond > 0 && added >= 32) {
+            var timing = blocks.lastTiming();
+            long allowanceMs = Math.max(5000, timing.bytes() * 1000 / (minimumPeerKiBPerSecond * 1024L));
+            slowBodyBatches = timing.transportMs() > allowanceMs ? slowBodyBatches + 1 : 0;
+            if (slowBodyBatches >= 2)
+                throw new IOException("RVN peer delivery slow for two consecutive batches: transportMs="
+                        + timing.transportMs() + ", bytes=" + timing.bytes() + "; trying another peer");
+        }
+        return progress;
     }
 
     private int replayBodies(int limit) {
         if (replay == null) return 0;
         try {
+            long replayStart = System.nanoTime();
             var progress = replay.advance(limit);
             if (progress.connected() + progress.disconnected() > 0)
-                log.info("RVN block replay: connected={}, disconnected={}, checkedHeight={}; readiness requires versioned genesis-to-current-tip coverage",
-                        progress.connected(), progress.disconnected(), progress.tip().height());
+                log.info("RVN block replay: connected={}, disconnected={}, checkedHeight={}, replayMs={}; readiness requires versioned genesis-to-current-tip coverage",
+                        progress.connected(), progress.disconnected(), progress.tip().height(),
+                        TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - replayStart));
             return progress.connected() + progress.disconnected();
         } catch (IOException | RuntimeException e) {
             // Stored-data replay failures are local validation failures, not peer retries.

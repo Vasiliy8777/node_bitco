@@ -20,6 +20,32 @@ import static org.junit.jupiter.api.Assertions.*;
 class StratumIntegrationTest {
     @TempDir Path directory;
 
+    @Test void unchangedWorkSurvivesFormerRefreshAndNewTipReplacesItImmediately() throws Exception {
+        var parameters = NetworkParametersRegistry.regtest();
+        var clock = new java.util.concurrent.atomic.AtomicLong(1_800_000_000L);
+        var ready = new AtomicBoolean(true);
+        try (var db = new RocksDbDatabase(directory); var peers = new PeerManager();
+             var validation = new NodeValidationService(db, parameters, clock::get, new Mempool())) {
+            var sync = new NodeSyncInfrastructure(db, parameters, clock::get);
+            try (var relay = new NodeRelayService(validation, sync, peers)) {
+                var backend = new StratumMiningBackend(validation, relay, parameters, clock::get,
+                        ready::get, new byte[]{0x51}, 4_000_000, new FeeRate(0));
+                var original = backend.work().orElseThrow();
+                // Cross the actual former monotonic expiry, not just the block timestamp.
+                Thread.sleep(30_100);
+                clock.addAndGet(600);
+                assertSame(original, backend.work().orElseThrow());
+                var block = ru.bitcoin.node.mining.NonceMiner.search(original.block(), parameters,
+                        0, 10_000, () -> false).orElseThrow();
+                assertTrue(backend.submit(block));
+                assertFalse(backend.isCurrent(original.block().header().previousBlockHash()));
+                assertEquals(block.hash(), backend.work().orElseThrow().block().header().previousBlockHash());
+                ready.set(false);
+                assertTrue(backend.work().isEmpty());
+            }
+        }
+    }
+
     @Test
     @org.junit.jupiter.api.condition.EnabledIfSystemProperty(named="bitcoin.pre-mainnet.test",matches="true")
     void measuresWireNotificationLatencyAcrossRepeatedTemplateChanges() throws Exception {

@@ -1,0 +1,438 @@
+[INFO] Scanning for projects...
+[WARNING] 
+[WARNING] Some problems were encountered while building the effective model for ru.bitcoin.mining:common:jar:0.0.1-SNAPSHOT
+[WARNING] 'build.plugins.plugin.version' for org.apache.maven.plugins:maven-compiler-plugin is missing. @ ru.bitcoin.mining:node:0.0.1-SNAPSHOT, C:\Users\Vasiliy\IdeaProjects\bitcoin-node\pom.xml, line 122, column 21
+[WARNING] 
+[WARNING] Some problems were encountered while building the effective model for ru.bitcoin.mining:crypto:jar:0.0.1-SNAPSHOT
+[WARNING] 'build.plugins.plugin.version' for org.apache.maven.plugins:maven-compiler-plugin is missing. @ ru.bitcoin.mining:node:0.0.1-SNAPSHOT, C:\Users\Vasiliy\IdeaProjects\bitcoin-node\pom.xml, line 122, column 21
+[WARNING] 
+[WARNING] Some problems were encountered while building the effective model for ru.bitcoin.mining:protocol:jar:0.0.1-SNAPSHOT
+[WARNING] 'build.plugins.plugin.version' for org.apache.maven.plugins:maven-compiler-plugin is missing. @ ru.bitcoin.mining:node:0.0.1-SNAPSHOT, C:\Users\Vasiliy\IdeaProjects\bitcoin-node\pom.xml, line 122, column 21
+[WARNING] 
+[WARNING] Some problems were encountered while building the effective model for ru.bitcoin.mining:script:jar:0.0.1-SNAPSHOT
+[WARNING] 'build.plugins.plugin.version' for org.apache.maven.plugins:maven-compiler-plugin is missing. @ ru.bitcoin.mining:node:0.0.1-SNAPSHOT, C:\Users\Vasiliy\IdeaProjects\bitcoin-node\pom.xml, line 122, column 21
+[WARNING] 
+[WARNING] Some problems were encountered while building the effective model for ru.bitcoin.mining:consensus:jar:0.0.1-SNAPSHOT
+[WARNING] 'build.plugins.plugin.version' for org.apache.maven.plugins:maven-compiler-plugin is missing. @ ru.bitcoin.mining:node:0.0.1-SNAPSHOT, C:\Users\Vasiliy\IdeaProjects\bitcoin-node\pom.xml, line 122, column 21
+[WARNING] 
+[WARNING] Some problems were encountered while building the effective model for ru.bitcoin.mining:storage:jar:0.0.1-SNAPSHOT
+[WARNING] 'build.plugins.plugin.version' for org.apache.maven.plugins:maven-compiler-plugin is missing. @ ru.bitcoin.mining:node:0.0.1-SNAPSHOT, C:\Users\Vasiliy\IdeaProjects\bitcoin-node\pom.xml, line 122, column 21
+[WARNING] 
+[WARNING] Some problems were encountered while building the effective model for ru.bitcoin.mining:chain:jar:0.0.1-SNAPSHOT
+[WARNING] 'build.plugins.plugin.version' for org.apache.maven.plugins:maven-compiler-plugin is missing. @ ru.bitcoin.mining:node:0.0.1-SNAPSHOT, C:\Users\Vasiliy\IdeaProjects\bitcoin-node\pom.xml, line 122, column 21
+[WARNING] 
+[WARNING] Some problems were encountered while building the effective model for ru.bitcoin.mining:mempool:jar:0.0.1-SNAPSHOT
+[WARNING] 'build.plugins.plugin.version' for org.apache.maven.plugins:maven-compiler-plugin is missing. @ ru.bitcoin.mining:node:0.0.1-SNAPSHOT, C:\Users\Vasiliy\IdeaProjects\bitcoin-node\pom.xml, line 122, column 21
+[WARNING] 
+[WARNING] Some problems were encountered while building the effective model for ru.bitcoin.mining:p2p:jar:0.0.1-SNAPSHOT
+[WARNING] 'build.plugins.plugin.version' for org.apache.maven.plugins:maven-compiler-plugin is missing. @ ru.bitcoin.mining:node:0.0.1-SNAPSHOT, C:\Users\Vasiliy\IdeaProjects\bitcoin-node\pom.xml, line 122, column 21
+[WARNING] 
+[WARNING] Some problems were encountered while building the effective model for ru.bitcoin.mining:mining:jar:0.0.1-SNAPSHOT
+[WARNING] 'build.plugins.plugin.version' for org.apache.maven.plugins:maven-compiler-plugin is missing. @ ru.bitcoin.mining:node:0.0.1-SNAPSHOT, C:\Users\Vasiliy\IdeaProjects\bitcoin-node\pom.xml, line 122, column 21
+[WARNING] 
+[WARNING] Some problems were encountered while building the effective model for ru.bitcoin.mining:stratum:jar:0.0.1-SNAPSHOT
+[WARNING] 'build.plugins.plugin.version' for org.apache.maven.plugins:maven-compiler-plugin is missing. @ ru.bitcoin.mining:node:0.0.1-SNAPSHOT, C:\Users\Vasiliy\IdeaProjects\bitcoin-node\pom.xml, line 122, column 21
+[WARNING] 
+[WARNING] Some problems were encountered while building the effective model for ru.bitcoin.mining:app:jar:0.0.1-SNAPSHOT
+[WARNING] 'build.plugins.plugin.version' for org.apache.maven.plugins:maven-compiler-plugin is missing. @ ru.bitcoin.mining:node:0.0.1-SNAPSHOT, C:\Users\Vasiliy\IdeaProjects\bitcoin-node\pom.xml, line 122, column 21
+[WARNING] 
+[WARNING] Some problems were encountered while building the effective model for ru.bitcoin.mining:rvn-p2p:jar:0.0.1-SNAPSHOT
+[WARNING] 'build.plugins.plugin.version' for org.apache.maven.plugins:maven-compiler-plugin is missing. @ ru.bitcoin.mining:node:0.0.1-SNAPSHOT, C:\Users\Vasiliy\IdeaProjects\bitcoin-node\pom.xml, line 122, column 21
+[WARNING] 
+[WARNING] Some problems were encountered while building the effective model for ru.bitcoin.mining:rvn-protocol:jar:0.0.1-SNAPSHOT
+[WARNING] 'build.plugins.plugin.version' for org.apache.maven.plugins:maven-compiler-plugin is missing. @ ru.bitcoin.mining:node:0.0.1-SNAPSHOT, C:\Users\Vasiliy\IdeaProjects\bitcoin-node\pom.xml, line 122, column 21
+[WARNING] 
+[WARNING] Some problems were encountered while building the effective model for ru.bitcoin.mining:rvn-consensus:jar:0.0.1-SNAPSHOT
+[WARNING] 'build.plugins.plugin.version' for org.apache.maven.plugins:maven-compiler-plugin is missing. @ ru.bitcoin.mining:node:0.0.1-SNAPSHOT, C:\Users\Vasiliy\IdeaProjects\bitcoin-node\pom.xml, line 122, column 21
+[WARNING] 
+[WARNING] Some problems were encountered while building the effective model for ru.bitcoin.mining:rvn-app:jar:0.0.1-SNAPSHOT
+[WARNING] 'build.plugins.plugin.version' for org.apache.maven.plugins:maven-compiler-plugin is missing. @ ru.bitcoin.mining:node:0.0.1-SNAPSHOT, C:\Users\Vasiliy\IdeaProjects\bitcoin-node\pom.xml, line 122, column 21
+[WARNING] 
+[WARNING] Some problems were encountered while building the effective model for ru.bitcoin.mining:rvn-pow:jar:0.0.1-SNAPSHOT
+[WARNING] 'build.plugins.plugin.version' for org.apache.maven.plugins:maven-compiler-plugin is missing. @ ru.bitcoin.mining:node:0.0.1-SNAPSHOT, C:\Users\Vasiliy\IdeaProjects\bitcoin-node\pom.xml, line 122, column 21
+[WARNING] 
+[WARNING] Some problems were encountered while building the effective model for ru.bitcoin.mining:rvn-storage:jar:0.0.1-SNAPSHOT
+[WARNING] 'build.plugins.plugin.version' for org.apache.maven.plugins:maven-compiler-plugin is missing. @ ru.bitcoin.mining:node:0.0.1-SNAPSHOT, C:\Users\Vasiliy\IdeaProjects\bitcoin-node\pom.xml, line 122, column 21
+[WARNING] 
+[WARNING] Some problems were encountered while building the effective model for ru.bitcoin.mining:rvn-chain:jar:0.0.1-SNAPSHOT
+[WARNING] 'build.plugins.plugin.version' for org.apache.maven.plugins:maven-compiler-plugin is missing. @ ru.bitcoin.mining:node:0.0.1-SNAPSHOT, C:\Users\Vasiliy\IdeaProjects\bitcoin-node\pom.xml, line 122, column 21
+[WARNING] 
+[WARNING] Some problems were encountered while building the effective model for ru.bitcoin.mining:node:pom:0.0.1-SNAPSHOT
+[WARNING] 'build.plugins.plugin.version' for org.apache.maven.plugins:maven-compiler-plugin is missing. @ line 122, column 21
+[WARNING] 
+[WARNING] It is highly recommended to fix these problems because they threaten the stability of your build.
+[WARNING] 
+[WARNING] For this reason, future Maven versions might no longer support building such malformed projects.
+[WARNING] 
+[INFO] ------------------------------------------------------------------------
+[INFO] Reactor Build Order:
+[INFO] 
+[INFO] bitcoin-node                                                       [pom]
+[INFO] common                                                             [jar]
+[INFO] crypto                                                             [jar]
+[INFO] protocol                                                           [jar]
+[INFO] script                                                             [jar]
+[INFO] rvn-protocol                                                       [jar]
+[INFO] rvn-p2p                                                            [jar]
+[INFO] rvn-consensus                                                      [jar]
+[INFO] rvn-chain                                                          [jar]
+[INFO] rvn-storage                                                        [jar]
+[INFO] rvn-pow                                                            [jar]
+[INFO] rvn-app                                                            [jar]
+[INFO] 
+[INFO] -----------------------< ru.bitcoin.mining:node >-----------------------
+[INFO] Building bitcoin-node 0.0.1-SNAPSHOT                              [1/12]
+[INFO]   from pom.xml
+[INFO] --------------------------------[ pom ]---------------------------------
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ node ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] ----------------------< ru.bitcoin.mining:common >----------------------
+[INFO] Building common 0.0.1-SNAPSHOT                                    [2/12]
+[INFO]   from common\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ common ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ common ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.11.0:compile (default-compile) @ common ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Nothing to compile - all classes are up to date
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ common ---
+[INFO] skip non existing resourceDirectory C:\Users\Vasiliy\IdeaProjects\bitcoin-node\common\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.11.0:testCompile (default-testCompile) @ common ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Nothing to compile - all classes are up to date
+[INFO] 
+[INFO] --- surefire:3.2.2:test (default-test) @ common ---
+[INFO] Toolchain in maven-surefire-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] ----------------------< ru.bitcoin.mining:crypto >----------------------
+[INFO] Building crypto 0.0.1-SNAPSHOT                                    [3/12]
+[INFO]   from crypto\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ crypto ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ crypto ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.11.0:compile (default-compile) @ crypto ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Nothing to compile - all classes are up to date
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ crypto ---
+[INFO] Copying 2 resources from src\test\resources to target\test-classes
+[INFO] 
+[INFO] --- compiler:3.11.0:testCompile (default-testCompile) @ crypto ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Nothing to compile - all classes are up to date
+[INFO] 
+[INFO] --- surefire:3.2.2:test (default-test) @ crypto ---
+[INFO] Toolchain in maven-surefire-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] ---------------------< ru.bitcoin.mining:protocol >---------------------
+[INFO] Building protocol 0.0.1-SNAPSHOT                                  [4/12]
+[INFO]   from protocol\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ protocol ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ protocol ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.11.0:compile (default-compile) @ protocol ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Nothing to compile - all classes are up to date
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ protocol ---
+[INFO] skip non existing resourceDirectory C:\Users\Vasiliy\IdeaProjects\bitcoin-node\protocol\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.11.0:testCompile (default-testCompile) @ protocol ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Nothing to compile - all classes are up to date
+[INFO] 
+[INFO] --- surefire:3.2.2:test (default-test) @ protocol ---
+[INFO] Toolchain in maven-surefire-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] ----------------------< ru.bitcoin.mining:script >----------------------
+[INFO] Building script 0.0.1-SNAPSHOT                                    [5/12]
+[INFO]   from script\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ script ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ script ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.11.0:compile (default-compile) @ script ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Nothing to compile - all classes are up to date
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ script ---
+[INFO] Copying 8 resources from src\test\resources to target\test-classes
+[INFO] 
+[INFO] --- compiler:3.11.0:testCompile (default-testCompile) @ script ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Nothing to compile - all classes are up to date
+[INFO] 
+[INFO] --- surefire:3.2.2:test (default-test) @ script ---
+[INFO] Toolchain in maven-surefire-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] -------------------< ru.bitcoin.mining:rvn-protocol >-------------------
+[INFO] Building rvn-protocol 0.0.1-SNAPSHOT                              [6/12]
+[INFO]   from rvn-protocol\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ rvn-protocol ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ rvn-protocol ---
+[INFO] skip non existing resourceDirectory C:\Users\Vasiliy\IdeaProjects\bitcoin-node\rvn-protocol\src\main\resources
+[INFO] 
+[INFO] --- compiler:3.11.0:compile (default-compile) @ rvn-protocol ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Nothing to compile - all classes are up to date
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ rvn-protocol ---
+[INFO] skip non existing resourceDirectory C:\Users\Vasiliy\IdeaProjects\bitcoin-node\rvn-protocol\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.11.0:testCompile (default-testCompile) @ rvn-protocol ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Nothing to compile - all classes are up to date
+[INFO] 
+[INFO] --- surefire:3.5.3:test (default-test) @ rvn-protocol ---
+[INFO] Toolchain in maven-surefire-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] ---------------------< ru.bitcoin.mining:rvn-p2p >----------------------
+[INFO] Building rvn-p2p 0.0.1-SNAPSHOT                                   [7/12]
+[INFO]   from rvn-p2p\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ rvn-p2p ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ rvn-p2p ---
+[INFO] skip non existing resourceDirectory C:\Users\Vasiliy\IdeaProjects\bitcoin-node\rvn-p2p\src\main\resources
+[INFO] 
+[INFO] --- compiler:3.11.0:compile (default-compile) @ rvn-p2p ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Nothing to compile - all classes are up to date
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ rvn-p2p ---
+[INFO] skip non existing resourceDirectory C:\Users\Vasiliy\IdeaProjects\bitcoin-node\rvn-p2p\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.11.0:testCompile (default-testCompile) @ rvn-p2p ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Changes detected - recompiling the module! :source
+[INFO] Compiling 8 source files with javac [forked debug release 21] to target\test-classes
+[INFO] 
+[INFO] --- surefire:3.5.3:test (default-test) @ rvn-p2p ---
+[INFO] Toolchain in maven-surefire-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running ru.bitcoin.node.rvn.p2p.RvnPeerSessionTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.125 s -- in ru.bitcoin.node.rvn.p2p.RvnPeerSessionTest
+[INFO] 
+[INFO] Results:
+[INFO] 
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0
+[INFO] 
+[INFO] 
+[INFO] ------------------< ru.bitcoin.mining:rvn-consensus >-------------------
+[INFO] Building rvn-consensus 0.0.1-SNAPSHOT                             [8/12]
+[INFO]   from rvn-consensus\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ rvn-consensus ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ rvn-consensus ---
+[INFO] skip non existing resourceDirectory C:\Users\Vasiliy\IdeaProjects\bitcoin-node\rvn-consensus\src\main\resources
+[INFO] 
+[INFO] --- compiler:3.11.0:compile (default-compile) @ rvn-consensus ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Nothing to compile - all classes are up to date
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ rvn-consensus ---
+[INFO] skip non existing resourceDirectory C:\Users\Vasiliy\IdeaProjects\bitcoin-node\rvn-consensus\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.11.0:testCompile (default-testCompile) @ rvn-consensus ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Nothing to compile - all classes are up to date
+[INFO] 
+[INFO] --- surefire:3.5.3:test (default-test) @ rvn-consensus ---
+[INFO] Toolchain in maven-surefire-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --------------------< ru.bitcoin.mining:rvn-chain >---------------------
+[INFO] Building rvn-chain 0.0.1-SNAPSHOT                                 [9/12]
+[INFO]   from rvn-chain\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ rvn-chain ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ rvn-chain ---
+[INFO] Copying 2 resources from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.11.0:compile (default-compile) @ rvn-chain ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Nothing to compile - all classes are up to date
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ rvn-chain ---
+[INFO] Copying 5 resources from src\test\resources to target\test-classes
+[INFO] 
+[INFO] --- compiler:3.11.0:testCompile (default-testCompile) @ rvn-chain ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Nothing to compile - all classes are up to date
+[INFO] 
+[INFO] --- surefire:3.5.3:test (default-test) @ rvn-chain ---
+[INFO] Toolchain in maven-surefire-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] -------------------< ru.bitcoin.mining:rvn-storage >--------------------
+[INFO] Building rvn-storage 0.0.1-SNAPSHOT                              [10/12]
+[INFO]   from rvn-storage\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ rvn-storage ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ rvn-storage ---
+[INFO] skip non existing resourceDirectory C:\Users\Vasiliy\IdeaProjects\bitcoin-node\rvn-storage\src\main\resources
+[INFO] 
+[INFO] --- compiler:3.11.0:compile (default-compile) @ rvn-storage ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Nothing to compile - all classes are up to date
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ rvn-storage ---
+[INFO] skip non existing resourceDirectory C:\Users\Vasiliy\IdeaProjects\bitcoin-node\rvn-storage\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.11.0:testCompile (default-testCompile) @ rvn-storage ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Nothing to compile - all classes are up to date
+[INFO] 
+[INFO] --- surefire:3.5.3:test (default-test) @ rvn-storage ---
+[INFO] Toolchain in maven-surefire-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] ---------------------< ru.bitcoin.mining:rvn-pow >----------------------
+[INFO] Building rvn-pow 0.0.1-SNAPSHOT                                  [11/12]
+[INFO]   from rvn-pow\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ rvn-pow ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ rvn-pow ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.11.0:compile (default-compile) @ rvn-pow ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Nothing to compile - all classes are up to date
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ rvn-pow ---
+[INFO] Copying 1 resource from src\test\resources to target\test-classes
+[INFO] 
+[INFO] --- compiler:3.11.0:testCompile (default-testCompile) @ rvn-pow ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Nothing to compile - all classes are up to date
+[INFO] 
+[INFO] --- surefire:3.5.3:test (default-test) @ rvn-pow ---
+[INFO] Toolchain in maven-surefire-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] ---------------------< ru.bitcoin.mining:rvn-app >----------------------
+[INFO] Building rvn-app 0.0.1-SNAPSHOT                                  [12/12]
+[INFO]   from rvn-app\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- toolchains:3.2.0:toolchain (default) @ rvn-app ---
+[INFO] Required toolchain: jdk [ version='21' ]
+[INFO] Found matching toolchain for type jdk: JDK[C:\Program Files\Java\jdk-21]
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ rvn-app ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.11.0:compile (default-compile) @ rvn-app ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Changes detected - recompiling the module! :source
+[INFO] Compiling 19 source files with javac [forked debug release 21] to target\classes
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ rvn-app ---
+[INFO] skip non existing resourceDirectory C:\Users\Vasiliy\IdeaProjects\bitcoin-node\rvn-app\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.11.0:testCompile (default-testCompile) @ rvn-app ---
+[INFO] Toolchain in maven-compiler-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Changes detected - recompiling the module! :dependency
+[INFO] Compiling 13 source files with javac [forked debug release 21] to target\test-classes
+[INFO] 
+[INFO] --- surefire:3.5.3:test (default-test) @ rvn-app ---
+[INFO] Toolchain in maven-surefire-plugin: JDK[C:\Program Files\Java\jdk-21]
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running ru.bitcoin.node.rvn.app.mining.RvnSoloMiningTest
+02:22:59.976 [main] INFO ru.bitcoin.node.rvn.app.mining.RvnSoloMining -- RVN target candidates: cpuVerified=1, height=1, generation=1, nBits=1e00ffff
+02:23:00.028 [main] INFO ru.bitcoin.node.rvn.app.mining.RvnSoloMining -- RVN target candidates: cpuVerified=1, height=1, generation=1, nBits=1e00ffff
+02:23:00.177 [main] INFO ru.bitcoin.node.rvn.app.mining.RvnSoloMining -- RVN target candidates: cpuVerified=1, height=1, generation=1, nBits=1e00ffff
+02:23:00.180 [main] INFO ru.bitcoin.node.rvn.app.mining.RvnSoloMining -- RVN mined block: locallyAcceptedBlocksSession=1, height=1; relay pending
+02:23:00.181 [main] INFO ru.bitcoin.node.rvn.app.mining.RvnSoloMining -- RVN mined block relay completed: relayedBlocksSession=1; peer possession confirmed by production backend
+02:23:00.260 [main] INFO ru.bitcoin.node.rvn.app.mining.RvnSoloMining -- RVN target candidates: cpuVerified=1, height=1, generation=2, nBits=1e00ffff
+02:23:00.263 [main] INFO ru.bitcoin.node.rvn.app.mining.RvnSoloMining -- RVN mined block: locallyAcceptedBlocksSession=1, height=1; relay pending
+02:23:00.264 [main] INFO ru.bitcoin.node.rvn.app.mining.RvnSoloMining -- RVN mined block relay completed: relayedBlocksSession=1; peer possession confirmed by production backend
+02:23:00.476 [main] INFO ru.bitcoin.node.rvn.app.mining.RvnSoloMining -- RVN target candidates: cpuVerified=1, height=1, generation=1, nBits=207fffff
+02:23:00.476 [main] INFO ru.bitcoin.node.rvn.app.mining.RvnSoloMining -- RVN mined block: locallyAcceptedBlocksSession=1, height=1; relay pending
+02:23:00.477 [main] INFO ru.bitcoin.node.rvn.app.mining.RvnSoloMining -- RVN mined block relay completed: relayedBlocksSession=1; peer possession confirmed by production backend
+02:23:00.506 [main] INFO ru.bitcoin.node.rvn.app.mining.RvnSoloMining -- RVN target candidates: cpuVerified=1, height=1, generation=1, nBits=1e00ffff
+[INFO] Tests run: 13, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.923 s -- in ru.bitcoin.node.rvn.app.mining.RvnSoloMiningTest
+[INFO] Running ru.bitcoin.node.rvn.app.sync.RvnSeedResolverTest
+[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.125 s -- in ru.bitcoin.node.rvn.app.sync.RvnSeedResolverTest
+[INFO] 
+[INFO] Results:
+[INFO] 
+[INFO] Tests run: 20, Failures: 0, Errors: 0, Skipped: 0
+[INFO] 
+[INFO] ------------------------------------------------------------------------
+[INFO] Reactor Summary for bitcoin-node 0.0.1-SNAPSHOT:
+[INFO] 
+[INFO] bitcoin-node ....................................... SUCCESS [  0.155 s]
+[INFO] common ............................................. SUCCESS [  0.433 s]
+[INFO] crypto ............................................. SUCCESS [  0.046 s]
+[INFO] protocol ........................................... SUCCESS [  0.048 s]
+[INFO] script ............................................. SUCCESS [  0.061 s]
+[INFO] rvn-protocol ....................................... SUCCESS [  0.111 s]
+[INFO] rvn-p2p ............................................ SUCCESS [  1.688 s]
+[INFO] rvn-consensus ...................................... SUCCESS [  0.038 s]
+[INFO] rvn-chain .......................................... SUCCESS [  0.058 s]
+[INFO] rvn-storage ........................................ SUCCESS [  0.057 s]
+[INFO] rvn-pow ............................................ SUCCESS [  0.051 s]
+[INFO] rvn-app ............................................ SUCCESS [  4.492 s]
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  7.470 s
+[INFO] Finished at: 2026-10-28T02:23:00+07:00
+[INFO] ------------------------------------------------------------------------

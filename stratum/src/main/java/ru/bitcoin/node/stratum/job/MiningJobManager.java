@@ -1,6 +1,5 @@
 package ru.bitcoin.node.stratum.job;
 
-import java.time.Duration;
 import java.util.*;
 
 /** Bounded job history. Changes to the parent invalidate every previous job. */
@@ -23,8 +22,9 @@ public final class MiningJobManager {
 
     public synchronized Optional<MiningJob> find(String id) {
         var job = jobs.get(id);
-        if (job == null || System.nanoTime() - job.createdNanos() > Duration.ofMinutes(2).toNanos()) return Optional.empty();
-        return Optional.of(job);
+        // History is bounded to eight jobs and cleared on parent changes.
+        // An unchanged current template must remain usable beyond two minutes.
+        return Optional.ofNullable(job);
     }
 
     public synchronized void clear() { jobs.clear(); latest = null; }

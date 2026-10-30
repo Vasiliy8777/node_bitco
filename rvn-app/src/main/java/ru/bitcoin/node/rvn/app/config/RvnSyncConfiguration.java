@@ -4,6 +4,8 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.*;
 import org.springframework.beans.factory.annotation.Value;
 import ru.bitcoin.node.rvn.app.chain.RvnMainnetHeaderChain;
+import ru.bitcoin.node.rvn.app.chain.RvnHeaderPowBatch;
+import ru.bitcoin.node.rvn.app.chain.RvnGpuHeaderVerifier;
 import ru.bitcoin.node.rvn.app.chain.RvnNativeBlockReplay;
 import ru.bitcoin.node.rvn.storage.RvnCoinStore;
 import ru.bitcoin.node.rvn.storage.RvnFlatFileStore;
@@ -42,8 +44,21 @@ public class RvnSyncConfiguration {
     }
 
     @Bean
-    RvnMainnetHeaderChain rvnMainnetHeaderChain(RvnHeaderStore store, RvnJavaPowEngine engine) {
-        return new RvnMainnetHeaderChain(store, engine, () -> System.currentTimeMillis() / 1000);
+    RvnMainnetHeaderChain rvnMainnetHeaderChain(RvnHeaderStore store, RvnJavaPowEngine engine, RvnHeaderPowBatch powBatch) {
+        return new RvnMainnetHeaderChain(store, engine, () -> System.currentTimeMillis() / 1000, powBatch);
+    }
+
+    @Bean(destroyMethod = "close")
+    RvnHeaderPowBatch rvnHeaderPowBatch(@Value("${ravencoin.sync.pow-workers:4}") int workers,
+                                      @Value("${ravencoin.pow.cached-dag-items:65536}") int capacity,
+                                      ObjectProvider<RvnGpuHeaderVerifier> gpu) {
+        return new RvnHeaderPowBatch(workers, () -> new RvnJavaPowEngine(new RvnKawpowLightEngine(capacity)), gpu.getIfAvailable());
+    }
+
+    @Bean(destroyMethod = "close")
+    @ConditionalOnProperty(name = "ravencoin.sync.gpu-pow-enabled", havingValue = "true")
+    RvnGpuHeaderVerifier rvnGpuHeaderVerifier(RvnCudaKawpowWorker worker) {
+        return new RvnGpuHeaderVerifier(worker);
     }
 
     @Bean(destroyMethod = "close")
@@ -55,9 +70,10 @@ public class RvnSyncConfiguration {
     @Bean(destroyMethod = "close")
     @ConditionalOnProperty(name = "ravencoin.validation.native-replay-enabled", havingValue = "true")
     RvnCoinStore rvnCoinStore(RvnDataDirectories directories, RvnHeaderStore headers,
-            @Qualifier("rvnUndoFiles") RvnFlatFileStore undoFiles) throws Exception {
+            @Qualifier("rvnUndoFiles") RvnFlatFileStore undoFiles,
+            @Value("${ravencoin.sync.coin-cache-mib:1024}") int cacheMiB) throws Exception {
         // Header storage is opened/self-tested first; failures cannot create an orphan coin DB.
-        return new RvnCoinStore(directories.coins(), RvnMainnetExpectedBits.GENESIS_ID, undoFiles);
+        return new RvnCoinStore(directories.coins(), RvnMainnetExpectedBits.GENESIS_ID, undoFiles, cacheMiB);
     }
 
     @Bean
@@ -70,17 +86,20 @@ public class RvnSyncConfiguration {
     @Bean
     RvnHeaderSyncService rvnHeaderSyncService(RvnMainnetHeaderChain chain, RvnHeaderStore store,
             ObjectProvider<RvnNativeBlockReplay> replay,
-            @Value("${ravencoin.sync.peers:seed-raven.bitactivate.com,seed-raven.ravencoin.com,seed-raven.ravencoin.org}") String peers,
+            @Value("${ravencoin.sync.peers:2602:ffb8::208:72:56:214,51.79.161.39,seed-raven.bitactivate.com,seed-raven.ravencoin.com,seed-raven.ravencoin.org}") String peers,
             @Value("${ravencoin.p2p.port:0}") int port,
             @Value("${ravencoin.p2p.timeout-ms:5000}") int timeout,
             @Value("${ravencoin.sync.response-timeout-ms:30000}") long responseTimeout,
-            @Value("${ravencoin.sync.poll-ms:10000}") long poll,
+            @Value("${ravencoin.sync.poll-ms:2000}") long poll,
             @Value("${ravencoin.sync.dns-over-https:}") String dnsOverHttps,
             @Value("${ravencoin.sync.blocks-enabled:false}") boolean blocks,
+            @Value("${ravencoin.sync.headers-first:true}") boolean headersFirst,
             @Value("${ravencoin.sync.header-lead-blocks:4096}") int headerLead,
-            @Value("${ravencoin.sync.block-in-flight:16}") int inFlight) {
+            @Value("${ravencoin.sync.body-batches-per-header:4}") int bodyBatchesPerHeader,
+            @Value("${ravencoin.sync.minimum-peer-kib-per-second:64}") int minimumPeerKiBPerSecond,
+            @Value("${ravencoin.sync.block-in-flight:32}") int inFlight) {
         return new RvnHeaderSyncService(chain, Arrays.stream(peers.split(",")).map(String::trim).toList(),
                 port == 0 ? RvnNetwork.MAINNET.port() : port, timeout, responseTimeout, poll,
-                blocks ? new RvnBlockDownloader(store, responseTimeout, inFlight) : null, replay.getIfAvailable(), new RvnSeedResolver(dnsOverHttps), headerLead);
+                blocks ? new RvnBlockDownloader(store, responseTimeout, inFlight) : null, replay.getIfAvailable(), new RvnSeedResolver(dnsOverHttps), headerLead, bodyBatchesPerHeader, minimumPeerKiBPerSecond, headersFirst);
     }
 }

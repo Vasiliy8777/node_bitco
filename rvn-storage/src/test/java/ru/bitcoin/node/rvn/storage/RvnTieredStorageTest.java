@@ -63,6 +63,53 @@ class RvnTieredStorageTest {
     }
 
     @Test
+    void archiveBatchRotatesAndSurvivesReopenWithoutChangingRecordFormat() throws Exception {
+        var payloads = List.of(new byte[400], new byte[400], new byte[400], new byte[]{7, 8});
+        Path path = temp.resolve("batch-archive"); List<byte[]> references;
+        try (var files = new RvnFlatFileStore(path, "batch", 512, 1024)) {
+            references = files.appendBatch(payloads);
+            assertThrows(IOException.class, () -> files.appendBatch(List.of(new byte[]{1}, new byte[513])));
+        }
+        try (var files = new RvnFlatFileStore(path, "batch", 512, 1024)) {
+            for (int i = 0; i < references.size(); i++) assertArrayEquals(payloads.get(i), files.read(references.get(i)));
+            assertArrayEquals(new byte[]{9}, files.read(files.append(new byte[]{9})));
+        }
+    }
+
+    @Test
+    void bodyBatchChecksEverythingBeforePublishingAndAdvancesContiguousCursorAtomically() throws Exception {
+        Path hot = temp.resolve("batch-headers"), cold = temp.resolve("batch-blocks");
+        byte[] genesis = RvnHeaderStoreTest.header(null, 1000, RvnHeaderStoreTest.BITS);
+        var genesisId = RvnHeaderStoreTest.id(genesis); var parent = genesisId;
+        var headers = new ArrayList<byte[]>(); var bodies = new LinkedHashMap<RvnHash256, byte[]>();
+        for (int i = 1; i <= 4; i++) {
+            byte[] raw = RvnHeaderStoreTest.header(parent, 1000 + 60 * i, RvnHeaderStoreTest.BITS);
+            headers.add(raw); parent = RvnHeaderStoreTest.id(raw); bodies.put(parent, Arrays.copyOf(raw, 81));
+        }
+        var ids = new ArrayList<>(bodies.keySet());
+        try (var files = new RvnFlatFileStore(cold, "batch-bodies", 8_000_000);
+             var store = new RvnHeaderStore(hot, genesisId, genesis, RvnHeaderStoreTest.LIMIT, files)) {
+            store.accept(headers, (raw, view) -> RvnHeaderStoreTest.id(raw));
+            var firstBatch = new LinkedHashMap<RvnHash256, byte[]>();
+            for (int i : new int[]{2, 0, 1}) firstBatch.put(ids.get(i), bodies.get(ids.get(i)));
+            assertEquals(3, store.saveDownloadedBodies(firstBatch, (bytes, known) -> {}));
+            assertEquals(3, store.downloadedBodyTip().height());
+            assertEquals(0, store.saveDownloadedBodies(firstBatch, (bytes, known) -> {}));
+            var conflict = bodies.get(ids.get(1)).clone(); conflict[80] = 1;
+            var badBatch = new LinkedHashMap<RvnHash256, byte[]>();
+            badBatch.put(ids.get(3), bodies.get(ids.get(3))); badBatch.put(ids.get(1), conflict);
+            assertThrows(SecurityException.class, () -> store.saveDownloadedBodies(badBatch, (bytes, known) -> {}));
+            assertFalse(store.hasBlockBody(ids.get(3))); assertEquals(3, store.downloadedBodyTip().height());
+        }
+        try (var files = new RvnFlatFileStore(cold, "batch-bodies", 8_000_000);
+             var store = new RvnHeaderStore(hot, genesisId, genesis, RvnHeaderStoreTest.LIMIT, files)) {
+            assertEquals(3, store.downloadedBodyTip().height());
+            for (int i = 0; i < 3; i++) assertArrayEquals(bodies.get(ids.get(i)), store.blockBody(ids.get(i)));
+            assertNull(store.blockBody(ids.get(3)));
+        }
+    }
+
+    @Test
     void bodiesAreColdAndSsdContainsOnlyReferencesWithRestartAndMissingFileRejection() throws Exception {
         Path hot = temp.resolve("hot/headers"), cold = temp.resolve("cold/blocks");
         byte[] genesis = RvnHeaderStoreTest.header(null, 1000, RvnHeaderStoreTest.BITS);
@@ -143,6 +190,52 @@ class RvnTieredStorageTest {
             var coins = new RvnCoinStore(root.resolve("hot"), id(0), files);
             if (args[1].equals("before")) files.append(new byte[]{1, 2, 3});
             else coins.connect(coins.tip(), id(1), changes());
+            Runtime.getRuntime().halt(19);
+        }
+    }
+
+    @Test
+    void bodyGroupCommitSurvivesProcessCrashBeforeAndAfterIndexPublication() throws Exception {
+        byte[] genesis = RvnHeaderStoreTest.header(null, 1000, RvnHeaderStoreTest.BITS);
+        var genesisId = RvnHeaderStoreTest.id(genesis);
+        for (String mode : List.of("before", "after")) {
+            Path root = temp.resolve("body-crash-" + mode);
+            String classpath = System.getProperty("surefire.test.class.path", System.getProperty("java.class.path"));
+            var process = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                    "-cp", classpath, BodyCrashWriter.class.getName(), root.toString(), mode).redirectErrorStream(true).start();
+            try {
+                assertTrue(process.waitFor(30, TimeUnit.SECONDS));
+                assertEquals(19, process.exitValue(), new String(process.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8));
+            } finally { if (process.isAlive()) process.destroyForcibly(); }
+            try (var files = new RvnFlatFileStore(root.resolve("cold"), "body-crash", 8_000_000);
+                 var store = new RvnHeaderStore(root.resolve("hot"), genesisId, genesis, RvnHeaderStoreTest.LIMIT, files)) {
+                assertEquals(2, store.best().height());
+                assertEquals(mode.equals("after") ? 2 : 0, store.downloadedBodyTip().height());
+                for (int height = 1; height <= 2; height++) {
+                    var header = store.ancestor(store.best(), height);
+                    assertEquals(mode.equals("after"), store.hasBlockBody(header.id()));
+                    if (mode.equals("after")) assertArrayEquals(Arrays.copyOf(header.raw(), 81), store.blockBody(header.id()));
+                }
+            }
+        }
+    }
+
+    public static class BodyCrashWriter {
+        public static void main(String[] args) throws Exception {
+            Path root = Path.of(args[0]);
+            byte[] genesis = RvnHeaderStoreTest.header(null, 1000, RvnHeaderStoreTest.BITS);
+            var genesisId = RvnHeaderStoreTest.id(genesis);
+            var files = new RvnFlatFileStore(root.resolve("cold"), "body-crash", 8_000_000);
+            var store = new RvnHeaderStore(root.resolve("hot"), genesisId, genesis, RvnHeaderStoreTest.LIMIT, files);
+            var headers = new ArrayList<byte[]>(); var bodies = new LinkedHashMap<RvnHash256, byte[]>();
+            var parent = genesisId;
+            for (int height = 1; height <= 2; height++) {
+                byte[] raw = RvnHeaderStoreTest.header(parent, 1000 + 60 * height, RvnHeaderStoreTest.BITS);
+                parent = RvnHeaderStoreTest.id(raw); headers.add(raw); bodies.put(parent, Arrays.copyOf(raw, 81));
+            }
+            store.accept(headers, (raw, view) -> RvnHeaderStoreTest.id(raw));
+            if (args[1].equals("before")) files.appendBatch(new ArrayList<>(bodies.values()));
+            else store.saveDownloadedBodies(bodies, (bytes, known) -> {});
             Runtime.getRuntime().halt(19);
         }
     }

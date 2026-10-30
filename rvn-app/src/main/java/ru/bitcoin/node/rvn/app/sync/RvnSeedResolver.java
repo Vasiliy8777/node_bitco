@@ -9,7 +9,7 @@ import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
 
-/** Bounded system DNS with optional HTTPS A-record fallback. Addresses only
+/** Bounded system DNS with optional HTTPS A/AAAA fallback. Addresses only
  * discover untrusted peers; all downloaded headers/bodies still need consensus checks. */
 public final class RvnSeedResolver implements AutoCloseable {
     @FunctionalInterface interface Lookup { List<String> resolve(String host) throws IOException; }
@@ -54,7 +54,7 @@ public final class RvnSeedResolver implements AutoCloseable {
         var unique = new ArrayList<>(new LinkedHashSet<>(addresses));
         if (unique.isEmpty() || unique.size() > 256) throw new IOException("RVN DNS returned no usable addresses or exceeded limit");
         Collections.shuffle(unique);
-        var result = List.copyOf(unique);
+        var result = interleave(unique);
         if (cache.size() >= 64) cache.clear();
         cache.put(host, new Cached(result, System.nanoTime() + TimeUnit.SECONDS.toNanos(30)));
         return result;
@@ -69,34 +69,71 @@ public final class RvnSeedResolver implements AutoCloseable {
         finally { pending.cancel(true); }
     }
     private List<String> https(URI endpoint, String host) throws IOException {
+        var addresses = new LinkedHashSet<String>();
+        IOException failure = null;
+        for (int type : new int[] {28, 1}) {
+            try { addresses.addAll(https(endpoint, host, type)); }
+            catch (IOException e) {
+                if (Thread.currentThread().isInterrupted()) throw e;
+                if (failure == null) failure = e; else failure.addSuppressed(e);
+            }
+        }
+        if (addresses.isEmpty()) {
+            if (failure != null) throw failure;
+            throw new IOException("RVN HTTPS DNS has no A/AAAA records");
+        }
+        return List.copyOf(addresses);
+    }
+    private List<String> https(URI endpoint, String host, int type) throws IOException {
         URI query = URI.create(endpoint + "?name=" + URLEncoder.encode(host, StandardCharsets.UTF_8)
-                + "&type=A&edns_client_subnet=0.0.0.0%2F0");
+                + "&type=" + type + "&edns_client_subnet=0.0.0.0%2F0");
         var request = HttpRequest.newBuilder(query).timeout(Duration.ofSeconds(5)).header("Accept", "application/dns-json").GET().build();
         try {
             var response = http.send(request, info -> new LimitedBody());
             if (response.statusCode() != 200) throw new IOException("RVN HTTPS DNS HTTP status " + response.statusCode());
-            return parse(host, new String(response.body(), StandardCharsets.UTF_8));
+            return parse(host, new String(response.body(), StandardCharsets.UTF_8), type);
         } catch (InterruptedException e) { Thread.currentThread().interrupt(); throw new InterruptedIOException("RVN HTTPS DNS interrupted"); }
     }
     static List<String> parse(String host, String json) throws IOException {
+        return parse(host, json, 1);
+    }
+    static List<String> parse(String host, String json, int recordType) throws IOException {
+        if (recordType != 1 && recordType != 28) throw new IllegalArgumentException("DNS record type");
         if (json.length() > 65536) throw new IOException("RVN HTTPS DNS response size limit");
         try {
             var value = new JacksonJsonParser().parseMap(json);
             if (!(value.get("Status") instanceof Number status) || status.intValue() != 0 || !Boolean.FALSE.equals(value.get("TC")))
                 throw new IOException("RVN HTTPS DNS failed or truncated");
             if (!(value.get("Question") instanceof List<?> questions) || questions.size() != 1
-                    || !(questions.getFirst() instanceof Map<?, ?> q) || !(q.get("type") instanceof Number type) || type.intValue() != 1
+                    || !(questions.getFirst() instanceof Map<?, ?> q) || !(q.get("type") instanceof Number type) || type.intValue() != recordType
                     || !(q.get("name") instanceof String name) || !name.replaceFirst("\\.$", "").equalsIgnoreCase(host.replaceFirst("\\.$", "")))
                 throw new IOException("RVN HTTPS DNS question mismatch");
-            if (!(value.get("Answer") instanceof List<?> answers) || answers.size() > 256) throw new IOException("RVN HTTPS DNS answers missing/oversized");
+            Object rawAnswers = value.getOrDefault("Answer", List.of());
+            if (!(rawAnswers instanceof List<?> answers) || answers.size() > 256) throw new IOException("RVN HTTPS DNS answers oversized/invalid");
             var result = new LinkedHashSet<String>();
-            for (var raw : answers) if (raw instanceof Map<?, ?> answer && answer.get("type") instanceof Number t && t.intValue() == 1) {
-                if (!(answer.get("data") instanceof String ip) || !ipv4(ip)) throw new IOException("Invalid RVN HTTPS DNS IPv4 record");
+            for (var raw : answers) if (raw instanceof Map<?, ?> answer && answer.get("type") instanceof Number t && t.intValue() == recordType) {
+                if (!(answer.get("data") instanceof String ip) || !(recordType == 1 ? ipv4(ip) : ipv6(ip)))
+                    throw new IOException("Invalid RVN HTTPS DNS address record");
                 result.add(ip);
             }
-            if (result.isEmpty()) throw new IOException("RVN HTTPS DNS has no A records");
             return List.copyOf(result);
         } catch (RuntimeException e) { throw new IOException("Malformed RVN HTTPS DNS JSON", e); }
+    }
+    private static boolean ipv6(String ip) {
+        // Restrict to literals before using InetAddress: never resolve DNS data as a hostname.
+        if (ip.indexOf(':') < 0 || !ip.matches("[0-9a-fA-F:.]+")) return false;
+        try { InetAddress.getByName(ip); return true; }
+        catch (UnknownHostException e) { return false; }
+    }
+    static List<String> interleave(List<String> addresses) {
+        var v6 = addresses.stream().filter(a -> a.indexOf(':') >= 0).toList();
+        var v4 = addresses.stream().filter(a -> a.indexOf(':') < 0).toList();
+        var result = new ArrayList<String>();
+        for (int i = 0; i < Math.max(v6.size(), v4.size()); i++) {
+            if (i < v6.size()) result.add(v6.get(i));
+            if (i < v4.size()) result.add(v4.get(i));
+        }
+        return List.copyOf(result);
     }
     private static boolean ipv4(String ip) {
         if (!ip.matches("[0-9]{1,3}(\\.[0-9]{1,3}){3}")) return false;

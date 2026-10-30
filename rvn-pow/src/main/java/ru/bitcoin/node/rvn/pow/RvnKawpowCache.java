@@ -10,16 +10,21 @@ public final class RvnKawpowCache {
     public static final int ROW_BYTES = 64;
     public static final int CACHE_ROUNDS = 3;
     private final byte[][] rows;
+    private final long epoch;
 
     private RvnKawpowCache(byte[][] rows) {
-        this.rows = rows;
+        this(rows, -1);
+    }
+    private RvnKawpowCache(byte[][] rows, long epoch) {
+        this.rows = rows; this.epoch = epoch;
     }
 
     public static RvnKawpowCache forEpoch(long epoch) {
         long bytes = RvnKawpowDatasetSizes.cacheBytes(epoch);
         if (bytes / ROW_BYTES > Integer.MAX_VALUE)
             throw new IllegalArgumentException("Cache too large");
-        return build(RvnKawpowEpochSeed.forEpoch(epoch), (int) (bytes / ROW_BYTES));
+        var generated = build(RvnKawpowEpochSeed.forEpoch(epoch), (int) (bytes / ROW_BYTES));
+        return new RvnKawpowCache(generated.rows, epoch);
     }
 
     /**
@@ -48,6 +53,7 @@ public final class RvnKawpowCache {
     public int size() {
         return rows.length;
     }
+    long epoch() { return epoch; }
 
     public byte[] row(int index) {
         return rows[index].clone();
