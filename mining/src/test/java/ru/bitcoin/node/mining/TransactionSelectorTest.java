@@ -20,6 +20,39 @@ class TransactionSelectorTest {
         return new MempoolEntry(tx, fee, TransactionWeight.calculate(tx), 0, ops);
     }
 
+    @Test void cachedSnapshotsRemainCoherentAcrossFeeChangesAndRemoval() {
+        byte[] script = java.util.HexFormat.of().parseHex("0020" + java.util.HexFormat.of().formatHex(
+                ru.bitcoin.node.crypto.hash.Sha256.hash(new byte[]{0x51})));
+        var fund = new OutPoint(Hash256.fromDisplayHex("71".repeat(32)), new UInt32(0));
+        var parent = new Transaction(2, List.of(new TxIn(fund, new byte[0], TxIn.FINAL_SEQUENCE,
+                new Witness(List.of(new byte[]{0x51})))), List.of(new TxOut(90_000, script)), new UInt32(0));
+        var child = new Transaction(2, List.of(new TxIn(new OutPoint(parent.txId(), new UInt32(0)), new byte[0], TxIn.FINAL_SEQUENCE,
+                new Witness(List.of(new byte[]{0x51})))), List.of(new TxOut(80_000, script)), new UInt32(0));
+        var pool = new Mempool();
+        var context = new MempoolValidationContext(200, 1_700_000_000L, height -> 1_600_000_000L);
+        ru.bitcoin.node.consensus.transaction.UtxoView coins = point -> point.equals(fund)
+                ? Optional.of(new ru.bitcoin.node.consensus.transaction.UtxoEntry(100_000, script, 100, false)) : Optional.empty();
+        pool.admit(parent, context, coins); pool.admit(child, context, coins);
+        var original = pool.miningSnapshot();
+        compareSelection(original);
+        pool.prioritise(child.txId(), 40_000);
+        compareSelection(pool.miningSnapshot());
+        assertEquals(0, original.entries().get(1).feeDelta(), "Published snapshots must not change with live prioritisation");
+        assertThrows(UnsupportedOperationException.class, () -> original.entries().clear());
+        assertThrows(UnsupportedOperationException.class, () -> original.clusters().getFirst().clear());
+        pool.remove(parent.txId());
+        compareSelection(pool.miningSnapshot());
+        assertEquals(List.of(parent, child), TransactionSelector.selectSnapshot(original, 4_000_000, 80_000, new FeeRate(0)));
+    }
+
+    private static void compareSelection(Mempool.MiningSnapshot snapshot) {
+        for (long weight : new long[]{0, 400, 800, 4_000_000})
+            for (long sigops : new long[]{0, 1, 80_000})
+                for (long fee : new long[]{0, 100, 100_000})
+                    assertEquals(TransactionSelector.select(snapshot.entries(), weight, sigops, new FeeRate(fee)),
+                            TransactionSelector.selectSnapshot(snapshot, weight, sigops, new FeeRate(fee)));
+    }
+
     @Test
     void childPaysForParentAndParentsPrecedeChildrenRegardlessOfSnapshotOrder() {
         var parent = tx(Hash256.fromDisplayHex("11".repeat(32)), 1);

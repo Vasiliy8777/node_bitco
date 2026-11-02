@@ -86,12 +86,8 @@ class OutboundPeerManagerTest {
                             1_700_000_000L
                     );
 
-            /*
-             * Only the failing endpoint is initially available.
-             *
-             * AddrMan selection is randomized, so adding both addresses
-             * before connectOne() would make this test nondeterministic.
-             */
+            // Register the failing endpoint first. The deterministic selector
+            // below enforces attempt order independently of AddrMan randomness.
             addressManager.add(
                     failedAddress,
                     discoveredAt
@@ -125,55 +121,10 @@ class OutboundPeerManagerTest {
                             )
                     );
 
-            /*
-             * We need the successful address to become available only
-             * after the first failed connection attempt.
-             *
-             * The injected clock is called when markAttempt() is made.
-             * Add the replacement address immediately after observing
-             * that first attempt.
-             */
-            CompletableFuture<ru.bitcoin.node.p2p.address.KnownPeerAddress> failedAttempt =
-                    CompletableFuture.supplyAsync(
-                            () -> {
-
-                                long deadline =
-                                        System.nanoTime()
-                                                + TimeUnit.SECONDS
-                                                .toNanos(
-                                                        5
-                                                );
-
-                                while (System.nanoTime()
-                                        < deadline) {
-
-                                    var known =
-                                            addressManager.find(
-                                                    failedAddress
-                                            );
-
-                                    if (known.isPresent()
-                                            && known.get()
-                                            .attempts() > 0) {
-
-                                        addressManager.add(
-                                                successfulAddress,
-                                                discoveredAt.plusSeconds(
-                                                        1
-                                                )
-                                        );
-
-                                        return known.get();
-                                    }
-
-                                    Thread.onSpinWait();
-                                }
-
-                                throw new AssertionError(
-                                        "Failing address was not attempted"
-                                );
-                            }
-                    );
+            // The injected selector already fixes failed -> successful order.
+            // Publish both addresses before connecting: an asynchronous add can
+            // lose the race to the second selection and return an unknown address.
+            addressManager.add(successfulAddress, discoveredAt.plusSeconds(1));
 
             try {
 
@@ -183,10 +134,7 @@ class OutboundPeerManagerTest {
                         );
 
                 var failedKnown =
-                        failedAttempt.get(
-                                5,
-                                TimeUnit.SECONDS
-                        );
+                        addressManager.find(failedAddress).orElseThrow();
 
                 assertTrue(
                         peer.isReady()

@@ -1,0 +1,59 @@
+package ru.bitcoin.node.mempool;
+
+import ru.bitcoin.node.common.types.Hash256;
+import java.util.*;
+import java.util.function.BiFunction;
+
+/** Owned by the mempool monitor. Retains bounded metadata, never transactions or UTXOs. */
+final class ClusterDiagramCache {
+    private record Score(long fee, long weight, long virtualSize) { }
+    private record Cached(Map<Hash256, Score> scores, List<ClusterLinearization.Chunk> chunks) { }
+    private final int maximumTransactions;
+    private final BiFunction<Map<Hash256, MempoolEntry>, Set<Hash256>, List<ClusterLinearization.Chunk>> linearizer;
+    private Map<Set<Hash256>, Cached> previous = Map.of();
+
+    ClusterDiagramCache() { this(65_536, ClusterLinearization::chunks); }
+
+    ClusterDiagramCache(int maximumTransactions,
+            BiFunction<Map<Hash256, MempoolEntry>, Set<Hash256>, List<ClusterLinearization.Chunk>> linearizer) {
+        if (maximumTransactions < 0) throw new IllegalArgumentException("Negative cluster cache capacity");
+        this.maximumTransactions = maximumTransactions;
+        this.linearizer = Objects.requireNonNull(linearizer);
+    }
+
+    List<List<ClusterLinearization.Chunk>> clusters(Map<Hash256, MempoolEntry> entries) {
+        var next = new HashMap<Set<Hash256>, Cached>();
+        var result = new ArrayList<List<ClusterLinearization.Chunk>>();
+        int retained = 0;
+        for (var cluster : ClusterLinearization.clusters(entries)) {
+            var cached = previous.get(cluster);
+            if (cached == null || !matches(cached.scores(), entries)) {
+                var scores = new HashMap<Hash256, Score>();
+                for (var id : cluster) {
+                    var entry = entries.get(id);
+                    // txid commits to inputs/dependencies; modified fees and sigops-
+                    // adjusted sizes are the additional ordering inputs that can change.
+                    scores.put(id, new Score(entry.modifiedFee(), entry.adjustedWeight(), entry.virtualSize()));
+                }
+                cached = new Cached(Map.copyOf(scores), List.copyOf(linearizer.apply(entries, cluster)));
+            }
+            result.add(cached.chunks());
+            if (cluster.size() <= maximumTransactions - retained) {
+                next.put(cluster, cached); retained += cluster.size();
+            }
+        }
+        // Merged, split, removed and replaced clusters are discarded every time.
+        previous = next;
+        return List.copyOf(result);
+    }
+
+    private static boolean matches(Map<Hash256, Score> scores, Map<Hash256, MempoolEntry> entries) {
+        for (var item : scores.entrySet()) {
+            var entry = entries.get(item.getKey());
+            var score = item.getValue();
+            if (entry == null || entry.modifiedFee() != score.fee() || entry.adjustedWeight() != score.weight()
+                    || entry.virtualSize() != score.virtualSize()) return false;
+        }
+        return true;
+    }
+}

@@ -17,7 +17,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.IntSupplier;
 
 /**
- * Maintains a fixed target number of long-lived outbound peer connections.
+ * Maintains the outbound pool, with an optional extra full-relay recovery slot.
  *
  * <p>The supervisor never reads sockets itself. PeerMessageReader remains the
  * single socket reader for every Peer.
@@ -27,6 +27,74 @@ import java.util.function.IntSupplier;
  * and netgroup selection unique, while network establishment runs concurrently.
  */
 public final class OutboundPeerSupervisor implements AutoCloseable {
+    private OutboundPeerRecoveryView recoveryView;
+    private ExtraOutboundPeerPolicy recoveryPolicy;
+    private java.util.concurrent.ScheduledExecutorService recoveryTimer;
+    private long nextExtraEvictionNanos;
+    private final Set<Peer> protectedRecoveryPeers = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+    private volatile boolean tryExtra;
+    private volatile boolean tryBlock;
+    private boolean blockRotationStarted;
+    private long nextBlockProbeMicros;
+    private long nextNetworkProbeMicros;
+    private volatile ru.bitcoin.node.p2p.address.PeerAddressNetwork preferredNetwork;
+    private java.util.function.LongSupplier networkProbeDelayMicros = ExtraOutboundPeerPolicy::randomProbeDelayMicros;
+    private java.util.function.LongSupplier blockProbeDelayMicros = ExtraOutboundPeerPolicy::randomProbeDelayMicros;
+    private java.util.function.LongSupplier recoveryTimeMicros = PeerConnection::currentTimeMicros;
+    private int maximumAutomaticConnections = Integer.MAX_VALUE;
+
+    OutboundPeerSupervisor recoveryTimeMicros(java.util.function.LongSupplier clock) {
+        synchronized (monitor) {
+            if (started.get() || stopping) throw new IllegalStateException("Configure clock before starting");
+            recoveryTimeMicros = Objects.requireNonNull(clock);
+        }
+        return this;
+    }
+
+    public OutboundPeerSupervisor maximumAutomaticConnections(int maximum) {
+        synchronized (monitor) {
+            if (started.get() || stopping) throw new IllegalStateException("Configure connection capacity before starting");
+            if (maximum < targetOutboundPeers + targetBlockRelayPeers)
+                throw new IllegalArgumentException("Connection capacity is below the normal outbound pool");
+            maximumAutomaticConnections = maximum;
+        }
+        return this;
+    }
+
+    OutboundPeerSupervisor networkProbeDelayMicros(java.util.function.LongSupplier delay) {
+        synchronized (monitor) {
+            if (started.get()) throw new IllegalStateException("Configure probe timing before starting");
+            networkProbeDelayMicros = Objects.requireNonNull(delay);
+        }
+        return this;
+    }
+
+    OutboundPeerSupervisor blockProbeDelayMicros(java.util.function.LongSupplier delay) {
+        synchronized (monitor) {
+            if (started.get()) throw new IllegalStateException("Configure probe timing before starting");
+            blockProbeDelayMicros = Objects.requireNonNull(delay);
+        }
+        return this;
+    }
+
+    public OutboundPeerSupervisor recovery(OutboundPeerRecoveryView view, long targetSpacingSeconds) {
+        synchronized (monitor) {
+            if (started.get() || stopping) throw new IllegalStateException("Configure recovery before starting the supervisor");
+            recoveryView = Objects.requireNonNull(view);
+            recoveryPolicy = new ExtraOutboundPeerPolicy(targetSpacingSeconds);
+        }
+        return this;
+    }
+    private BlockRelayAnchorStore anchorStore;
+    private final java.util.ArrayDeque<PeerAddress> pendingAnchors = new java.util.ArrayDeque<>();
+
+    public OutboundPeerSupervisor anchorStore(BlockRelayAnchorStore store) {
+        synchronized (monitor) {
+            if (started.get() || stopping) throw new IllegalStateException("Configure anchors before starting the supervisor");
+            anchorStore = Objects.requireNonNull(store);
+        }
+        return this;
+    }
 
     private static final System.Logger log =
             System.getLogger(OutboundPeerSupervisor.class.getName());
@@ -205,10 +273,10 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
                         "startHeightSupplier"
                 );
 
-        if (targetOutboundPeers <= 0) {
+        if (targetOutboundPeers < 0 || (targetOutboundPeers == 0 && targetBlockRelayPeers > 0)) {
 
             throw new IllegalArgumentException(
-                    "targetOutboundPeers must be positive"
+                    "Full-relay target must be positive unless all automatic outbound connections are disabled"
             );
         }
 
@@ -274,15 +342,37 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
                 throw new IllegalStateException("OutboundPeerSupervisor is stopping");
             }
 
+            if (anchorStore != null && targetBlockRelayPeers > 0) {
+                try {
+                    pendingAnchors.addAll(anchorStore.consume());
+                    log.log(System.Logger.Level.INFO, "Loaded {0} one-shot block relay anchors", pendingAnchors.size());
+                }
+                catch (IOException failure) { log.log(System.Logger.Level.WARNING, "Ignoring unreadable block relay anchors", failure); }
+            }
+
             for (int index = 0; index < targetOutboundPeers; index++) {
                 slots.add(new Slot(index, PeerConnectionRole.FULL_RELAY));
             }
             for (int index = 0; index < targetBlockRelayPeers; index++) {
                 slots.add(new Slot(targetOutboundPeers + index, PeerConnectionRole.BLOCK_RELAY_ONLY));
             }
+            if (recoveryView != null) {
+                nextNetworkProbeMicros = recoveryTimeMicros.getAsLong() + Math.max(0, networkProbeDelayMicros.getAsLong());
+                Slot extra = new Slot(slots.size(), PeerConnectionRole.FULL_RELAY);
+                extra.extra = true;
+                slots.add(extra);
+                if (targetBlockRelayPeers > 0) {
+                    Slot blockExtra = new Slot(slots.size(), PeerConnectionRole.BLOCK_RELAY_ONLY);
+                    blockExtra.extra = true;
+                    slots.add(blockExtra);
+                    nextBlockProbeMicros = recoveryTimeMicros.getAsLong() + Math.max(0, blockProbeDelayMicros.getAsLong());
+                }
+            }
 
             Slot initialSlot = slots.get(0);
             initialSlot.connection = initialConnection;
+            initialSlot.connectionId = initialConnection.peer().connectionId();
+            initialSlot.connectedAtMicros = initialConnection.peer().connectionEstablishedAtMicros();
             registerCloseListener(initialSlot, initialConnection);
 
             for (Slot slot : slots) {
@@ -311,6 +401,23 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
             worker.start();
 
             monitor.notifyAll();
+        }
+
+        synchronized (monitor) {
+            if (recoveryView != null && !stopping) {
+                recoveryTimer = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(
+                        Thread.ofPlatform().daemon().name("outbound-peer-recovery").factory());
+                nextExtraEvictionNanos = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(45);
+                recoveryTimer.scheduleWithFixedDelay(() -> {
+                    try {
+                        long nowNanos = System.nanoTime();
+                        boolean evict = nowNanos - nextExtraEvictionNanos >= 0;
+                        if (evict) nextExtraEvictionNanos = nowNanos + java.util.concurrent.TimeUnit.SECONDS.toNanos(45);
+                        checkRecoveryAtMicros(recoveryTimeMicros.getAsLong(), evict);
+                    }
+                    catch (RuntimeException failure) { log.log(System.Logger.Level.WARNING, "Outbound recovery check failed", failure); }
+                }, 500, 500, java.util.concurrent.TimeUnit.MILLISECONDS);
+            }
         }
 
         log.log(
@@ -489,7 +596,7 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
 
     private void waitForEmptySlot(Slot slot) {
         synchronized (monitor) {
-            while (!stopping && slot.connection != null) {
+            while (!stopping && (slot.connection != null || !canConnectSlot(slot))) {
                 try {
                     monitor.wait();
                 } catch (InterruptedException exception) {
@@ -507,7 +614,7 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
         Duration delayBeforeNextAttempt = Duration.ZERO;
         int attempt = 0;
 
-        while (!stopping && isSlotEmpty(slot)) {
+        while (!stopping && canConnectSlot(slot) && isSlotEmpty(slot)) {
             if (!delayBeforeNextAttempt.isZero()) {
                 log.log(
                         System.Logger.Level.INFO,
@@ -555,6 +662,7 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
                     return;
                 }
 
+                startRecoveryHeaders(slot, newConnection);
                 synchronized (monitor) { successfulReplacements++; }
                 log.log(
                         System.Logger.Level.INFO,
@@ -585,6 +693,8 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
                 delayBeforeNextAttempt = delayBeforeNextAttempt.isZero()
                         ? initialBackoff
                         : nextBackoff(delayBeforeNextAttempt);
+            } finally {
+                synchronized (monitor) { slot.connecting = false; monitor.notifyAll(); }
             }
         }
     }
@@ -594,9 +704,10 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
 
         final int startHeight;
         final PeerAddress reservedAddress;
+        final ru.bitcoin.node.p2p.address.PeerAddressNetwork networkPreference;
 
         synchronized (connectLock) {
-            if (stopping || !isSlotEmpty(slot)) {
+            if (stopping || !canConnectSlot(slot) || !isSlotEmpty(slot)) {
                 return null;
             }
 
@@ -607,6 +718,14 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
                 );
             }
 
+            if (slot.extra) synchronized (monitor) {
+                slot.connecting = true;
+                if (slot.role == PeerConnectionRole.BLOCK_RELAY_ONLY) tryBlock = false;
+            }
+            synchronized (monitor) {
+                networkPreference = slot.extra && slot.role == PeerConnectionRole.FULL_RELAY && !tryExtra ? preferredNetwork : null;
+                if (networkPreference != null) preferredNetwork = null;
+            }
             List<PeerAddress> occupied = occupiedAddresses(slot);
             Set<PeerNetGroup> occupiedGroups = occupiedNetGroups(slot);
 
@@ -616,10 +735,25 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
             LinkedHashSet<PeerNetGroup> excludedNetGroups = new LinkedHashSet<>(occupiedGroups);
             excludedNetGroups.addAll(connectingNetGroups);
 
-            reservedAddress = outboundPeerManager.selectPersistentCandidate(
-                    List.copyOf(excludedAddresses),
-                    Set.copyOf(excludedNetGroups)
-            );
+            PeerAddress anchor = null;
+            if (slot.role == PeerConnectionRole.BLOCK_RELAY_ONLY) {
+                while (!pendingAnchors.isEmpty()) {
+                    var candidate = pendingAnchors.removeLast();
+                    if (excludedAddresses.contains(candidate)
+                            || (PeerNetGroup.isDiversifiable(candidate) && excludedNetGroups.contains(PeerNetGroup.of(candidate)))
+                            || !outboundPeerManager.prepareAnchor(candidate)) continue;
+                    anchor = candidate; break;
+                }
+            } else {
+                // Full-relay workers must not take endpoints reserved for anchor attempts.
+                excludedAddresses.addAll(pendingAnchors);
+                for (var candidate : pendingAnchors) if (PeerNetGroup.isDiversifiable(candidate))
+                    excludedNetGroups.add(PeerNetGroup.of(candidate));
+            }
+            reservedAddress = anchor != null ? anchor : networkPreference == null
+                    ? outboundPeerManager.selectPersistentCandidate(List.copyOf(excludedAddresses), Set.copyOf(excludedNetGroups))
+                    : outboundPeerManager.selectPersistentCandidate(List.copyOf(excludedAddresses), Set.copyOf(excludedNetGroups), networkPreference);
+            if (anchor != null) log.log(System.Logger.Level.INFO, "Trying block relay anchor {0}", anchor);
 
             connectingAddresses.add(reservedAddress);
             if (PeerNetGroup.isDiversifiable(reservedAddress)) {
@@ -721,6 +855,10 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
             }
 
             slot.connection = newConnection;
+            slot.connectionId = newConnection.peer().connectionId();
+            slot.connectedAtMicros = newConnection.peer().connectionEstablishedAtMicros();
+            slot.chainSync = new PeerChainSyncPolicy();
+            slot.headersStarted = false;
             registerCloseListener(slot, newConnection);
 
             return !stopping && slot.connection == newConnection;
@@ -785,7 +923,7 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
         synchronized (monitor) {
             int active = 0;
             for (Slot candidate : slots) if (candidate.connection != null) active++;
-            int target = slots.size();
+            int target = targetOutboundPeers + targetBlockRelayPeers + (tryExtra || tryBlock || preferredNetwork != null ? 1 : 0);
             return "PEER POOL target=" + target
                     + " active=" + active
                     + " connecting=" + connecting
@@ -825,6 +963,29 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
         synchronized (monitor) {
             return slot.connection == null;
         }
+    }
+
+    private boolean canConnectSlot(Slot slot) {
+        synchronized (monitor) {
+            if (!slot.extra) return true;
+            if (maximumAutomaticConnections <= targetOutboundPeers + targetBlockRelayPeers) return false;
+            if (slot.role == PeerConnectionRole.FULL_RELAY ? (!tryExtra && preferredNetwork == null)
+                    : (!tryBlock || tryExtra || preferredNetwork != null)) return false;
+            return slots.stream().noneMatch(other -> other != slot && other.extra
+                    && (other.connection != null || other.connecting));
+        }
+    }
+
+    private void startRecoveryHeaders(Slot slot, OutboundPeerConnection connection) {
+        if (recoveryView == null) return;
+        var work = recoveryView.chainWork(connection.peer());
+        if (work == null) return;
+        synchronized (monitor) {
+            if (stopping || slot.connection != connection) return;
+            slot.headersStarted = true;
+        }
+        try { recoveryView.requestHeaders(connection.peer(), work.locator()); }
+        catch (IOException | IllegalStateException failure) { log.log(System.Logger.Level.DEBUG, "Initial recovery headers request failed", failure); }
     }
 
     private Duration nextBackoff(Duration current) {
@@ -891,6 +1052,125 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
         return targetOutboundPeers;
     }
 
+    /** Scheduler entry point; package-visible to exercise recovery without waiting ten minutes. */
+    synchronized void checkRecovery(long now) {
+        checkRecovery(now, true);
+    }
+
+    synchronized void checkRecovery(long now, boolean evictExtra) {
+        checkRecoveryAtMicros(Math.multiplyExact(now, 1_000_000), evictExtra);
+    }
+
+    synchronized void checkRecoveryAtMicros(long nowMicros, boolean evictExtra) {
+        long now = Math.floorDiv(nowMicros, 1_000_000);
+        if (recoveryView == null || stopping || !started.get()) return;
+        List<OutboundPeerConnection> victims = new ArrayList<>();
+        var probes = new java.util.IdentityHashMap<Peer, List<ru.bitcoin.node.common.types.Hash256>>();
+        synchronized (monitor) {
+            var full = slots.stream().filter(slot -> slot.role == PeerConnectionRole.FULL_RELAY)
+                    .filter(slot -> slot.connection != null && slot.connection.peer().isReady()).toList();
+            protectedRecoveryPeers.removeIf(peer -> full.stream().noneMatch(slot -> slot.connection.peer() == peer));
+            for (Slot slot : full) {
+                if (protectedRecoveryPeers.size() >= 4) break;
+                if (recoveryView.protectedFromChainSync(slot.connection.peer())) protectedRecoveryPeers.add(slot.connection.peer());
+            }
+            if (evictExtra && full.size() > targetOutboundPeers) {
+                var candidates = full.stream().map(slot -> new ExtraOutboundPeerPolicy.Candidate(
+                        slot.connectionId, slot.connection.address().network().bip155Id(), slot.connectedAtMicros,
+                        slot.connection.peer().lastNewBlockAnnouncementTime(),
+                        protectedRecoveryPeers.contains(slot.connection.peer()),
+                        recoveryView.blocksInFlight(slot.connection.peer()))).toList();
+                var choice = ExtraOutboundPeerPolicy.evictionCandidate(candidates, nowMicros);
+                if (choice.isPresent()) {
+                    Slot remove = full.stream().filter(slot -> slot.connectionId == choice.getAsLong()).findFirst().orElseThrow();
+                    victims.add(retireExtraPeer(remove));
+                    recoveryPolicy.evicted();
+                    tryExtra = false;
+                }
+            }
+            var blocks = slots.stream().filter(slot -> slot.role == PeerConnectionRole.BLOCK_RELAY_ONLY)
+                    .filter(slot -> slot.connection != null && slot.connection.peer().isReady()).toList();
+            if (evictExtra && blocks.size() > targetBlockRelayPeers) {
+                var candidates = blocks.stream().map(slot -> new ExtraOutboundPeerPolicy.BlockCandidate(
+                        slot.connectionId, slot.connectedAtMicros, slot.connection.peer().lastAcceptedBlockTime(),
+                        recoveryView.blocksInFlight(slot.connection.peer()))).toList();
+                var choice = ExtraOutboundPeerPolicy.blockEvictionCandidate(candidates, nowMicros);
+                if (choice.isPresent()) victims.add(retireExtraPeer(blocks.stream()
+                        .filter(slot -> slot.connectionId == choice.getAsLong()).findFirst().orElseThrow()));
+            }
+            for (Slot slot : slots) {
+                if (slot.connection == null || !slot.connection.peer().isReady()) continue;
+                Peer peer = slot.connection.peer();
+                var work = recoveryView.chainWork(peer);
+                if (!slot.headersStarted && work != null) {
+                    slot.headersStarted = true;
+                    probes.put(peer, work.locator());
+                }
+                if (!slot.headersStarted) continue;
+                var action = slot.chainSync.check(now, protectedRecoveryPeers.contains(peer), work);
+                if (action == PeerChainSyncPolicy.Action.REQUEST_HEADERS) probes.put(peer, slot.chainSync.locator());
+                if (action == PeerChainSyncPolicy.Action.DISCONNECT) victims.add(slot.connection);
+            }
+            boolean wasTryingExtra = tryExtra;
+            if (evictExtra) tryExtra = recoveryPolicy.check(now, recoveryView.lastTipUpdateSeconds(),
+                    recoveryView.blocksInFlight(), recoveryView.enabled());
+            if (tryExtra && !wasTryingExtra)
+                log.log(System.Logger.Level.INFO, "Potential stale tip: allowing one extra full-relay peer");
+            if (recoveryView.directFetch()) blockRotationStarted = true;
+            if (targetBlockRelayPeers > 0 && blockRotationStarted && recoveryView.enabled()
+                    && !tryExtra && nowMicros > nextBlockProbeMicros
+                    && slots.stream().filter(slot -> !slot.extra).allMatch(slot -> slot.connection != null && slot.connection.peer().isReady())
+                    && slots.stream().filter(slot -> slot.extra).noneMatch(slot -> slot.connection != null || slot.connecting)) {
+                tryBlock = true;
+                nextBlockProbeMicros = nowMicros + Math.max(0, blockProbeDelayMicros.getAsLong());
+            }
+            if (maximumAutomaticConnections > targetOutboundPeers + targetBlockRelayPeers
+                    && targetOutboundPeers == 8 && full.size() == 8 && recoveryView.enabled()
+                    && !tryExtra && !tryBlock && preferredNetwork == null && nowMicros > nextNetworkProbeMicros
+                    && slots.stream().filter(slot -> !slot.extra).allMatch(slot -> slot.connection != null && slot.connection.peer().isReady())
+                    && slots.stream().filter(slot -> slot.extra).noneMatch(slot -> slot.connection != null || slot.connecting)) {
+                var missing = new ArrayList<>(outboundPeerManager.knownAutomaticNetworks());
+                missing.removeIf(network -> full.stream().anyMatch(slot -> slot.connection.address().network() == network));
+                java.util.Collections.shuffle(missing, ThreadLocalRandom.current());
+                if (!missing.isEmpty()) {
+                    preferredNetwork = missing.getFirst();
+                    nextNetworkProbeMicros = nowMicros + Math.max(0, networkProbeDelayMicros.getAsLong());
+                    log.log(System.Logger.Level.INFO, "Trying an extra full-relay connection to missing network {0}", preferredNetwork);
+                }
+            }
+            monitor.notifyAll();
+        }
+        probes.forEach((peer, locator) -> {
+            if (victims.stream().anyMatch(connection -> connection.peer() == peer)) return;
+            try { recoveryView.requestHeaders(peer, locator); }
+            catch (IOException | IllegalStateException failure) { log.log(System.Logger.Level.DEBUG, "Chainwork headers request failed", failure); }
+        });
+        for (var victim : victims) {
+            log.log(System.Logger.Level.INFO, "Disconnecting outbound peer selected by recovery policy: {0}", victim.address());
+            try { victim.peer().close(new PeerCloseException(PeerCloseReason.LOCAL_RESOURCE_LIMIT,
+                    "outbound-peer-recovery", "Outbound peer selected by extra-peer or chainwork eviction")); }
+            catch (IOException failure) { log.log(System.Logger.Level.DEBUG, "Extra peer close failed", failure); }
+        }
+    }
+
+    /** Called under monitor. Preserve supervision and per-connection state on promotion. */
+    private OutboundPeerConnection retireExtraPeer(Slot remove) {
+        var victim = remove.connection;
+        remove.connection = null;
+        Slot extra = slots.stream().filter(slot -> slot.extra && slot.role == remove.role).findFirst().orElseThrow();
+        if (remove != extra && extra.connection != null) {
+            remove.connection = extra.connection;
+            remove.connectionId = extra.connectionId;
+            remove.connectedAtMicros = extra.connectedAtMicros;
+            remove.chainSync = extra.chainSync;
+            remove.headersStarted = extra.headersStarted;
+            extra.connection = null;
+            registerCloseListener(remove, remove.connection);
+        }
+        protectedRecoveryPeers.remove(victim.peer());
+        return victim;
+    }
+
     public int targetBlockRelayPeers() {
         return targetBlockRelayPeers;
     }
@@ -906,6 +1186,7 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
     @Override
     public void close() {
         List<Thread> threadsToJoin;
+        List<PeerAddress> anchorsToSave;
 
         synchronized (monitor) {
 
@@ -915,6 +1196,15 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
 
             stopping =
                     true;
+            if (recoveryTimer != null) recoveryTimer.shutdownNow();
+
+            anchorsToSave = slots.stream().filter(slot -> slot.role == PeerConnectionRole.BLOCK_RELAY_ONLY)
+                    .map(slot -> slot.connection).filter(Objects::nonNull).filter(connection -> connection.peer().isReady())
+                    .map(connection -> {
+                        var address = connection.address(); var version = connection.peer().evictionVersion();
+                        return new PeerAddress(address.network(), address.rawAddress(), address.port(),
+                                version == null ? address.services() : version.services());
+                    }).limit(BlockRelayAnchorStore.MAX_ANCHORS).toList();
 
             monitor.notifyAll();
 
@@ -941,6 +1231,14 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
         }
 
         log.log(System.Logger.Level.INFO, "Stopping outbound peer supervisor");
+
+        if (anchorStore != null && started.get() && targetBlockRelayPeers > 0) {
+            try {
+                anchorStore.save(anchorsToSave);
+                log.log(System.Logger.Level.INFO, "Saved {0} block relay anchors for clean restart", anchorsToSave.size());
+            }
+            catch (IOException failure) { log.log(System.Logger.Level.WARNING, "Unable to save block relay anchors", failure); }
+        }
 
         for (Thread thread : threadsToJoin) {
             thread.interrupt();
@@ -997,6 +1295,12 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
         private final PeerConnectionRole role;
         private OutboundPeerConnection connection;
         private Thread worker;
+        private boolean extra;
+        private boolean connecting;
+        private PeerChainSyncPolicy chainSync = new PeerChainSyncPolicy();
+        private boolean headersStarted;
+        private long connectionId;
+        private long connectedAtMicros;
 
         private Slot(int index, PeerConnectionRole role) {
             this.index = index;

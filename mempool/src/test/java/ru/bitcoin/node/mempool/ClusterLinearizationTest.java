@@ -10,6 +10,16 @@ import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ClusterLinearizationTest {
+    @Test void equalRateChunksKeepParentsBeforeChildrenRegardlessOfHashOrder() {
+        var root = Hash256.fromDisplayHex("11".repeat(32));
+        for (int tag = 1; tag <= 64; tag++) {
+            var parent = tx(List.of(root), tag);
+            var child = tx(List.of(parent.txId()), tag + 100);
+            var entries = map(e(parent, 1000), e(child, 1000));
+            var order = ClusterLinearization.mempoolDiagram(entries).stream().flatMap(chunk -> chunk.transactions().stream()).toList();
+            assertEquals(List.of(parent.txId(), child.txId()), order);
+        }
+    }
     private static Transaction tx(List<Hash256> parents, int tag) {
         return new Transaction(2, parents.stream().map(p -> new TxIn(new OutPoint(p, new UInt32(0)), new byte[0], TxIn.FINAL_SEQUENCE)).toList(),
                 List.of(new TxOut(tag, new byte[]{0x51})), new UInt32(0));

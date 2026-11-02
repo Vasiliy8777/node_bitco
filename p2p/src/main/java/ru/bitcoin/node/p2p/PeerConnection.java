@@ -30,6 +30,23 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
 
 public final class PeerConnection implements AutoCloseable {
+    private static final java.util.concurrent.atomic.AtomicLong NEXT_CONNECTION_ID = new java.util.concurrent.atomic.AtomicLong(1);
+    private volatile long connectionId;
+    private volatile long establishedAtMicros;
+
+    public long connectionId() { return connectionId; }
+    public long establishedAtMillis() { return establishedAtMicros / 1000; }
+    public long establishedAtMicros() { return establishedAtMicros; }
+
+    static long currentTimeMicros() {
+        var now = java.time.Instant.now();
+        return Math.addExact(Math.multiplyExact(now.getEpochSecond(), 1_000_000), now.getNano() / 1000);
+    }
+
+    private void recordTcpEstablishment() {
+        establishedAtMicros = currentTimeMicros();
+        connectionId = NEXT_CONNECTION_ID.getAndIncrement();
+    }
 
     public static final int DEFAULT_CONNECT_TIMEOUT_MILLIS =
             4_000;
@@ -174,6 +191,7 @@ public final class PeerConnection implements AutoCloseable {
                     ),
                     connectTimeoutMillis
             );
+            recordTcpEstablishment();
 
             newSocket.setSoTimeout(
                     readTimeoutMillis
@@ -313,6 +331,7 @@ public final class PeerConnection implements AutoCloseable {
         }
 
         try {
+            recordTcpEstablishment();
             acceptedSocket.setSoTimeout(
                     readTimeoutMillis
             );

@@ -14,6 +14,17 @@ public final class PeerManager
             new ArrayList<>();
     private final List<java.util.function.Consumer<Peer>> listeners = new ArrayList<>();
     private final Map<Peer, PeerConnectionRole> roles = new IdentityHashMap<>();
+    private final java.util.Set<Peer> chainSyncProtected = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+
+    /** Call only after a complete validated headers batch proves at least active-tip work. */
+    public synchronized boolean protectChainSync(Peer peer) {
+        Objects.requireNonNull(peer);
+        if (chainSyncProtected.contains(peer)) return true;
+        if (roles.get(peer) != PeerConnectionRole.FULL_RELAY || !peer.isReady() || chainSyncProtected.size() >= 4) return false;
+        return chainSyncProtected.add(peer);
+    }
+
+    public synchronized boolean hasChainSyncProtection(Peer peer) { return chainSyncProtected.contains(peer); }
     private final PeerDiscouragementManager discouragementManager;
     private final PeerBanManager banManager;
 
@@ -105,6 +116,7 @@ public final class PeerManager
         synchronized (this) {
             peers.remove(peer);
             roles.remove(peer);
+            chainSyncProtected.remove(peer);
         }
         if (isProtocolViolation(cause)) {
             java.net.InetSocketAddress remote = peer.remoteAddress();
@@ -150,6 +162,7 @@ public final class PeerManager
                 peer
         );
         roles.remove(peer);
+        chainSyncProtected.remove(peer);
     }
 
     public synchronized List<Peer> peers() {
@@ -221,6 +234,7 @@ public final class PeerManager
 
             peers.clear();
             roles.clear();
+            chainSyncProtected.clear();
         }
 
         IOException failure =

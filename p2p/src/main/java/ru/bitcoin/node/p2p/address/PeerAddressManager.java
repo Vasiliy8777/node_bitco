@@ -184,6 +184,11 @@ public final class PeerAddressManager {
                 "seenAt"
         );
 
+        if (peerAddress.isRfc9637Documentation()) {
+            // Keep the non-null legacy return contract, without storing or relaying the endpoint.
+            return new KnownPeerAddress(peerAddress, source, seenAt);
+        }
+
         PeerAddressKey key =
                 PeerAddressKey.from(
                         peerAddress
@@ -463,7 +468,7 @@ public final class PeerAddressManager {
         for (KnownPeerAddress known :
                 addresses.values()) {
 
-            if (!isTerrible(
+            if (!known.peerAddress().isRfc9637Documentation() && !isTerrible(
                     known,
                     now
             )) {
@@ -563,6 +568,7 @@ public final class PeerAddressManager {
         Objects.requireNonNull(snapshot, "snapshot");
         PeerAddressManager manager = new PeerAddressManager(snapshot.secretKey(), new SecureRandom());
         for (EntrySnapshot entry : snapshot.entries()) {
+            if (entry.address().isRfc9637Documentation()) continue;
             PeerAddressKey key = PeerAddressKey.from(entry.address());
             KnownPeerAddress known = new KnownPeerAddress(entry.address(), entry.source(), entry.firstSeen());
             known.restoreMetadata(entry.lastSeen(), entry.lastAttempt(), entry.lastSuccess(),
@@ -570,6 +576,7 @@ public final class PeerAddressManager {
             manager.addresses.put(key, known);
         }
         for (BucketSnapshot bucket : snapshot.buckets()) {
+            if (bucket.address().isRfc9637Documentation()) continue;
             AddrManBucket[] table = bucket.tried() ? manager.triedBuckets : manager.newBuckets;
             if (bucket.bucket() < 0 || bucket.bucket() >= table.length) throw new IllegalArgumentException("invalid AddrMan bucket");
             PeerAddressKey key = PeerAddressKey.from(bucket.address());
@@ -631,7 +638,7 @@ public final class PeerAddressManager {
             }
 
             PeerAddress peerAddress = known.peerAddress();
-            if (!peerAddress.isDirectSocketAddress()) {
+            if (!peerAddress.isDirectSocketAddress() || peerAddress.isRfc9637Documentation()) {
                 continue;
             }
             if (PeerNetGroup.isDiversifiable(peerAddress)

@@ -42,6 +42,53 @@ public final class RocksDbUtxoStore
     private final Map<OutPoint, Optional<StoredUtxo>> readCache;
     private long cacheHits;
     private long cacheMisses;
+    private java.util.concurrent.ExecutorService prevoutFetcher;
+    private int prevoutFetchThreads;
+
+    /** Configure once, before validation starts. Zero keeps synchronous MultiGet. */
+    public synchronized void prevoutFetchThreads(int threads) {
+        if (threads < 0 || threads > 16) throw new IllegalArgumentException("prevoutfetchthreads must be 0..16");
+        if (prevoutFetcher != null) throw new IllegalStateException("Prevout fetcher already configured");
+        prevoutFetchThreads = threads;
+        if (threads > 0) prevoutFetcher = java.util.concurrent.Executors.newFixedThreadPool(threads,
+                Thread.ofPlatform().daemon().name("bitcoin-prevout-fetch-", 0).factory());
+    }
+
+    public void closePrevoutFetcher() {
+        var executor = prevoutFetcher;
+        if (executor != null) {
+            executor.shutdown();
+            try {
+                while (!executor.awaitTermination(1, java.util.concurrent.TimeUnit.SECONDS)) { }
+            } catch (InterruptedException e) {
+                executor.shutdownNow(); Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    private List<byte[]> fetchPrevouts(List<byte[]> keys) {
+        if (prevoutFetcher == null || keys.size() < 128) return database.getAll(keys);
+        int partitionSize = (keys.size() + prevoutFetchThreads - 1) / prevoutFetchThreads;
+        var tasks = new ArrayList<java.util.concurrent.Callable<List<byte[]>>>();
+        for (int start = 0; start < keys.size(); start += partitionSize) {
+            var partition = List.copyOf(keys.subList(start, Math.min(start + partitionSize, keys.size())));
+            tasks.add(() -> database.getAll(partition));
+        }
+        try {
+            var futures = prevoutFetcher.invokeAll(tasks);
+            var values = new ArrayList<byte[]>(keys.size());
+            Throwable failure = null;
+            for (var future : futures) {
+                try { values.addAll(future.get()); }
+                catch (java.util.concurrent.ExecutionException e) { if (failure == null) failure = e.getCause(); }
+            }
+            if (failure != null) throw new IllegalStateException("Parallel prevout read failed", failure);
+            return values;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Parallel prevout read interrupted", e);
+        }
+    }
 
     public RocksDbUtxoStore(
             RocksDbDatabase database
@@ -216,7 +263,7 @@ public final class RocksDbUtxoStore
         }
 
         if (!keys.isEmpty()) {
-            List<byte[]> values = database.getAll(keys);
+            List<byte[]> values = fetchPrevouts(keys);
             if (values.size() != misses.size()) {
                 throw new IllegalStateException("RocksDB MultiGet returned unexpected result count");
             }

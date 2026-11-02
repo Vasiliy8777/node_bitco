@@ -13,6 +13,30 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.*;
 
 class RocksDbUtxoStoreTest {
+    @Test void parallelPrevoutsPreserveOrderMissingCoinsAndBufferedMutations() {
+        try (var db = new RocksDbDatabase(tempDirectory.resolve("parallel-prevouts"))) {
+            var store = new RocksDbUtxoStore(db);
+            var points = new java.util.ArrayList<OutPoint>();
+            for (int i = 0; i < 513; i++) {
+                var point = testOutPoint(i); points.add(point);
+                if (i % 3 != 0) store.save(point, new StoredUtxo(i + 1, new byte[]{0x51}, 1, false));
+            }
+            db.enableChainstateWriteBack();
+            store.delete(points.get(1));
+            store.save(points.get(3), new StoredUtxo(999, new byte[]{0x51}, 2, false));
+            var expected = store.findAll(points);
+            store.prevoutFetchThreads(8);
+            try {
+                var actual = store.findAll(points);
+                assertEquals(points, new java.util.ArrayList<>(actual.keySet()));
+                for (var point : points) {
+                    assertEquals(expected.get(point).map(StoredUtxo::amount), actual.get(point).map(StoredUtxo::amount));
+                }
+                assertTrue(actual.get(points.get(1)).isEmpty());
+                assertEquals(999, actual.get(points.get(3)).orElseThrow().amount());
+            } finally { store.closePrevoutFetcher(); }
+        }
+    }
     @Test void statisticsAndSnapshotIncludeBufferedCreatesAndDeletes() throws Exception {
         try (var db = new RocksDbDatabase(tempDirectory.resolve("buffered-stats"))) {
             var store = new RocksDbUtxoStore(db);

@@ -3,7 +3,6 @@ package ru.bitcoin.node.p2p.sync;
 import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.p2p.Peer;
 import ru.bitcoin.node.p2p.PeerMessageDispatcher;
-import ru.bitcoin.node.p2p.message.BitcoinMessages;
 import ru.bitcoin.node.p2p.message.GetHeadersMessage;
 import ru.bitcoin.node.p2p.message.HeadersMessage;
 import ru.bitcoin.node.p2p.message.VersionMessage;
@@ -109,14 +108,23 @@ public final class HeaderSynchronizer {
 
         try {
 
-            peer.send(
-                    BitcoinMessages.getHeaders(
-                            request
-                    )
-            );
-
-            HeadersMessage headers = completedHeaders(future, responseTimeout);
-            return headers;
+            long deadline = System.nanoTime() + responseTimeout.toNanos();
+            boolean sent = false;
+            while (true) {
+                long remaining = deadline - System.nanoTime();
+                if (remaining <= 0) throw new HeaderSynchronizationTimeoutException(responseTimeout);
+                if (!future.isDone() && !sent) sent = peer.trySendGetHeaders(request);
+                // A response already dispatched to an asynchronous validator may
+                // release the gate without completing this newer waiter. Recheck
+                // admission without introducing another socket reader.
+                long wait = sent ? remaining : Math.min(remaining, TimeUnit.MILLISECONDS.toNanos(100));
+                try { return completedHeaders(future, Duration.ofNanos(wait)); }
+                catch (HeaderSynchronizationTimeoutException timeout) {
+                    if (future.isDone()) return completedHeaders(future, Duration.ofNanos(1));
+                    if (sent || System.nanoTime() >= deadline)
+                        throw new HeaderSynchronizationTimeoutException(responseTimeout);
+                }
+            }
 
         } finally {
 
@@ -125,6 +133,9 @@ public final class HeaderSynchronizer {
             );
         }
     }
+
+    /** Call after the downloaded nonempty batch validates and connects to the header tree. */
+    public void headersValidated() { peer.headersResponseValidated(); }
 
     private static HeadersMessage completedHeaders(
             CompletableFuture<HeadersMessage> future,

@@ -150,6 +150,14 @@ final class TxRelayState {
         return pending.size();
     }
 
+    /** Re-resolve queued IDs against today's mempool and re-sort at the actual trickle slot. */
+    synchronized void refreshPending(List<TransactionRelayBuckets.Transaction> miningOrder) {
+        var previous = new java.util.HashSet<>(pending.keySet());
+        pending.clear();
+        for (var tx : miningOrder) if (previous.contains(tx.wtxid()))
+            queue(tx.txid(), tx.wtxid(), tx.feeRate());
+    }
+
     synchronized long nextInventorySendNanos() {
         return nextInventorySendNanos;
     }

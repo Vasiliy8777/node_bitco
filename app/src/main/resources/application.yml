@@ -16,13 +16,16 @@ bitcoin:
 
   p2p:
     listen: true
-    max-inbound-peers: 32
+    maxconnections: 200
+    inboundrelaypercent: 50
+    txsendrate: 14
     target-outbound-peers: 8
     target-block-relay-peers: 2
     v2-transport: true
 
   rpc:
     bind: 127.0.0.1
+    maxconnections: 16
     enabled: true
     user: bitcoin
     password: bitcoin

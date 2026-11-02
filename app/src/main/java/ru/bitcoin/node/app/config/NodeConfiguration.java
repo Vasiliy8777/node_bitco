@@ -35,18 +35,28 @@ import java.util.List;
 @Configuration
 @ConditionalOnProperty(name = "bitcoin.data-directory")
 public class NodeConfiguration {
+    @Bean
+    public ConnectionLimits connectionLimits(
+            @Value("${bitcoin.p2p.maxconnections:200}") int maximum,
+            @Value("${bitcoin.p2p.target-outbound-peers:8}") int fullRelay,
+            @Value("${bitcoin.p2p.target-block-relay-peers:2}") int blockRelay,
+            @Value("${bitcoin.p2p.inboundrelaypercent:50}") int inboundRelayPercent) {
+        return new ConnectionLimits(maximum, fullRelay, blockRelay, inboundRelayPercent);
+    }
     @Bean(destroyMethod = "close")
     public ru.bitcoin.node.app.service.NodeRelayService nodeRelayService(
             NodeValidationService validation,
             NodeSyncInfrastructure infrastructure,
             PeerManager peers,
-            BlockDownloadScheduler blockDownloadScheduler
+            BlockDownloadScheduler blockDownloadScheduler,
+            @Value("${bitcoin.p2p.txsendrate:14}") int transactionSendRate
     ) {
         return new ru.bitcoin.node.app.service.NodeRelayService(
                 validation,
                 infrastructure,
                 peers,
-                blockDownloadScheduler
+                blockDownloadScheduler,
+                transactionSendRate
         );
     }
 
@@ -101,7 +111,10 @@ public class NodeConfiguration {
             @Value("${bitcoin.txospenderindex:false}")
             boolean txOutSpenderIndex,
             @Value("${bitcoin.ibd-utxo-prefetch:true}") boolean ibdUtxoPrefetch,
-            @Value("${bitcoin.utxo-read-cache-entries:500000}") int utxoReadCacheEntries
+            @Value("${bitcoin.utxo-read-cache-entries:500000}") int utxoReadCacheEntries,
+            @Value("${bitcoin.prevoutfetchthreads:8}") int prevoutFetchThreads,
+            @Value("${bitcoin.mining.block-reserved-weight:8000}") long miningReservedWeight,
+            @Value("${bitcoin.mining.coinbase-output-max-additional-sigops:400}") long miningReservedSigops
     ) {
         long pruneTargetBytes = pruneTargetBytes(pruneMiB);
         var pruneState = new ru.bitcoin.node.storage.chain.RocksDbPruneStateStore(database);
@@ -180,6 +193,8 @@ public class NodeConfiguration {
                 utxoReadCacheEntries
         );
         validation.initialSyncPrefetchEnabled(ibdUtxoPrefetch);
+        validation.prevoutFetchThreads(prevoutFetchThreads);
+        validation.miningReservations(miningReservedWeight, miningReservedSigops);
         return validation;
     }
 
@@ -249,10 +264,10 @@ public class NodeConfiguration {
     public OutboundPeerSupervisor outboundPeerSupervisor(
             OutboundPeerManager outboundPeerManager,
             NodeValidationService validationService,
-            @Value("${bitcoin.p2p.target-outbound-peers:8}")
-            int targetOutboundPeers,
-            @Value("${bitcoin.p2p.target-block-relay-peers:2}")
-            int targetBlockRelayPeers
+            ConnectionLimits limits,
+            NetworkParameters parameters,
+            ru.bitcoin.node.app.service.NodeRelayService relayService,
+            @Value("${bitcoin.data-directory}") String dataDirectory
     ) {
 
         return new OutboundPeerSupervisor(
@@ -262,9 +277,11 @@ public class NodeConfiguration {
                                 .downloadTip()
                                 .height()
                 ),
-                targetOutboundPeers,
-                targetBlockRelayPeers
-        );
+                limits.fullRelayOutbound(),
+                limits.blockRelayOutbound()
+        ).anchorStore(new BlockRelayAnchorStore(networkDataDirectory(Path.of(dataDirectory), parameters), parameters.magic()))
+                .recovery(relayService.outboundRecoveryView(), parameters.targetSpacingSeconds())
+                .maximumAutomaticConnections(limits.maximum());
     }
 
     @Bean
@@ -387,7 +404,7 @@ public class NodeConfiguration {
                 syncInfrastructure.blockIndexLookup(),
                 syncInfrastructure.blockStore(),
                 1024,
-                nodeRelayService::onConnectedBlock
+                nodeRelayService::onConnectedBlockAfterReception
         );
     }
 
@@ -404,6 +421,7 @@ public class NodeConfiguration {
             BitcoinServer bitcoinServer,
             BlockSyncCoordinator blockSyncCoordinator,
             NetworkParameters parameters,
+            ConnectionLimits connectionLimits,
             @Value("${bitcoin.p2p.listen:true}")
             boolean listen,
             @Value("${bitcoin.p2p.port:0}")
@@ -424,7 +442,7 @@ public class NodeConfiguration {
                         ? parameters.defaultPort()
                         : listenPort;
 
-        return new NodeLifecycleService(
+        var service = new NodeLifecycleService(
                 validationService,
                 syncInfrastructure,
                 addressManager,
@@ -441,6 +459,8 @@ public class NodeConfiguration {
                 parameters.minimumChainWork(),
                 checkpointInterval(mempoolCheckpointIntervalSeconds)
         );
+        service.automaticConnectionsEnabled(connectionLimits.maximum() > 0);
+        return service;
     }
 
     @Bean
@@ -473,7 +493,9 @@ public class NodeConfiguration {
     public BitcoinServer bitcoinServer(
             NetworkParameters parameters,
             PeerManager peerManager,
-            @Value("${bitcoin.p2p.max-inbound-peers:32}") int maxInboundPeers,
+            NodeValidationService validation,
+            @Value("${bitcoin.p2p.max-inbound-peers:-1}") int maxInboundPeers,
+            ConnectionLimits limits,
             @Value("${bitcoin.prune:0}") long pruneMiB,
             @Value("${bitcoin.blockfilterindex:false}") boolean blockFilterIndex,
             @Value("${bitcoin.p2p.peer-block-filters:false}") boolean peerBlockFilters,
@@ -487,8 +509,11 @@ public class NodeConfiguration {
             services |= ru.bitcoin.node.p2p.message.VersionMessage.NODE_COMPACT_FILTERS;
         }
         if (v2Transport) services |= ru.bitcoin.node.p2p.message.VersionMessage.NODE_P2P_V2;
-        return new BitcoinServer(parameters, peerManager, services, true, maxInboundPeers,
-                peerManager.discouragementManager(), v2Transport);
+        int inbound = maxInboundPeers < 0 ? limits.inbound() : Math.min(maxInboundPeers, limits.inbound());
+        var server = new BitcoinServer(parameters, peerManager, services, true, inbound,
+                peerManager.discouragementManager(), v2Transport, limits.inboundRelayPercent());
+        server.initialBlockDownload(validation::downloadInitialBlockDownload);
+        return server;
     }
 
     @Bean(destroyMethod = "close")

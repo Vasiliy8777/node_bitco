@@ -126,7 +126,7 @@ class UnconnectedHeaderRecoveryTest {
         when(peer.remoteVersion()).thenReturn(version);
         var dispatcher = new PeerMessageDispatcher(peer);
         when(peer.messageDispatcher()).thenReturn(dispatcher);
-        doAnswer(call -> { dispatcher.dispatch(BitcoinMessages.headers(response)); return null; }).when(peer).send(any());
+        doAnswer(call -> { dispatcher.dispatch(BitcoinMessages.headers(response)); return true; }).when(peer).trySendGetHeaders(any());
         return peer;
     }
 }

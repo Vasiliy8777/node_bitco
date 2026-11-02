@@ -112,6 +112,8 @@ public final class PeerMessageDispatcher {
         return future;
     }
 
+    synchronized boolean hasPendingHeaders() { return pendingHeaders != null; }
+
     public synchronized void unregisterHeaders(
             CompletableFuture<HeadersMessage> future
     ) {
@@ -272,6 +274,7 @@ public final class PeerMessageDispatcher {
         }
 
         if (!headers.isEmpty()) peer.noteBlockAnnouncement(headers.headers().getLast().hash());
+        else peer.headersResponseValidated();
 
         CompletableFuture<HeadersMessage> future;
 

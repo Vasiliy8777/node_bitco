@@ -90,6 +90,16 @@ public final class NodeValidationService implements AutoCloseable {
     private final RocksDbPruneStateStore pruneState;
     private final long pruneTargetBytes;
     private BlockIndex poolTip;
+    private final MempoolFeeEstimator mempoolFeeEstimator = new MempoolFeeEstimator();
+    private final BlockPolicyFeeEstimator blockPolicyFeeEstimator = new BlockPolicyFeeEstimator();
+    private long miningReservedWeight = 8000;
+    private long miningReservedSigops = 400;
+
+    public void miningReservations(long weight, long sigops) {
+        if (weight < 2000 || weight >= 4_000_000 || sigops < 0 || sigops >= 80_000)
+            throw new IllegalArgumentException("Invalid block reservation");
+        miningReservedWeight = weight; miningReservedSigops = sigops;
+    }
     private long revision;
     private boolean mempoolPersistenceDirty;
     private final ActiveChainAncestors activeAncestors = new ActiveChainAncestors();
@@ -101,6 +111,7 @@ public final class NodeValidationService implements AutoCloseable {
     private void utxoWarmInputs(List<OutPoint> inputs) { utxos.warmPersistentInputs(inputs); }
 
     public void initialSyncPrefetchEnabled(boolean enabled) { initialSyncPrefetchEnabled = enabled; }
+    public void prevoutFetchThreads(int threads) { utxos.prevoutFetchThreads(threads); }
 
     public void prefetchInitialSyncInputsAhead(List<Block> blocks) {
         if (initialSyncPrefetchEnabled && !blocks.isEmpty()) {
@@ -559,7 +570,40 @@ public final class NodeValidationService implements AutoCloseable {
             if (blockPruner.automatic()) blockPruner.prune(chain.activeTip(), assumeUtxoPruneCeiling());
             initialBlockDownload.update(chain.activeTip());
         }
+        if (persistMempool) mempoolFeeEstimator.load(mempoolEstimatorPath(), chain.activeTip().height(), chain.activeTip().hash());
+        blockPolicyFeeEstimator.load(blockEstimatorPath());
         ensureBackgroundValidationWorker();
+    }
+
+    public record BlockReception(BlockProcessingResult result, boolean newBody) { }
+
+    /** Ordered batch receipts share the validation lock and deduplicate repeated hashes. */
+    public List<BlockReception> processInitialSyncBatchWithReception(List<Block> batch) {
+        Objects.requireNonNull(batch, "batch");
+        if (batch.isEmpty()) return List.of();
+        synchronized (chain) {
+            Set<Hash256> present = new HashSet<>();
+            for (var block : batch) if (availability.hasData(block.hash())) present.add(block.hash());
+            var results = processInitialSyncBatch(batch);
+            List<BlockReception> receptions = new ArrayList<>(batch.size());
+            for (int i = 0; i < batch.size(); i++) {
+                var hash = batch.get(i).hash();
+                boolean stored = results.get(i) != BlockProcessingResult.UNKNOWN_PARENT && availability.hasData(hash);
+                boolean newBody = stored && present.add(hash);
+                receptions.add(new BlockReception(results.get(i), newBody));
+            }
+            return List.copyOf(receptions);
+        }
+    }
+
+    /** Reception metadata is captured under the same lock as validation/storage. */
+    public BlockReception processBlockWithReception(Block block) {
+        Objects.requireNonNull(block, "block");
+        synchronized (chain) {
+            boolean hadData = availability.hasData(block.hash());
+            var result = processBlock(block);
+            return new BlockReception(result, !hadData && availability.hasData(block.hash()));
+        }
     }
 
     public BlockProcessingResult processBlock(Block block) {
@@ -867,6 +911,10 @@ public final class NodeValidationService implements AutoCloseable {
             try {
                 mempool.expire();
                 var entry = mempool.admit(transaction, context(), coins);
+                var parents = before.stream().map(candidate -> candidate.transaction().txId()).collect(java.util.stream.Collectors.toSet());
+                boolean independent = transaction.inputs().stream().noneMatch(input -> parents.contains(input.previousOutput().transactionId()));
+                blockPolicyFeeEstimator.added(transaction.txId(), entry.admissionHeight(), entry.fee(), entry.virtualSize(),
+                        !initialBlockDownload.isInitialBlockDownload() && independent);
                 revision++;
                 chain.notifyAll();
                 return entry;
@@ -1337,6 +1385,76 @@ public final class NodeValidationService implements AutoCloseable {
         }
     }
 
+    /** One coherent snapshot for Core 32.1 global relay scheduling. */
+    public List<MempoolEntry> mempoolMiningOrder() {
+        synchronized (chain) {
+            synchronizePool();
+            var entries = new HashMap<Hash256, MempoolEntry>();
+            for (var entry : mempool.entries()) entries.put(entry.transaction().txId(), entry);
+            var result = new ArrayList<MempoolEntry>();
+            for (var chunk : mempool.feeRateDiagram())
+                for (var id : chunk.transactions()) result.add(entries.get(id));
+            return List.copyOf(result);
+        }
+    }
+
+    public MempoolFeeEstimator.Estimate estimateMempoolFee(boolean conservative) {
+        synchronized (chain) {
+            synchronizePool();
+            return mempoolFeeEstimator.estimate(chain.activeTip().hash(), System.nanoTime(), conservative,
+                    Math.max(mempool.minimumRelayFeeRate(), mempool.feeFilterRate()), () -> {
+                        var entries = mempool.entries();
+                        var selected = ru.bitcoin.node.mining.TransactionSelector.select(entries, 3_991_999, 79_599, new FeeRate(1));
+                        var ids = selected.stream().map(Transaction::txId).collect(java.util.stream.Collectors.toSet());
+                        var pool = new LinkedHashMap<Hash256, MempoolEntry>();
+                        for (var entry : entries) if (ids.contains(entry.transaction().txId())) pool.put(entry.transaction().txId(), entry);
+                        return ClusterLinearization.mempoolDiagram(pool).stream()
+                                .map(chunk -> new MempoolFeeEstimator.FeeChunk(chunk.fee(), chunk.virtualSize())).toList();
+                    });
+        }
+    }
+
+    public List<MempoolFeeEstimator.BlockStats> mempoolFeeHealthStatistics() {
+        synchronized (chain) { synchronizePool(); return mempoolFeeEstimator.statistics(); }
+    }
+
+    public record FeeEstimate(Long satoshisPerKvB, int blocks, String estimator, String error) { }
+
+    public FeeEstimate estimateFee(String estimator, int target, boolean conservative) {
+        synchronized (chain) {
+            synchronizePool();
+            long floor = Math.max(mempool.minimumRelayFeeRate(), mempool.feeFilterRate());
+            if (estimator.equals("mempool_policy")) {
+                var estimate = estimateMempoolFee(conservative);
+                return new FeeEstimate(estimate.satoshisPerKvB(), 2, estimator, estimate.error());
+            }
+            var block = blockPolicyFeeEstimator.estimate(target, conservative);
+            if (block.satoshisPerKvB() == null)
+                return new FeeEstimate(null, block.blocks(), "block_policy", "Insufficient data or no feerate found");
+            if (estimator.equals("auto")) {
+                var pool = estimateMempoolFee(conservative);
+                if (pool.satoshisPerKvB() != null && pool.satoshisPerKvB() < block.satoshisPerKvB())
+                    return new FeeEstimate(Math.max(floor, pool.satoshisPerKvB()), 2, "mempool_policy", null);
+            }
+            return new FeeEstimate(Math.max(floor, block.satoshisPerKvB()), block.blocks(), "block_policy", null);
+        }
+    }
+
+    private java.nio.file.Path mempoolEstimatorPath() {
+        return database.externalDataRoot().resolve("fees/mempool_policy_estimator.dat");
+    }
+
+    private java.nio.file.Path blockEstimatorPath() {
+        return database.externalDataRoot().resolve("fees/block_policy_estimates.dat");
+    }
+
+    private void flushMempoolFeeEstimator() {
+        try { mempoolFeeEstimator.save(mempoolEstimatorPath()); }
+        catch (java.io.IOException e) { LOG.log(System.Logger.Level.WARNING, "Could not persist mempool fee statistics", e); }
+        try { blockPolicyFeeEstimator.save(blockEstimatorPath()); }
+        catch (java.io.IOException e) { LOG.log(System.Logger.Level.WARNING, "Could not persist block policy fee statistics", e); }
+    }
+
     /**
      * Current local BIP133 fee-filter floor in sat/kvB, before privacy
      * quantization performed by the relay layer.
@@ -1643,8 +1761,9 @@ public final class NodeValidationService implements AutoCloseable {
             var bits = ChainHeaderValidator.nextBits(parent, lookup, parameters, blockTime);
             int version = ru.bitcoin.node.mining.MiningVersionBits.preferredVersion(
                     0x20000000, miningDeployments(parent), supportedRules);
-            return ru.bitcoin.node.mining.BlockTemplateBuilder.fromMempool(parent, lookup, utxos, parameters,
-                    version, blockTime, bits, payout, extraNonce, mempool.entries(), maximumWeight, minimumRate);
+            return ru.bitcoin.node.mining.BlockTemplateBuilder.fromMempoolSnapshot(parent, lookup, utxos, parameters,
+                    version, blockTime, bits, payout, extraNonce, mempool.miningSnapshot(), maximumWeight, minimumRate,
+                    miningReservedWeight, miningReservedSigops);
         }
     }
 
@@ -1674,6 +1793,22 @@ public final class NodeValidationService implements AutoCloseable {
         }
         var before = mempool.entries();
         mempool.reconcile(context(), coins, confirmed, retry);
+        if (!plan.blocksToDisconnect().isEmpty())
+            mempoolFeeEstimator.rewind(plan.commonAncestor().height(), plan.commonAncestor().hash());
+        var poolWeights = new HashMap<Hash256, Long>();
+        for (var entry : before) poolWeights.put(entry.transaction().txId(), entry.weight());
+        for (var index : plan.blocksToConnect()) {
+            var block = requireBlock(index);
+            long represented = 0, total = 0;
+            for (var tx : block.transactions()) {
+                if (tx.isCoinbase()) continue;
+                total += ru.bitcoin.node.consensus.transaction.TransactionWeight.calculate(tx);
+                Long weight = poolWeights.remove(tx.txId());
+                if (weight != null) represented += weight;
+            }
+            mempoolFeeEstimator.connected(new MempoolFeeEstimator.BlockStats(index.height(), represented, total), index.hash());
+            blockPolicyFeeEstimator.connected(index.height(), block.transactions().stream().map(Transaction::txId).toList());
+        }
         markMempoolPersistenceDirty(before);
         poolTip = tip;
         revision++;
@@ -1706,6 +1841,7 @@ public final class NodeValidationService implements AutoCloseable {
         if (!persistMempool) return;
         synchronized (chain) {
             synchronizePool();
+            flushMempoolFeeEstimator();
             var beforeExpiry = mempool.entries();
             mempool.expire();
             markMempoolPersistenceDirty(beforeExpiry);
@@ -1723,6 +1859,9 @@ public final class NodeValidationService implements AutoCloseable {
     }
 
     private void markMempoolPersistenceDirty(List<MempoolEntry> before) {
+        var currentIds = mempool.entries().stream().map(entry -> entry.transaction().txId()).collect(java.util.stream.Collectors.toSet());
+        for (var entry : before) if (!currentIds.contains(entry.transaction().txId()))
+            blockPolicyFeeEstimator.removed(entry.transaction().txId());
         if (!persistMempool) return;
         if (!before.equals(mempool.entries())) {
             mempoolPersistenceDirty = true;
@@ -1863,6 +2002,8 @@ public final class NodeValidationService implements AutoCloseable {
     @Override
     public synchronized void close() {
         initialSyncPrefetcher.close();
+        utxos.closePrevoutFetcher();
+        synchronized (chain) { blockPolicyFeeEstimator.shutdown(); flushMempoolFeeEstimator(); }
         database.forceFlushChainstate();
         database.disableChainstateWriteBack(false);
         backgroundValidationStop = true;

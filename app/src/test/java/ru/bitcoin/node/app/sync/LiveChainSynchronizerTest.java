@@ -60,8 +60,8 @@ class LiveChainSynchronizerTest {
                 messageListener.get().onMessage(healthy, empty);
                 dispatcher.dispatch(empty);
             }
-            return null;
-        }).when(healthy).send(any());
+            return true;
+        }).when(healthy).trySendGetHeaders(any());
         var failed = mock(Peer.class);
         // Disconnect between the loop's readiness check and the actual request.
         when(failed.isReady()).thenReturn(true, false);

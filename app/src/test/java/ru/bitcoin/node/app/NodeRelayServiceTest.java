@@ -26,6 +26,96 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class NodeRelayServiceTest {
+    @Test void queuedEmptyHeadersCannotReleaseAdmissionForANewerRequestAgain() throws Exception {
+        var validation = mock(NodeValidationService.class);
+        var sync = mock(NodeSyncInfrastructure.class);
+        var peer = mockPeer(); when(peer.isReady()).thenReturn(true);
+        var messages = new AtomicReference<PeerMessageListener>();
+        doAnswer(call -> { messages.set(call.getArgument(0)); return null; }).when(peer).addMessageListener(any());
+        try (var peers = new PeerManager()) {
+            peers.add(peer);
+            try (var relay = new NodeRelayService(validation, sync, peers)) {
+                messages.get().onMessage(peer, BitcoinMessages.headers(new HeadersMessage(List.of())));
+                var zero = new Hash256(new byte[32]);
+                messages.get().onMessage(peer, BitcoinMessages.getHeaders(new GetHeadersMessage(
+                        VersionMessage.CURRENT_PROTOCOL_VERSION, List.of(zero), zero)));
+                // Response to the following message is a barrier after processing
+                // the empty reply already acknowledged by the socket dispatcher.
+                verify(peer, timeout(2000)).send(argThat(message -> "headers".equals(message.command())));
+                verify(peer, never()).headersResponseValidated();
+            }
+        }
+    }
+
+    @Test
+    void recoveryUsesValidatedNewHeadersAndTracksDownloadsAndTipUpdates() throws Exception {
+        var validation = mock(NodeValidationService.class);
+        var sync = mock(NodeSyncInfrastructure.class);
+        var lookup = mock(ru.bitcoin.node.chain.BlockIndexLookup.class);
+        when(sync.blockIndexLookup()).thenReturn(lookup);
+        var tip = mock(ru.bitcoin.node.chain.BlockIndex.class);
+        var announced = mock(ru.bitcoin.node.chain.BlockIndex.class);
+        when(tip.chainWork()).thenReturn(java.math.BigInteger.ONE);
+        when(announced.chainWork()).thenReturn(java.math.BigInteger.TEN);
+        when(validation.downloadTip()).thenReturn(tip);
+        var header = ru.bitcoin.node.protocol.block.GenesisBlockFactory.create(NetworkParametersRegistry.regtest()).header();
+        when(tip.hash()).thenReturn(header.hash());
+        when(announced.hash()).thenReturn(header.hash());
+        var locators = mock(ru.bitcoin.node.chain.BlockLocatorBuilder.class);
+        when(sync.blockLocatorBuilder()).thenReturn(locators);
+        when(locators.build(tip)).thenReturn(List.of(header.hash()));
+        var indexed = new java.util.concurrent.atomic.AtomicBoolean();
+        when(lookup.find(header.hash())).thenAnswer(call -> indexed.get() ? announced : null);
+        var processed = new CountDownLatch(2);
+        when(validation.processHeaders(any(), any())).thenAnswer(call -> {
+            indexed.set(true); processed.countDown(); return List.of(announced);
+        });
+        var scheduler = mock(ru.bitcoin.node.p2p.sync.BlockDownloadScheduler.class);
+        var peer = mockPeer();
+        when(peer.isReady()).thenReturn(true);
+        var messages = new AtomicReference<PeerMessageListener>();
+        doAnswer(call -> { messages.set(call.getArgument(0)); return null; }).when(peer).addMessageListener(any());
+        try (var peers = new PeerManager()) {
+            peers.add(peer, PeerConnectionRole.FULL_RELAY);
+            try (var relay = new NodeRelayService(validation, sync, peers, scheduler)) {
+                var view = relay.outboundRecoveryView();
+                assertFalse(view.hasTipWork(peer));
+                indexed.set(true);
+                when(peer.lastBlockAnnouncement()).thenReturn(header.hash());
+                assertTrue(view.hasTipWork(peer));
+                assertFalse(view.protectedFromChainSync(peer), "Known inventory alone must not assign protection");
+                indexed.set(false);
+                when(peer.lastBlockAnnouncement()).thenReturn(null);
+                var announcement = BitcoinMessages.headers(new HeadersMessage(List.of(header)));
+                messages.get().onMessage(peer, announcement);
+                messages.get().onMessage(peer, announcement);
+                assertTrue(processed.await(3, TimeUnit.SECONDS));
+                verify(peer, timeout(2000).times(1)).recordNewBlockAnnouncement();
+                assertTrue(view.hasTipWork(peer));
+                long protectionDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+                while (!view.protectedFromChainSync(peer) && System.nanoTime() < protectionDeadline) Thread.sleep(5);
+                assertTrue(view.protectedFromChainSync(peer));
+                assertEquals(java.math.BigInteger.TEN, view.chainWork(peer).peerWork());
+                when(sync.downloadBlockFailed(announced)).thenReturn(true);
+                assertFalse(view.hasTipWork(peer), "Failed header branches must not count as currently available work");
+                assertNull(view.chainWork(peer).peerWork());
+                when(sync.downloadBlockFailed(announced)).thenReturn(false);
+                assertFalse(view.blocksInFlight());
+                when(scheduler.blocksInFlight()).thenReturn(true);
+                when(scheduler.blocksInFlight(peer)).thenReturn(true);
+                assertTrue(view.blocksInFlight());
+                assertTrue(view.blocksInFlight(peer));
+                var block = mock(Block.class);
+                when(block.transactions()).thenReturn(List.of());
+                when(validation.downloadInitialBlockDownload()).thenReturn(true);
+                assertEquals(0, view.lastTipUpdateSeconds());
+                relay.onConnectedBlock(block, peer);
+                assertTrue(view.lastTipUpdateSeconds() > 0);
+                verify(peer).recordAcceptedBlock();
+            }
+        }
+    }
+
     @TempDir
     Path directory;
 
@@ -40,8 +130,8 @@ class NodeRelayServiceTest {
         var blockedOnce = new java.util.concurrent.atomic.AtomicBoolean();
         var healthyServed = new CountDownLatch(1);
         try (var peers = new PeerManager()) {
-            var noisy = mock(Peer.class);
-            var healthy = mock(Peer.class);
+            var noisy = mockPeer();
+            var healthy = mockPeer();
             for (var peer : List.of(noisy, healthy)) {
                 when(peer.isReady()).thenReturn(true);
                 doAnswer(call -> { messages.put(peer, call.getArgument(0)); return null; })
@@ -84,7 +174,7 @@ class NodeRelayServiceTest {
         var validation = mock(NodeValidationService.class);
         when(validation.downloadInitialBlockDownload()).thenReturn(true);
         var sync = mock(NodeSyncInfrastructure.class);
-        var peer = mock(Peer.class);
+        var peer = mockPeer();
         when(peer.isReady()).thenReturn(true);
         var incoming = new AtomicReference<PeerMessageListener>();
         doAnswer(call -> { incoming.set(call.getArgument(0)); return null; })
@@ -127,7 +217,7 @@ class NodeRelayServiceTest {
                 header = new ru.bitcoin.node.protocol.block.BlockHeader(4, genesis.hash(), genesis.hash(),
                         new UInt32(original.timestamp().value() + 1), original.bits(), new UInt32(nonce++));
             } while (!ru.bitcoin.node.consensus.pow.ProofOfWork.isValid(header, parameters));
-            var peer = mock(Peer.class);
+            var peer = mockPeer();
             when(peer.isReady()).thenReturn(true);
             when(peer.remoteVersion()).thenReturn(new VersionMessage(
                     VersionMessage.CURRENT_PROTOCOL_VERSION, VersionMessage.DEFAULT_SERVICES,
@@ -177,7 +267,7 @@ class NodeRelayServiceTest {
     void lowWorkGetHeadersReturnsEmptyWithoutHistoricalLookup() throws Exception {
         var validation = mock(NodeValidationService.class);
         var sync = mock(NodeSyncInfrastructure.class);
-        var peer = mock(Peer.class);
+        var peer = mockPeer();
         when(peer.isReady()).thenReturn(true);
         var incoming = new AtomicReference<PeerMessageListener>();
         doAnswer(call -> { incoming.set(call.getArgument(0)); return null; })
@@ -206,7 +296,7 @@ class NodeRelayServiceTest {
         when(validation.downloadInitialBlockDownload()).thenReturn(true);
         var sync = mock(NodeSyncInfrastructure.class);
         var block = ru.bitcoin.node.protocol.block.GenesisBlockFactory.create(NetworkParametersRegistry.regtest());
-        var peer = mock(Peer.class);
+        var peer = mockPeer();
         when(peer.isReady()).thenReturn(true);
         try (var peers = new PeerManager()) {
             peers.add(peer);
@@ -228,7 +318,7 @@ class NodeRelayServiceTest {
         var sync = mock(NodeSyncInfrastructure.class);
         Block historical = ru.bitcoin.node.protocol.block.GenesisBlockFactory.create(NetworkParametersRegistry.regtest());
         when(validation.findBlock(historical.hash())).thenReturn(Optional.of(historical));
-        var peer = mock(Peer.class);
+        var peer = mockPeer();
         when(peer.isReady()).thenReturn(true);
         var incoming = new AtomicReference<PeerMessageListener>();
         doAnswer(call -> {
@@ -282,8 +372,8 @@ class NodeRelayServiceTest {
             new RocksDbUtxoStore(db).save(fund, new StoredUtxo(100_000, script, 0, false));
             var parent = spend(fund, 90_000, script);
             var child = spend(new OutPoint(parent.txId(), new UInt32(0)), 80_000, script);
-            var source = mock(Peer.class);
-            var destination = mock(Peer.class);
+            var source = mockPeer();
+            var destination = mockPeer();
             var version = mock(VersionMessage.class);
             when(version.relay()).thenReturn(true);
             when(source.isReady()).thenReturn(true);
@@ -314,6 +404,7 @@ class NodeRelayServiceTest {
                 incoming.get().onMessage(source, new BitcoinMessage("tx", TransactionSerializer.serialize(child)));
                 assertEquals(parent.txId(), BitcoinMessages.decodeGetData(take(requests)).inventory().getFirst().hash());
                 assertTrue(validation.mempoolEntries().isEmpty());
+                verify(source, never()).recordAcceptedTransaction();
                 incoming.get().onMessage(source, new BitcoinMessage("tx", TransactionSerializer.serialize(parent)));
                 BitcoinMessage relayed = take(announcements);
                 assertEquals("inv", relayed.command());
@@ -326,6 +417,7 @@ class NodeRelayServiceTest {
                                 .toList()
                 );
                 assertEquals(2, validation.mempoolEntries().size());
+                verify(source, times(2)).recordAcceptedTransaction();
                 /*
                  * The source peer originally announced the child's wtxid to us,
                  * so the per-peer known-inventory state must suppress announcing
@@ -377,7 +469,7 @@ class NodeRelayServiceTest {
             var child = spend(new OutPoint(parent.txId(), new UInt32(0)), 90_000, script);
             assertThrows(ru.bitcoin.node.mempool.MempoolAdmissionException.class, () -> validation.admit(parent));
 
-            var source = mock(Peer.class);
+            var source = mockPeer();
             var version = mock(VersionMessage.class);
             when(version.relay()).thenReturn(true);
             when(source.isReady()).thenReturn(true);
@@ -650,7 +742,7 @@ class NodeRelayServiceTest {
              var peers = new PeerManager()) {
             var validation = new NodeValidationService(db, parameters, () -> 1_800_000_000L, new Mempool());
             var sync = new NodeSyncInfrastructure(db, parameters, () -> 1_800_000_000L);
-            var peer = mock(Peer.class);
+            var peer = mockPeer();
             when(peer.isReady()).thenReturn(true);
 
             var incoming = new AtomicReference<PeerMessageListener>();
@@ -691,8 +783,8 @@ class NodeRelayServiceTest {
             var validation = new NodeValidationService(db, parameters, () -> 1_800_000_000L, new Mempool());
             var sync = new NodeSyncInfrastructure(db, parameters, () -> 1_800_000_000L);
 
-            var slow = mock(Peer.class);
-            var fast = mock(Peer.class);
+            var slow = mockPeer();
+            var fast = mockPeer();
             when(slow.isReady()).thenReturn(true);
             when(fast.isReady()).thenReturn(true);
 
@@ -768,7 +860,7 @@ class NodeRelayServiceTest {
                     () -> 1_800_000_000L
             );
 
-            var peer = mock(Peer.class);
+            var peer = mockPeer();
             when(peer.isReady()).thenReturn(true);
 
             var incoming = new AtomicReference<PeerMessageListener>();
@@ -823,7 +915,7 @@ class NodeRelayServiceTest {
              var peers = new PeerManager()) {
             var validation = postIbdValidation(db, parameters);
             var sync = new NodeSyncInfrastructure(db, parameters, () -> 1_800_000_000L);
-            var peer = mock(Peer.class);
+            var peer = mockPeer();
             when(peer.isReady()).thenReturn(true);
             var incoming = new AtomicReference<PeerMessageListener>();
             doAnswer(invocation -> {
@@ -872,8 +964,8 @@ class NodeRelayServiceTest {
              var peers = new PeerManager()) {
             var validation = postIbdValidation(db, parameters);
             var sync = new NodeSyncInfrastructure(db, parameters, () -> 1_800_000_000L);
-            var first = mock(Peer.class);
-            var second = mock(Peer.class);
+            var first = mockPeer();
+            var second = mockPeer();
             when(first.isReady()).thenReturn(true);
             when(second.isReady()).thenReturn(true);
             var firstIncoming = new AtomicReference<PeerMessageListener>();
@@ -891,11 +983,13 @@ class NodeRelayServiceTest {
             var firstOutbound = new LinkedBlockingQueue<BitcoinMessage>();
             var secondOutbound = new LinkedBlockingQueue<BitcoinMessage>();
             doAnswer(invocation -> {
-                firstOutbound.add(invocation.getArgument(0));
+                BitcoinMessage message = invocation.getArgument(0);
+                if ("getdata".equals(message.command())) firstOutbound.add(message);
                 return null;
             }).when(first).send(any());
             doAnswer(invocation -> {
-                secondOutbound.add(invocation.getArgument(0));
+                BitcoinMessage message = invocation.getArgument(0);
+                if ("getdata".equals(message.command())) secondOutbound.add(message);
                 return null;
             }).when(second).send(any());
             peers.add(first);
@@ -930,7 +1024,7 @@ class NodeRelayServiceTest {
             var parent = spend(fund, 90_000, script);
             var child = spend(new OutPoint(parent.txId(), new UInt32(0)), 80_000, script);
 
-            var source = mock(Peer.class);
+            var source = mockPeer();
             var version = mock(VersionMessage.class);
             when(version.relay()).thenReturn(true);
             when(source.isReady()).thenReturn(true);
@@ -1014,8 +1108,8 @@ class NodeRelayServiceTest {
             // This fixture tests live-tip relay deduplication, outside IBD.
             doReturn(false).when(validation).downloadInitialBlockDownload();
             var sync = new NodeSyncInfrastructure(db, parameters, () -> 1_800_000_000L);
-            var source = mock(Peer.class);
-            var destination = mock(Peer.class);
+            var source = mockPeer();
+            var destination = mockPeer();
             when(source.isReady()).thenReturn(true);
             when(destination.isReady()).thenReturn(true);
             peers.add(source);
@@ -1045,7 +1139,7 @@ class NodeRelayServiceTest {
     void disconnectsPeerThatExhaustsPerPeerInboundRelayBudget() throws Exception {
         var validation = mock(NodeValidationService.class);
         var sync = mock(NodeSyncInfrastructure.class);
-        var peer = mock(Peer.class);
+        var peer = mockPeer();
         when(peer.isReady()).thenReturn(true);
         var incoming = new AtomicReference<PeerMessageListener>();
         doAnswer(call -> { incoming.set(call.getArgument(0)); return null; })
@@ -1059,6 +1153,17 @@ class NodeRelayServiceTest {
                 verify(peer, never()).disconnectForProtocolViolation(any(), any());
             }
         }
+    }
+
+    private static Peer mockPeer() {
+        var peer = mock(Peer.class);
+        // A READY production peer always has a negotiated version. Background
+        // relay ticks also inspect it in tests that only exercise block messages.
+        var address = new NetworkAddress(VersionMessage.DEFAULT_SERVICES, new byte[16], 18444);
+        when(peer.remoteVersion()).thenReturn(new VersionMessage(
+                VersionMessage.CURRENT_PROTOCOL_VERSION, VersionMessage.DEFAULT_SERVICES,
+                1_800_000_000L, address, address, 1L, "/relay-test/", 1, true));
+        return peer;
     }
 
     private static NodeValidationService postIbdValidation(RocksDbDatabase database,

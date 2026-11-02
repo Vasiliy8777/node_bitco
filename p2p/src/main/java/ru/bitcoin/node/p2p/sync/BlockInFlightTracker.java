@@ -404,6 +404,8 @@ public final class BlockInFlightTracker {
         return blocks.size();
     }
 
+    public synchronized int totalCount() { return peerByBlock.size(); }
+
     public synchronized Peer peerForBlock(
             Hash256 blockHash
     ) {

@@ -34,6 +34,13 @@ class BlockTemplateBuilderTest {
                 new byte[]{0x51},new byte[0],snapshot,4_000_000,new ru.bitcoin.node.mempool.FeeRate(0));
         assertEquals(2,selected.transactions().size());
         assertEquals(5_000_001_000L,selected.transactions().getFirst().outputs().getFirst().value());
+        long txWeight = ru.bitcoin.node.consensus.transaction.TransactionWeight.calculate(tx);
+        var strict = BlockTemplateBuilder.fromMempool(parent,h->parent,store,params,4,time,parent.header().bits(),
+                new byte[]{0x51},new byte[0],snapshot,8000 + txWeight,new ru.bitcoin.node.mempool.FeeRate(1),8000,400);
+        assertEquals(1,strict.transactions().size());
+        var fits = BlockTemplateBuilder.fromMempool(parent,h->parent,store,params,4,time,parent.header().bits(),
+                new byte[]{0x51},new byte[0],snapshot,8001 + txWeight,new ru.bitcoin.node.mempool.FeeRate(1),8000,400);
+        assertEquals(2,fits.transactions().size());
         long reserve=356+ru.bitcoin.node.consensus.transaction.TransactionWeight.calculate(selected.transactions().getFirst());
         var empty=BlockTemplateBuilder.fromMempool(parent,h->parent,store,params,4,time,parent.header().bits(),
                 new byte[]{0x51},new byte[0],snapshot,reserve,new ru.bitcoin.node.mempool.FeeRate(0));

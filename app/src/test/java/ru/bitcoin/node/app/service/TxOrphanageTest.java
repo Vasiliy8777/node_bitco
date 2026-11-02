@@ -39,11 +39,14 @@ class TxOrphanageTest {
 
         assertTrue(orphanage.add(orphan, first));
         assertFalse(orphanage.add(orphan, second));
+        assertSame(first, orphanage.sourceOf(orphan));
         assertEquals(1, orphanage.size());
 
         orphanage.removePeer(first);
+        assertSame(second, orphanage.sourceOf(orphan));
         assertEquals(1, orphanage.size(), "second announcer keeps the orphan alive");
         orphanage.removePeer(second);
+        assertNull(orphanage.sourceOf(orphan));
         assertEquals(0, orphanage.size());
     }
 

@@ -19,6 +19,7 @@ public final class Mempool {
     private final java.time.Clock clock;
     private final RollingMinimumFee rollingFee = new RollingMinimumFee();
     private final Map<Hash256, MempoolEntry> entries = new LinkedHashMap<>();
+    private final ClusterDiagramCache clusterDiagramCache = new ClusterDiagramCache();
     private final Map<OutPoint, Hash256> spent = new HashMap<>();
     private final Map<Hash256, Long> feeDeltas = new LinkedHashMap<>();
     private final Set<Hash256> unbroadcast = new LinkedHashSet<>();
@@ -470,7 +471,22 @@ public final class Mempool {
 
     /** Atomic whole-mempool feerate diagram, in descending mining order. */
     public synchronized List<ClusterLinearization.Chunk> feeRateDiagram() {
-        return ClusterLinearization.mempoolDiagram(entries);
+        return ClusterLinearization.mergeChunks(clusterDiagramCache.clusters(entries));
+    }
+
+    /** Atomic immutable entries and matching cached cluster order, safe after releasing the monitor. */
+    public synchronized MiningSnapshot miningSnapshot() {
+        return new MiningSnapshot(List.copyOf(entries.values()), clusterDiagramCache.clusters(entries));
+    }
+
+    public static final class MiningSnapshot {
+        private final List<MempoolEntry> entries;
+        private final List<List<ClusterLinearization.Chunk>> clusters;
+        private MiningSnapshot(List<MempoolEntry> entries, List<List<ClusterLinearization.Chunk>> clusters) {
+            this.entries = entries; this.clusters = clusters;
+        }
+        public List<MempoolEntry> entries() { return entries; }
+        public List<List<ClusterLinearization.Chunk>> clusters() { return clusters; }
     }
 
     /** Atomic graph data used by getmempoolentry. Sets include the transaction itself. */

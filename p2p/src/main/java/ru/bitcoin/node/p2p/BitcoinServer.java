@@ -22,7 +22,7 @@ public final class BitcoinServer
             new AtomicInteger();
 
     public static final int DEFAULT_MAX_INBOUND_CONNECTIONS =
-            32;
+            190;
 
     private final NetworkParameters networkParameters;
     private final PeerManager peerManager;
@@ -32,6 +32,18 @@ public final class BitcoinServer
     private final boolean relay;
     private final int maxInboundConnections;
     private final boolean v2Transport;
+    private final int maxInboundFullRelay;
+    private final Set<Peer> inboundFullRelay = new HashSet<>();
+    private record InboundMetadata(long id, long connected, java.net.InetAddress address, long netGroup, boolean preferEvict) { }
+    private final java.util.Map<Peer, InboundMetadata> inboundMetadata = new java.util.IdentityHashMap<>();
+    private final Set<Peer> evicting = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+    private final long[] evictionKey = new java.security.SecureRandom().longs(2).toArray();
+    private long nextInboundId;
+    private volatile java.util.function.BooleanSupplier initialBlockDownload = () -> false;
+
+    public void initialBlockDownload(java.util.function.BooleanSupplier supplier) {
+        initialBlockDownload = Objects.requireNonNull(supplier);
+    }
 
     private final ExecutorService handshakeExecutor;
 
@@ -59,7 +71,7 @@ public final class BitcoinServer
                 true,
                 DEFAULT_MAX_INBOUND_CONNECTIONS,
                 peerManager.discouragementManager(),
-                false
+                false, 50
         );
     }
 
@@ -88,6 +100,13 @@ public final class BitcoinServer
     public BitcoinServer(NetworkParameters networkParameters, PeerManager peerManager, long localServices,
                          boolean relay, int maxInboundConnections, PeerDiscouragementManager discouragementManager,
                          boolean v2Transport) {
+        this(networkParameters, peerManager, localServices, relay, maxInboundConnections,
+                discouragementManager, v2Transport, 100);
+    }
+
+    public BitcoinServer(NetworkParameters networkParameters, PeerManager peerManager, long localServices,
+                         boolean relay, int maxInboundConnections, PeerDiscouragementManager discouragementManager,
+                         boolean v2Transport, int inboundRelayPercent) {
 
         this.networkParameters =
                 Objects.requireNonNull(
@@ -104,9 +123,10 @@ public final class BitcoinServer
         this.discouragementManager = Objects.requireNonNull(
                 discouragementManager, "discouragementManager");
 
-        if (maxInboundConnections <= 0) {
+        if (maxInboundConnections < 0 || maxInboundConnections > 2000
+                || inboundRelayPercent < 0 || inboundRelayPercent > 100) {
             throw new IllegalArgumentException(
-                    "maxInboundConnections must be positive"
+                    "Invalid inbound connection count or relay percentage"
             );
         }
 
@@ -119,6 +139,7 @@ public final class BitcoinServer
         this.maxInboundConnections =
                 maxInboundConnections;
         this.v2Transport = v2Transport;
+        this.maxInboundFullRelay = maxInboundConnections * inboundRelayPercent / 100;
 
         this.handshakeExecutor =
                 Executors.newThreadPerTaskExecutor(
@@ -236,15 +257,16 @@ public final class BitcoinServer
                 socket =
                         currentServerSocket.accept();
 
+                boolean discouraged = socket.getInetAddress() != null && discouragementManager.isDiscouraged(socket.getInetAddress());
                 if (socket.getInetAddress() != null
-                        && (discouragementManager.isDiscouraged(socket.getInetAddress())
-                        || peerManager.banManager().isBanned(socket.getInetAddress()))) {
+                        && (peerManager.banManager().isBanned(socket.getInetAddress())
+                        || (discouraged && inboundConnectionCount.get() + 1 >= maxInboundConnections))) {
                     closeQuietly(socket);
                     socket = null;
                     continue;
                 }
 
-                if (!reserveInboundSlot()) {
+                if (!reserveInboundSlot() && (!evictInbound(false, null) || !reserveInboundSlot())) {
 
                     closeQuietly(
                             socket
@@ -263,7 +285,7 @@ public final class BitcoinServer
 
                     handshakeExecutor.execute(
                             () -> handleInboundConnection(
-                                    acceptedSocket
+                                    acceptedSocket, discouraged
                             )
                     );
 
@@ -338,7 +360,7 @@ public final class BitcoinServer
     }
 
     private void handleInboundConnection(
-            Socket socket
+            Socket socket, boolean discouraged
     ) {
 
         Peer peer =
@@ -367,6 +389,11 @@ public final class BitcoinServer
             inboundPeers.add(
                     peer
             );
+            byte[] group = EvictionNetGroup.group(socket.getInetAddress());
+            byte[] keyedInput = java.nio.ByteBuffer.allocate(8 + group.length).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                    .putLong(0x6c0edd8036ef4036L).put(group).array();
+            long keyedGroup = ru.bitcoin.node.crypto.hash.SipHash24.hash(evictionKey[0], evictionKey[1], keyedInput);
+            inboundMetadata.put(peer, new InboundMetadata(nextInboundId++, System.currentTimeMillis(), socket.getInetAddress(), keyedGroup, discouraged));
         }
 
         peer.addCloseListener(
@@ -396,6 +423,8 @@ public final class BitcoinServer
                 return;
             }
 
+            if (!admitRelayRole(peer)) { peer.close(); return; }
+
             peerManager.add(
                     peer
             );
@@ -416,7 +445,67 @@ public final class BitcoinServer
             removeInboundPeer(
                     peer
             );
+            // Eviction can race before PeerConnection has attached the accepted socket.
+            closeQuietly(socket);
         }
+    }
+
+    private boolean admitRelayRole(Peer peer) {
+        while (running && peer.isReady()) {
+            synchronized (inboundPeers) {
+                if (!inboundPeers.contains(peer) || evicting.contains(peer)) return false;
+                boolean relays = peer.remoteVersion().relay();
+                if (!relays || inboundFullRelay.size() < maxInboundFullRelay) {
+                    if (relays) inboundFullRelay.add(peer);
+                    return true;
+                }
+            }
+            // Only transaction-relaying peers are candidates for the full-relay cap.
+            // The new connection is protected; if all existing peers are protected, reject it.
+            if (!evictInbound(true, peer)) return false;
+        }
+        return false;
+    }
+
+    private boolean evictInbound(boolean transactionRelayOnly, Peer protectedPeer) {
+        if (!running) return false;
+        boolean allowLimited = !initialBlockDownload.getAsBoolean();
+        Peer selected = null;
+        synchronized (inboundPeers) {
+            var candidates = new java.util.ArrayList<InboundPeerEviction.Candidate>();
+            for (var entry : inboundMetadata.entrySet()) {
+                var peer = entry.getKey(); var metadata = entry.getValue();
+                if (peer == protectedPeer || evicting.contains(peer) || peer.state() == PeerState.CLOSED) continue;
+                var version = peer.evictionVersion();
+                boolean relays = version != null && version.relay();
+                if (transactionRelayOnly && !relays) continue;
+                long services = version == null ? 0 : version.services();
+                boolean relevant = (services & VersionMessage.NODE_WITNESS) != 0
+                        && ((services & VersionMessage.NODE_NETWORK) != 0
+                        || (allowLimited && (services & VersionMessage.NODE_NETWORK_LIMITED) != 0));
+                var network = metadata.address().getAddress().length == 4
+                        ? InboundPeerEviction.Network.IPV4 : InboundPeerEviction.Network.IPV6;
+                candidates.add(new InboundPeerEviction.Candidate(metadata.id(), metadata.connected(),
+                        peer.minPingRoundTrip().map(java.time.Duration::toNanos).orElse(Long.MAX_VALUE),
+                        peer.lastAcceptedBlockTime(), peer.lastAcceptedTransactionTime(), relevant, relays, false,
+                        metadata.netGroup(), metadata.preferEvict(),
+                        EvictionNetGroup.local(metadata.address()), network, false, true));
+            }
+            var id = InboundPeerEviction.select(candidates);
+            if (id.isEmpty()) return false;
+            for (var entry : inboundMetadata.entrySet()) if (entry.getValue().id() == id.getAsLong()) {
+                selected = entry.getKey(); evicting.add(selected); break;
+            }
+        }
+        if (selected == null) return false;
+        // Closing invokes listeners and may take other locks; never do it under inboundPeers.
+        try {
+            selected.close(new PeerCloseException(PeerCloseReason.LOCAL_RESOURCE_LIMIT,
+                    "inbound-eviction", "Inbound peer selected for eviction by Core 32.1 protection policy"));
+        } catch (IOException failure) {
+            System.getLogger(BitcoinServer.class.getName()).log(System.Logger.Level.DEBUG, "Evicted peer close failed", failure);
+        } finally { removeInboundPeer(selected); }
+        return true;
     }
 
     private void removeInboundPeer(
@@ -426,6 +515,9 @@ public final class BitcoinServer
         boolean removed;
 
         synchronized (inboundPeers) {
+            inboundFullRelay.remove(peer);
+            inboundMetadata.remove(peer);
+            evicting.remove(peer);
 
             removed =
                     inboundPeers.remove(
@@ -566,7 +658,6 @@ public final class BitcoinServer
                             inboundPeers
                     );
 
-            inboundPeers.clear();
         }
 
         for (Peer peer : peersToClose) {

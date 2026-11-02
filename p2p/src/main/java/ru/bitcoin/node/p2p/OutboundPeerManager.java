@@ -267,10 +267,28 @@ public final class OutboundPeerManager {
             List<PeerAddress> excludedAddresses,
             Set<PeerNetGroup> excludedNetGroups
     ) throws IOException {
+        return selectPersistentCandidate(excludedAddresses, excludedNetGroups, null);
+    }
+
+    /** Networks with known addresses supported by the current automatic direct transport. */
+    Set<ru.bitcoin.node.p2p.address.PeerAddressNetwork> knownAutomaticNetworks() {
+        var networks = java.util.EnumSet.noneOf(ru.bitcoin.node.p2p.address.PeerAddressNetwork.class);
+        for (var known : addressManager.addresses()) {
+            var network = known.peerAddress().network();
+            if (network == ru.bitcoin.node.p2p.address.PeerAddressNetwork.IPV4
+                    || network == ru.bitcoin.node.p2p.address.PeerAddressNetwork.IPV6) networks.add(network);
+        }
+        return Set.copyOf(networks);
+    }
+
+    PeerAddress selectPersistentCandidate(List<PeerAddress> excludedAddresses, Set<PeerNetGroup> excludedNetGroups,
+            ru.bitcoin.node.p2p.address.PeerAddressNetwork preferredNetwork) throws IOException {
         Objects.requireNonNull(excludedAddresses, "excludedAddresses");
         Objects.requireNonNull(excludedNetGroups, "excludedNetGroups");
 
         Set<PeerAddress> attempted = new java.util.LinkedHashSet<>(excludedAddresses);
+        if (preferredNetwork != null) for (var known : addressManager.addresses())
+            if (known.peerAddress().network() != preferredNetwork) attempted.add(known.peerAddress());
 
         while (true) {
             if (connectionAttemptsCancelled || Thread.currentThread().isInterrupted()) {
@@ -287,6 +305,7 @@ public final class OutboundPeerManager {
             }
 
             attempted.add(address);
+            if (preferredNetwork != null && address.network() != preferredNetwork) continue;
             if (address.isDirectSocketAddress()
                     && (discouragementManager.isDiscouraged(address.address())
                     || peerManager.banManager().isBanned(address.address()))) {
@@ -294,6 +313,23 @@ public final class OutboundPeerManager {
             }
             return address;
         }
+    }
+
+    /** Validate and register a one-shot anchor before the normal connection path. */
+    boolean prepareAnchor(PeerAddress address) {
+        if (!address.isDirectSocketAddress() || address.isRfc9637Documentation()) return false;
+        var ip = address.address();
+        byte[] raw = address.rawAddress();
+        if ((raw.length == 16 && raw[0] == 0x20 && raw[1] == 1 && raw[2] == 0x0d && raw[3] == (byte) 0xb8)
+                || (raw.length == 4 && java.util.Arrays.equals(raw, new byte[]{-1, -1, -1, -1}))) return false;
+        if (ip.isAnyLocalAddress() || ip.isLoopbackAddress() || ip.isMulticastAddress()
+                || (raw.length == 4 && raw[0] == 0)
+                || peerManager.banManager().isBanned(ip) || discouragementManager.isDiscouraged(ip)) return false;
+        long services = address.services();
+        if ((services & VersionMessage.NODE_WITNESS) == 0 || ((services & VersionMessage.NODE_NETWORK) == 0
+                && (initialBlockDownload.getAsBoolean() || (services & VersionMessage.NODE_NETWORK_LIMITED) == 0))) return false;
+        addressManager.add(address, now());
+        return addressManager.find(address).isPresent();
     }
 
     /** Connects exactly the address already reserved by OutboundPeerSupervisor. */

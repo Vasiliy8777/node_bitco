@@ -677,7 +677,7 @@ public final class BlockSyncCoordinator {
                 }
                 validationService.prefetchInitialSyncInputsAhead(ahead);
                 long validationStarted = System.nanoTime();
-                List<BlockProcessingResult> results = validationService.processInitialSyncBatch(
+                var results = validationService.processInitialSyncBatchWithReception(
                         connectBlocks.stream().map(AvailableBlock::block).toList());
                 validationNanos += System.nanoTime() - validationStarted;
                 if (results.size() != connectBlocks.size()) {
@@ -687,7 +687,8 @@ public final class BlockSyncCoordinator {
                 for (int i = 0; i < connectBlocks.size(); i++) {
                     BlockIndex index = connectIndexes.get(i);
                     AvailableBlock available = connectBlocks.get(i);
-                    BlockProcessingResult processingResult = results.get(i);
+                    var reception = results.get(i);
+                    BlockProcessingResult processingResult = reception.result();
                     availableBlocks.remove(index.hash());
 
                     if (processingResult == BlockProcessingResult.UNKNOWN_PARENT) {
@@ -695,6 +696,7 @@ public final class BlockSyncCoordinator {
                                 "Block has unknown parent: " + index.hash().toDisplayHex()
                                         + " at height " + index.height());
                     }
+                    if (reception.newBody() && available.sourcePeer() != null) available.sourcePeer().recordAcceptedBlock();
                     if (processingResult == BlockProcessingResult.CONNECTED) {
                         stallTimeoutEvaluator.blockConnected();
                         connectedBlockListener.onConnected(available.block(), available.sourcePeer());

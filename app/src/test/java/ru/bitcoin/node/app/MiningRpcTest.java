@@ -163,6 +163,22 @@ class MiningRpcTest {
                     assertTrue(((String) call(client, uri, "help", List.of()).get("result")).contains("getrpcinfo"));
                     var rpcInfo = (Map<?, ?>) call(client, uri, "getrpcinfo", List.of()).get("result");
                     assertTrue(rpcInfo.containsKey("active_commands"));
+                    var discovery = (Map<?, ?>) call(client, uri, "getopenrpcinfo", List.of()).get("result");
+                    assertEquals("1.4.1", discovery.get("openrpc"));
+                    assertEquals(discovery, call(client, uri, "rpc.discover", List.of()).get("result"));
+                    assertEquals(discovery, call(client, uri, "getopenrpcinfo", Map.of("show_hidden", true)).get("result"));
+                    assertEquals(call(client, uri, "getblockhash", List.of(0)).get("result"),
+                            call(client, uri, "getblockhash", Map.of("height", 0)).get("result"));
+                    assertEquals(-8, error(call(client, uri, "getblockhash", Map.of("unknown", 0))));
+                    var network = (Map<?, ?>) call(client, uri, "getnetworkinfo", List.of()).get("result");
+                    assertEquals(java.util.Set.of("inbound", "outbound"), ((Map<?, ?>) network.get("inv_buckets")).keySet());
+                    var fee = (Map<?, ?>) call(client, uri, "estimatesmartfee", Map.of("conf_target", 2,
+                            "options", Map.of("fee_rate_estimator", "mempool_policy", "verbosity", 2))).get("result");
+                    assertTrue(fee.containsKey("errors"));
+                    assertTrue(fee.containsKey("mempool_health_statistics"));
+                    assertEquals(2, ((Number) fee.get("blocks")).intValue());
+                    assertEquals(-8, error(call(client, uri, "estimatesmartfee", List.of(2, "economical",
+                            Map.of("fee_rate_estimator", "unknown")))));
                     assertNull(call(client, uri, "ping", List.of()).get("error"));
                     assertEquals("rocksdb:mempool", ((Map<?, ?>) call(client, uri, "savemempool", List.of()).get("result")).get("filename"));
 
@@ -250,8 +266,9 @@ class MiningRpcTest {
                     assertEquals(101_000L, ((Number) mempoolInfo.get("limitclustersize")).longValue());
                     assertEquals(true, mempoolInfo.get("optimal"));
                     assertFalse(mempoolInfo.containsKey("usage"), "Unmeasured JVM memory must not be reported as virtual size");
-                    assertEquals(true, mempoolInfo.get("fullrbf"));
-                    assertEquals(List.of(), call(client, uri, "getmempoolfeeratediagram", List.of()).get("result"));
+                    assertFalse(mempoolInfo.containsKey("fullrbf"));
+                    assertEquals(List.of(Map.of("weight", 0, "fee", 0.0)),
+                            call(client, uri, "getmempoolfeeratediagram", List.of()).get("result"));
                     var missingCluster = call(client, uri, "getmempoolcluster", List.of("00".repeat(32)));
                     assertEquals(-5, ((Number) ((Map<?, ?>) missingCluster.get("error")).get("code")).intValue());
 
@@ -434,12 +451,12 @@ class MiningRpcTest {
         return NonceMiner.search(candidate, parameters, 0, 100_000, () -> false).orElseThrow();
     }
 
-    private static HttpRequest request(URI uri, String method, List<?> params) {
+    private static HttpRequest request(URI uri, String method, Object params) {
         return HttpRequest.newBuilder(uri).header("Authorization", "Basic " + Base64.getEncoder().encodeToString("test:test-password".getBytes(java.nio.charset.StandardCharsets.UTF_8)))
                 .POST(HttpRequest.BodyPublishers.ofString(JSON.writeValueAsString(Map.of("id", 1, "method", method, "params", params)))).build();
     }
 
-    private static Map<?, ?> call(HttpClient client, URI uri, String method, List<?> params) throws Exception {
+    private static Map<?, ?> call(HttpClient client, URI uri, String method, Object params) throws Exception {
         return JSON.readValue(client.send(request(uri, method, params), HttpResponse.BodyHandlers.ofString()).body(), Map.class);
     }
 

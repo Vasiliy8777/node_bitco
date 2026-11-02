@@ -12,12 +12,12 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class BitcoinCoreScriptVectorsTest {
     @TestFactory Stream<DynamicTest> allScriptVectors() throws Exception {
-        var resource = Objects.requireNonNull(getClass().getResourceAsStream("/bitcoin-core-v30/script-all.txt"));
+        var resource = Objects.requireNonNull(getClass().getResourceAsStream("/bitcoin-core-v32/script-all.txt"));
         List<String> rows;
         try (var reader = new BufferedReader(new InputStreamReader(resource, StandardCharsets.UTF_8))) {
             rows = reader.lines().toList();
         }
-        assertEquals(1212, rows.size());
+        assertEquals(1237, rows.size());
         return IntStream.range(0, rows.size()).mapToObj(i -> DynamicTest.dynamicTest("Core script row " + (i+1), () -> {
             String[] fields = Arrays.stream(rows.get(i).split("\\|", -1))
                     .map(s -> new String(Base64.getDecoder().decode(s), StandardCharsets.UTF_8)).toArray(String[]::new);

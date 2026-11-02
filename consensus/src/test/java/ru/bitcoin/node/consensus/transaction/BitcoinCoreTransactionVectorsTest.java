@@ -26,13 +26,13 @@ class BitcoinCoreTransactionVectorsTest {
     private static final List<Integer> FLAGS = declaredFlags();
     private static final int ALL_FLAGS = FLAGS.stream().reduce(0, (a, b) -> a | b);
 
-    @TestFactory Stream<DynamicTest> validTransactions() throws Exception { return vectors("tx_valid", 120, true); }
+    @TestFactory Stream<DynamicTest> validTransactions() throws Exception { return vectors("tx_valid", 121, true); }
     @TestFactory Stream<DynamicTest> invalidTransactions() throws Exception { return vectors("tx_invalid", 93, false); }
 
     private Stream<DynamicTest> vectors(String name, int count, boolean valid) throws Exception {
         List<String> rows;
         try (var reader = new BufferedReader(new InputStreamReader(Objects.requireNonNull(
-                getClass().getResourceAsStream("/bitcoin-core-v30/" + name + ".txt")), StandardCharsets.UTF_8))) {
+                getClass().getResourceAsStream("/bitcoin-core-v32/" + name + ".txt")), StandardCharsets.UTF_8))) {
             rows = reader.lines().toList();
         }
         assertEquals(count, rows.size());

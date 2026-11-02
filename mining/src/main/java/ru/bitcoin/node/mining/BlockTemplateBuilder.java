@@ -25,6 +25,35 @@ public final class BlockTemplateBuilder {
                                    byte[] payout, byte[] extraNonce,
                                    List<ru.bitcoin.node.mempool.MempoolEntry> snapshot,
                                    long maximumWeight, ru.bitcoin.node.mempool.FeeRate minimumRate) {
+        return fromMempool(parent, lookup, coins, parameters, version, time, bits, payout, extraNonce,
+                snapshot, maximumWeight, minimumRate, 0, 0);
+    }
+
+    public static Block fromMempool(BlockIndex parent, BlockIndexLookup lookup, UtxoStore coins,
+                                   NetworkParameters parameters, int version, UInt32 time, UInt32 bits,
+                                   byte[] payout, byte[] extraNonce,
+                                   List<ru.bitcoin.node.mempool.MempoolEntry> snapshot,
+                                   long maximumWeight, ru.bitcoin.node.mempool.FeeRate minimumRate,
+                                   long configuredReservedWeight, long configuredReservedSigops) {
+        return fromMempool(parent, lookup, coins, parameters, version, time, bits, payout, extraNonce, snapshot,
+                maximumWeight, minimumRate, configuredReservedWeight, configuredReservedSigops, null);
+    }
+
+    public static Block fromMempoolSnapshot(BlockIndex parent, BlockIndexLookup lookup, UtxoStore coins,
+                                   NetworkParameters parameters, int version, UInt32 time, UInt32 bits,
+                                   byte[] payout, byte[] extraNonce, ru.bitcoin.node.mempool.Mempool.MiningSnapshot snapshot,
+                                   long maximumWeight, ru.bitcoin.node.mempool.FeeRate minimumRate,
+                                   long configuredReservedWeight, long configuredReservedSigops) {
+        return fromMempool(parent, lookup, coins, parameters, version, time, bits, payout, extraNonce, snapshot.entries(),
+                maximumWeight, minimumRate, configuredReservedWeight, configuredReservedSigops, snapshot);
+    }
+
+    private static Block fromMempool(BlockIndex parent, BlockIndexLookup lookup, UtxoStore coins,
+                                   NetworkParameters parameters, int version, UInt32 time, UInt32 bits,
+                                   byte[] payout, byte[] extraNonce, List<ru.bitcoin.node.mempool.MempoolEntry> snapshot,
+                                   long maximumWeight, ru.bitcoin.node.mempool.FeeRate minimumRate,
+                                   long configuredReservedWeight, long configuredReservedSigops,
+                                   ru.bitcoin.node.mempool.Mempool.MiningSnapshot cached) {
         if (maximumWeight <= 0 || maximumWeight > 4_000_000)
             throw new IllegalArgumentException("Invalid block weight limit");
         var coinbase = CoinbaseBuilder.build(Math.addExact(parent.height(),1), parameters, 0,
@@ -32,10 +61,18 @@ public final class BlockTemplateBuilder {
         // Header and worst-case CompactSize transaction count (9 bytes), both stripped.
         long reservedWeight = Math.addExact(80L * 4 + 9L * 4, TransactionWeight.calculate(coinbase));
         long reservedSigops = TransactionSigOpCost.legacyCost(coinbase);
+        if (configuredReservedWeight < 0 || configuredReservedSigops < 0)
+            throw new IllegalArgumentException("Negative coinbase reservation");
+        reservedWeight = Math.max(reservedWeight, configuredReservedWeight);
+        reservedSigops = Math.max(reservedSigops, configuredReservedSigops);
         if (reservedWeight > maximumWeight || reservedSigops > 80_000)
             throw new IllegalArgumentException("Coinbase exceeds template budget");
-        var selected = TransactionSelector.select(snapshot, maximumWeight-reservedWeight,
-                80_000-reservedSigops, minimumRate);
+        long margin = configuredReservedWeight > 0 ? 1 : 0;
+        long availableWeight = Math.max(0, maximumWeight-reservedWeight-margin);
+        long availableSigops = Math.max(0, 80_000-reservedSigops-margin);
+        var selected = cached == null
+                ? TransactionSelector.select(snapshot, availableWeight, availableSigops, minimumRate)
+                : TransactionSelector.selectSnapshot(cached, availableWeight, availableSigops, minimumRate);
         var block = build(parent,lookup,coins,parameters,version,time,bits,payout,extraNonce,selected);
         if (ru.bitcoin.node.consensus.block.BlockWeight.calculate(block) > maximumWeight)
             throw new IllegalStateException("Selected block exceeds requested weight");

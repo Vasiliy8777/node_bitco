@@ -14,15 +14,15 @@ class ConsensusCorpusIntegrityTest {
     @Test
     void projectedCoreConsensusCorpusIsSemanticallyPinned() throws Exception {
         assertNormalizedTextSha256(
-                "/bitcoin-core-v30/script-all.txt",
-                "08dd5a7c3afda29b4c652aac81b8f110155a1bb1a839bf03b5e7cf24cb4f1901"
+                "/bitcoin-core-v32/script-all.txt",
+                "d1166063f4ad9de3f98a9249d2dd602c36697110b466a57bd46aabeaf8027d5a"
         );
         assertNormalizedTextSha256(
-                "/bitcoin-core-v30/tx_valid.txt",
-                "fbf6783ff9824690fb0edd91c929ffb87dc4aaeb2282251d696d99a68ec77027"
+                "/bitcoin-core-v32/tx_valid.txt",
+                "58baed3b8123a926510c804c8dba0aa5376121681153b401ba11c6541c75aaad"
         );
         assertNormalizedTextSha256(
-                "/bitcoin-core-v30/tx_invalid.txt",
+                "/bitcoin-core-v32/tx_invalid.txt",
                 "91a669b7da658e99d4ed9fc0ee61bdffbf7fd888b105bc49f0ce72efd2c29a70"
         );
     }

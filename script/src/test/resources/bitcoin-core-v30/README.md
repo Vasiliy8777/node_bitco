@@ -21,5 +21,6 @@ BitcoinCoreScriptVectorsTest checks acceptance/rejection, not exact error codes.
 The remaining corpus, witness rows and transaction vectors are not yet executed.
 
 The active Script test has now moved to the consensus module and executes all
-1101 rows without explicit witness arrays. See consensus/src/test/resources/bitcoin-core-v30/README.md.
+1237 Core v32.1 rows including witness arrays. See
+consensus/src/test/resources/bitcoin-core-v32/README.md.
 The first-100 projection is retained as the earlier subset; it is not a separate active test.

@@ -43,8 +43,8 @@ public class StratumConfiguration {
                                        @Value("${bitcoin.stratum.vardiff.retarget-seconds:60}") long retargetSeconds,
                                        @Value("${bitcoin.mining.payout-address:}") String payoutAddress,
                                        @Value("${bitcoin.mining.payout-script:}") String payoutScript,
-                                       @Value("${bitcoin.mining.maximum-weight:3996000}") long maximumWeight,
-                                       @Value("${bitcoin.mining.minimum-fee-sat-per-kvb:1000}") long minimumFee) throws IOException {
+                                       @Value("${bitcoin.mining.maximum-weight:4000000}") long maximumWeight,
+                                       @Value("${bitcoin.mining.minimum-fee-sat-per-kvb:1}") long minimumFee) throws IOException {
         var backend = new StratumMiningBackend(validation, relay, parameters, time, lifecycle::isMiningReady,
                 MiningPayoutResolver.resolveStratum(payoutAddress, payoutScript, parameters), maximumWeight, new FeeRate(minimumFee));
         var varDiff = new VarDiffConfig(varDiffEnabled, varDiffMinimum, varDiffMaximum,

@@ -35,6 +35,15 @@ public final class NodeRpcServer implements AutoCloseable {
     private static final int MAX_REQUEST = 8_100_000;
     private static final long DEFAULT_MAX_RAW_TX_FEE_RATE = 10_000_000L; // 0.10 BTC/kvB
     private static final long MAX_RAW_TX_FEE_RATE = 100_000_000L; // 1 BTC/kvB
+    private static Integer installedConnectionLimit;
+
+    private static synchronized void configureConnectionLimit(int maximum) {
+        if (maximum < 1) throw new IllegalArgumentException("rpcmaxconnections must be positive");
+        if (installedConnectionLimit != null && installedConnectionLimit != maximum)
+            throw new IllegalStateException("The JDK HTTP connection limit is JVM-wide and must be configured before the first RPC server");
+        System.setProperty("jdk.httpserver.maxConnections", Integer.toString(maximum));
+        installedConnectionLimit = maximum;
+    }
     private static final long DEFAULT_MAX_BURN_AMOUNT = 0L;
     private final HttpServer server;
     private final ThreadPoolExecutor executor = new ThreadPoolExecutor(8, 8, 0, TimeUnit.SECONDS,
@@ -67,6 +76,12 @@ public final class NodeRpcServer implements AutoCloseable {
     public NodeRpcServer(InetSocketAddress address, String user, String password, MiningController mining,
                          NodeValidationService validation, NodeRelayService relay, NodeSyncInfrastructure sync,
                          BooleanSupplier ready, PeerManager peerManager, long localServices) throws IOException {
+        this(address, user, password, mining, validation, relay, sync, ready, peerManager, localServices, 16);
+    }
+
+    public NodeRpcServer(InetSocketAddress address, String user, String password, MiningController mining,
+                         NodeValidationService validation, NodeRelayService relay, NodeSyncInfrastructure sync,
+                         BooleanSupplier ready, PeerManager peerManager, long localServices, int maximumConnections) throws IOException {
         if (address.isUnresolved() || !address.getAddress().isLoopbackAddress())
             throw new IllegalArgumentException("RPC must bind to a loopback address");
         if (user.isBlank() || user.contains(":") || password.isBlank())
@@ -80,7 +95,8 @@ public final class NodeRpcServer implements AutoCloseable {
         this.ready = ready;
         this.peerManager = peerManager;
         this.localServices = localServices;
-        server = HttpServer.create(address, 16);
+        configureConnectionLimit(maximumConnections);
+        server = HttpServer.create(address, maximumConnections);
         server.createContext("/", this::handle);
         server.setExecutor(executor);
         server.start();
@@ -167,9 +183,10 @@ public final class NodeRpcServer implements AutoCloseable {
             if (id != null && !(id instanceof String) && !(id instanceof Number))
                 throw new RpcException(-32600, "Invalid request id");
             Object rawParams = request.get("params");
-            if (rawParams != null && !(rawParams instanceof List<?>))
-                throw new RpcException(-32602, "Expected positional parameters");
-            List<?> params = rawParams == null ? List.of() : (List<?>) rawParams;
+            if (rawParams != null && !(rawParams instanceof List<?>) && !(rawParams instanceof Map<?, ?>))
+                throw new RpcException(-32602, "Expected positional or named parameters");
+            List<?> params = rawParams == null ? List.of()
+                    : rawParams instanceof Map<?, ?> named ? RpcMethods.positional(method, named) : (List<?>) rawParams;
             if (method.equals("getblocktemplate") && !params.isEmpty() && params.getFirst() instanceof Map<?, ?> options
                     && options.containsKey("longpollid")) {
                 acquired = longPolls.tryAcquire();
@@ -216,9 +233,68 @@ public final class NodeRpcServer implements AutoCloseable {
     private record RpcReply(Object body, boolean notification) { }
     private record ActiveCommand(String method, long startedNanos) { }
 
+    private Map<String, Object> estimateSmartFee(List<?> params) {
+        if (params.isEmpty() || params.size() > 3 || !(params.getFirst() instanceof Number number))
+            throw new RpcException(-32602, "Expected conf_target, optional estimate_mode and options");
+        int target;
+        try { target = new java.math.BigDecimal(number.toString()).intValueExact(); }
+        catch (ArithmeticException e) { throw new RpcException(-8, "Invalid conf_target"); }
+        if (target < 1 || target > 1008) throw new RpcException(-8, "Invalid conf_target, must be between 1 and 1008");
+        String mode = "ECONOMICAL";
+        if (params.size() > 1 && params.get(1) != null) {
+            if (!(params.get(1) instanceof String text)) throw new RpcException(-3, "estimate_mode must be a string");
+            mode = text.toUpperCase(Locale.ROOT);
+        }
+        if (!Set.of("UNSET", "ECONOMICAL", "CONSERVATIVE").contains(mode))
+            throw new RpcException(-8, "Invalid estimate_mode parameter");
+        Map<?, ?> options = Map.of();
+        if (params.size() > 2 && params.get(2) != null) {
+            if (!(params.get(2) instanceof Map<?, ?> map)) throw new RpcException(-3, "options must be an object");
+            options = map;
+        }
+        for (var key : options.keySet())
+            if (!Set.of("fee_rate_estimator", "verbosity").contains(key)) throw new RpcException(-3, "Unknown named parameter " + key);
+        Object estimatorOption = options.get("fee_rate_estimator");
+        if (estimatorOption != null && !(estimatorOption instanceof String)) throw new RpcException(-3, "fee_rate_estimator must be a string");
+        String estimator = estimatorOption == null ? "auto" : (String) estimatorOption;
+        if (!Set.of("auto", "block_policy", "mempool_policy").contains(estimator))
+            throw new RpcException(-8, "Invalid fee_rate_estimator parameter, must be one of: auto, block_policy, mempool_policy");
+        int verbosity = 1;
+        if (options.get("verbosity") != null) {
+            if (!(options.get("verbosity") instanceof Number n)) throw new RpcException(-3, "verbosity must be numeric");
+            try { verbosity = new java.math.BigDecimal(n.toString()).intValueExact(); }
+            catch (ArithmeticException e) { throw new RpcException(-8, "Invalid verbosity"); }
+            if (verbosity < 0) throw new RpcException(-8, "Invalid verbosity");
+        }
+        var result = new LinkedHashMap<String, Object>();
+        var estimate = validation.estimateFee(estimator, target, mode.equals("CONSERVATIVE"));
+        if (estimate.error() != null) result.put("errors", List.of(estimate.error()));
+        else {
+            result.put("feerate", satoshisPerKvBToBtcPerKvB(estimate.satoshisPerKvB()));
+            if (estimator.equals("auto")) result.put("estimator", estimate.estimator());
+        }
+        result.put("blocks", estimate.blocks());
+        if (verbosity >= 2) {
+            result.put("mempool_health_statistics", validation.mempoolFeeHealthStatistics().reversed().stream()
+                    .map(block -> Map.of("block_height", block.height(), "block_weight", block.blockWeight(),
+                            "mempool_txs_weight", block.mempoolWeight())).toList());
+        }
+        return result;
+    }
+
     @SuppressWarnings("unchecked")
     private Object dispatch(String method, List<?> params) throws InterruptedException {
         return switch (method) {
+            case "estimatesmartfee" -> estimateSmartFee(params);
+            case "getopenrpcinfo" -> {
+                if (params.size() > 1) throw new RpcException(-32602, "Expected optional show_hidden boolean");
+                booleanParam(params, 0, false);
+                yield RpcMethods.discovery();
+            }
+            case "rpc.discover" -> {
+                requireNoParams(method, params);
+                yield RpcMethods.discovery();
+            }
             case "help" -> {
                 if (params.size() > 1 || (!params.isEmpty() && !(params.getFirst() instanceof String)))
                     throw new RpcException(-32602, "help takes an optional command name");
@@ -437,7 +513,10 @@ public final class NodeRpcServer implements AutoCloseable {
 
                 if (verbosity == 0)
                     yield HexFormat.of().formatHex(TransactionSerializer.serialize(transaction));
-                yield transactionJson(transaction, blockInfo, null);
+                var json = transactionJson(transaction, blockInfo, null);
+                if (blockInfo == null) validation.mempoolEntry(txid)
+                        .ifPresent(entry -> json.put("vsize_adjusted", entry.virtualSize()));
+                yield json;
             }
             case "prioritisetransaction" -> {
                 if (params.size() != 3 || !(params.getFirst() instanceof String txidText))
@@ -521,6 +600,7 @@ public final class NodeRpcServer implements AutoCloseable {
                 if (!params.isEmpty()) throw new RpcException(-32602, "getmempoolfeeratediagram takes no parameters");
                 long weight = 0, fee = 0;
                 List<Map<String, Object>> result = new ArrayList<>();
+                result.add(Map.of("weight", 0L, "fee", satoshisToBtc(0)));
                 for (var chunk : validation.mempoolFeeRateDiagram()) {
                     weight = Math.addExact(weight, chunk.adjustedWeight());
                     fee = Math.addExact(fee, chunk.fee());
@@ -924,9 +1004,8 @@ public final class NodeRpcServer implements AutoCloseable {
                 info.put("unbroadcastcount", validation.unbroadcastMempoolCount());
                 info.put("limitclustercount", MempoolLimits.DEFAULT.clusterCount());
                 info.put("limitclustersize", MempoolLimits.DEFAULT.clusterVirtualBytes());
-                // The greedy cluster linearizer does not certify global optimality.
-                info.put("optimal", entries.isEmpty());
-                info.put("fullrbf", true);
+                // Cluster ordering is computed by an exact maximum-closure solver.
+                info.put("optimal", true);
                 yield info;
             }
             case "getnetworkinfo" -> {
@@ -939,6 +1018,7 @@ public final class NodeRpcServer implements AutoCloseable {
                 info.put("localservices", String.format("%016x", services));
                 info.put("localservicesnames", serviceNames(services));
                 info.put("localrelay", true);
+                info.put("inv_buckets", relay.inventoryBucketInfo());
                 info.put("timeoffset", 0);
                 info.put("networkactive", true);
                 info.put("connections", peerManager == null ? 0 : peerManager.size());
@@ -1297,7 +1377,7 @@ public final class NodeRpcServer implements AutoCloseable {
     }
 
     private static boolean booleanParam(List<?> params, int index, boolean defaultValue) {
-        if (params.size() <= index) return defaultValue;
+        if (params.size() <= index || params.get(index) == null) return defaultValue;
         Object value = params.get(index);
         if (!(value instanceof Boolean result))
             throw new RpcException(-32602, "Expected boolean parameter");
@@ -1333,15 +1413,7 @@ public final class NodeRpcServer implements AutoCloseable {
     }
 
     private String rpcHelp(String command) {
-        List<String> methods = List.of(
-                "clearbanned", "decoderawtransaction", "disconnectnode", "dumptxoutset", "getbestblockhash",
-                "getblock", "getblockchaininfo", "getblockcount", "getblockfilter", "getblockhash", "getblockheader",
-                "getblocktemplate", "getchainstates", "getchaintips", "getconnectioncount", "getdifficulty", "getindexinfo",
-                "getmempoolancestors", "getmempoolcluster", "getmempooldescendants", "getmempoolentry", "getmempoolfeeratediagram",
-                "getmempoolinfo", "getmininginfo", "getnetworkhashps", "getnetworkinfo", "getpeerinfo", "getprioritisedtransactions",
-                "getrawmempool", "getrawtransaction", "getrpcinfo", "gettxout", "gettxoutsetinfo", "gettxspendingprevout", "help",
-                "invalidateblock", "listbanned", "loadtxoutset", "ping", "prioritisetransaction", "pruneblockchain", "reconsiderblock",
-                "savemempool", "sendrawtransaction", "setban", "submitblock", "submitpackage", "testmempoolaccept", "uptime");
+        var methods = RpcMethods.names();
         if (command == null) return String.join("\n", methods);
         if (!methods.contains(command)) throw new RpcException(-32601, "Method not found");
         return command + " - supported by java-bitcoin-node RPC";

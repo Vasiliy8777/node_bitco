@@ -1,5 +1,8 @@
 # Bitcoin Core v30 Script vectors
 
+The active Script and transaction adapters now use the pinned Core v32.1 corpus
+in `../bitcoin-core-v32/`. This directory retains the earlier source/projections.
+
 `script-legacy.txt` contains all 1101 rows without an explicit witness array from
 https://github.com/bitcoin/bitcoin/blob/v30.0/src/test/data/script_tests.json
 The unmodified source is retained in script/src/test/resources/bitcoin-core-v30/script_tests.json.

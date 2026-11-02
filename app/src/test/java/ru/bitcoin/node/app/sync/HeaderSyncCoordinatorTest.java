@@ -39,6 +39,43 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class HeaderSyncCoordinatorTest {
+    @Test void knownTipConfirmationNotifiesTheValidatedBatchObserverBeforeReturning() throws Exception {
+        var genesis = createGenesisIndex();
+        var transport = org.mockito.Mockito.mock(HeaderSynchronizer.class);
+        var service = org.mockito.Mockito.mock(HeaderSyncService.class);
+        var locators = org.mockito.Mockito.mock(BlockLocatorBuilder.class);
+        var message = new HeadersMessage(List.of(genesis.header()));
+        org.mockito.Mockito.when(locators.build(genesis)).thenReturn(List.of(genesis.hash()));
+        org.mockito.Mockito.when(transport.download(org.mockito.ArgumentMatchers.anyList(), org.mockito.ArgumentMatchers.any())).thenReturn(message);
+        org.mockito.Mockito.when(service.process(org.mockito.ArgumentMatchers.eq(message), org.mockito.ArgumentMatchers.any())).thenReturn(List.of(genesis));
+        var observed = new java.util.concurrent.atomic.AtomicReference<List<BlockIndex>>();
+        var coordinator = new HeaderSyncCoordinator(transport, service, new HeaderChainState(genesis), locators)
+                .onValidatedBatch(observed::set);
+        assertEquals(0, coordinator.synchronize(new Hash256(new byte[32]), ignored -> { }));
+        assertEquals(List.of(genesis), observed.get());
+        org.mockito.Mockito.verify(transport).headersValidated();
+        org.mockito.Mockito.verify(transport, org.mockito.Mockito.times(1)).download(org.mockito.ArgumentMatchers.anyList(), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test void failedHeaderResponseDoesNotNotifyTheValidatedBatchObserver() throws Exception {
+        var genesis = createGenesisIndex();
+        var transport = org.mockito.Mockito.mock(HeaderSynchronizer.class);
+        var service = org.mockito.Mockito.mock(HeaderSyncService.class);
+        var locators = org.mockito.Mockito.mock(BlockLocatorBuilder.class);
+        org.mockito.Mockito.when(locators.build(genesis)).thenReturn(List.of(genesis.hash()));
+        org.mockito.Mockito.when(transport.download(org.mockito.ArgumentMatchers.anyList(), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new HeadersMessage(List.of(genesis.header())));
+        org.mockito.Mockito.when(service.process(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+                .thenThrow(new IllegalArgumentException("Controlled invalid batch"));
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        var coordinator = new HeaderSyncCoordinator(transport, service, new HeaderChainState(genesis), locators)
+                .onValidatedBatch(batch -> calls.incrementAndGet());
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                () -> coordinator.synchronize(new Hash256(new byte[32]), ignored -> { }));
+        assertEquals(0, calls.get());
+        org.mockito.Mockito.verify(transport, org.mockito.Mockito.never()).headersValidated();
+    }
+
 
     private static final NetworkParameters REGTEST =
             NetworkParametersRegistry.regtest();

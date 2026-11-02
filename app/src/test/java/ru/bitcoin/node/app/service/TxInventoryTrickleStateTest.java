@@ -8,6 +8,18 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 class TxInventoryTrickleStateTest {
+    @Test void rechecksMempoolMembershipAndMiningPriorityAtSendTime() {
+        var state = new TxRelayState();
+        state.queue(hash(1), hash(2), 1000);
+        state.queue(hash(3), hash(4), 1000);
+        state.queue(hash(5), hash(6), 1000);
+        state.refreshPending(List.of(
+                new TransactionRelayBuckets.Transaction(hash(5), hash(6), 3000, 100),
+                new TransactionRelayBuckets.Transaction(hash(1), hash(2), 2000, 100)));
+        var selected = state.takeForRelay(true, 100);
+        assertEquals(List.of(hash(6), hash(2)), selected.stream().map(TxRelayState.PendingAnnouncement::wtxId).toList());
+        assertEquals(List.of(3000L, 2000L), selected.stream().map(TxRelayState.PendingAnnouncement::feeRateSatPerKvB).toList());
+    }
 
     @Test
     void queuesOnceAndDrainsInInsertionOrder() {

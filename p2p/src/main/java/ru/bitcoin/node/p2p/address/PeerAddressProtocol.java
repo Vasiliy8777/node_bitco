@@ -510,11 +510,12 @@ public final class PeerAddressProtocol
                 return null;
             }
 
-            return new PeerAddress(
+            PeerAddress result = new PeerAddress(
                     address,
                     entry.port(),
                     entry.services()
             );
+            return result.isRfc9637Documentation() ? null : result;
 
         } catch (UnknownHostException
                  | IllegalArgumentException exception) {
@@ -537,12 +538,13 @@ public final class PeerAddressProtocol
         }
 
         try {
-            return new PeerAddress(
+            PeerAddress result = new PeerAddress(
                     PeerAddressNetwork.from(network),
                     entry.address(),
                     entry.port(),
                     entry.services()
             );
+            return result.isRfc9637Documentation() ? null : result;
         } catch (IllegalArgumentException exception) {
             return null;
         }

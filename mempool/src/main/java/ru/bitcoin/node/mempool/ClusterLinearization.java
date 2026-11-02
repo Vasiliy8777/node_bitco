@@ -8,9 +8,10 @@ import java.util.*;
 /**
  * Deterministic dependency-respecting cluster linearization and feerate diagram.
  * <p>
- * The linearization repeatedly appends the highest-feerate ancestor package that
- * remains in the cluster. Chunks are the maximum-feerate prefixes of the remaining
- * linearization, yielding a monotonically non-increasing feerate diagram.
+ * The linearization repeatedly appends a minimal highest-feerate ancestor-closed
+ * set, including sets shared by multiple descendants. Chunks are the maximum-feerate
+ * prefixes of the remaining linearization, yielding a monotonically non-increasing
+ * feerate diagram.
  * Arithmetic comparisons are exact; no floating point is used.
  */
 public final class ClusterLinearization {
@@ -41,30 +42,17 @@ public final class ClusterLinearization {
 
     public static List<Hash256> linearize(Map<Hash256, MempoolEntry> entries, Set<Hash256> cluster) {
         Objects.requireNonNull(entries, "entries");
-        Set<Hash256> remaining = new LinkedHashSet<>(Objects.requireNonNull(cluster, "cluster"));
-        if (remaining.isEmpty()) return List.of();
-        for (Hash256 id : remaining)
-            if (!entries.containsKey(id)) throw new IllegalArgumentException("Unknown cluster transaction: " + id);
-        List<Hash256> result = new ArrayList<>(remaining.size());
-        while (!remaining.isEmpty()) {
-            List<Hash256> best = null;
-            long bestFee = 0, bestSize = 1;
-            for (Hash256 id : remaining) {
-                LinkedHashSet<Hash256> packageIds = new LinkedHashSet<>();
-                collectAncestors(id, entries, remaining, new HashSet<>(), packageIds);
-                long fee = fee(entries, packageIds), size = adjustedWeight(entries, packageIds);
-                if (best == null || compareRate(fee, size, bestFee, bestSize) > 0
-                        || (compareRate(fee, size, bestFee, bestSize) == 0 && comparePackage(packageIds, best) < 0)) {
-                    best = List.copyOf(packageIds);
-                    bestFee = fee;
-                    bestSize = size;
-                }
-            }
-            if (best == null || best.isEmpty()) throw new IllegalStateException("Unable to linearize cluster");
-            result.addAll(best);
-            remaining.removeAll(best);
+        Objects.requireNonNull(cluster, "cluster");
+        if (cluster.isEmpty()) return List.of();
+        if (cluster.size() == 1) {
+            var id = cluster.iterator().next();
+            var entry = require(entries, id);
+            if (entry.adjustedWeight() <= 0) throw new IllegalArgumentException("Non-positive transaction weight");
+            if (entry.transaction().inputs().stream().anyMatch(input -> input.previousOutput().transactionId().equals(id)))
+                throw new IllegalArgumentException("Cyclic mempool dependencies");
+            return List.of(id);
         }
-        return List.copyOf(result);
+        return OptimalClusterLinearizer.linearize(entries, cluster);
     }
 
     public static List<Chunk> chunks(Map<Hash256, MempoolEntry> entries, Set<Hash256> cluster) {
@@ -99,18 +87,32 @@ public final class ClusterLinearization {
 
     /**
      * Returns the whole-mempool feerate diagram by merging every cluster's chunks
-     * in descending feerate order. Cluster chunks are independently dependency-safe,
-     * so interleaving clusters by chunk feerate preserves a valid mining order.
+     * in descending feerate order, preserving chunk order within each cluster.
+     * Equal-feerate chunks may still depend on earlier chunks in that cluster.
      */
     public static List<Chunk> mempoolDiagram(Map<Hash256, MempoolEntry> entries) {
         Objects.requireNonNull(entries, "entries");
+        return mergeChunks(clusters(entries).stream().map(cluster -> chunks(entries, cluster)).toList());
+    }
+
+    /** Merge already linearized clusters without losing intra-cluster dependencies. */
+    public static List<Chunk> mergeChunks(List<List<Chunk>> clusters) {
         List<Chunk> result = new ArrayList<>();
-        for (Set<Hash256> cluster : clusters(entries)) result.addAll(chunks(entries, cluster));
-        result.sort((a, b) -> {
+        record Cursor(List<Chunk> chunks, int position) {
+            Chunk head() { return chunks.get(position); }
+        }
+        var queue = new PriorityQueue<Cursor>((left, right) -> {
+            var a = left.head(); var b = right.head();
             int rate = compareRate(b.fee(), b.adjustedWeight(), a.fee(), a.adjustedWeight());
             if (rate != 0) return rate;
             return comparePackage(a.transactions(), b.transactions());
         });
+        for (var cluster : clusters) if (!cluster.isEmpty()) queue.add(new Cursor(cluster, 0));
+        while (!queue.isEmpty()) {
+            var cursor = queue.remove(); result.add(cursor.head());
+            if (cursor.position() + 1 < cursor.chunks().size())
+                queue.add(new Cursor(cursor.chunks(), cursor.position() + 1));
+        }
         return List.copyOf(result);
     }
 
@@ -167,16 +169,6 @@ public final class ClusterLinearization {
         return Set.copyOf(result);
     }
 
-    private static void collectAncestors(Hash256 id, Map<Hash256, MempoolEntry> entries, Set<Hash256> remaining,
-                                         Set<Hash256> visiting, LinkedHashSet<Hash256> result) {
-        if (!remaining.contains(id) || result.contains(id)) return;
-        if (!visiting.add(id)) throw new IllegalArgumentException("Cyclic mempool dependencies");
-        for (var input : require(entries, id).transaction().inputs())
-            collectAncestors(input.previousOutput().transactionId(), entries, remaining, visiting, result);
-        visiting.remove(id);
-        result.add(id);
-    }
-
     private static int comparePackage(Collection<Hash256> a, Collection<Hash256> b) {
         Iterator<Hash256> ai = a.iterator(), bi = b.iterator();
         while (ai.hasNext() && bi.hasNext()) {
@@ -190,24 +182,6 @@ public final class ClusterLinearization {
         MempoolEntry e = entries.get(id);
         if (e == null) throw new IllegalArgumentException("Unknown transaction: " + id);
         return e;
-    }
-
-    private static long fee(Map<Hash256, MempoolEntry> entries, Collection<Hash256> ids) {
-        long v = 0;
-        for (Hash256 id : ids) v = Math.addExact(v, require(entries, id).modifiedFee());
-        return v;
-    }
-
-    private static long size(Map<Hash256, MempoolEntry> entries, Collection<Hash256> ids) {
-        long v = 0;
-        for (Hash256 id : ids) v = Math.addExact(v, require(entries, id).virtualSize());
-        return v;
-    }
-
-    private static long adjustedWeight(Map<Hash256, MempoolEntry> entries, Collection<Hash256> ids) {
-        long v = 0;
-        for (Hash256 id : ids) v = Math.addExact(v, require(entries, id).adjustedWeight());
-        return v;
     }
 
     public static int compareRate(long fa, long sa, long fb, long sb) {

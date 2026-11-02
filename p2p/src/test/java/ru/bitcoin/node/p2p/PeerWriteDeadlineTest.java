@@ -27,11 +27,19 @@ class PeerWriteDeadlineTest {
             assertThrows(IOException.class, () -> connection.send(MESSAGE));
             connection.close();
             assertTrue(failed.await(2, TimeUnit.SECONDS));
-            try (var restored = budget.newAccount().reserve(8);
-                 var second = budget.newAccount().reserve(8)) {
-                assertNotNull(restored);
-                assertNotNull(second);
-            }
+            // shutdownNow cancels queued writes directly. A task already taken
+            // by the worker releases in its finally block, possibly after the
+            // first callback. Wait for both reservations, not just one callback.
+            assertTimeoutPreemptively(java.time.Duration.ofSeconds(2), () -> {
+                while (true) {
+                    try (var restored = budget.newAccount().reserve(8);
+                         var second = budget.newAccount().reserve(8)) {
+                        assertNotNull(restored);
+                        assertNotNull(second);
+                        return;
+                    } catch (IOException pendingCleanup) { Thread.sleep(1); }
+                }
+            });
         }
     }
 

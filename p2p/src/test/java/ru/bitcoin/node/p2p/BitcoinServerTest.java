@@ -9,6 +9,106 @@ import java.time.Duration;
 import static org.junit.jupiter.api.Assertions.*;
 
 class BitcoinServerTest {
+    @Test void discouragedPeersAreAcceptedOnlyWhileCapacityIsSpare() throws Exception {
+        var parameters = NetworkParametersRegistry.regtest();
+        try (var manager = new PeerManager(); var server = new BitcoinServer(parameters, manager, 9, true, 3)) {
+            manager.discouragementManager().discourage(java.net.InetAddress.getByName("127.0.0.1"));
+            server.start(0, 0);
+            var client = new BitcoinClient(parameters);
+            try (var first = client.connect("127.0.0.1", server.localPort(), 0);
+                 var second = client.connect("127.0.0.1", server.localPort(), 0)) {
+                waitUntil(() -> manager.size() == 2, Duration.ofSeconds(5));
+                assertThrows(java.io.IOException.class, () -> client.connect("127.0.0.1", server.localPort(), 0));
+                assertTrue(first.isReady()); assertTrue(second.isReady());
+            }
+        }
+    }
+
+    @Test void closingDuringHandshakesReleasesEveryReservedSlot() throws Exception {
+        var parameters = NetworkParametersRegistry.regtest();
+        var sockets = new java.util.ArrayList<Socket>();
+        try (var manager = new PeerManager(); var server = new BitcoinServer(parameters, manager, 9, true, 40)) {
+            server.start(0, 0);
+            try {
+                for (int i = 0; i < 50; i++) sockets.add(new Socket("127.0.0.1", server.localPort()));
+                waitUntil(() -> server.inboundPeerCount() > 0, Duration.ofSeconds(5));
+                server.close();
+                waitUntil(() -> server.inboundPeerCount() == 0, Duration.ofSeconds(5));
+                assertTrue(manager.isEmpty());
+            } finally { for (var socket : sockets) socket.close(); }
+        }
+    }
+    @Test void fullInboundPoolEvictsACandidateAndKeepsItsBoundedSize() throws Exception {
+        var parameters = NetworkParametersRegistry.regtest();
+        var clients = new java.util.ArrayList<Peer>();
+        try (var manager = new PeerManager(); var server = new BitcoinServer(parameters, manager, 9, true, 40)) {
+            server.start(0, 0);
+            var client = new BitcoinClient(parameters);
+            try {
+                for (int i = 0; i < 40; i++) clients.add(client.connect("127.0.0.1", server.localPort(), 0));
+                waitUntil(() -> manager.size() == 40, Duration.ofSeconds(5));
+                try (var replacement = client.connect("127.0.0.1", server.localPort(), 0)) {
+                    waitUntil(() -> manager.size() == 40 && clients.stream().anyMatch(peer -> peer.state() == PeerState.CLOSED), Duration.ofSeconds(5));
+                    assertTrue(replacement.isReady());
+                    assertEquals(40, server.inboundPeerCount());
+                }
+            } finally { for (var peer : clients) peer.close(); }
+            waitUntil(() -> server.inboundPeerCount() == 0, Duration.ofSeconds(5));
+        }
+    }
+
+    @Test void fullRelayEvictionNeverSelectsReservedBlockOnlyConnections() throws Exception {
+        var parameters = NetworkParametersRegistry.regtest();
+        var relays = new java.util.ArrayList<Peer>();
+        var blocks = new java.util.ArrayList<Peer>();
+        try (var manager = new PeerManager();
+             var server = new BitcoinServer(parameters, manager, 9, true, 80, manager.discouragementManager(), false, 50)) {
+            server.start(0, 0);
+            var client = new BitcoinClient(parameters);
+            var blockClient = new BitcoinClient(parameters, 9, false);
+            try {
+                for (int i = 0; i < 40; i++) relays.add(client.connect("127.0.0.1", server.localPort(), 0));
+                for (int i = 0; i < 10; i++) blocks.add(blockClient.connect("127.0.0.1", server.localPort(), 0));
+                waitUntil(() -> manager.size() == 50, Duration.ofSeconds(5));
+                try (var replacement = client.connect("127.0.0.1", server.localPort(), 0)) {
+                    waitUntil(() -> manager.size() == 50 && relays.stream().anyMatch(peer -> peer.state() == PeerState.CLOSED), Duration.ofSeconds(5));
+                    assertTrue(replacement.isReady());
+                    assertTrue(blocks.stream().allMatch(Peer::isReady));
+                    assertEquals(50, server.inboundPeerCount());
+                }
+            } finally {
+                for (var peer : relays) peer.close();
+                for (var peer : blocks) peer.close();
+            }
+        }
+    }
+    @Test void inboundRelayCapReservesRoomForBlockOnlyPeersAndReleasesSlots() throws Exception {
+        var parameters = NetworkParametersRegistry.regtest();
+        try (var manager = new PeerManager();
+             var server = new BitcoinServer(parameters, manager, 9, true, 2,
+                     manager.discouragementManager(), false, 50)) {
+            server.start(0, 0);
+            var client = new BitcoinClient(parameters);
+            try (var first = client.connect("127.0.0.1", server.localPort(), 0)) {
+                waitUntil(() -> manager.size() == 1, Duration.ofSeconds(5));
+                try (var excess = client.connect("127.0.0.1", server.localPort(), 0)) {
+                    waitUntil(() -> excess.state() == PeerState.CLOSED, Duration.ofSeconds(5));
+                    assertEquals(1, manager.size());
+                }
+                var blockClient = new BitcoinClient(parameters, 9, false);
+                try (var blockOnly = blockClient.connect("127.0.0.1", server.localPort(), 0)) {
+                    waitUntil(() -> manager.size() == 2, Duration.ofSeconds(5));
+                    assertTrue(blockOnly.isReady());
+                    first.close();
+                    waitUntil(() -> manager.size() == 1, Duration.ofSeconds(5));
+                    try (var replacement = client.connect("127.0.0.1", server.localPort(), 0)) {
+                        waitUntil(() -> manager.size() == 2, Duration.ofSeconds(5));
+                        assertTrue(replacement.isReady());
+                    }
+                }
+            }
+        }
+    }
 
     @Test
     void shouldStartAndListenOnEphemeralPort()

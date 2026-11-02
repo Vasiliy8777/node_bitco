@@ -42,6 +42,31 @@ public final class Peer implements AutoCloseable {
     }
 
     private IOException closeCause;
+    private final PeerHeaderRequestGate headerRequestGate = new PeerHeaderRequestGate();
+
+    /** Only empty or successfully validated connecting HEADERS responses may call this. */
+    public void headersResponseValidated() { headerRequestGate.responded(); }
+
+    public boolean trySendGetHeaders(GetHeadersMessage request) throws IOException {
+        if (!isReady()) throw new IllegalStateException("Peer handshake is not complete");
+        return sendHeadersMessage(BitcoinMessages.getHeaders(java.util.Objects.requireNonNull(request)), false);
+    }
+
+    private boolean sendHeadersMessage(BitcoinMessage message, boolean asynchronous) throws IOException {
+        long token = headerRequestGate.acquire(PeerConnection.currentTimeMicros());
+        if (token == 0) return false;
+        try {
+            if (asynchronous) connection.sendAsync(message, failure -> {
+                headerRequestGate.failed(token);
+                handleReaderFailure(failure);
+            });
+            else connection.send(message);
+            return true;
+        } catch (IOException | RuntimeException failure) {
+            headerRequestGate.failed(token);
+            throw failure;
+        }
+    }
     private final PeerMessageDispatcher messageDispatcher;
     private final PeerMessageReader messageReader;
     private static final int WTXID_RELAY_VERSION =
@@ -68,6 +93,9 @@ public final class Peer implements AutoCloseable {
             new SecureRandom();
 
     private final PeerConnection connection;
+    public long connectionId() { return connection.connectionId(); }
+    public long connectionEstablishedAtSeconds() { return connection.establishedAtMillis() / 1000; }
+    public long connectionEstablishedAtMicros() { return connection.establishedAtMicros(); }
     private volatile boolean v2Fallback;
     private final long localServices;
     private final int startHeight;
@@ -77,7 +105,20 @@ public final class Peer implements AutoCloseable {
     private volatile PeerState state =
             PeerState.DISCONNECTED;
 
-    private VersionMessage remoteVersion;
+    private volatile VersionMessage remoteVersion;
+    private volatile long lastAcceptedTransactionTime;
+    private volatile long lastAcceptedBlockTime;
+    private volatile long lastNewBlockAnnouncementTime;
+
+    /** Only call after validating a previously unknown header above our active chainwork. */
+    public void recordNewBlockAnnouncement() { lastNewBlockAnnouncementTime = System.currentTimeMillis() / 1000; }
+    public long lastNewBlockAnnouncementTime() { return lastNewBlockAnnouncementTime; }
+
+    public void recordAcceptedTransaction() { lastAcceptedTransactionTime = System.currentTimeMillis() / 1000; }
+    public void recordAcceptedBlock() { lastAcceptedBlockTime = System.currentTimeMillis() / 1000; }
+    public long lastAcceptedTransactionTime() { return lastAcceptedTransactionTime; }
+    public long lastAcceptedBlockTime() { return lastAcceptedBlockTime; }
+    VersionMessage evictionVersion() { return remoteVersion; }
 
     private boolean remoteVerackReceived;
 
@@ -885,6 +926,7 @@ public final class Peer implements AutoCloseable {
 
     public void sendAsync(BitcoinMessage message) throws IOException {
         if (!isReady()) throw new IllegalStateException("Peer handshake is not complete");
+        if ("getheaders".equals(message.command())) { sendHeadersMessage(message, true); return; }
         connection.sendAsync(message, this::handleReaderFailure);
     }
 
@@ -904,6 +946,7 @@ public final class Peer implements AutoCloseable {
             );
         }
 
+        if ("getheaders".equals(message.command())) { sendHeadersMessage(message, false); return; }
         connection.send(
                 message
         );

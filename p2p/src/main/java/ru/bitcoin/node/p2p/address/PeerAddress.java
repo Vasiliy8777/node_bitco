@@ -49,6 +49,13 @@ public final class PeerAddress {
     public boolean isLegacyAddrCompatible() { return isIp(); }
     public boolean isDirectSocketAddress() { return isIp() || network == PeerAddressNetwork.CJDNS; }
 
+    /** RFC 9637 reserves 3fff::/20 for documentation (Core 31.2/32.1). */
+    public boolean isRfc9637Documentation() {
+        return network == PeerAddressNetwork.IPV6
+                && rawAddress[0] == 0x3f && rawAddress[1] == (byte) 0xff
+                && (rawAddress[2] & 0xf0) == 0;
+    }
+
     public InetAddress address() {
         if (!isDirectSocketAddress()) {
             throw new IllegalStateException(network + " endpoint is not an InetAddress");

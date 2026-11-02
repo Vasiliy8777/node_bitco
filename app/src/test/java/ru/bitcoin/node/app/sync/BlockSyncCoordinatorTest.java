@@ -100,7 +100,7 @@ class BlockSyncCoordinatorTest {
             if (completed != null) pending.decrementAndGet();
             return Optional.ofNullable(completed);
         });
-        org.mockito.Mockito.when(validation.processInitialSyncBatch(org.mockito.ArgumentMatchers.anyList()))
+        org.mockito.Mockito.when(validation.processInitialSyncBatchWithReception(org.mockito.ArgumentMatchers.anyList()))
                 .thenAnswer(call -> {
                     List<Block> batch = call.getArgument(0);
                     largestBatch.accumulateAndGet(batch.size(), Math::max);
@@ -115,13 +115,14 @@ class BlockSyncCoordinatorTest {
                                 "The new window tail must be requested before the next connect step");
                     }
                     tip.set(indexes.get(Math.toIntExact(tip.get().height() + batch.size())));
-                    return Collections.nCopies(batch.size(), BlockProcessingResult.CONNECTED);
+                    return Collections.nCopies(batch.size(), new NodeValidationService.BlockReception(BlockProcessingResult.CONNECTED, true));
                 });
         var coordinator = new BlockSyncCoordinator(scheduler, validation, new HeaderChainState(indexes.getLast()),
                 preparationLookup(indexes, ignored -> {}),
                 org.mockito.Mockito.mock(ru.bitcoin.node.storage.block.BlockStore.class), 64);
         coordinator.synchronizeToTip();
         assertEquals(indexes.getLast().hash(), tip.get().hash());
+        org.mockito.Mockito.verify(sourcePeer, org.mockito.Mockito.times(128)).recordAcceptedBlock();
         if (inputsPerBlock == 4096) {
             assertTrue(largestBatch.get() > 1, "Modern blocks must share a maintenance batch");
         }
@@ -200,12 +201,12 @@ class BlockSyncCoordinatorTest {
             if (ready != null) pending.decrementAndGet();
             return Optional.ofNullable(ready);
         });
-        org.mockito.Mockito.when(validation.processInitialSyncBatch(org.mockito.ArgumentMatchers.anyList()))
+        org.mockito.Mockito.when(validation.processInitialSyncBatchWithReception(org.mockito.ArgumentMatchers.anyList()))
                 .thenAnswer(call -> {
                     List<Block> batch = call.getArgument(0);
                     assertTrue(batch.size() <= 32);
                     tip.set(indexes.get(Math.toIntExact(tip.get().height() + batch.size())));
-                    return Collections.nCopies(batch.size(), BlockProcessingResult.CONNECTED);
+                    return Collections.nCopies(batch.size(), new NodeValidationService.BlockReception(BlockProcessingResult.CONNECTED, true));
                 });
         var delegate = preparationLookup(indexes, ignored -> {});
         var lookup = new BlockIndexAncestorLookup() {
@@ -7013,7 +7014,7 @@ class BlockSyncCoordinatorTest {
                     assertTrue(releaseValidation.await(10, TimeUnit.SECONDS));
                 }
                 return invocation.callRealMethod();
-            }).when(validation).processInitialSyncBatch(org.mockito.ArgumentMatchers.anyList());
+            }).when(validation).processInitialSyncBatchWithReception(org.mockito.ArgumentMatchers.anyList());
             var store = new RocksDbBlockIndexStore(database);
             new ru.bitcoin.node.chain.storage.KnownHeaderStorage(database, store,
                     new RocksDbChainStateStore(database)).saveBatch(indexes, tip);

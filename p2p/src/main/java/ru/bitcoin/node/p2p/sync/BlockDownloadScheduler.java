@@ -86,6 +86,9 @@ public final class BlockDownloadScheduler {
 
     public int maxBlocksInFlightPerPeer() { return maxBlocksInFlightPerPeer; }
 
+    public boolean blocksInFlight() { return inFlightTracker.totalCount() != 0; }
+    public boolean blocksInFlight(ru.bitcoin.node.p2p.Peer peer) { return inFlightTracker.count(peer) != 0; }
+
     public BlockDownloadSession openSession() {
 
         // Bitcoin Core-style IBD: one global moving window, with each block

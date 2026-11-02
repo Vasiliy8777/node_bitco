@@ -16,6 +16,20 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class PeerDiscoveryTest {
 
+    @Test void skipsDocumentationAddressesFromDns() throws Exception {
+        var manager = new PeerAddressManager();
+        var discovery = new PeerDiscovery(NetworkParametersRegistry.mainnet(), manager,
+                host -> host.equals("dnsseed.bluematt.me")
+                        ? List.of(InetAddress.getByName("3fff::1"), InetAddress.getByName("2606:4700::1111"))
+                        : List.of(), () -> NOW);
+        var discovered = discovery.discover();
+        assertEquals(1, discovered.size());
+        assertEquals(1, manager.size());
+        assertFalse(discovered.getFirst().isRfc9637Documentation());
+        assertEquals(ru.bitcoin.node.p2p.message.VersionMessage.NODE_P2P_V2,
+                discovered.getFirst().services());
+    }
+
     private static final Instant NOW =
             Instant.ofEpochSecond(
                     1_700_000_000L
@@ -80,7 +94,7 @@ class PeerDiscoveryTest {
             );
 
             assertEquals(
-                    0L,
+                    ru.bitcoin.node.p2p.message.VersionMessage.NODE_P2P_V2,
                     address.services()
             );
 

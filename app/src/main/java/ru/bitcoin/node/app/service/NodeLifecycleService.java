@@ -71,9 +71,15 @@ public final class NodeLifecycleService
     private final AtomicLong knownHeaderTargetHeight =
             new AtomicLong();
     private final ru.bitcoin.node.app.sync.LiveChainSynchronizer liveSync;
+    private boolean automaticConnectionsEnabled = true;
+
+    public synchronized void automaticConnectionsEnabled(boolean enabled) {
+        if (state != NodeLifecycleState.NEW) throw new IllegalStateException("Configure networking before startup");
+        automaticConnectionsEnabled = enabled;
+    }
 
     public boolean isMiningReady() {
-        return isRunning()
+        return automaticConnectionsEnabled && isRunning()
                 && !validationService.downloadInitialBlockDownload()
                 && liveSync.isCurrent();
     }
@@ -273,6 +279,13 @@ public final class NodeLifecycleService
                     NodeLifecycleState.STARTING
             );
 
+            if (!automaticConnectionsEnabled) {
+                if (listen) bitcoinServer.start(listenPort, Math.toIntExact(validationService.activeTip().height()));
+                setState(NodeLifecycleState.RUNNING);
+                mempoolCheckpointService.start();
+                return;
+            }
+
             bootstrapAddresses();
 
             ensureNotStopping();
@@ -438,7 +451,11 @@ public final class NodeLifecycleService
                         syncInfrastructure.headerSyncService(),
                         syncInfrastructure.headerChainState(),
                         syncInfrastructure.blockLocatorBuilder()
-                );
+                ).onValidatedBatch(batch -> {
+                    if (!batch.isEmpty() && !syncInfrastructure.downloadBlockFailed(batch.getLast())
+                            && batch.getLast().chainWork().compareTo(validationService.downloadTip().chainWork()) >= 0)
+                        peerManager.protectChainSync(peer);
+                });
 
         final long initialHeight = syncInfrastructure.headerChainState().bestHeaderTip().height();
         final long advertisedHeight = Math.max(initialHeight, peer.remoteVersion().startHeight());

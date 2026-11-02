@@ -5,6 +5,7 @@ import ru.bitcoin.node.p2p.address.NetworkDnsSeeds;
 import ru.bitcoin.node.p2p.address.PeerAddress;
 import ru.bitcoin.node.p2p.address.PeerAddressManager;
 import ru.bitcoin.node.p2p.address.SystemDnsResolver;
+import ru.bitcoin.node.p2p.message.VersionMessage;
 import ru.bitcoin.node.protocol.network.NetworkParameters;
 
 import java.net.InetAddress;
@@ -123,8 +124,10 @@ public final class PeerDiscovery {
                         new PeerAddress(
                                 address,
                                 networkParameters.defaultPort(),
-                                0L
+                                VersionMessage.NODE_P2P_V2
                         );
+
+                if (peerAddress.isRfc9637Documentation()) continue;
 
                 addressManager.add(
                         peerAddress,

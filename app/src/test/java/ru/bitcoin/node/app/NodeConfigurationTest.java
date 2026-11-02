@@ -28,6 +28,15 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 class NodeConfigurationTest {
+    @Test void zeroAutomaticConnectionBudgetStartsWithoutDnsOrOutboundSync() throws Exception {
+        try (var context = createContext(Map.of("bitcoin.p2p.maxconnections", 0, "bitcoin.p2p.listen", false))) {
+            var lifecycle = context.getBean(NodeLifecycleService.class);
+            lifecycle.start();
+            assertEquals(NodeLifecycleState.RUNNING, lifecycle.state());
+            assertTrue(context.getBean(PeerManager.class).isEmpty());
+            assertFalse(lifecycle.isMiningReady());
+        }
+    }
 
     @Test
     void testnetProfileConfiguresDeeperBoundedDownloadPipeline() throws Exception {

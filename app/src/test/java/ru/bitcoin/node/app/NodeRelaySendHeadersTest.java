@@ -187,6 +187,12 @@ class NodeRelaySendHeadersTest {
     }
 
     private static void captureListener(Peer peer, AtomicReference<PeerMessageListener> target) {
+        // READY production peers always have a negotiated version. Background
+        // transaction-relay ticks also inspect it in these block-only fixtures.
+        var address = new NetworkAddress(VersionMessage.DEFAULT_SERVICES, new byte[16], 18444);
+        when(peer.remoteVersion()).thenReturn(new VersionMessage(
+                VersionMessage.CURRENT_PROTOCOL_VERSION, VersionMessage.DEFAULT_SERVICES,
+                1_800_000_000L, address, address, 1L, "/headers-relay-test/", 1, true));
         doAnswer(invocation -> {
             target.set(invocation.getArgument(0));
             return null;
@@ -195,7 +201,10 @@ class NodeRelaySendHeadersTest {
 
     private static void captureOutbound(Peer peer, BlockingQueue<BitcoinMessage> target) throws Exception {
         doAnswer(invocation -> {
-            target.add(invocation.getArgument(0));
+            BitcoinMessage message = invocation.getArgument(0);
+            // BIP133 control traffic is independent of the block announcements
+            // under test and must not count as a duplicate/source announcement.
+            if (!"feefilter".equals(message.command())) target.add(message);
             return null;
         }).when(peer).send(any());
     }

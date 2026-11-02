@@ -31,6 +31,7 @@ final class TxOrphanage {
         final long weight;
         final int latencyScore;
         final long sequence;
+        Peer firstSupplier;
         final Set<Peer> announcers = Collections.newSetFromMap(new IdentityHashMap<>());
 
         Entry(Transaction transaction, Peer peer, long sequence) {
@@ -39,7 +40,13 @@ final class TxOrphanage {
             this.weight = TransactionWeight.calculate(transaction);
             this.latencyScore = 1 + transaction.inputs().size() / 10;
             this.sequence = sequence;
+            this.firstSupplier = peer;
             this.announcers.add(peer);
+        }
+
+        void forget(Peer peer) {
+            announcers.remove(peer);
+            if (firstSupplier == peer) firstSupplier = announcers.stream().findFirst().orElse(null);
         }
     }
 
@@ -89,6 +96,13 @@ final class TxOrphanage {
         return byWtxid.containsKey(wtxid);
     }
 
+    synchronized Peer sourceOf(Transaction transaction) {
+        var entry = byWtxid.get(transaction.wtxId());
+        if (entry == null) return null;
+        if (entry.announcers.contains(entry.firstSupplier)) return entry.firstSupplier;
+        return entry.announcers.stream().findFirst().orElse(null);
+    }
+
     synchronized List<Transaction> childrenOf(Hash256 parentTxid) {
         LinkedHashSet<Hash256> ids = childrenByParentTxid.get(parentTxid);
         if (ids == null || ids.isEmpty()) return List.of();
@@ -115,7 +129,7 @@ final class TxOrphanage {
 
     synchronized void removePeer(Peer peer) {
         for (Entry entry : List.copyOf(byWtxid.values())) {
-            entry.announcers.remove(peer);
+            entry.forget(peer);
             if (entry.announcers.isEmpty()) removeByWtxid(entry.wtxid);
         }
         trim();
@@ -132,7 +146,7 @@ final class TxOrphanage {
             Entry victim = oldestFromPeer(worstPeer);
             if (victim == null) victim = byWtxid.values().iterator().next();
             // Drop only this peer's announcement when another peer also announced it.
-            victim.announcers.remove(worstPeer);
+            victim.forget(worstPeer);
             if (victim.announcers.isEmpty()) removeByWtxid(victim.wtxid);
         }
     }

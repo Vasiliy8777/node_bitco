@@ -27,12 +27,13 @@ public class MiningConfiguration {
                                        @Value("${bitcoin.rpc.password:}") String password,
                                        @Value("${bitcoin.mining.payout-address:}") String payoutAddress,
                                        @Value("${bitcoin.mining.payout-script:}") String payoutScript,
-                                       @Value("${bitcoin.mining.maximum-weight:3996000}") long maximumWeight,
-                                       @Value("${bitcoin.mining.minimum-fee-sat-per-kvb:1000}") long minimumFee,
+                                       @Value("${bitcoin.mining.maximum-weight:4000000}") long maximumWeight,
+                                       @Value("${bitcoin.mining.minimum-fee-sat-per-kvb:1}") long minimumFee,
                                        @Value("${bitcoin.prune:0}") long pruneMiB,
                                        @Value("${bitcoin.blockfilterindex:false}") boolean blockFilterIndex,
                                        @Value("${bitcoin.p2p.peer-block-filters:false}") boolean peerBlockFilters,
-                                       @Value("${bitcoin.p2p.v2-transport:true}") boolean v2Transport) throws IOException {
+                                       @Value("${bitcoin.p2p.v2-transport:true}") boolean v2Transport,
+                                       @Value("${bitcoin.rpc.maxconnections:16}") int maximumConnections) throws IOException {
         var controller = new MiningController(validation, relay, parameters, lifecycle::isMiningReady,
                 MiningPayoutResolver.resolve(payoutAddress, payoutScript, parameters), maximumWeight, new FeeRate(minimumFee));
         long services = pruneMiB > 0
@@ -42,6 +43,6 @@ public class MiningConfiguration {
         if (blockFilterIndex && peerBlockFilters) services |= ru.bitcoin.node.p2p.message.VersionMessage.NODE_COMPACT_FILTERS;
         if (v2Transport) services |= ru.bitcoin.node.p2p.message.VersionMessage.NODE_P2P_V2;
         return new NodeRpcServer(new InetSocketAddress(bind, port), user, password, controller,
-                validation, relay, sync, lifecycle::isMiningReady, peerManager, services);
+                validation, relay, sync, lifecycle::isMiningReady, peerManager, services, maximumConnections);
     }
 }

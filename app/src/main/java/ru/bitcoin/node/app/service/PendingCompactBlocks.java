@@ -28,6 +28,8 @@ final class PendingCompactBlocks {
         this.countLimit = countLimit;
     }
     synchronized void register(Peer peer) { entries.computeIfAbsent(peer, ignored -> new HashMap<>()); }
+    synchronized boolean hasPending() { return entries.values().stream().anyMatch(values -> !values.isEmpty()); }
+    synchronized boolean hasPending(Peer peer) { return !entries.getOrDefault(peer, Map.of()).isEmpty(); }
     synchronized boolean contains(Peer peer, Hash256 hash) {
         var byHash = entries.get(peer);
         return byHash != null && byHash.containsKey(hash);

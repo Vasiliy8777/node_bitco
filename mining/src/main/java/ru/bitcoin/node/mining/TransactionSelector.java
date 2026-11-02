@@ -12,6 +12,17 @@ public final class TransactionSelector {
 
     public static List<Transaction> select(List<MempoolEntry> snapshot, long weightBudget,
                                            long sigopsBudget, FeeRate minimumRate) {
+        return select(snapshot, null, weightBudget, sigopsBudget, minimumRate);
+    }
+
+    public static List<Transaction> selectSnapshot(Mempool.MiningSnapshot snapshot, long weightBudget,
+                                                   long sigopsBudget, FeeRate minimumRate) {
+        return select(snapshot.entries(), snapshot.clusters(), weightBudget, sigopsBudget, minimumRate);
+    }
+
+    private static List<Transaction> select(List<MempoolEntry> snapshot,
+                                            List<List<ClusterLinearization.Chunk>> orderedClusters,
+                                            long weightBudget, long sigopsBudget, FeeRate minimumRate) {
         if (weightBudget < 0 || sigopsBudget < 0) throw new IllegalArgumentException("Negative budget");
         Objects.requireNonNull(minimumRate, "minimumRate");
         Map<Hash256,MempoolEntry> pool = new LinkedHashMap<>();
@@ -29,8 +40,9 @@ public final class TransactionSelector {
             return rate != 0 ? rate : Integer.compare(a.ordinal, b.ordinal);
         });
         int ordinal = 0;
-        for (Set<Hash256> cluster : ClusterLinearization.clusters(pool))
-            cursors.add(new Cursor(ClusterLinearization.chunks(pool, cluster), ordinal++));
+        if (orderedClusters == null)
+            orderedClusters = ClusterLinearization.clusters(pool).stream().map(cluster -> ClusterLinearization.chunks(pool, cluster)).toList();
+        for (var cluster : orderedClusters) cursors.add(new Cursor(cluster, ordinal++));
 
         List<Transaction> result = new ArrayList<>();
         while (!cursors.isEmpty()) {

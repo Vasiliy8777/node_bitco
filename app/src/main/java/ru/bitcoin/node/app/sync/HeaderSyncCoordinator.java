@@ -19,6 +19,13 @@ public final class HeaderSyncCoordinator {
     private final HeaderSyncService headerSyncService;
     private final HeaderChainState headerChainState;
     private final BlockLocatorBuilder blockLocatorBuilder;
+    private java.util.function.Consumer<List<BlockIndex>> validatedBatchListener = ignored -> { };
+
+    /** Called for complete validated responses, including already-known tip confirmations. */
+    public HeaderSyncCoordinator onValidatedBatch(java.util.function.Consumer<List<BlockIndex>> listener) {
+        validatedBatchListener = Objects.requireNonNull(listener);
+        return this;
+    }
 
     public HeaderSyncCoordinator(
             HeaderSynchronizer headerSynchronizer,
@@ -117,6 +124,8 @@ public final class HeaderSyncCoordinator {
                                 + "produced no block indexes"
                 );
             }
+            headerSynchronizer.headersValidated();
+            validatedBatchListener.accept(List.copyOf(processed));
 
             cursor =
                     processed.get(

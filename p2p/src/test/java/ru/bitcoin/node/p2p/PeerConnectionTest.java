@@ -24,6 +24,28 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PeerConnectionTest {
+    @Test void tcpIdentityPrecedesHandshakeSurvivesCloseAndChangesOnReconnect() throws Exception {
+        try (var listener = new ServerSocket(0); var connection = new PeerConnection(NetworkParametersRegistry.regtest())) {
+            assertEquals(0, connection.connectionId());
+            long before = System.currentTimeMillis();
+            connection.connect("127.0.0.1", listener.getLocalPort());
+            try (var remote = listener.accept()) {
+                long id = connection.connectionId(); long established = connection.establishedAtMillis();
+                assertEquals(established, connection.establishedAtMicros() / 1000);
+                assertTrue(id > 0);
+                assertTrue(established >= before && established <= System.currentTimeMillis());
+                connection.close();
+                assertEquals(id, connection.connectionId());
+                assertEquals(established, connection.establishedAtMillis());
+                connection.connect("127.0.0.1", listener.getLocalPort());
+                try (var replacement = listener.accept()) {
+                    assertTrue(connection.connectionId() > id);
+                    assertTrue(connection.establishedAtMillis() >= established);
+                }
+            }
+        }
+    }
+
 
     @Test
     void closeInterruptsWriterWhenRemoteStopsReading() throws Exception {
