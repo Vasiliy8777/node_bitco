@@ -33,6 +33,62 @@ class NodeRelaySendHeadersTest {
     @TempDir
     Path directory;
 
+    @Test void headerOnlyLocatorDescendantStopsDownloadAndPreservesLaterTipAnnouncement() throws Exception {
+        var parameters = NetworkParametersRegistry.regtest();
+        try (var db = new RocksDbDatabase(directory); var peers = new PeerManager()) {
+            var validation = new NodeValidationService(db, parameters, () -> 1_800_000_000L, new Mempool());
+            var sync = new NodeSyncInfrastructure(db, parameters, () -> 1_800_000_000L);
+            var mining = new MiningController(validation, null, parameters, () -> true, new byte[]{0x51}, 4_000_000, new FeeRate(0));
+            var first = MiningRpcTest.mineTemplate(mining.getBlockTemplate(java.util.Map.of("rules", List.of("segwit"))));
+            validation.processBlock(first);
+            var ahead = MiningRpcTest.mineTemplate(mining.getBlockTemplate(java.util.Map.of("rules", List.of("segwit"))));
+            validation.processHeaders(sync.headerSyncService(), new HeadersMessage(List.of(ahead.header())));
+            Peer peer = mock(Peer.class); when(peer.isReady()).thenReturn(true);
+            var incoming = new AtomicReference<PeerMessageListener>();
+            var outgoing = new LinkedBlockingQueue<BitcoinMessage>();
+            captureListener(peer, incoming); captureOutbound(peer, outgoing); peers.add(peer);
+            try (var relay = new NodeRelayService(validation, sync, peers)) {
+                incoming.get().onMessage(peer, BitcoinMessages.sendHeaders());
+                incoming.get().onMessage(peer, BitcoinMessages.getHeaders(new GetHeadersMessage(70016,
+                        List.of(ahead.hash(), parameters.genesisBlockHash()), new Hash256(new byte[32]))));
+                assertTrue(BitcoinMessages.decodeHeaders(take(outgoing)).isEmpty());
+                validation.processBlock(ahead);
+                relay.relayConnectedBlock(ahead, null);
+                var announced = take(outgoing);
+                assertEquals("headers", announced.command());
+                assertEquals(List.of(ahead.header()), BitcoinMessages.decodeHeaders(announced).headers());
+                verify(peer, never()).close();
+            }
+        }
+    }
+
+    @Test void nullLocatorReturnsOnlyTheRequestedHeaderAndIgnoresUnknownHashes() throws Exception {
+        var parameters = NetworkParametersRegistry.regtest();
+        try (var db = new RocksDbDatabase(directory); var peers = new PeerManager()) {
+            var validation = new NodeValidationService(db, parameters, () -> 1_800_000_000L, new Mempool());
+            var sync = new NodeSyncInfrastructure(db, parameters, () -> 1_800_000_000L);
+            var mining = new MiningController(validation, null, parameters, () -> true, new byte[]{0x51}, 4_000_000, new FeeRate(0));
+            for (int i = 0; i < 3; i++) validation.processBlock(MiningRpcTest.mineTemplate(
+                    mining.getBlockTemplate(java.util.Map.of("rules", List.of("segwit")))));
+            Peer peer = mock(Peer.class); when(peer.isReady()).thenReturn(true);
+            var incoming = new AtomicReference<PeerMessageListener>();
+            var outgoing = new LinkedBlockingQueue<BitcoinMessage>();
+            captureListener(peer, incoming); captureOutbound(peer, outgoing); peers.add(peer);
+            try (var relay = new NodeRelayService(validation, sync, peers)) {
+                var unknown = Hash256.fromDisplayHex("21".repeat(32));
+                incoming.get().onMessage(peer, BitcoinMessages.getHeaders(new GetHeadersMessage(70016, List.of(), unknown)));
+                incoming.get().onMessage(peer, BitcoinMessages.getHeaders(new GetHeadersMessage(
+                        70016, List.of(), parameters.genesisBlockHash())));
+                var answer = BitcoinMessages.decodeHeaders(take(outgoing));
+                assertEquals(List.of(GenesisBlockFactory.create(parameters).header()), answer.headers());
+                assertTrue(outgoing.isEmpty(), "Unknown hash must not produce an empty HEADERS response");
+                verify(peer, never()).close();
+                assertEquals(List.of(GenesisBlockFactory.create(parameters).header()),
+                        validation.headers(List.of(), parameters.genesisBlockHash()));
+            }
+        }
+    }
+
     @Test
     void sendHeadersPreferenceUsesHeadersWhileLegacyPeerGetsInvAndSourceIsExcluded() throws Exception {
         var parameters = NetworkParametersRegistry.regtest();
@@ -170,10 +226,12 @@ class NodeRelaySendHeadersTest {
             peers.add(peer);
             try (var relay = new NodeRelayService(validation, sync, peers)) {
                 incoming.get().onMessage(peer, BitcoinMessages.sendHeaders());
-                incoming.get().onMessage(peer, BitcoinMessages.getHeaders(new GetHeadersMessage(
-                        VersionMessage.CURRENT_PROTOCOL_VERSION,
-                        List.of(Hash256.fromDisplayHex("55".repeat(32))), new Hash256(new byte[32]))));
-                assertEquals("headers", take(outbound).command());
+                // A GETHEADERS reply establishes a known sent header even for an
+                // unknown locator. Use a transaction request as the queue barrier
+                // so this fixture really has no connecting header knowledge.
+                incoming.get().onMessage(peer, BitcoinMessages.getData(new GetDataMessage(List.of(
+                        new InventoryVector(InventoryVector.MSG_TX, Hash256.fromDisplayHex("55".repeat(32)))))));
+                assertEquals("notfound", take(outbound).command());
                 var mining = new MiningController(validation, relay, parameters, () -> true, new byte[]{0x51}, 4_000_000, new FeeRate(0));
                 var template = mining.getBlockTemplate(java.util.Map.of("rules", List.of("segwit")));
                 var block = MiningRpcTest.mineTemplate(template);

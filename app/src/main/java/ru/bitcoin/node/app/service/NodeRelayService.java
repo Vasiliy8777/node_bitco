@@ -55,6 +55,7 @@ public final class NodeRelayService implements AutoCloseable {
     private final TransactionRelayBuckets inventoryBuckets;
 
     private final NodeValidationService validation;
+    private final boolean blocksOnly;
     private final NodeSyncInfrastructure sync;
     private final PeerManager peers;
     private final BlockDownloadScheduler blockDownloadScheduler;
@@ -63,6 +64,7 @@ public final class NodeRelayService implements AutoCloseable {
     private final Map<Peer, BlockAnnouncementState> blockAnnouncements = new ConcurrentHashMap<>();
     private final Map<Peer, TxRelayState> txRelayStates = new ConcurrentHashMap<>();
     private final PendingCompactBlocks pendingCompactBlocks = new PendingCompactBlocks();
+    private volatile Block mostRecentBlock;
     // Guarded by the map monitor. These are relay-owned fallbacks only; a hash already
     // owned by BlockDownloadScheduler must stay in the scheduler's single download lifecycle.
     private final Map<Peer, Map<Hash256, Long>> compactFallbacks = new HashMap<>();
@@ -90,8 +92,6 @@ public final class NodeRelayService implements AutoCloseable {
     // Bitcoin Core v31.1 MAX_BLOCKS_TO_ANNOUNCE.
     private static final int MAX_BLOCKS_TO_ANNOUNCE = 8;
     // Bitcoin Core v31.1 BIP152 serving depths.
-    private static final int MAX_CMPCTBLOCK_DEPTH = 5;
-    private static final int MAX_BLOCKTXN_DEPTH = 10;
     private static final long CMPCTBLOCKS_VERSION = 2;
     // BIP152/Core keeps at most three peers in high-bandwidth announcement mode.
     private static final int MAX_HIGH_BANDWIDTH_COMPACT_PEERS = 3;
@@ -168,12 +168,15 @@ public final class NodeRelayService implements AutoCloseable {
         };
     }
 
-    private void processPeerHeaders(Peer peer, HeadersMessage announcement) {
-        var batch = announcement.headers();
-        boolean newHeader = !batch.isEmpty() && sync.blockIndexLookup().find(batch.getLast().hash()) == null;
-        validation.processHeaders(sync.headerSyncService(), announcement);
-        if (!batch.isEmpty()) {
-            var index = sync.blockIndexLookup().find(batch.getLast().hash());
+    private ru.bitcoin.node.chain.BlockIndex processPeerHeaders(Peer peer, HeadersMessage announcement) {
+        var reception = validation.processHeadersWithReception(sync.headerSyncService(), announcement);
+        return updatePeerHeaders(peer, reception);
+    }
+
+    private ru.bitcoin.node.chain.BlockIndex updatePeerHeaders(Peer peer,
+            ru.bitcoin.node.chain.HeaderBatchProcessor.Reception reception) {
+        if (!reception.indexes().isEmpty()) {
+            var index = reception.indexes().getLast();
             if (index != null && !sync.downloadBlockFailed(index)) {
                 synchronized (validatedPeerHeaders) {
                     var previousHash = validatedPeerHeaders.get(peer);
@@ -182,12 +185,14 @@ public final class NodeRelayService implements AutoCloseable {
                             || index.chainWork().compareTo(previous.chainWork()) >= 0))
                         validatedPeerHeaders.put(peer, index.hash());
                 }
-                if (newHeader && index.chainWork().compareTo(validation.downloadTip().chainWork()) > 0)
+                if (reception.lastHeaderNew() && index.chainWork().compareTo(validation.downloadTip().chainWork()) > 0)
                     peer.recordNewBlockAnnouncement();
                 var bestWork = knownPeerWork(peer);
                 if (bestWork != null && bestWork.compareTo(validation.downloadTip().chainWork()) >= 0) peers.protectChainSync(peer);
+                return index;
             }
         }
+        return null;
     }
 
 
@@ -195,6 +200,7 @@ public final class NodeRelayService implements AutoCloseable {
      * Per-peer BIP130 block-announcement preference and last header sent.
      */
     private static final class BlockAnnouncementState {
+        private final java.util.concurrent.atomic.AtomicReference<Hash256> continuation = new java.util.concurrent.atomic.AtomicReference<>();
         private volatile boolean prefersHeaders;
         private volatile Hash256 bestHeaderSent;
         private volatile boolean providesCompactBlocks;
@@ -216,6 +222,12 @@ public final class NodeRelayService implements AutoCloseable {
 
     public NodeRelayService(NodeValidationService validation, NodeSyncInfrastructure sync, PeerManager peers,
                             BlockDownloadScheduler blockDownloadScheduler, int transactionSendRate) {
+        this(validation, sync, peers, blockDownloadScheduler, transactionSendRate, false);
+    }
+
+    public NodeRelayService(NodeValidationService validation, NodeSyncInfrastructure sync, PeerManager peers,
+                            BlockDownloadScheduler blockDownloadScheduler, int transactionSendRate, boolean blocksOnly) {
+        this.blocksOnly = blocksOnly;
         inventoryBuckets = new TransactionRelayBuckets(transactionSendRate);
         this.validation = Objects.requireNonNull(validation, "validation");
         this.sync = Objects.requireNonNull(sync, "sync");
@@ -233,9 +245,9 @@ public final class NodeRelayService implements AutoCloseable {
                     if (!closed) {
                         if (!validation.downloadInitialBlockDownload()) {
                             dispatchTransactionRequests();
-                            flushTransactionInventory();
                             maybeSendFeeFilters();
                         }
+                        flushTransactionInventory();
                         expireCompactBlocks();
                     }
                 } finally { requestTickQueued.set(false); }
@@ -276,13 +288,14 @@ public final class NodeRelayService implements AutoCloseable {
         // Ignore transaction traffic before allocating relay tasks during IBD.
         // Block inventory has its independent header/download listeners.
         if (validation.downloadInitialBlockDownload()
-                && ("inv".equals(message.command()) || "tx".equals(message.command()))) return;
+                && ("inv".equals(message.command()) || "tx".equals(message.command()))
+                && !(blocksOnly && !peer.hasPermission(PeerPermission.RELAY))) return;
         if ("block".equals(message.command())) {
             synchronized (compactFallbacks) {
                 if (!compactFallbacks.containsKey(peer)) return;
             }
         }
-        if (closed || !Set.of("inv", "tx", "getdata", "getheaders", "headers", "notfound", "sendheaders", "sendcmpct", "feefilter", "cmpctblock", "getblocktxn", "blocktxn", "block").contains(message.command()))
+        if (closed || !Set.of("inv", "tx", "getdata", "getblocks", "getheaders", "headers", "notfound", "sendheaders", "sendcmpct", "feefilter", "cmpctblock", "getblocktxn", "blocktxn", "block", "filterload", "filteradd", "filterclear", "mempool").contains(message.command()))
             return;
         PeerInbound receiver = inbound.get(peer);
         if (receiver != null) receiver.enqueue(message);
@@ -381,8 +394,16 @@ public final class NodeRelayService implements AutoCloseable {
         PeerConnectionRole role = peers.roleOf(peer);
         switch (message.command()) {
             case "inv" -> {
-                if (role.relaysTransactions() && !validation.downloadInitialBlockDownload()) {
+                if (role.relaysTransactions() && (!validation.downloadInitialBlockDownload()
+                        || (blocksOnly && !peer.hasPermission(PeerPermission.RELAY)))) {
                     InvMessage inventory = BitcoinMessages.decodeInv(message);
+                    if (blocksOnly && !peer.hasPermission(PeerPermission.RELAY)
+                            && inventory.inventory().stream().anyMatch(vector -> vector.type() == InventoryVector.MSG_TX
+                            || vector.type() == InventoryVector.MSG_WITNESS_TX || vector.type() == MSG_WTX)) {
+                        disconnect(peer);
+                        break;
+                    }
+                    if (validation.downloadInitialBlockDownload()) break;
                     TxRelayState relayState = txRelayStates.get(peer);
                     if (relayState != null) {
                         for (InventoryVector vector : inventory.inventory()) {
@@ -398,13 +419,31 @@ public final class NodeRelayService implements AutoCloseable {
                 }
             }
             case "tx" -> {
-                if (role.relaysTransactions() && !validation.downloadInitialBlockDownload())
+                if (blocksOnly && !peer.hasPermission(PeerPermission.RELAY)) disconnect(peer);
+                else if (role.relaysTransactions() && !validation.downloadInitialBlockDownload())
                     receiveTransaction(peer, TransactionParser.parse(message.payload()));
+            }
+            case "mempool" -> {
+                if ((peer.localServices() & VersionMessage.NODE_BLOOM) == 0
+                        && !peer.hasPermission(PeerPermission.MEMPOOL)) {
+                    if (!peer.hasPermission(PeerPermission.NOBAN)) disconnect(peer);
+                    break;
+                }
+                if (role.relaysTransactions()) {
+                    var state = txRelayStates.get(peer);
+                    if (state != null) state.requestMempool();
+                }
             }
             case "getdata" -> queueGetData(peer, BitcoinMessages.decodeGetData(message));
             case "headers" -> {
                 var announcement = BitcoinMessages.decodeHeaders(message);
                 var batch = announcement.headers();
+                // Core checks the entire announcement's claimed work before
+                // treating a missing parent as a benign request for deeper headers.
+                for (var header : batch) {
+                    if (!ru.bitcoin.node.consensus.pow.ProofOfWork.isValid(header, validation.networkParameters()))
+                        throw new IllegalArgumentException("Header announcement has invalid proof of work");
+                }
                 for (int i = 1; i < batch.size(); i++) {
                     if (!batch.get(i).previousBlockHash().equals(batch.get(i - 1).hash())) {
                         throw new IllegalArgumentException("Non-continuous headers announcement");
@@ -413,18 +452,62 @@ public final class NodeRelayService implements AutoCloseable {
                 try {
                     // Availability responses use sendAsync rather than a pending HEADERS
                     // future. Validate/persist them even while historical blocks download.
-                    processPeerHeaders(peer, announcement);
-                    if (!batch.isEmpty()) peer.headersResponseValidated();
+                    var result = validation.processPeerHeadersWithReception(sync.headerSyncService(), peer,
+                            announcement, peer::headersResponseValidated);
+                    var last = updatePeerHeaders(peer, result.reception());
+                    if (!result.nextLocator().isEmpty()) {
+                        send(peer, BitcoinMessages.getHeaders(new GetHeadersMessage(
+                                Math.min(VersionMessage.CURRENT_PROTOCOL_VERSION, peer.remoteVersion().version()),
+                                result.nextLocator(), new Hash256(new byte[32]))));
+                    }
+                    if (!batch.isEmpty()) {
+                        if (!result.presyncHandled() && batch.size() == HeadersMessage.MAX_HEADERS && last != null) {
+                            // Asynchronous availability replies have no coordinator
+                            // to advance their locator. Full replies may have more.
+                            send(peer, BitcoinMessages.getHeaders(new GetHeadersMessage(
+                                    Math.min(VersionMessage.CURRENT_PROTOCOL_VERSION, peer.remoteVersion().version()),
+                                    sync.blockLocatorBuilder().build(last), new Hash256(new byte[32]))));
+                        }
+                    }
+                } catch (ru.bitcoin.node.chain.UnconnectedHeaderException unconnected) {
+                    requestMissingHeaders(peer);
+                    peer.noteBlockAnnouncement(batch.getLast().hash());
                 } catch (ru.bitcoin.node.consensus.block.BlockHeaderValidationException invalid) {
-                    throw new IllegalArgumentException("Invalid headers announcement", invalid);
+                    handleInvalidHeader(peer, invalid, false);
                 }
             }
+            case "filterload", "filteradd", "filterclear" -> {
+                // Core checks the offered service before decoding any Bloom payload.
+                if ((peer.localServices() & VersionMessage.NODE_BLOOM) == 0) disconnect(peer);
+            }
+            case "getblocks" -> {
+                GetBlocksMessage request;
+                try { request = BitcoinMessages.decodeGetBlocks(message); }
+                catch (GetHeadersMessageCodec.TooManyLocatorHashesException oversized) { disconnect(peer); break; }
+                var inventory = validation.blockInventory(request.locatorHashes(), request.stopHash());
+                BlockAnnouncementState state = blockAnnouncements.get(peer);
+                if (state != null && inventory.reachedLimit()) state.continuation.set(inventory.hashes().getLast());
+                if (!inventory.hashes().isEmpty()) send(peer, BitcoinMessages.inv(new InvMessage(inventory.hashes().stream()
+                        .map(hash -> new InventoryVector(InventoryVector.MSG_BLOCK, hash)).toList())));
+            }
             case "getheaders" -> {
-                var request = GetHeadersMessageCodec.decode(message.payload());
+                GetHeadersMessage request;
+                try { request = GetHeadersMessageCodec.decode(message.payload()); }
+                catch (GetHeadersMessageCodec.TooManyLocatorHashesException oversized) { disconnect(peer); break; }
                 // Core returns an empty response below minimum chainwork. A
                 // historical IBD tip must not scan/serve a low-work active prefix.
-                if (!validation.downloadHasMinimumChainWork()) {
+                if (!validation.downloadHasMinimumChainWork() && !peer.hasPermission(PeerPermission.DOWNLOAD)) {
                     send(peer, BitcoinMessages.headers(new HeadersMessage(List.of())));
+                    break;
+                }
+                // A null locator requests exactly hashStop. Core silently ignores
+                // unknown/ineligible hashes instead of returning an empty HEADERS.
+                if (request.locatorHashes().isEmpty()) {
+                    var header = validation.requestedHeader(request.stopHash());
+                    if (header.isEmpty()) break;
+                    send(peer, BitcoinMessages.headers(new HeadersMessage(List.of(header.get()))));
+                    BlockAnnouncementState state = blockAnnouncements.get(peer);
+                    if (state != null) state.bestHeaderSent = header.get().hash();
                     break;
                 }
                 var headers = validation.headers(request.locatorHashes(), request.stopHash());
@@ -471,8 +554,13 @@ public final class NodeRelayService implements AutoCloseable {
                     }
                 }
             }
-            case "cmpctblock" ->
+            case "cmpctblock" -> {
+                var state = blockAnnouncements.get(peer);
+                // Core ignores this command before decoding unless SENDCMPCT
+                // established a supported version on this connection.
+                if (state != null && state.providesCompactBlocks)
                     receiveCompactBlock(peer, BitcoinMessages.decodeCompactBlock(message, CMPCTBLOCKS_VERSION));
+            }
             case "getblocktxn" -> queueGetBlockTxn(peer, BitcoinMessages.decodeGetBlockTxn(message));
             case "blocktxn" ->
                     receiveBlockTransactions(peer, BitcoinMessages.decodeBlockTxn(message, CMPCTBLOCKS_VERSION));
@@ -518,6 +606,22 @@ public final class NodeRelayService implements AutoCloseable {
         }
     }
 
+    private void requestMissingHeaders(Peer peer) {
+        send(peer, BitcoinMessages.getHeaders(new GetHeadersMessage(
+                Math.min(VersionMessage.CURRENT_PROTOCOL_VERSION, peer.remoteVersion().version()),
+                sync.blockLocatorBuilder().build(sync.headerChainState().bestHeaderTip()),
+                new Hash256(new byte[32]))));
+    }
+
+    private static void handleInvalidHeader(Peer peer,
+            ru.bitcoin.node.consensus.block.BlockHeaderValidationException invalid, boolean viaCompact) {
+        var reason = invalid.reason();
+        if (reason == ru.bitcoin.node.consensus.block.BlockHeaderValidationException.Reason.TIME_FUTURE
+                || (reason == ru.bitcoin.node.consensus.block.BlockHeaderValidationException.Reason.CACHED_INVALID
+                    && (peer.isInboundConnection() || viaCompact))) return;
+        throw new IllegalArgumentException("Invalid announced block header", invalid);
+    }
+
     private void receiveCompactBlock(Peer peer, CompactBlockMessage compact) {
         Hash256 hash = compact.header().hash();
         synchronized (compactFallbacks) {
@@ -526,9 +630,22 @@ public final class NodeRelayService implements AutoCloseable {
         }
         if (pendingCompactBlocks.contains(peer, hash) || validation.findBlock(hash).isPresent()) return;
 
+        // Core's compact-block missing-parent path precedes header validation
+        // and only requests deeper headers when initial download has finished.
+        if (sync.blockIndexLookup().find(compact.header().previousBlockHash()) == null) {
+            if (!validation.downloadInitialBlockDownload()) requestMissingHeaders(peer);
+            return;
+        }
+        if (!sync.headerSyncService().compactHasSufficientWork(compact.header())) return;
+
         // A compact block carries a real block header. Feed it through the existing header
         // validation/index pipeline before accepting any reconstructed body.
-        processPeerHeaders(peer, new HeadersMessage(List.of(compact.header())));
+        try {
+            processPeerHeaders(peer, new HeadersMessage(List.of(compact.header())));
+        } catch (ru.bitcoin.node.consensus.block.BlockHeaderValidationException invalid) {
+            handleInvalidHeader(peer, invalid, true);
+            return;
+        }
 
         List<Transaction> candidates = validation.mempoolEntries().stream()
                 .map(entry -> entry.transaction()).toList();
@@ -749,8 +866,18 @@ public final class NodeRelayService implements AutoCloseable {
     }
 
     private void receiveTransaction(Peer peer, Transaction transaction) throws IOException {
-        if (!transactionRequests.isExpected(peer, transaction.txId(), transaction.wtxId())) return;
         transactionRequests.forget(transaction.txId(), transaction.wtxId());
+        var state = txRelayStates.get(peer);
+        if (state != null) { state.markKnown(transaction.txId()); state.markKnown(transaction.wtxId()); }
+        // Core's ReceivedTx accepts new unsolicited transactions for validation.
+        // A force-relay duplicate must use the already validated mempool object.
+        var existing = validation.mempoolEntry(transaction.txId());
+        if (existing.isPresent()) {
+            var accepted = existing.get().transaction();
+            if (peer.hasPermission(PeerPermission.FORCERELAY) && accepted.wtxId().equals(transaction.wtxId()))
+                announceTransaction(accepted, peer);
+            return;
+        }
         try {
             validation.admit(transaction);
             peer.recordAcceptedTransaction();
@@ -839,6 +966,10 @@ public final class NodeRelayService implements AutoCloseable {
     }
 
     private void queueGetBlockTxn(Peer peer, BlockTransactionsRequest request) {
+        if (request.indexes().isEmpty()) {
+            disconnect(peer); // Core disconnects without discouraging this request.
+            return;
+        }
         PeerOutbound sender = outbound.get(peer);
         long retainedBytes = 256L + 8L * request.indexes().size();
         if (sender == null || !sender.execute(() -> serveBlockTransactions(peer, request), retainedBytes)) {
@@ -847,20 +978,35 @@ public final class NodeRelayService implements AutoCloseable {
     }
 
     private void serveBlockTransactions(Peer peer, BlockTransactionsRequest request) throws IOException {
-        OptionalLong depth = validation.activeBlockDepth(request.blockHash());
-        Optional<Block> blockOptional = validation.findBlock(request.blockHash());
-        if (depth.isEmpty() || blockOptional.isEmpty()) return;
-        Block block = blockOptional.orElseThrow();
+        var recent = mostRecentBlock;
+        if (recent != null && recent.hash().equals(request.blockHash())) {
+            sendBlockTransactions(peer, request, recent);
+            return;
+        }
+        Optional<NodeValidationService.BlockTransactionsResponse> response;
+        try { response = peer.hasPermission(PeerPermission.NOBAN)
+                ? validation.requestedBlockTransactions(request.blockHash(), peer.localServices(), true)
+                : validation.requestedBlockTransactions(request.blockHash(), peer.localServices()); }
+        catch (NodeValidationService.LimitedHistoryRequestException denied) { disconnect(peer); return; }
+        if (response.isEmpty()) return;
+        Block block = response.get().block();
 
-        if (depth.getAsLong() > MAX_BLOCKTXN_DEPTH) {
+        if (response.get().fullBlock()) {
             sendDirect(peer, new BitcoinMessage("block", BlockSerializer.serialize(block)));
+            sendContinuation(peer, request.blockHash());
             return;
         }
 
+        sendBlockTransactions(peer, request, block);
+    }
+
+    private void sendBlockTransactions(Peer peer, BlockTransactionsRequest request, Block block) throws IOException {
         List<Transaction> transactions = new ArrayList<>(request.indexes().size());
         for (int index : request.indexes()) {
             if (index < 0 || index >= block.transactions().size()) {
-                throw new IllegalArgumentException("getblocktxn transaction index out of bounds: " + index);
+                peer.disconnectForProtocolViolation("getblocktxn transaction index out of bounds",
+                        new IllegalArgumentException("Invalid transaction index: " + index));
+                return;
             }
             transactions.add(block.transactions().get(index));
         }
@@ -894,27 +1040,32 @@ public final class NodeRelayService implements AutoCloseable {
         for (var vector : request.inventory()) {
             if (!peer.isReady() || closed) return;
 
-            if (vector.type() == InventoryVector.MSG_CMPCT_BLOCK) {
-                var block = validation.findBlock(vector.hash());
-                OptionalLong depth = validation.activeBlockDepth(vector.hash());
-                if (block.isPresent() && depth.isPresent()) {
-                    if (depth.getAsLong() <= MAX_CMPCTBLOCK_DEPTH) {
+            if (vector.type() == InventoryVector.MSG_FILTERED_BLOCK) {
+                if ((peer.localServices() & VersionMessage.NODE_BLOOM) == 0) { disconnect(peer); return; }
+                // BIP37 serving is not implemented or advertised by the configured node.
+                continue;
+            }
+            if (vector.type() == InventoryVector.MSG_CMPCT_BLOCK || vector.type() == InventoryVector.MSG_BLOCK
+                    || vector.type() == InventoryVector.MSG_WITNESS_BLOCK) {
+                Optional<NodeValidationService.BlockResponse> response;
+                try { response = peer.hasPermission(PeerPermission.NOBAN)
+                        ? validation.requestedBlock(vector.hash(), peer.localServices(), true)
+                        : validation.requestedBlock(vector.hash(), peer.localServices()); }
+                catch (NodeValidationService.LimitedHistoryRequestException denied) { disconnect(peer); return; }
+                if (response.isPresent()) {
+                    Block block = response.get().block();
+                    if (vector.type() == InventoryVector.MSG_CMPCT_BLOCK && response.get().compactEligible()) {
                         long nonce = ThreadLocalRandom.current().nextLong();
                         sendDirect(peer, BitcoinMessages.compactBlock(
-                                CompactBlockFactory.create(block.orElseThrow(), nonce, CMPCTBLOCKS_VERSION),
+                                CompactBlockFactory.create(block, nonce, CMPCTBLOCKS_VERSION),
                                 CMPCTBLOCKS_VERSION));
                     } else {
-                        sendDirect(peer, new BitcoinMessage("block", BlockSerializer.serialize(block.orElseThrow())));
+                        sendDirect(peer, new BitcoinMessage("block", vector.type() == InventoryVector.MSG_BLOCK
+                                ? BlockSerializer.serializeLegacy(block) : BlockSerializer.serialize(block)));
                     }
-                    continue;
+                    sendContinuation(peer, vector.hash());
                 }
-            } else if (vector.type() == InventoryVector.MSG_BLOCK || vector.type() == InventoryVector.MSG_WITNESS_BLOCK) {
-                var block = validation.findBlock(vector.hash());
-                if (block.isPresent()) {
-                    sendDirect(peer, new BitcoinMessage("block", vector.type() == InventoryVector.MSG_BLOCK
-                            ? BlockSerializer.serializeLegacy(block.get()) : BlockSerializer.serialize(block.get())));
-                    continue;
-                }
+                continue; // Missing, pruned or ineligible blocks are silently ignored by Core.
             } else if (role.relaysTransactions() && (vector.type() == InventoryVector.MSG_TX
                     || vector.type() == InventoryVector.MSG_WITNESS_TX
                     || vector.type() == MSG_WTX)) {
@@ -926,10 +1077,20 @@ public final class NodeRelayService implements AutoCloseable {
                             ? TransactionSerializer.serializeLegacy(transaction) : TransactionSerializer.serialize(transaction)));
                     continue;
                 }
+                missing.add(vector);
             }
-            missing.add(vector);
         }
 
+    }
+
+    private void sendContinuation(Peer peer, Hash256 servedHash) throws IOException {
+        var state = blockAnnouncements.get(peer);
+        if (state == null) return;
+        Hash256 marker = state.continuation.get();
+        if (servedHash.equals(marker) && state.continuation.compareAndSet(marker, null)) {
+            sendDirect(peer, BitcoinMessages.inv(new InvMessage(List.of(new InventoryVector(
+                    InventoryVector.MSG_BLOCK, validation.downloadTip().hash())))));
+        }
     }
 
     /** Retains one reservation while yielding between bounded portions of a GETDATA request. */
@@ -950,7 +1111,7 @@ public final class NodeRelayService implements AutoCloseable {
             while (end < inventory.size() && end - offset < 128) {
                 long type = inventory.get(end++).type();
                 if (type == InventoryVector.MSG_BLOCK || type == InventoryVector.MSG_WITNESS_BLOCK
-                        || type == InventoryVector.MSG_CMPCT_BLOCK) break;
+                        || type == InventoryVector.MSG_CMPCT_BLOCK || type == InventoryVector.MSG_FILTERED_BLOCK) break;
             }
             serveData(peer, new GetDataMessage(inventory.subList(offset, end)), missing);
             offset = end;
@@ -992,6 +1153,7 @@ public final class NodeRelayService implements AutoCloseable {
      * Announces an active-tip block once, excluding the peer that supplied its body.
      */
     public void relayConnectedBlock(Block block, Peer source) {
+        mostRecentBlock = Objects.requireNonNull(block);
         Objects.requireNonNull(block, "block");
         // Core's UpdatedBlockTip does not relay inventory during IBD. Feeding
         // every historical block into bounded send queues disconnects useful
@@ -1082,8 +1244,8 @@ public final class NodeRelayService implements AutoCloseable {
 
     private void processInventoryBacklog(long now, List<Peer> readyPeers) {
         if (!inventoryBuckets.ready(now)) return;
-        var targets = readyPeers.stream().filter(peer -> peers.hasRole(peer, PeerConnectionRole.FULL_RELAY)
-                || peers.hasRole(peer, PeerConnectionRole.INBOUND)).filter(peer -> peer.remoteVersion().relay()).toList();
+        var targets = readyPeers.stream().filter(peer -> peers.roleOf(peer).relaysTransactions())
+                .filter(peer -> peer.remoteVersion().relay()).toList();
         var order = currentRelayMiningOrder();
         var batch = inventoryBuckets.drain(now, order,
                 targets.stream().anyMatch(Peer::isInboundConnection),
@@ -1099,7 +1261,7 @@ public final class NodeRelayService implements AutoCloseable {
     private List<TransactionRelayBuckets.Transaction> currentRelayMiningOrder() {
         return validation.mempoolMiningOrder().stream().map(entry ->
                 new TransactionRelayBuckets.Transaction(entry.transaction().txId(), entry.transaction().wtxId(),
-                        Math.max(0, entry.feeRate().satoshisPerKiloByte()),
+                        ru.bitcoin.node.mempool.FeeRate.fromFeeAndVSize(entry.fee(), entry.virtualSize()).satoshisPerKiloByte(),
                         Math.toIntExact(TransactionSerializer.serializedSize(entry.transaction(), true)))).toList();
     }
 
@@ -1109,6 +1271,7 @@ public final class NodeRelayService implements AutoCloseable {
         long minimumRelay = validation.minimumRelayFeeRate();
 
         for (Peer peer : peers.readyPeers()) {
+            if (peer.hasPermission(PeerPermission.FORCERELAY)) continue;
             // readyPeers() is a snapshot. The peer may be removed concurrently
             // before role lookup (for example when a header-sync race loser closes).
             if (!peers.hasRole(peer, ru.bitcoin.node.p2p.PeerConnectionRole.FULL_RELAY)) {
@@ -1192,21 +1355,23 @@ public final class NodeRelayService implements AutoCloseable {
     private void flushTransactionInventory() {
         long now = System.nanoTime();
         var readyPeers = peers.readyPeers();
-        processInventoryBacklog(now, readyPeers);
+        boolean ibd = validation.downloadInitialBlockDownload();
+        if (!ibd) processInventoryBacklog(now, readyPeers);
         List<TransactionRelayBuckets.Transaction> miningOrder = null;
         for (Peer peer : readyPeers) {
-            if (!peers.roleOf(peer).relaysTransactions()
-                    || !peer.remoteVersion().relay()) {
+            if (!peers.roleOf(peer).relaysTransactions()) {
                 continue;
             }
 
             TxRelayState state = txRelayStates.get(peer);
-            if (state == null || state.pendingCount() == 0) {
+            if (state == null) continue;
+            boolean requested = state.mempoolRequested();
+            if (!requested && (ibd || !peer.remoteVersion().relay() || state.pendingCount() == 0)) {
                 continue;
             }
 
             long next = state.nextInventorySendNanos();
-            if (next == 0L) {
+            if (next == 0L && !requested && !peer.hasPermission(PeerPermission.NOBAN)) {
                 state.nextInventorySendNanos(
                         saturatedAdd(
                                 now,
@@ -1216,7 +1381,7 @@ public final class NodeRelayService implements AutoCloseable {
                 continue;
             }
 
-            if (now < next) {
+            if (next != 0L && now < next && !peer.hasPermission(PeerPermission.NOBAN)) {
                 continue;
             }
 
@@ -1226,6 +1391,26 @@ public final class NodeRelayService implements AutoCloseable {
                             nextInventoryDelayNanos(peer)
                     )
             );
+
+            if (requested) {
+                var snapshot = validation.mempoolEntries();
+                state.completeMempoolRequest();
+                var inventory = new ArrayList<InventoryVector>();
+                for (var entry : snapshot) {
+                    if (!MempoolInventory.passesFeeFilter(entry, state.feeFilterSatPerKvB())) continue;
+                    var tx = entry.transaction();
+                    inventory.add(new InventoryVector(peer.remoteWtxidRelay() ? MSG_WTX : InventoryVector.MSG_TX,
+                            peer.remoteWtxidRelay() ? tx.wtxId() : tx.txId()));
+                    state.markKnown(tx.txId());
+                    state.markKnown(tx.wtxId());
+                    if (inventory.size() == InvMessage.MAX_INVENTORY_SIZE) {
+                        send(peer, BitcoinMessages.inv(new InvMessage(List.copyOf(inventory))));
+                        inventory.clear();
+                    }
+                }
+                if (!inventory.isEmpty()) send(peer, BitcoinMessages.inv(new InvMessage(List.copyOf(inventory))));
+                continue;
+            }
 
             int broadcastMaximum = InvMessage.MAX_INVENTORY_SIZE;
             if (miningOrder == null) miningOrder = currentRelayMiningOrder();
@@ -1376,6 +1561,7 @@ public final class NodeRelayService implements AutoCloseable {
         inbound.clear();
         outbound.clear();
         blockAnnouncements.clear();
+        mostRecentBlock = null;
         txRelayStates.clear();
         validatedPeerHeaders.clear();
         inventoryBuckets.clear();

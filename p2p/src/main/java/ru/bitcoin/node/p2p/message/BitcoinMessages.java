@@ -88,6 +88,14 @@ public final class BitcoinMessages {
         );
     }
 
+    public static BitcoinMessage getBlocks(GetBlocksMessage message) {
+        return new BitcoinMessage("getblocks", ru.bitcoin.node.p2p.codec.GetBlocksMessageCodec.encode(message));
+    }
+
+    public static GetBlocksMessage decodeGetBlocks(BitcoinMessage message) {
+        return ru.bitcoin.node.p2p.codec.GetBlocksMessageCodec.decode(message.payload());
+    }
+
     public static BitcoinMessage headers(
             HeadersMessage headersMessage
     ) {

@@ -379,7 +379,10 @@ public final class NodeRpcServer implements AutoCloseable {
                         result.put("wtxid", tx.wtxId().toDisplayHex());
                         result.put("allowed", false);
                         if (transactions.size() > 1) result.put("package-error", probe.rejectReason());
-                        else result.put("reject-reason", probe.rejectReason());
+                        else result.put("reject-reason", switch (probe.rejectReason()) {
+                            case "cluster-count-limit", "cluster-size-limit" -> "too-large-cluster";
+                            default -> probe.rejectReason();
+                        });
                         results.add(result);
                     }
                     yield results;
@@ -789,7 +792,11 @@ public final class NodeRpcServer implements AutoCloseable {
                 var remote = peer.remoteAddress();
                 info.put("addr", remote == null ? "" : remote.getHostString() + ":" + remote.getPort());
                 info.put("inbound", peer.isInboundConnection());
+                var headerSync = sync == null ? null : sync.headerSyncService();
+                info.put("presynced_headers", headerSync == null ? -1L : headerSync.presyncedHeight(peer));
                 info.put("connection_type", managed.role().name().toLowerCase(Locale.ROOT));
+                info.put("permissions", List.of(ru.bitcoin.node.p2p.PeerPermission.NOBAN, ru.bitcoin.node.p2p.PeerPermission.FORCERELAY, ru.bitcoin.node.p2p.PeerPermission.RELAY, ru.bitcoin.node.p2p.PeerPermission.MEMPOOL, ru.bitcoin.node.p2p.PeerPermission.DOWNLOAD, ru.bitcoin.node.p2p.PeerPermission.ADDR)
+                        .stream().filter(peer::hasPermission).map(permission -> permission.name().toLowerCase(Locale.ROOT)).toList());
                 info.put("transport_protocol_type", peer.isV2Transport() ? "v2" : "v1");
                 byte[] sessionId = peer.transportSessionId();
                 info.put("session_id", sessionId == null ? "" : HexFormat.of().formatHex(sessionId));
@@ -940,7 +947,7 @@ public final class NodeRpcServer implements AutoCloseable {
                     var item = new LinkedHashMap<String,Object>();
                     item.put("blocks", state.blocks());
                     item.put("bestblockhash", state.bestBlockHash().toDisplayHex());
-                    if (state.snapshot()) item.put("snapshot_blockhash", state.bestBlockHash().toDisplayHex());
+                    if (state.snapshot()) item.put("snapshot_blockhash", state.snapshotBlockHash().toDisplayHex());
                     item.put("validated", state.validated());
                     return item;
                 }).toList());
@@ -957,6 +964,16 @@ public final class NodeRpcServer implements AutoCloseable {
                 info.put("chainwork", String.format("%064x", tip.chainWork()));
                 info.put("difficulty", difficulty(tip));
                 info.put("initialblockdownload", validation.downloadInitialBlockDownload());
+                validation.backgroundValidationReport().ifPresent(background -> {
+                    var report = new LinkedHashMap<String,Object>();
+                    report.put("snapshotheight", background.snapshotHeight());
+                    report.put("blocks", background.blocks());
+                    report.put("bestblockhash", background.bestBlockHash().toDisplayHex());
+                    report.put("mediantime", background.medianTime());
+                    report.put("chainwork", String.format("%064x", background.chainWork()));
+                    report.put("verificationprogress", background.verificationProgress());
+                    info.put("backgroundvalidation", report);
+                });
                 info.put("pruned", prune != null && prune.enabled());
                 if (prune != null && prune.enabled()) {
                     info.put("pruneheight", prune.pruneHeight());

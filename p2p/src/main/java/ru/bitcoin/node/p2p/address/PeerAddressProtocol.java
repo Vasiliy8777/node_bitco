@@ -4,6 +4,7 @@ import ru.bitcoin.node.p2p.Peer;
 import ru.bitcoin.node.p2p.PeerMessageListener;
 import ru.bitcoin.node.p2p.PeerManager;
 import ru.bitcoin.node.p2p.PeerConnectionRole;
+import ru.bitcoin.node.p2p.PeerPermission;
 import ru.bitcoin.node.p2p.message.*;
 
 import java.io.IOException;
@@ -34,6 +35,7 @@ public final class PeerAddressProtocol
     private final PeerManager peerManager;
     private final java.util.function.LongSupplier nanoTime;
     private final PeerAddressRelayManager relayManager;
+    private final GetAddrResponseCache responseCache;
     // Weak keys avoid retaining disconnected Peer instances; values never reference the peer.
     private final java.util.Map<Peer, AddressRelayBudget> budgets = new java.util.WeakHashMap<>();
 
@@ -61,6 +63,7 @@ public final class PeerAddressProtocol
         this.peerManager = peerManager;
         this.relayManager = relayManager;
         this.nanoTime = Objects.requireNonNull(nanoTime, "nanoTime");
+        this.responseCache = new GetAddrResponseCache(nanoTime);
     }
 
     /**
@@ -225,7 +228,8 @@ public final class PeerAddressProtocol
         Instant receivedAt =
                 Instant.now();
 
-        int remaining = budget.takeAddresses(addrMessage.size(), nanoTime.getAsLong());
+        int remaining = peer.hasPermission(PeerPermission.ADDR) ? addrMessage.size()
+                : budget.takeAddresses(addrMessage.size(), nanoTime.getAsLong());
         for (AddrEntry entry :
                 addrMessage.addresses()) {
             if (remaining-- == 0) break;
@@ -267,7 +271,8 @@ public final class PeerAddressProtocol
         Instant receivedAt =
                 Instant.now();
 
-        int remaining = budget.takeAddresses(addrV2Message.addresses().size(), nanoTime.getAsLong());
+        int remaining = peer.hasPermission(PeerPermission.ADDR) ? addrV2Message.addresses().size()
+                : budget.takeAddresses(addrV2Message.addresses().size(), nanoTime.getAsLong());
         for (AddrV2Entry entry :
                 addrV2Message.addresses()) {
             if (remaining-- == 0) break;
@@ -367,7 +372,7 @@ public final class PeerAddressProtocol
         }
 
         List<KnownPeerAddress> selected =
-                addressManager.getAddr();
+                responseCache.select(peer, this::freshGetAddr);
 
         if (selected.isEmpty()) {
             return;
@@ -397,6 +402,15 @@ public final class PeerAddressProtocol
                     exception
             );
         }
+    }
+
+    private List<KnownPeerAddress> freshGetAddr() {
+        return addressManager.getAddr().stream().filter(known -> {
+            var address = known.peerAddress();
+            if (peerManager == null || !address.isLegacyAddrCompatible()) return true;
+            return !peerManager.banManager().isBanned(address.address())
+                    && !peerManager.discouragementManager().isDiscouraged(address.address());
+        }).toList();
     }
 
     private void sendAddr(

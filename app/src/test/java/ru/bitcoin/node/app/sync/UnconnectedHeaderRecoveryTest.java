@@ -46,9 +46,10 @@ class UnconnectedHeaderRecoveryTest {
             var valid = header(genesis.hash(), genesis.header().timestamp().value() + 1);
             var unknown = Hash256.fromDisplayHex("21".repeat(32));
             var orphan = header(unknown, genesis.header().timestamp().value() + 2);
+            var orphanChild = header(orphan.hash(), genesis.header().timestamp().value() + 3);
             var downloader = mock(HeaderSynchronizer.class);
             when(downloader.download(anyList(), eq(STOP))).thenReturn(
-                    new HeadersMessage(List.of(valid, orphan)), new HeadersMessage(List.of(valid)), new HeadersMessage(List.of()));
+                    new HeadersMessage(List.of(orphan, orphanChild)), new HeadersMessage(List.of(valid)), new HeadersMessage(List.of()));
             var coordinator = new HeaderSyncCoordinator(downloader, infrastructure.headerSyncService(),
                     infrastructure.headerChainState(), infrastructure.blockLocatorBuilder());
             var failure = assertThrows(IOException.class, () -> coordinator.synchronize(STOP));
@@ -56,6 +57,8 @@ class UnconnectedHeaderRecoveryTest {
             assertEquals(unknown, cause.parentHash());
             assertEquals(orphan.hash(), cause.headerHash());
             assertTrue(new RocksDbBlockIndexStore(db).find(valid.hash()).isEmpty(), "Rejected batch partially persisted");
+            assertTrue(new RocksDbBlockIndexStore(db).find(orphan.hash()).isEmpty());
+            assertTrue(new RocksDbBlockIndexStore(db).find(orphanChild.hash()).isEmpty());
             assertEquals(genesis.hash(), infrastructure.headerChainState().bestHeaderTip().hash());
             assertEquals(genesis.hash(), new RocksDbChainStateStore(db).loadBestHeaderTipHash().orElseThrow());
             assertEquals(1, coordinator.synchronize(STOP).size());
@@ -74,7 +77,7 @@ class UnconnectedHeaderRecoveryTest {
         when(downloader.download(anyList(), any())).thenReturn(response);
         var service = mock(HeaderSyncService.class);
         var internal = new IllegalStateException("Corrupt local index");
-        when(service.process(eq(response), any())).thenThrow(internal);
+        when(service.processWithReception(eq(response), any(), any())).thenThrow(internal);
         var coordinator = new HeaderSyncCoordinator(downloader, service, new HeaderChainState(tip), locator);
         assertSame(internal, assertThrows(IllegalStateException.class, () -> coordinator.synchronize(STOP)));
     }

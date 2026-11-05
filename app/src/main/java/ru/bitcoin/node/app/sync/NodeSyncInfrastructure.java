@@ -120,15 +120,15 @@ public final class NodeSyncInfrastructure {
                         failureResolver
                 );
 
-        this.headerSyncService =
-                new HeaderSyncService(
-                        batchProcessor
-                );
-
         this.blockLocatorBuilder =
                 new BlockLocatorBuilder(
                         blockIndexLookup
                 );
+        this.headerSyncService = new HeaderSyncService(batchProcessor,
+                new HeadersPresyncController(parameters, blockIndexLookup, headerChainState, blockLocatorBuilder,
+                        () -> chainStateStore.loadActiveTipHash().map(blockIndexLookup::find).orElseThrow(
+                                () -> new IllegalStateException("Missing active tip for header work threshold")),
+                        adjustedTime::currentTimeSeconds));
     }
 
     public BlockIndexLookup blockIndexLookup() {

@@ -20,6 +20,12 @@ public final class HeaderSyncCoordinator {
     private final HeaderChainState headerChainState;
     private final BlockLocatorBuilder blockLocatorBuilder;
     private java.util.function.Consumer<List<BlockIndex>> validatedBatchListener = ignored -> { };
+    private java.util.function.Consumer<BlockIndex> newHeaderListener = ignored -> { };
+
+    public HeaderSyncCoordinator onNewValidatedHeader(java.util.function.Consumer<BlockIndex> listener) {
+        newHeaderListener = Objects.requireNonNull(listener);
+        return this;
+    }
 
     /** Called for complete validated responses, including already-known tip confirmations. */
     public HeaderSyncCoordinator onValidatedBatch(java.util.function.Consumer<List<BlockIndex>> listener) {
@@ -86,16 +92,16 @@ public final class HeaderSyncCoordinator {
         BlockIndex cursor = headerChainState.bestHeaderTip();
         var visited = new java.util.HashSet<Hash256>();
         visited.add(cursor.hash());
+        List<Hash256> nextLocator = null;
+        var peer = headerSynchronizer.peer();
 
         while (true) {
 
             BlockIndex previousCursor =
                     cursor;
 
-            List<Hash256> locator =
-                    blockLocatorBuilder.build(
-                            previousCursor
-                    );
+            List<Hash256> locator = nextLocator != null ? nextLocator : blockLocatorBuilder.build(previousCursor);
+            nextLocator = null;
 
             HeadersMessage headers =
                     headerSynchronizer.download(
@@ -104,12 +110,27 @@ public final class HeaderSyncCoordinator {
                     );
 
             if (headers.isEmpty()) {
+                if (peer != null) headerSyncService.processPeerWithReception(peer, headers, onValidatedHeader,
+                        headerSynchronizer::headersValidated);
                 return processedCount;
             }
 
             List<BlockIndex> processed;
+            boolean lastHeaderNew;
+            boolean presyncHandled = false;
             try {
-                processed = headerSyncService.process(headers, onValidatedHeader);
+                ru.bitcoin.node.chain.HeaderBatchProcessor.Reception reception;
+                if (peer != null) {
+                    var result = headerSyncService.processPeerWithReception(peer, headers, onValidatedHeader,
+                            headerSynchronizer::headersValidated);
+                    reception = result.reception(); presyncHandled = result.presyncHandled();
+                    if (!result.nextLocator().isEmpty()) nextLocator = result.nextLocator();
+                } else {
+                    reception = headerSyncService.processWithReception(headers, onValidatedHeader,
+                            headerSynchronizer::headersValidated);
+                }
+                processed = reception.indexes();
+                lastHeaderNew = reception.lastHeaderNew();
             } catch (ru.bitcoin.node.chain.UnconnectedHeaderException exception) {
                 // A peer may send an unsolicited/fork header that cannot connect to
                 // our tree. Initial and live sync must replace this peer, not fail
@@ -119,12 +140,16 @@ public final class HeaderSyncCoordinator {
             }
 
             if (processed.isEmpty()) {
+                if (presyncHandled) {
+                    if (nextLocator == null) return processedCount;
+                    continue;
+                }
                 throw new IllegalStateException(
                         "Non-empty headers response "
                                 + "produced no block indexes"
                 );
             }
-            headerSynchronizer.headersValidated();
+            if (lastHeaderNew) newHeaderListener.accept(processed.getLast());
             validatedBatchListener.accept(List.copyOf(processed));
 
             cursor =

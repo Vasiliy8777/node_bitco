@@ -17,7 +17,13 @@ public final class RocksDbAssumeUtxoBackgroundStore {
 
     public enum Status {RUNNING, VALIDATED, INVALID}
 
-    public record State(Status status, Hash256 tipHash, long tipHeight) {
+    public record State(Status status, Hash256 tipHash, long tipHeight, long chainTxCount) {
+        public State(Status status, Hash256 tipHash, long tipHeight) {
+            this(status, tipHash, tipHeight, tipHeight == 0 ? 1 : 0);
+        }
+        public State {
+            if (tipHeight < 0 || chainTxCount < 0) throw new IllegalArgumentException("Negative background progress");
+        }
     }
 
     public RocksDbAssumeUtxoBackgroundStore(RocksDbDatabase db) {
@@ -27,11 +33,14 @@ public final class RocksDbAssumeUtxoBackgroundStore {
     public Optional<State> load() {
         byte[] v = db.get(KEY);
         if (v == null) return Optional.empty();
-        if (v.length != SIZE || v[0] != 1) throw new IllegalStateException("Invalid AssumeUTXO background state");
+        if (!((v.length == SIZE && v[0] == 1) || (v.length == SIZE + 8 && v[0] == 2)))
+            throw new IllegalStateException("Invalid AssumeUTXO background state");
         int ordinal = v[1] & 255;
         if (ordinal >= Status.values().length) throw new IllegalStateException("Invalid AssumeUTXO background status");
         byte[] hash = java.util.Arrays.copyOfRange(v, 2, 34);
-        return Optional.of(new State(Status.values()[ordinal], new Hash256(hash), readLong(v, 34)));
+        long height = readLong(v, 34);
+        long count = v[0] == 2 ? readLong(v, SIZE) : (height == 0 ? 1 : 0);
+        return Optional.of(new State(Status.values()[ordinal], new Hash256(hash), height, count));
     }
 
     public void initialize(Hash256 tip, long height) {
@@ -43,17 +52,20 @@ public final class RocksDbAssumeUtxoBackgroundStore {
     }
 
     public void save(RocksDbWriteBatch batch, State state) {
-        byte[] v = new byte[SIZE];
-        v[0] = 1;
+        byte[] v = new byte[SIZE + 8];
+        v[0] = 2;
         v[1] = (byte) state.status().ordinal();
         System.arraycopy(state.tipHash().bytes(), 0, v, 2, 32);
         writeLong(v, 34, state.tipHeight());
+        writeLong(v, SIZE, state.chainTxCount());
         batch.put(KEY, v);
     }
 
     public void mark(Status status, Hash256 tip, long height) {
         try (var batch = new RocksDbWriteBatch()) {
-            save(batch, new State(status, tip, height));
+            long count = load().filter(s -> s.tipHash().equals(tip)).map(State::chainTxCount)
+                    .orElse(height == 0 ? 1L : 0L);
+            save(batch, new State(status, tip, height, count));
             db.write(batch);
         }
     }

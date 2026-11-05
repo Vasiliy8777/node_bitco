@@ -166,6 +166,7 @@ class NodeRelayCompactBlockTest {
                         mining.getBlockTemplate(Map.of("rules", List.of("segwit"))));
 
                 when(scheduler.hasSubmittedBlock(block.hash())).thenReturn(true);
+                incoming.get().onMessage(peer, BitcoinMessages.sendCmpct(new SendCmpctMessage(false, 2)));
 
                 incoming.get().onMessage(
                         peer,

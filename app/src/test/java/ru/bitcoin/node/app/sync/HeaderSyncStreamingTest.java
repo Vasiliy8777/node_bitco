@@ -40,13 +40,16 @@ class HeaderSyncStreamingTest {
             assertEquals(List.of(second.hash()), current);
             return new HeadersMessage(List.of());
         });
-        when(processor.process(eq(message), any())).thenReturn(List.of(first), List.of(second));
+        when(processor.processWithReception(eq(message), any(), any())).thenReturn(new ru.bitcoin.node.chain.HeaderBatchProcessor.Reception(List.of(first), true), new ru.bitcoin.node.chain.HeaderBatchProcessor.Reception(List.of(second), true));
         var coordinator = new HeaderSyncCoordinator(downloader, processor, state, locator);
+        var newHeaders = new ArrayList<Hash256>();
+        coordinator.onNewValidatedHeader(index -> newHeaders.add(index.hash()));
         assertEquals(2, coordinator.synchronize(start.hash(), batch -> {
             assertThrows(UnsupportedOperationException.class, () -> batch.add(start));
             delivered.add(batch.getLast().hash());
         }));
         verify(state, times(1)).bestHeaderTip();
+        assertEquals(List.of(first.hash(), second.hash()), newHeaders);
     }
 
     @Test
@@ -61,8 +64,9 @@ class HeaderSyncStreamingTest {
         when(locator.build(start)).thenReturn(startLocator);
         var message = new HeadersMessage(List.of(GenesisBlockFactory.create(NetworkParametersRegistry.regtest()).header()));
         when(downloader.download(anyList(), any())).thenReturn(message);
-        when(processor.process(eq(message), any())).thenReturn(List.of(start));
+        when(processor.processWithReception(eq(message), any(), any())).thenReturn(new ru.bitcoin.node.chain.HeaderBatchProcessor.Reception(List.of(start), false));
         var coordinator = new HeaderSyncCoordinator(downloader, processor, state, locator);
+        coordinator.onNewValidatedHeader(index -> fail("Already-known tip must not receive new-header credit"));
         assertEquals(0, coordinator.synchronize(start.hash(),
                 batch -> fail("Duplicate batch must not be published")));
         verify(downloader, times(1)).download(anyList(), any());

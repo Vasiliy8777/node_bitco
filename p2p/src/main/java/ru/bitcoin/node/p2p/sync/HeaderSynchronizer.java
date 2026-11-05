@@ -26,6 +26,8 @@ public final class HeaderSynchronizer {
     private final Peer peer;
     private final Duration responseTimeout;
 
+    public Peer peer() { return peer; }
+
     public HeaderSynchronizer(
             Peer peer
     ) {

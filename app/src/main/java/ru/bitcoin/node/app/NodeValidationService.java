@@ -286,6 +286,70 @@ public final class NodeValidationService implements AutoCloseable {
         }
     }
 
+    /** Network-serving snapshot; eligibility and body availability share the chain lock. */
+    public record BlockResponse(Block block, boolean compactEligible) { }
+
+    public record BlockTransactionsResponse(Block block, boolean fullBlock) { }
+
+    public static final class LimitedHistoryRequestException extends RuntimeException {
+        private LimitedHistoryRequestException() { super("Block request below NODE_NETWORK_LIMITED history window"); }
+    }
+
+    private void checkServingWindow(BlockIndex candidate, long services) {
+        if (BlockRequestPolicy.limitedHistoryExceeded(services, chain.activeTip().height(), candidate.height()))
+            throw new LimitedHistoryRequestException();
+    }
+
+    /** Core's recent GETBLOCKTXN path is based on height/data, not active-chain membership. */
+    public Optional<BlockTransactionsResponse> requestedBlockTransactions(Hash256 hash) {
+        return requestedBlockTransactions(hash, 0);
+    }
+
+    public Optional<BlockTransactionsResponse> requestedBlockTransactions(Hash256 hash, long localServices) {
+        return requestedBlockTransactions(hash, localServices, false);
+    }
+
+    public Optional<BlockTransactionsResponse> requestedBlockTransactions(Hash256 hash, long localServices, boolean noBan) {
+        Objects.requireNonNull(hash, "hash");
+        synchronized (chain) {
+            BlockIndex candidate = lookup.find(hash);
+            if (candidate == null || !availability.hasData(hash)) return Optional.empty();
+            boolean fullBlock = candidate.height() < chain.activeTip().height() - 10;
+            // Older requests become ordinary witness GETDATA requests in Core.
+            if (fullBlock && !blockRequestAllowed(candidate)) return Optional.empty();
+            if (fullBlock && !noBan) checkServingWindow(candidate, localServices);
+            return blocks.find(hash).map(block -> new BlockTransactionsResponse(block, fullBlock));
+        }
+    }
+
+    public Optional<BlockResponse> requestedBlock(Hash256 hash) {
+        return requestedBlock(hash, 0);
+    }
+
+    public Optional<BlockResponse> requestedBlock(Hash256 hash, long localServices) {
+        return requestedBlock(hash, localServices, false);
+    }
+
+    public Optional<BlockResponse> requestedBlock(Hash256 hash, long localServices, boolean noBan) {
+        Objects.requireNonNull(hash, "hash");
+        synchronized (chain) {
+            BlockIndex candidate = lookup.find(hash);
+            if (candidate == null || !blockRequestAllowed(candidate)) return Optional.empty();
+            if (!noBan) checkServingWindow(candidate, localServices);
+            boolean compact = BlockRequestPolicy.compactAllowed(candidate.height(), chain.activeTip(),
+                    System.currentTimeMillis() / 1000, parameters.targetSpacingSeconds());
+            return blocks.find(hash).map(block -> new BlockResponse(block, compact));
+        }
+    }
+
+    private boolean blockRequestAllowed(BlockIndex candidate) {
+        if (activeBlockDepth(candidate.hash()).isPresent()) return true;
+        if (failureManager.isFailed(candidate.hash())) return false;
+        BlockIndex best = new RocksDbChainStateStore(database).loadBestHeaderTipHash().map(lookup::find).orElse(null);
+        return BlockRequestPolicy.allowsSideChain(candidate, best, validationStatus.isScriptsValid(candidate.hash()),
+                parameters.targetSpacingSeconds());
+    }
+
     /**
      * Returns active-chain depth: tip=0, parent=1; empty for unknown/side-chain blocks.
      */
@@ -303,10 +367,14 @@ public final class NodeValidationService implements AutoCloseable {
     }
 
     /**
-     * Only returns active-chain headers, in forward order, bounded to the wire limit.
+     * Returns active-chain successors for a locator, or the eligible stop header
+     * itself for a null locator. Results are bounded to the wire limit.
      */
     public List<ru.bitcoin.node.protocol.block.BlockHeader> headers(List<Hash256> locator, Hash256 stop) {
+        Objects.requireNonNull(locator, "locator");
+        Objects.requireNonNull(stop, "stop");
         synchronized (chain) {
+            if (locator.isEmpty()) return requestedHeader(stop).map(List::of).orElseGet(List::of);
             BlockIndex tip = chain.activeTip();
             long start = bestActiveLocator(locator).map(lookup::find).map(BlockIndex::height).orElse(0L);
             var answer = new ArrayList<ru.bitcoin.node.protocol.block.BlockHeader>();
@@ -322,23 +390,60 @@ public final class NodeValidationService implements AutoCloseable {
         }
     }
 
+    public record BlockInventory(List<Hash256> hashes) {
+        public BlockInventory { hashes = List.copyOf(hashes); }
+        public boolean reachedLimit() { return hashes.size() == 500; }
+    }
+
+    /** Bounded legacy GETBLOCKS inventory; hashStop is exclusive, unlike GETHEADERS. */
+    public BlockInventory blockInventory(List<Hash256> locator, Hash256 stop) {
+        Objects.requireNonNull(locator, "locator"); Objects.requireNonNull(stop, "stop");
+        synchronized (chain) {
+            BlockIndex tip = chain.activeTip();
+            long start = lookup.find(bestActiveLocator(locator).orElseThrow()).height();
+            long retainedWindow = BlockPruner.MIN_BLOCKS_TO_KEEP - 3600 / parameters.targetSpacingSeconds();
+            var hashes = new ArrayList<Hash256>();
+            long count = Math.min(500, tip.height() - start);
+            if (count > 0) activeAncestors.at(tip, start + count, lookup);
+            for (long offset = 1; offset <= count; offset++) {
+                var index = activeAncestors.at(tip, start + offset, lookup);
+                if (index.hash().equals(stop)) break;
+                if (blockPruner.enabled() && (!availability.hasData(index.hash())
+                        || index.height() <= tip.height() - retainedWindow)) break;
+                hashes.add(index.hash());
+            }
+            return new BlockInventory(hashes);
+        }
+    }
+
+    /** A null GETHEADERS locator asks for hashStop itself, including eligible former tips. */
+    public Optional<ru.bitcoin.node.protocol.block.BlockHeader> requestedHeader(Hash256 hash) {
+        Objects.requireNonNull(hash, "hash");
+        synchronized (chain) {
+            BlockIndex candidate = lookup.find(hash);
+            return candidate != null && blockRequestAllowed(candidate) ? Optional.of(candidate.header()) : Optional.empty();
+        }
+    }
+
     /**
-     * Returns the best active-chain block referenced by a peer locator, or empty when none matches.
+     * Core FindForkInGlobalIndex: first active match, descendant-of-tip shortcut,
+     * then genesis. Locator order is significant, even for an unsorted list.
      */
     public Optional<Hash256> bestActiveLocator(List<Hash256> locator) {
         Objects.requireNonNull(locator, "locator");
         synchronized (chain) {
-            if (locator.isEmpty()) return Optional.empty();
             BlockIndex tip = chain.activeTip();
-            BlockIndex best = null;
             for (Hash256 hash : locator) {
                 BlockIndex candidate = lookup.find(hash);
-                if (candidate == null || candidate.height() > tip.height()
-                        || (best != null && candidate.height() <= best.height())) continue;
-                BlockIndex active = activeAncestors.at(tip, candidate.height(), lookup);
-                if (active.hash().equals(hash)) best = candidate;
+                if (candidate == null) continue;
+                if (candidate.height() <= tip.height()) {
+                    BlockIndex active = activeAncestors.at(tip, candidate.height(), lookup);
+                    if (active.hash().equals(hash)) return Optional.of(hash);
+                } else if (lookup.ancestor(candidate, tip.height()).hash().equals(tip.hash())) {
+                    return Optional.of(tip.hash());
+                }
             }
-            return best == null ? Optional.empty() : Optional.of(best.hash());
+            return Optional.of(activeAncestors.at(tip, 0, lookup).hash());
         }
     }
 
@@ -704,10 +809,28 @@ public final class NodeValidationService implements AutoCloseable {
     /** Serialize header persistence with block activation and failed-branch updates. */
     public List<BlockIndex> processHeaders(HeaderSyncService service,
             ru.bitcoin.node.p2p.message.HeadersMessage message) {
+        return processHeadersWithReception(service, message).indexes();
+    }
+
+    public ru.bitcoin.node.chain.HeaderBatchProcessor.Reception processHeadersWithReception(HeaderSyncService service,
+            ru.bitcoin.node.p2p.message.HeadersMessage message) {
+        return processHeadersWithReception(service, message, () -> { });
+    }
+
+    public ru.bitcoin.node.chain.HeaderBatchProcessor.Reception processHeadersWithReception(HeaderSyncService service,
+            ru.bitcoin.node.p2p.message.HeadersMessage message, Runnable onConnectingResponse) {
         java.util.Objects.requireNonNull(service, "service");
         java.util.Objects.requireNonNull(message, "message");
         synchronized (chain) {
-            return service.process(message);
+            return service.processWithReception(message, ignored -> { }, onConnectingResponse);
+        }
+    }
+
+    /** Network header receipt serialized with block activation and failure metadata. */
+    public HeaderSyncService.PeerReception processPeerHeadersWithReception(HeaderSyncService service,
+            ru.bitcoin.node.p2p.Peer peer, ru.bitcoin.node.p2p.message.HeadersMessage message, Runnable acknowledged) {
+        synchronized (chain) {
+            return service.processPeerWithReception(peer, message, ignored -> { }, acknowledged);
         }
     }
 
@@ -1026,11 +1149,16 @@ public final class NodeValidationService implements AutoCloseable {
             Hash256 backgroundHash = bg == null ? state.normalTipHash() : bg.tipHash();
             return java.util.List.of(
                     new ChainStateInfo(backgroundHeight, backgroundHash, false, true),
-                    new ChainStateInfo(active.height(), active.hash(), true, fullyValidated));
+                    new ChainStateInfo(active.height(), active.hash(), true, fullyValidated, state.snapshotBaseHash()));
         }
     }
 
-    public record ChainStateInfo(long blocks, Hash256 bestBlockHash, boolean snapshot, boolean validated) {}
+    public record ChainStateInfo(long blocks, Hash256 bestBlockHash, boolean snapshot, boolean validated,
+                                 Hash256 snapshotBlockHash) {
+        public ChainStateInfo(long blocks, Hash256 bestBlockHash, boolean snapshot, boolean validated) {
+            this(blocks, bestBlockHash, snapshot, validated, null);
+        }
+    }
 
     /**
      * Stages and verifies a snapshot against the network's trusted AssumeUTXO commitment.
@@ -1095,9 +1223,7 @@ public final class NodeValidationService implements AutoCloseable {
         synchronized (chain) {
             synchronizePool();
             expirePersistent();
-            return mempool.entries().stream()
-                    .filter(entry -> entry.transaction().txId().equals(txid))
-                    .findFirst();
+            return mempool.find(txid);
         }
     }
 
@@ -1964,6 +2090,29 @@ public final class NodeValidationService implements AutoCloseable {
     }
 
     public record BackgroundValidationInfo(String status, long height, Hash256 bestBlockHash) {}
+
+    public record BackgroundValidationReport(long snapshotHeight, long blocks, Hash256 bestBlockHash,
+            long medianTime, java.math.BigInteger chainWork, double verificationProgress) {}
+
+    /** One committed snapshot; completion removes the optional Core RPC object. */
+    public Optional<BackgroundValidationReport> backgroundValidationReport() {
+        // Normal-node status RPC must not wait behind historical block validation.
+        if (snapshotChainStateStore.load().isEmpty()) return Optional.empty();
+        synchronized (chain) {
+            var snapshot = snapshotChainStateStore.load().orElse(null);
+            var state = assumeUtxoBackgroundValidator.state();
+            if (snapshot == null || state == null
+                    || state.status() == ru.bitcoin.node.storage.utxo.RocksDbAssumeUtxoBackgroundStore.Status.VALIDATED)
+                return Optional.empty();
+            var tip = Objects.requireNonNull(lookup.find(state.tipHash()), "Missing background tip");
+            long targetCount = parameters.assumeUtxoForBlock(snapshot.snapshotBaseHash())
+                    .map(NetworkParameters.AssumeUtxoData::chainTxCount).orElse(0L);
+            double progress = state.chainTxCount() == 0 || targetCount == 0 ? 0.0
+                    : (double) state.chainTxCount() / targetCount;
+            return Optional.of(new BackgroundValidationReport(snapshot.snapshotBaseHeight(), state.tipHeight(),
+                    state.tipHash(), MedianTimePast.calculate(tip, lookup), tip.chainWork(), progress));
+        }
+    }
 
     private synchronized void ensureBackgroundValidationWorker() {
         if (snapshotChainStateStore.load().isEmpty() || backgroundValidationStop) return;

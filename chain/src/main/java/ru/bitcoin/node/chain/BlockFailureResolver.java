@@ -29,6 +29,11 @@ public final class BlockFailureResolver {
         return isFailed(index, null);
     }
 
+    /** The explicit invalid-block flag, excluding inherited ancestor failures. */
+    public boolean isDirectlyFailed(Hash256 hash) {
+        return failureStore.isFailed(Objects.requireNonNull(hash, "hash"));
+    }
+
     /**
      * Seeds a durable chain-state anchor that has already been selected as valid.
      * This is primarily used for the persisted best-header tip at startup so the

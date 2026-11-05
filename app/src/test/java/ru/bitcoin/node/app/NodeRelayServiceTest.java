@@ -26,6 +26,30 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class NodeRelayServiceTest {
+    @Test void downloadPermissionServesHeadersBelowMinimumWork() throws Exception {
+        for (boolean download : List.of(false, true)) {
+            var validation = mock(NodeValidationService.class);
+            var sync = mock(NodeSyncInfrastructure.class);
+            var header = ru.bitcoin.node.protocol.block.GenesisBlockFactory.create(NetworkParametersRegistry.regtest()).header();
+            when(validation.headers(anyList(), any())).thenReturn(List.of(header));
+            var peer = mockPeer(); when(peer.isReady()).thenReturn(true);
+            when(peer.hasPermission(PeerPermission.DOWNLOAD)).thenReturn(download);
+            var messages = new AtomicReference<PeerMessageListener>();
+            var responses = new LinkedBlockingQueue<BitcoinMessage>();
+            doAnswer(call -> { messages.set(call.getArgument(0)); return null; }).when(peer).addMessageListener(any());
+            doAnswer(call -> { BitcoinMessage message = call.getArgument(0); if (message.command().equals("headers")) responses.add(message); return null; }).when(peer).send(any());
+            try (var peers = new PeerManager()) {
+                peers.add(peer);
+                try (var relay = new NodeRelayService(validation, sync, peers)) {
+                    messages.get().onMessage(peer, BitcoinMessages.getHeaders(new GetHeadersMessage(70016, List.of(header.hash()), new Hash256(new byte[32]))));
+                    var response = responses.poll(3, TimeUnit.SECONDS); assertNotNull(response);
+                    assertEquals(download ? List.of(header) : List.of(), BitcoinMessages.decodeHeaders(response).headers());
+                    if (!download) verify(validation, never()).headers(anyList(), any());
+                }
+            }
+        }
+    }
+
     @Test void queuedEmptyHeadersCannotReleaseAdmissionForANewerRequestAgain() throws Exception {
         var validation = mock(NodeValidationService.class);
         var sync = mock(NodeSyncInfrastructure.class);
@@ -50,6 +74,7 @@ class NodeRelayServiceTest {
     @Test
     void recoveryUsesValidatedNewHeadersAndTracksDownloadsAndTipUpdates() throws Exception {
         var validation = mock(NodeValidationService.class);
+        when(validation.networkParameters()).thenReturn(NetworkParametersRegistry.regtest());
         var sync = mock(NodeSyncInfrastructure.class);
         var lookup = mock(ru.bitcoin.node.chain.BlockIndexLookup.class);
         when(sync.blockIndexLookup()).thenReturn(lookup);
@@ -65,14 +90,25 @@ class NodeRelayServiceTest {
         when(sync.blockLocatorBuilder()).thenReturn(locators);
         when(locators.build(tip)).thenReturn(List.of(header.hash()));
         var indexed = new java.util.concurrent.atomic.AtomicBoolean();
+        var failedBranch = new java.util.concurrent.atomic.AtomicBoolean();
+        when(sync.downloadBlockFailed(announced)).thenAnswer(call -> failedBranch.get());
         when(lookup.find(header.hash())).thenAnswer(call -> indexed.get() ? announced : null);
         var processed = new CountDownLatch(2);
-        when(validation.processHeaders(any(), any())).thenAnswer(call -> {
-            indexed.set(true); processed.countDown(); return List.of(announced);
+        when(validation.processPeerHeadersWithReception(any(), any(), any(), any())).thenAnswer(call -> {
+            ((Runnable) call.getArgument(3)).run();
+            boolean fresh = !indexed.getAndSet(true);
+            processed.countDown(); return new HeaderSyncService.PeerReception(
+                    new ru.bitcoin.node.chain.HeaderBatchProcessor.Reception(List.of(announced), fresh), List.of(), false);
         });
         var scheduler = mock(ru.bitcoin.node.p2p.sync.BlockDownloadScheduler.class);
         var peer = mockPeer();
         when(peer.isReady()).thenReturn(true);
+        var lastAnnouncement = new AtomicReference<Hash256>();
+        when(peer.lastBlockAnnouncement()).thenAnswer(call -> lastAnnouncement.get());
+        var downloading = new java.util.concurrent.atomic.AtomicBoolean();
+        when(scheduler.blocksInFlight()).thenAnswer(call -> downloading.get());
+        when(scheduler.blocksInFlight(peer)).thenAnswer(call -> downloading.get());
+        when(validation.downloadInitialBlockDownload()).thenReturn(true);
         var messages = new AtomicReference<PeerMessageListener>();
         doAnswer(call -> { messages.set(call.getArgument(0)); return null; }).when(peer).addMessageListener(any());
         try (var peers = new PeerManager()) {
@@ -81,11 +117,11 @@ class NodeRelayServiceTest {
                 var view = relay.outboundRecoveryView();
                 assertFalse(view.hasTipWork(peer));
                 indexed.set(true);
-                when(peer.lastBlockAnnouncement()).thenReturn(header.hash());
+                lastAnnouncement.set(header.hash());
                 assertTrue(view.hasTipWork(peer));
                 assertFalse(view.protectedFromChainSync(peer), "Known inventory alone must not assign protection");
                 indexed.set(false);
-                when(peer.lastBlockAnnouncement()).thenReturn(null);
+                lastAnnouncement.set(null);
                 var announcement = BitcoinMessages.headers(new HeadersMessage(List.of(header)));
                 messages.get().onMessage(peer, announcement);
                 messages.get().onMessage(peer, announcement);
@@ -96,18 +132,16 @@ class NodeRelayServiceTest {
                 while (!view.protectedFromChainSync(peer) && System.nanoTime() < protectionDeadline) Thread.sleep(5);
                 assertTrue(view.protectedFromChainSync(peer));
                 assertEquals(java.math.BigInteger.TEN, view.chainWork(peer).peerWork());
-                when(sync.downloadBlockFailed(announced)).thenReturn(true);
+                failedBranch.set(true);
                 assertFalse(view.hasTipWork(peer), "Failed header branches must not count as currently available work");
                 assertNull(view.chainWork(peer).peerWork());
-                when(sync.downloadBlockFailed(announced)).thenReturn(false);
+                failedBranch.set(false);
                 assertFalse(view.blocksInFlight());
-                when(scheduler.blocksInFlight()).thenReturn(true);
-                when(scheduler.blocksInFlight(peer)).thenReturn(true);
+                downloading.set(true);
                 assertTrue(view.blocksInFlight());
                 assertTrue(view.blocksInFlight(peer));
                 var block = mock(Block.class);
                 when(block.transactions()).thenReturn(List.of());
-                when(validation.downloadInitialBlockDownload()).thenReturn(true);
                 assertEquals(0, view.lastTipUpdateSeconds());
                 relay.onConnectedBlock(block, peer);
                 assertTrue(view.lastTipUpdateSeconds() > 0);
@@ -317,7 +351,7 @@ class NodeRelayServiceTest {
         var validation = mock(NodeValidationService.class);
         var sync = mock(NodeSyncInfrastructure.class);
         Block historical = ru.bitcoin.node.protocol.block.GenesisBlockFactory.create(NetworkParametersRegistry.regtest());
-        when(validation.findBlock(historical.hash())).thenReturn(Optional.of(historical));
+        when(validation.requestedBlock(eq(historical.hash()), anyLong())).thenReturn(Optional.of(new NodeValidationService.BlockResponse(historical, false)));
         var peer = mockPeer();
         when(peer.isReady()).thenReturn(true);
         var incoming = new AtomicReference<PeerMessageListener>();
@@ -448,7 +482,7 @@ class NodeRelayServiceTest {
                 var served = take(requests);
                 assertEquals("tx", served.command());
                 assertArrayEquals(TransactionSerializer.serialize(child), served.payload());
-                var unknown = new InventoryVector(InventoryVector.MSG_WITNESS_BLOCK, new Hash256(new byte[32]));
+                var unknown = new InventoryVector(InventoryVector.MSG_WITNESS_TX, new Hash256(new byte[32]));
                 incoming.get().onMessage(source, BitcoinMessages.getData(new GetDataMessage(List.of(unknown))));
                 assertEquals(List.of(unknown), BitcoinMessages.decodeNotFound(take(requests)).inventory());
             }

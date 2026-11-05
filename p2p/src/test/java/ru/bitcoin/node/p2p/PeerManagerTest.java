@@ -218,7 +218,7 @@ class PeerManagerTest {
     }
 
     @Test
-    void protocolCloseRetainsEndpointAndRemovesPeerBeforeDiscouragement() throws Exception {
+    void protocolCloseRetainsEndpointAndRemovesLocalPeerWithoutDiscouragement() throws Exception {
         try (var server = new java.net.ServerSocket(0);
              var client = new java.net.Socket("127.0.0.1", server.getLocalPort());
              var connection = new PeerConnection(PARAMETERS);
@@ -232,7 +232,7 @@ class PeerManagerTest {
             assertTrue(manager.isEmpty());
             assertEquals(endpoint, peer.remoteAddress());
             assertEquals(PeerConnectionRole.FULL_RELAY, snapshot.getFirst().role());
-            assertTrue(manager.discouragementManager().isDiscouraged(endpoint.getAddress()));
+            assertFalse(manager.discouragementManager().isDiscouraged(endpoint.getAddress()));
         }
     }
 

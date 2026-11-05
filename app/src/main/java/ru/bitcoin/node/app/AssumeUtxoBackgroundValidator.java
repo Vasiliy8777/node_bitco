@@ -114,7 +114,8 @@ final class AssumeUtxoBackgroundValidator {
                 validationStatus.markScriptsValid(batch, e.getKey());
             }
             progress.save(batch, new RocksDbAssumeUtxoBackgroundStore.State(
-                    RocksDbAssumeUtxoBackgroundStore.Status.RUNNING, next.hash(), next.height()));
+                    RocksDbAssumeUtxoBackgroundStore.Status.RUNNING, next.hash(), next.height(),
+                    state.chainTxCount() == 0 ? 0 : Math.addExact(state.chainTxCount(), block.transactions().size())));
             db.write(batch);
         }
         return next.height() == snap.snapshotBaseHeight()

@@ -69,6 +69,18 @@ public final class BlockHeaderValidator {
             );
         }
 
+        // Core checks PoW and required difficulty before contextual timestamp
+        // rejection. Invalid work must not acquire the non-punishable future reason.
+        if (checkProofOfWork && !ProofOfWork.isValid(header, parameters)) {
+            throw new BlockHeaderValidationException("Invalid proof of work");
+        }
+        if (header.bits().value() != expectedBits.value()) {
+            throw new BlockHeaderValidationException(
+                    "Unexpected difficulty bits. Expected: 0x"
+                            + Long.toHexString(expectedBits.value())
+                            + ", actual: 0x" + Long.toHexString(header.bits().value()));
+        }
+
         /*
          * Bitcoin requires:
          *
@@ -108,44 +120,10 @@ public final class BlockHeaderValidator {
                 > maximumAllowedTimestamp) {
 
             throw new BlockHeaderValidationException(
-                    "Block timestamp is too far in the future"
+                    "Block timestamp is too far in the future",
+                    BlockHeaderValidationException.Reason.TIME_FUTURE
             );
         }
 
-        /*
-         * nBits must exactly match the difficulty
-         * required by the active chain.
-         */
-        if (header.bits().value()
-                != expectedBits.value()) {
-
-            throw new BlockHeaderValidationException(
-                    "Unexpected difficulty bits. "
-                            + "Expected: 0x"
-                            + Long.toHexString(
-                            expectedBits.value()
-                    )
-                            + ", actual: 0x"
-                            + Long.toHexString(
-                            header.bits().value()
-                    )
-            );
-        }
-
-        /*
-         * ProofOfWork also checks:
-         *
-         * target > 0
-         * target <= network powLimit
-         * hash <= target
-         */
-        if (checkProofOfWork && !ProofOfWork.isValid(
-                header,
-                parameters
-        )) {
-            throw new BlockHeaderValidationException(
-                    "Invalid proof of work"
-            );
-        }
     }
 }

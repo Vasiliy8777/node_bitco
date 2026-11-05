@@ -37,6 +37,14 @@ final class TxRelayState {
             new LinkedHashMap<>();
 
     private long nextInventorySendNanos;
+    private boolean mempoolRequested;
+
+    synchronized void requestMempool() { mempoolRequested = true; }
+    synchronized boolean mempoolRequested() { return mempoolRequested; }
+    synchronized void completeMempoolRequest() {
+        mempoolRequested = false;
+        pending.clear();
+    }
 
     record PendingAnnouncement(
             Hash256 txId,

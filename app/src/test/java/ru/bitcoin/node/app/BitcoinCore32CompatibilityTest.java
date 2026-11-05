@@ -59,6 +59,30 @@ class BitcoinCore32CompatibilityTest {
                         var referenceDoc = json.readValue(core("getopenrpcinfo"), Map.class);
                         var javaDoc = (Map<?, ?>) call(client, uri, "getopenrpcinfo", List.of());
                         assertEquals(referenceDoc.get("openrpc"), javaDoc.get("openrpc"));
+                        String inventoryPath = System.getProperty("bitcoin.core.rpc.inventory");
+                        if (inventoryPath != null) {
+                            var fullReferenceDoc = json.readValue(core("getopenrpcinfo", "true"), Map.class);
+                            var referenceNames = rpcNames(fullReferenceDoc);
+                            var implementedNames = rpcNames(javaDoc);
+                            var missing = new TreeSet<>(referenceNames); missing.removeAll(implementedNames);
+                            var additional = new TreeSet<>(implementedNames); additional.removeAll(referenceNames);
+                            var missingByCategory = new TreeMap<String, SortedSet<String>>();
+                            for (Object entry : (List<?>) fullReferenceDoc.get("methods")) {
+                                var method = (Map<?, ?>) entry;
+                                String name = (String) method.get("name");
+                                if (missing.contains(name)) missingByCategory.computeIfAbsent(
+                                        String.valueOf(method.get("x-bitcoin-category")), ignored -> new TreeSet<>()).add(name);
+                            }
+                            assertTrue(additional.isEmpty(), "Local method names absent even from Core's hidden catalog: " + additional);
+                            Path output = Path.of(inventoryPath);
+                            Files.createDirectories(output.toAbsolutePath().getParent());
+                            Files.writeString(output, json.writeValueAsString(Map.of(
+                                    "referenceVersion", version.get("version"),
+                                    "scope", "RPC method names including hidden and wallet methods; schemas and behavior are not implied",
+                                    "referenceMethods", referenceNames, "implementedMethods", implementedNames,
+                                    "missingMethods", missing, "additionalMethods", additional,
+                                    "missingByCategory", missingByCategory)));
+                        }
                         assertEquals(javaDoc, call(client, uri, "rpc.discover", List.of()));
                         assertEquals(call(client, URI.create("http://127.0.0.1:" + rpcPort), "getmempoolfeeratediagram", List.of()),
                                 call(client, uri, "getmempoolfeeratediagram", List.of()), "empty mempool includes the origin");
@@ -81,6 +105,7 @@ class BitcoinCore32CompatibilityTest {
                         assertNotNull(validation.estimateFee("block_policy", 2, false).satoshisPerKvB());
                         assertEquals("mempool_policy", validation.estimateFee("auto", 2, false).estimator());
                         compareSharedParentCluster(client, uri, validation);
+                        compareOversizedReplacement(client, uri, validation);
                         core("stop");
                         assertTrue(core.waitFor(15, TimeUnit.SECONDS));
                         var nativeStatistics = new MempoolFeeEstimator();
@@ -98,6 +123,12 @@ class BitcoinCore32CompatibilityTest {
             try { core("stop"); } catch (Exception ignored) { }
             if (!core.waitFor(15, TimeUnit.SECONDS)) { core.destroyForcibly(); core.waitFor(5, TimeUnit.SECONDS); }
         }
+    }
+
+    private static SortedSet<String> rpcNames(Map<?, ?> document) {
+        var names = new TreeSet<String>();
+        for (Object method : (List<?>) document.get("methods")) names.add((String) ((Map<?, ?>) method).get("name"));
+        return names;
     }
 
     private void importBlocks(NodeValidationService validation, int first, int last) throws Exception {
@@ -128,6 +159,51 @@ class BitcoinCore32CompatibilityTest {
         assertEquals(call(client, reference, "getmempoolfeeratediagram", List.of()),
                 call(client, uri, "getmempoolfeeratediagram", List.of()));
         assertEquals(true, ((Map<?, ?>) call(client, uri, "getmempoolinfo", List.of())).get("optimal"));
+    }
+
+    private void compareOversizedReplacement(HttpClient client, URI uri, NodeValidationService validation) throws Exception {
+        URI reference = URI.create("http://127.0.0.1:" + rpcPort);
+        var coins = ((List<?>) call(client, reference, "listunspent", List.of())).stream()
+                .map(value -> (Map<?, ?>) value)
+                .filter(coin -> new java.math.BigDecimal(coin.get("amount").toString()).compareTo(java.math.BigDecimal.ONE) > 0)
+                .limit(3).toList();
+        assertEquals(3, coins.size());
+        String destination = core("getnewaddress").strip();
+        String script = ((Map<?, ?>) call(client, reference, "getaddressinfo", List.of(destination))).get("scriptPubKey").toString();
+        var fee = new java.math.BigDecimal("0.00001000");
+        var originalCoin = coins.getFirst();
+        broadcastSpend(client, validation, originalCoin.get("txid").toString(), ((Number) originalCoin.get("vout")).intValue(),
+                Map.of(destination, new java.math.BigDecimal(originalCoin.get("amount").toString()).subtract(fee)));
+        var inputs = new ArrayList<Map<String, Object>>();
+        var previousOutputs = new ArrayList<Map<String, Object>>();
+        inputs.add(Map.of("txid", originalCoin.get("txid"), "vout", originalCoin.get("vout")));
+        previousOutputs.add(Map.of("txid", originalCoin.get("txid"), "vout", originalCoin.get("vout"),
+                "amount", originalCoin.get("amount"), "scriptPubKey", originalCoin.get("scriptPubKey")));
+        var amount = new java.math.BigDecimal(originalCoin.get("amount").toString());
+        for (int branch = 1; branch <= 2; branch++) {
+            var coin = coins.get(branch); String parent = coin.get("txid").toString();
+            int output = ((Number) coin.get("vout")).intValue();
+            var value = new java.math.BigDecimal(coin.get("amount").toString());
+            for (int depth = 0; depth < 32; depth++) {
+                value = value.subtract(fee);
+                parent = broadcastSpend(client, validation, parent, output, Map.of(destination, value)); output = 0;
+            }
+            inputs.add(Map.of("txid", parent, "vout", output));
+            previousOutputs.add(Map.of("txid", parent, "vout", output, "amount", value, "scriptPubKey", script));
+            amount = amount.add(value);
+        }
+        String raw = (String) call(client, reference, "createrawtransaction", List.of(inputs,
+                Map.of(destination, amount.subtract(new java.math.BigDecimal("0.00100000")))));
+        var signed = (Map<?, ?>) call(client, reference, "signrawtransactionwithwallet", List.of(raw, previousOutputs));
+        assertEquals(true, signed.get("complete"));
+        var params = List.of(List.of(signed.get("hex")));
+        var expected = (Map<?, ?>) ((List<?>) call(client, reference, "testmempoolaccept", params)).getFirst();
+        var before = call(client, uri, "getrawmempool", List.of());
+        var actual = (Map<?, ?>) ((List<?>) call(client, uri, "testmempoolaccept", params)).getFirst();
+        assertEquals(false, expected.get("allowed")); assertEquals("too-large-cluster", expected.get("reject-reason"));
+        assertEquals(expected.get("allowed"), actual.get("allowed"));
+        assertEquals(expected.get("reject-reason"), actual.get("reject-reason"));
+        assertEquals(before, call(client, uri, "getrawmempool", List.of()), "Rejected replacement must not mutate the pool");
     }
 
     private String broadcastSpend(HttpClient client, NodeValidationService validation, String parent, int output, Map<String, java.math.BigDecimal> outputs) throws Exception {

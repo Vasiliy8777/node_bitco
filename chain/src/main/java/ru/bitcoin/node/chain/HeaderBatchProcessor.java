@@ -2,6 +2,7 @@ package ru.bitcoin.node.chain;
 
 import ru.bitcoin.node.chain.storage.KnownHeaderStorage;
 import ru.bitcoin.node.common.types.Hash256;
+import ru.bitcoin.node.consensus.block.BlockHeaderValidationException;
 import ru.bitcoin.node.protocol.block.BlockHeader;
 
 import java.util.ArrayList;
@@ -52,12 +53,38 @@ public final class HeaderBatchProcessor {
             List<BlockHeader> headers,
             Consumer<BlockIndex> onValidatedHeader
     ) {
+        return processWithReception(headers, onValidatedHeader).indexes();
+    }
+
+    /** Metadata is published only after the complete batch has durably committed. */
+    public record Reception(List<BlockIndex> indexes, boolean lastHeaderNew) {
+        public Reception { indexes = List.copyOf(indexes); }
+    }
+
+    public Reception processWithReception(List<BlockHeader> headers, Consumer<BlockIndex> onValidatedHeader,
+                                          Runnable onConnectingResponse) {
+        java.util.Objects.requireNonNull(headers, "headers");
+        java.util.Objects.requireNonNull(onConnectingResponse, "onConnectingResponse");
+
+        // Core releases GETHEADERS ownership after whole-message PoW/continuity
+        // and parent connection, before contextual or cached-invalid rejection.
+        for (int i = 0; i < headers.size(); i++) {
+            headerProcessor.validateClaimedProofOfWork(headers.get(i));
+            if (i > 0 && !headers.get(i).previousBlockHash().equals(headers.get(i - 1).hash()))
+                throw new IllegalArgumentException("Non-continuous headers response");
+        }
+        if (!headers.isEmpty() && headerProcessor.baseLookup().find(headers.getFirst().previousBlockHash()) != null)
+            onConnectingResponse.run();
+        return processWithReception(headers, onValidatedHeader);
+    }
+
+    public Reception processWithReception(List<BlockHeader> headers, Consumer<BlockIndex> onValidatedHeader) {
         if (headers == null) throw new IllegalArgumentException("headers must not be null");
         if (headers.stream().anyMatch(header -> header == null)) {
             throw new IllegalArgumentException("headers must not contain null");
         }
         if (onValidatedHeader == null) throw new IllegalArgumentException("onValidatedHeader must not be null");
-        if (headers.isEmpty()) return List.of();
+        if (headers.isEmpty()) return new Reception(List.of(), false);
 
         Map<Hash256, BlockIndex> overlay = new HashMap<>(Math.max(16, headers.size() * 2));
         Map<Hash256, BlockIndex> readCache = new HashMap<>(64);
@@ -101,8 +128,24 @@ public final class HeaderBatchProcessor {
         BlockIndex initialBest = headerChainState.bestHeaderTip();
         BlockIndex candidateBest = initialBest;
         BlockIndex previousBatchNew = null;
+        boolean lastHeaderNew = false;
 
         for (BlockHeader header : headers) {
+            // Core AcceptBlockHeader distinguishes explicit failure from failed ancestry:
+            // known descendants remain known headers, but explicitly invalid duplicates
+            // and new children of explicitly invalid parents must not be acknowledged.
+            if (failureResolver != null) {
+                BlockIndex existing = effectiveLookup.find(header.hash());
+                if (existing != null && failureResolver.isDirectlyFailed(existing.hash())) {
+                    throw new BlockHeaderValidationException(
+                            "duplicate-invalid: block was previously marked invalid",
+                            BlockHeaderValidationException.Reason.CACHED_INVALID);
+                }
+                if (existing == null && failureResolver.isDirectlyFailed(header.previousBlockHash())) {
+                    throw new BlockHeaderValidationException(
+                            "bad-prevblk: previous block was marked invalid");
+                }
+            }
             HeaderProcessor.ProcessResult result;
             if (previousBatchNew != null
                     && header.previousBlockHash().equals(previousBatchNew.hash())
@@ -113,6 +156,7 @@ public final class HeaderBatchProcessor {
                 result = headerProcessor.processDetailed(header, effectiveLookup);
             }
             BlockIndex index = result.index();
+            lastHeaderNew = result.newlyCreated();
 
             if (result.newlyCreated()) {
                 overlay.put(index.hash(), index);
@@ -153,6 +197,6 @@ public final class HeaderBatchProcessor {
             }
         }
 
-        return List.copyOf(processed);
+        return new Reception(processed, lastHeaderNew);
     }
 }

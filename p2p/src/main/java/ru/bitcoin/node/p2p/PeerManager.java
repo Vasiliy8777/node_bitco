@@ -118,9 +118,9 @@ public final class PeerManager
             roles.remove(peer);
             chainSyncProtected.remove(peer);
         }
-        if (isProtocolViolation(cause)) {
+        if (isProtocolViolation(cause) && !peer.hasPermission(PeerPermission.NOBAN) && !peer.isManualConnection()) {
             java.net.InetSocketAddress remote = peer.remoteAddress();
-            if (remote != null && remote.getAddress() != null) {
+            if (remote != null && remote.getAddress() != null && !EvictionNetGroup.local(remote.getAddress())) {
                 discouragementManager.discourage(remote.getAddress());
             }
         }

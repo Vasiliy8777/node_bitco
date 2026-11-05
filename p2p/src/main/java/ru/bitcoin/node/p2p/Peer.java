@@ -13,6 +13,10 @@ import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 public final class Peer implements AutoCloseable {
+    private final PeerAccess access;
+    public boolean hasPermission(PeerPermission permission) { return access.permissions().contains(permission); }
+    public boolean isManualConnection() { return access.manual(); }
+    public java.util.Set<PeerPermission> permissions() { return access.permissions(); }
     private final List<PeerMessageListener> messageListeners = new CopyOnWriteArrayList<>();
 
     public void addMessageListener(PeerMessageListener listener) {
@@ -44,7 +48,7 @@ public final class Peer implements AutoCloseable {
     private IOException closeCause;
     private final PeerHeaderRequestGate headerRequestGate = new PeerHeaderRequestGate();
 
-    /** Only empty or successfully validated connecting HEADERS responses may call this. */
+    /** Empty replies, or connecting HEADERS that passed whole-message PoW/continuity checks. */
     public void headersResponseValidated() { headerRequestGate.responded(); }
 
     public boolean trySendGetHeaders(GetHeadersMessage request) throws IOException {
@@ -98,6 +102,8 @@ public final class Peer implements AutoCloseable {
     public long connectionEstablishedAtMicros() { return connection.establishedAtMicros(); }
     private volatile boolean v2Fallback;
     private final long localServices;
+    /** Services offered to this connection; fixed for its lifetime. */
+    public long localServices() { return localServices; }
     private final int startHeight;
     private final boolean relay;
     private final long localNonce;
@@ -152,6 +158,16 @@ public final class Peer implements AutoCloseable {
             boolean relay,
             long localNonce
     ) {
+        this(connection, localServices, startHeight, relay, localNonce, PeerAccess.ordinary());
+    }
+
+    public Peer(PeerConnection connection, long localServices, int startHeight, boolean relay, PeerAccess access) {
+        this(connection, localServices, startHeight, relay, RANDOM.nextLong(), access);
+    }
+
+    private Peer(PeerConnection connection, long localServices, int startHeight, boolean relay,
+                 long localNonce, PeerAccess access) {
+        this.access = java.util.Objects.requireNonNull(access);
         if (connection == null) {
             throw new IllegalArgumentException(
                     "connection must not be null"
@@ -680,6 +696,10 @@ public final class Peer implements AutoCloseable {
         return connection.remoteAddress();
     }
 
+    public InetSocketAddress localAddress() {
+        return connection.localAddress();
+    }
+
     public VersionMessage remoteVersion() {
         if (remoteVersion == null) {
             throw new IllegalStateException(
@@ -1062,6 +1082,7 @@ public final class Peer implements AutoCloseable {
      * violation cause for connection-management policy.
      */
     public void disconnectForProtocolViolation(String message, Throwable cause) {
+        if (hasPermission(PeerPermission.NOBAN) || isManualConnection()) return;
         PeerProtocolException protocolFailure = cause instanceof PeerProtocolException p
                 ? p
                 : new PeerProtocolException(message, cause);

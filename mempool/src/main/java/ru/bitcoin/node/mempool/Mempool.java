@@ -21,6 +21,7 @@ public final class Mempool {
     private final Map<Hash256, MempoolEntry> entries = new LinkedHashMap<>();
     private final ClusterDiagramCache clusterDiagramCache = new ClusterDiagramCache();
     private final Map<OutPoint, Hash256> spent = new HashMap<>();
+    private long totalVirtualBytes;
     private final Map<Hash256, Long> feeDeltas = new LinkedHashMap<>();
     private final Set<Hash256> unbroadcast = new LinkedHashSet<>();
     /** Monotonic transaction-set mutation sequence used by getrawmempool. */
@@ -102,15 +103,21 @@ public final class Mempool {
         var entry = new MempoolEntry(transaction, fee, weight, arrivalTime, sigops, feeDelta, admissionHeight);
         if (!packageMode && entry.modifiedFee() < new FeeRate(minimumFeeRate()).feeForVSize(entry.virtualSize())) throw new MempoolAdmissionException("mempool-min-fee");
         MempoolGraphPolicy.replacement(entries, conflicts, evicted, entry, limits);
-        // Revalidation builds an isolated replacement pool. With no conflicts all
-        // fallible checks are complete, and package mode defers capacity trimming
-        // to the reconciliation boundary. Append without copying/scanning the pool
-        // for every transaction. Keep the ordinary RBF path for resurrection conflicts.
-        if (packageMode && bypassLimits && conflicts.isEmpty()) {
-            entries.put(txId, entry);
-            for (var input : transaction.inputs()) spent.put(input.previousOutput(), txId);
-            sequence++;
-            return entry;
+        // Conflict-free additions only affect their connected component.
+        // Preserve staged RBF/eviction and the package capacity boundary.
+        if (conflicts.isEmpty()) {
+            if (!bypassLimits) MempoolGraphPolicy.checkLimits(
+                    MempoolGraphPolicy.additionCluster(entries, spent, entry, limits.clusterCount()), txId, limits);
+            long proposedSize = Math.addExact(totalVirtualBytes, entry.virtualSize());
+            // No removal or eviction is needed. All validation precedes commit;
+            // package admission retains its existing deferred-capacity boundary.
+            if (packageMode || proposedSize <= limits.maxPoolVirtualBytes()) {
+                entries.put(txId, entry);
+                for (var input : transaction.inputs()) spent.put(input.previousOutput(), txId);
+                totalVirtualBytes = proposedSize;
+                sequence++;
+                return entry;
+            }
         }
         Map<Hash256, MempoolEntry> candidate = new LinkedHashMap<>(entries);
         evicted.forEach(candidate::remove);
@@ -287,6 +294,7 @@ public final class Mempool {
         }
         for (Hash256 id : removed) {
             MempoolEntry entry = entries.remove(id);
+            totalVirtualBytes = Math.subtractExact(totalVirtualBytes, entry.virtualSize());
             for (var input : entry.transaction().inputs()) spent.remove(input.previousOutput(), id);
         }
         unbroadcast.retainAll(entries.keySet());
@@ -330,6 +338,7 @@ public final class Mempool {
         unbroadcast.retainAll(entries.keySet());
         spent.clear();
         spent.putAll(replacement.spent);
+        totalVirtualBytes = entries.values().stream().mapToLong(MempoolEntry::virtualSize).sum();
         rollingFee.blockConnected(clock.instant().getEpochSecond());
         if (!removed.isEmpty()) sequence++;
         return List.copyOf(removed);
@@ -551,12 +560,14 @@ public final class Mempool {
 
     private void rebuildSpent() {
         spent.clear();
-        for (var entry : entries.values()) for (var input : entry.transaction().inputs()) {
-            spent.put(input.previousOutput(), entry.transaction().txId());
+        totalVirtualBytes = 0;
+        for (var entry : entries.values()) {
+            totalVirtualBytes = Math.addExact(totalVirtualBytes, entry.virtualSize());
+            for (var input : entry.transaction().inputs()) spent.put(input.previousOutput(), entry.transaction().txId());
         }
     }
     public synchronized long minimumFeeRate() {
-        return rollingFee.get(clock.instant().getEpochSecond(), entries.values().stream().mapToLong(MempoolEntry::virtualSize).sum(),
+        return rollingFee.get(clock.instant().getEpochSecond(), totalVirtualBytes,
                 limits.maxPoolVirtualBytes(), limits.incrementalRelaySatPerKvB());
     }
 

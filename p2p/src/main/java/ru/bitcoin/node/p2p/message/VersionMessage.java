@@ -8,6 +8,8 @@ public final class VersionMessage {
     public static final int SHORT_IDS_BLOCKS_VERSION = 70014;
 
     public static final long NODE_NETWORK = 1L << 0;
+    /** BIP37 Bloom filtering. Not offered by this implementation. */
+    public static final long NODE_BLOOM = 1L << 2;
     public static final long NODE_WITNESS = 1L << 3;
     /** BIP157: node serves BIP158 basic compact block filters. */
     public static final long NODE_COMPACT_FILTERS = 1L << 6;

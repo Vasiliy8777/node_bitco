@@ -9,6 +9,7 @@ public final class GetHeadersMessage {
     public static final int MAX_LOCATOR_HASHES = 101;
 
     private final int protocolVersion;
+    // Empty is the protocol's null locator: request hashStop itself.
     private final List<Hash256> locatorHashes;
     private final Hash256 stopHash;
 
@@ -20,12 +21,6 @@ public final class GetHeadersMessage {
         if (locatorHashes == null) {
             throw new IllegalArgumentException(
                     "locatorHashes must not be null"
-            );
-        }
-
-        if (locatorHashes.isEmpty()) {
-            throw new IllegalArgumentException(
-                    "locatorHashes must not be empty"
             );
         }
 

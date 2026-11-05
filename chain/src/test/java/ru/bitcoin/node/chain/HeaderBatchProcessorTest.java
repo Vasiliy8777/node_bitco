@@ -33,6 +33,45 @@ class HeaderBatchProcessorTest {
     Path tempDirectory;
 
     @Test
+    void rejectsExplicitFailuresButPreservesKnownDescendantsAndReconsideration() {
+        try (RocksDbDatabase database = new RocksDbDatabase(tempDirectory.resolve("failed-headers"))) {
+            var store = new RocksDbBlockIndexStore(database);
+            var stateStore = new RocksDbChainStateStore(database);
+            var failures = new ru.bitcoin.node.storage.block.RocksDbBlockFailureStore(database);
+            var genesis = createGenesisIndex();
+            store.save(BlockIndexStorageMapper.toStored(genesis));
+            stateStore.saveBestHeaderTipHash(genesis.hash());
+            var lookup = new StoredBlockIndexLookup(store);
+            var state = new HeaderChainState(genesis);
+            var processor = new HeaderBatchProcessor(new HeaderProcessor(lookup, REGTEST, TEST_TIME),
+                    state, new KnownHeaderStorage(database, store, stateStore),
+                    new BlockFailureResolver(lookup, failures));
+            var first = findValidHeader(genesis.hash(), 1_700_000_001L);
+            var knownChild = findValidHeader(first.hash(), 1_700_000_002L);
+            processor.process(List.of(first, knownChild));
+            failures.markFailed(first.hash());
+            var duplicate = org.junit.jupiter.api.Assertions.assertThrows(
+                    ru.bitcoin.node.consensus.block.BlockHeaderValidationException.class,
+                    () -> processor.process(List.of(first)));
+            assertTrue(duplicate.getMessage().startsWith("duplicate-invalid"));
+            var newChild = findValidHeader(first.hash(), 1_700_000_003L);
+            var prefix = findValidHeader(genesis.hash(), 1_700_000_004L);
+            var callbacks = new java.util.ArrayList<BlockIndex>();
+            var invalidParent = org.junit.jupiter.api.Assertions.assertThrows(
+                    ru.bitcoin.node.consensus.block.BlockHeaderValidationException.class,
+                    () -> processor.process(List.of(prefix, newChild), callbacks::add));
+            assertTrue(invalidParent.getMessage().startsWith("bad-prevblk"));
+            assertEquals(1, callbacks.size());
+            assertTrue(store.find(prefix.hash()).isEmpty());
+            assertTrue(store.find(newChild.hash()).isEmpty());
+            assertEquals(knownChild.hash(), processor.process(List.of(knownChild)).getFirst().hash());
+            failures.clearFailed(first.hash());
+            assertEquals(first.hash(), processor.process(List.of(first)).getFirst().hash());
+            assertEquals(newChild.hash(), processor.process(List.of(newChild)).getFirst().hash());
+        }
+    }
+
+    @Test
     void shouldProcessAndPersistSequentialHeaders() {
 
         Path databasePath =

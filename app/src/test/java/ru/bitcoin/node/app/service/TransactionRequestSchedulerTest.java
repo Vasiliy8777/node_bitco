@@ -12,6 +12,22 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.mock;
 
 class TransactionRequestSchedulerTest {
+    @Test void relayPermissionBypassesAnnouncementCapsWithoutRemovingDownloadWindows() {
+        var scheduler = new TransactionRequestScheduler();
+        var ordinary = mock(Peer.class);
+        var trusted = mock(Peer.class);
+        org.mockito.Mockito.when(trusted.hasPermission(ru.bitcoin.node.p2p.PeerPermission.RELAY)).thenReturn(true);
+        int count = TransactionRequestScheduler.MAX_CANDIDATES + 1;
+        for (int i = 0; i < count; i++) {
+            scheduler.announced(ordinary, new InventoryVector(5, hash(i)), 0);
+            scheduler.announced(trusted, new InventoryVector(5, hash(i + count)), 0);
+        }
+        assertEquals(count + TransactionRequestScheduler.MAX_CANDIDATES_PER_PEER, scheduler.candidateCount());
+        var requests = scheduler.schedule(1, ignored -> true);
+        assertEquals(2 * TransactionRequestScheduler.MAX_IN_FLIGHT_PER_PEER, requests.size());
+        assertEquals(TransactionRequestScheduler.MAX_IN_FLIGHT_PER_PEER,
+                requests.stream().filter(request -> request.peer() == trusted).count());
+    }
 
     @Test
     void sharesFullWindowAndRotatesAcrossSingleSlotRefills() {

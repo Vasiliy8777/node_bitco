@@ -47,7 +47,10 @@ class HeaderSyncCoordinatorTest {
         var message = new HeadersMessage(List.of(genesis.header()));
         org.mockito.Mockito.when(locators.build(genesis)).thenReturn(List.of(genesis.hash()));
         org.mockito.Mockito.when(transport.download(org.mockito.ArgumentMatchers.anyList(), org.mockito.ArgumentMatchers.any())).thenReturn(message);
-        org.mockito.Mockito.when(service.process(org.mockito.ArgumentMatchers.eq(message), org.mockito.ArgumentMatchers.any())).thenReturn(List.of(genesis));
+        org.mockito.Mockito.when(service.processWithReception(org.mockito.ArgumentMatchers.eq(message), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any())).thenAnswer(call -> {
+            ((Runnable) call.getArgument(2)).run();
+            return new ru.bitcoin.node.chain.HeaderBatchProcessor.Reception(List.of(genesis), false);
+        });
         var observed = new java.util.concurrent.atomic.AtomicReference<List<BlockIndex>>();
         var coordinator = new HeaderSyncCoordinator(transport, service, new HeaderChainState(genesis), locators)
                 .onValidatedBatch(observed::set);
@@ -65,11 +68,12 @@ class HeaderSyncCoordinatorTest {
         org.mockito.Mockito.when(locators.build(genesis)).thenReturn(List.of(genesis.hash()));
         org.mockito.Mockito.when(transport.download(org.mockito.ArgumentMatchers.anyList(), org.mockito.ArgumentMatchers.any()))
                 .thenReturn(new HeadersMessage(List.of(genesis.header())));
-        org.mockito.Mockito.when(service.process(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+        org.mockito.Mockito.when(service.processWithReception(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
                 .thenThrow(new IllegalArgumentException("Controlled invalid batch"));
         var calls = new java.util.concurrent.atomic.AtomicInteger();
         var coordinator = new HeaderSyncCoordinator(transport, service, new HeaderChainState(genesis), locators)
-                .onValidatedBatch(batch -> calls.incrementAndGet());
+                .onValidatedBatch(batch -> calls.incrementAndGet())
+                .onNewValidatedHeader(index -> calls.incrementAndGet());
         org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
                 () -> coordinator.synchronize(new Hash256(new byte[32]), ignored -> { }));
         assertEquals(0, calls.get());

@@ -20,6 +20,11 @@ public final class BitcoinClient
     private final PeerTransportPolicy transportPolicy;
     private final Set<Peer> pendingConnections = ConcurrentHashMap.newKeySet();
 
+    /** Same configuration, separate ownership/cancellation of connection attempts. */
+    public BitcoinClient independentClient() {
+        return new BitcoinClient(networkParameters, localServices, relay, transportPolicy != PeerTransportPolicy.V1_ONLY);
+    }
+
     public BitcoinClient(
             NetworkParameters networkParameters
     ) {
@@ -72,7 +77,8 @@ public final class BitcoinClient
     public Peer connectManaged(String host, int port, int startHeight, PeerConnectionRole role) throws IOException {
         Objects.requireNonNull(role, "role");
         boolean connectionRelay = role == PeerConnectionRole.BLOCK_RELAY_ONLY ? false : relay;
-        return connect(host, port, startHeight, false, connectionRelay, transportPolicy);
+        return connect(host, port, startHeight, false, connectionRelay, transportPolicy,
+                role == PeerConnectionRole.MANUAL ? PeerAccess.manualConnection() : PeerAccess.ordinary());
     }
 
     private Peer connect(String host, int port, int startHeight, boolean startReader) throws IOException {
@@ -90,6 +96,11 @@ public final class BitcoinClient
 
     private Peer connect(String host, int port, int startHeight, boolean startReader, boolean connectionRelay,
                          PeerTransportPolicy policy) throws IOException {
+        return connect(host, port, startHeight, startReader, connectionRelay, policy, PeerAccess.ordinary());
+    }
+
+    private Peer connect(String host, int port, int startHeight, boolean startReader, boolean connectionRelay,
+                         PeerTransportPolicy policy, PeerAccess access) throws IOException {
 
         if (host == null || host.isBlank()) {
             throw new IllegalArgumentException(
@@ -109,7 +120,7 @@ public final class BitcoinClient
             );
         }
 
-        Peer peer = newPeer(startHeight, connectionRelay);
+        Peer peer = newPeer(startHeight, connectionRelay, access);
         pendingConnections.add(peer);
 
         try {
@@ -130,7 +141,7 @@ public final class BitcoinClient
 
                     // BIP324 AUTO mode reconnects over a fresh TCP connection before downgrading to v1.
                     pendingConnections.remove(peer);
-                    peer = newPeer(startHeight, connectionRelay);
+                    peer = newPeer(startHeight, connectionRelay, access);
                     pendingConnections.add(peer);
                     peer.markV2Fallback();
                     peer.connect(host, port);
@@ -175,8 +186,8 @@ public final class BitcoinClient
         }
     }
 
-    private Peer newPeer(int startHeight, boolean connectionRelay) {
-        return new Peer(new PeerConnection(networkParameters), localServices, startHeight, connectionRelay);
+    private Peer newPeer(int startHeight, boolean connectionRelay, PeerAccess access) {
+        return new Peer(new PeerConnection(networkParameters), localServices, startHeight, connectionRelay, access);
     }
 
     public Peer connect(

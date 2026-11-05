@@ -49,14 +49,16 @@ public class NodeConfiguration {
             NodeSyncInfrastructure infrastructure,
             PeerManager peers,
             BlockDownloadScheduler blockDownloadScheduler,
-            @Value("${bitcoin.p2p.txsendrate:14}") int transactionSendRate
+            @Value("${bitcoin.p2p.txsendrate:14}") int transactionSendRate,
+            @Value("${bitcoin.p2p.blocksonly:false}") boolean blocksOnly
     ) {
         return new ru.bitcoin.node.app.service.NodeRelayService(
                 validation,
                 infrastructure,
                 peers,
                 blockDownloadScheduler,
-                transactionSendRate
+                transactionSendRate,
+                blocksOnly
         );
     }
 
@@ -317,7 +319,8 @@ public class NodeConfiguration {
             @Value("${bitcoin.prune:0}") long pruneMiB,
             @Value("${bitcoin.blockfilterindex:false}") boolean blockFilterIndex,
             @Value("${bitcoin.p2p.peer-block-filters:false}") boolean peerBlockFilters,
-            @Value("${bitcoin.p2p.v2-transport:true}") boolean v2Transport
+            @Value("${bitcoin.p2p.v2-transport:true}") boolean v2Transport,
+            @Value("${bitcoin.p2p.blocksonly:false}") boolean blocksOnly
     ) {
         long services = pruneMiB > 0
                 ? ru.bitcoin.node.p2p.message.VersionMessage.NODE_WITNESS
@@ -327,7 +330,17 @@ public class NodeConfiguration {
             services |= ru.bitcoin.node.p2p.message.VersionMessage.NODE_COMPACT_FILTERS;
         }
         if (v2Transport) services |= ru.bitcoin.node.p2p.message.VersionMessage.NODE_P2P_V2;
-        return new BitcoinClient(parameters, services, true, v2Transport);
+        return new BitcoinClient(parameters, services, !blocksOnly, v2Transport);
+    }
+
+    @Bean(destroyMethod = "close")
+    @ConditionalOnProperty(name = "bitcoin.p2p.manual-peers")
+    public ru.bitcoin.node.app.service.ManualPeerConnections manualPeerConnections(
+            BitcoinClient client, PeerManager peers, NodeValidationService validation, NetworkParameters parameters,
+            @Value("${bitcoin.p2p.manual-peers}") String manualPeers) {
+        return new ru.bitcoin.node.app.service.ManualPeerConnections(client.independentClient(), peers,
+                () -> Math.toIntExact(validation.downloadTip().height()),
+                ru.bitcoin.node.app.service.ManualPeerConnections.parse(manualPeers, parameters.defaultPort()));
     }
 
     @Bean
@@ -429,7 +442,8 @@ public class NodeConfiguration {
             @Value("${bitcoin.p2p.header-response-timeout-millis:120000}")
             long headerTimeoutMillis,
             @Value("${bitcoin.mempool-checkpoint-interval-seconds:900}")
-            long mempoolCheckpointIntervalSeconds
+            long mempoolCheckpointIntervalSeconds,
+            @Value("${bitcoin.p2p.manual-peers:}") String manualPeers
     ) {
 
         Duration headerResponseTimeout =
@@ -460,6 +474,8 @@ public class NodeConfiguration {
                 checkpointInterval(mempoolCheckpointIntervalSeconds)
         );
         service.automaticConnectionsEnabled(connectionLimits.maximum() > 0);
+        service.manualConnectionsConfigured(!ru.bitcoin.node.app.service.ManualPeerConnections.parse(
+                manualPeers, parameters.defaultPort()).isEmpty());
         return service;
     }
 
@@ -499,7 +515,9 @@ public class NodeConfiguration {
             @Value("${bitcoin.prune:0}") long pruneMiB,
             @Value("${bitcoin.blockfilterindex:false}") boolean blockFilterIndex,
             @Value("${bitcoin.p2p.peer-block-filters:false}") boolean peerBlockFilters,
-            @Value("${bitcoin.p2p.v2-transport:true}") boolean v2Transport
+            @Value("${bitcoin.p2p.v2-transport:true}") boolean v2Transport,
+            @Value("${bitcoin.p2p.inbound-permissions:}") String inboundPermissions,
+            @Value("${bitcoin.p2p.blocksonly:false}") boolean blocksOnly
     ) {
         long services = pruneMiB > 0
                 ? ru.bitcoin.node.p2p.message.VersionMessage.NODE_WITNESS
@@ -510,9 +528,10 @@ public class NodeConfiguration {
         }
         if (v2Transport) services |= ru.bitcoin.node.p2p.message.VersionMessage.NODE_P2P_V2;
         int inbound = maxInboundPeers < 0 ? limits.inbound() : Math.min(maxInboundPeers, limits.inbound());
-        var server = new BitcoinServer(parameters, peerManager, services, true, inbound,
+        var server = new BitcoinServer(parameters, peerManager, services, !blocksOnly, inbound,
                 peerManager.discouragementManager(), v2Transport, limits.inboundRelayPercent());
         server.initialBlockDownload(validation::downloadInitialBlockDownload);
+        server.permissionPolicy(ru.bitcoin.node.p2p.PeerPermissionPolicy.parse(inboundPermissions));
         return server;
     }
 

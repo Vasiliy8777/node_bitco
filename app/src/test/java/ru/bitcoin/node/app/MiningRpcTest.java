@@ -28,6 +28,53 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import static org.junit.jupiter.api.Assertions.*;
 
 class MiningRpcTest {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"cluster-count-limit", "cluster-size-limit"})
+    void clusterLimitProbeUsesCoreRpcRejectionName(String reason) throws Exception {
+        var parameters = NetworkParametersRegistry.regtest();
+        try (var db = new RocksDbDatabase(directory)) {
+            var validation = org.mockito.Mockito.spy(new NodeValidationService(db, parameters, () -> 1_800_000_000L, new Mempool()));
+            org.mockito.Mockito.doReturn(new Mempool.TestAcceptResult(List.of(), reason))
+                    .when(validation).testMempoolAccept(org.mockito.ArgumentMatchers.anyList());
+            var sync = new NodeSyncInfrastructure(db, parameters, () -> 1_800_000_000L);
+            var mining = new MiningController(validation, null, parameters, () -> true, new byte[]{0x51}, 4_000_000, new FeeRate(0));
+            var tx = new Transaction(2, List.of(new ru.bitcoin.node.protocol.transaction.TxIn(
+                    new ru.bitcoin.node.protocol.transaction.OutPoint(ru.bitcoin.node.common.types.Hash256.fromDisplayHex("11".repeat(32)), new UInt32(0)),
+                    new byte[0], ru.bitcoin.node.protocol.transaction.TxIn.FINAL_SEQUENCE)),
+                    List.of(new ru.bitcoin.node.protocol.transaction.TxOut(1000, new byte[]{0x51})), new UInt32(0));
+            try (var rpc = new NodeRpcServer(new InetSocketAddress("127.0.0.1", 0), "test", "test-password",
+                    mining, validation, null, sync, () -> true); var client = HttpClient.newHttpClient()) {
+                var result = (List<?>) call(client, URI.create("http://127.0.0.1:" + rpc.port()), "testmempoolaccept",
+                        List.of(List.of(HexFormat.of().formatHex(TransactionSerializer.serialize(tx))))).get("result");
+                assertEquals(false, ((Map<?, ?>) result.getFirst()).get("allowed"));
+                assertEquals("too-large-cluster", ((Map<?, ?>) result.getFirst()).get("reject-reason"));
+            }
+        }
+    }
+
+    @Test void peerInfoReportsNoPresyncAsMinusOne() throws Exception {
+        var parameters = NetworkParametersRegistry.regtest();
+        try (var db = new RocksDbDatabase(directory); var peers = new PeerManager()) {
+            var validation = new NodeValidationService(db, parameters, () -> 1_800_000_000L, new Mempool());
+            var sync = new NodeSyncInfrastructure(db, parameters, () -> 1_800_000_000L);
+            var peer = org.mockito.Mockito.mock(ru.bitcoin.node.p2p.Peer.class);
+            org.mockito.Mockito.when(peer.isReady()).thenReturn(true);
+            org.mockito.Mockito.when(peer.state()).thenReturn(ru.bitcoin.node.p2p.PeerState.READY);
+            org.mockito.Mockito.when(peer.remoteVersion()).thenReturn(new ru.bitcoin.node.p2p.message.VersionMessage(70016,
+                    ru.bitcoin.node.p2p.message.VersionMessage.DEFAULT_SERVICES, 0,
+                    ru.bitcoin.node.p2p.message.NetworkAddress.unspecified(), ru.bitcoin.node.p2p.message.NetworkAddress.unspecified(),
+                    123, "/presync-rpc-test/", 0, true));
+            peers.add(peer);
+            var mining = new MiningController(validation, null, parameters, () -> true, new byte[]{0x51}, 4_000_000, new FeeRate(0));
+            try (var rpc = new NodeRpcServer(new InetSocketAddress("127.0.0.1", 0), "test", "test-password",
+                    mining, validation, null, sync, () -> true, peers); var client = HttpClient.newHttpClient()) {
+                var result = (List<?>) call(client, URI.create("http://127.0.0.1:" + rpc.port()), "getpeerinfo", List.of()).get("result");
+                assertEquals(1, result.size());
+                assertEquals(-1, ((Number) ((Map<?, ?>) result.getFirst()).get("presynced_headers")).longValue());
+            }
+        }
+    }
+
     @TempDir
     Path directory;
     private static final JsonMapper JSON = JsonMapper.builder().build();

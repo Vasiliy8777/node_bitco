@@ -27,6 +27,12 @@ public final class BitcoinServer
     private final NetworkParameters networkParameters;
     private final PeerManager peerManager;
     private final PeerDiscouragementManager discouragementManager;
+    private PeerPermissionPolicy permissionPolicy = PeerPermissionPolicy.none();
+
+    public synchronized void permissionPolicy(PeerPermissionPolicy policy) {
+        if (running) throw new IllegalStateException("Set inbound permissions before starting the server");
+        permissionPolicy = Objects.requireNonNull(policy);
+    }
 
     private final long localServices;
     private final boolean relay;
@@ -257,8 +263,10 @@ public final class BitcoinServer
                 socket =
                         currentServerSocket.accept();
 
-                boolean discouraged = socket.getInetAddress() != null && discouragementManager.isDiscouraged(socket.getInetAddress());
-                if (socket.getInetAddress() != null
+                PeerAccess access = permissionPolicy.accessFor(socket.getInetAddress());
+                boolean noBan = access.permissions().contains(PeerPermission.NOBAN);
+                boolean discouraged = !noBan && socket.getInetAddress() != null && discouragementManager.isDiscouraged(socket.getInetAddress());
+                if (!noBan && socket.getInetAddress() != null
                         && (peerManager.banManager().isBanned(socket.getInetAddress())
                         || (discouraged && inboundConnectionCount.get() + 1 >= maxInboundConnections))) {
                     closeQuietly(socket);
@@ -285,7 +293,7 @@ public final class BitcoinServer
 
                     handshakeExecutor.execute(
                             () -> handleInboundConnection(
-                                    acceptedSocket, discouraged
+                                    acceptedSocket, discouraged, access
                             )
                     );
 
@@ -360,7 +368,7 @@ public final class BitcoinServer
     }
 
     private void handleInboundConnection(
-            Socket socket, boolean discouraged
+            Socket socket, boolean discouraged, PeerAccess access
     ) {
 
         Peer peer =
@@ -370,7 +378,8 @@ public final class BitcoinServer
                         ),
                         localServices,
                         startHeight,
-                        relay
+                        relay || access.permissions().contains(PeerPermission.RELAY),
+                        access
                 );
 
         synchronized (inboundPeers) {
@@ -489,7 +498,7 @@ public final class BitcoinServer
                         peer.minPingRoundTrip().map(java.time.Duration::toNanos).orElse(Long.MAX_VALUE),
                         peer.lastAcceptedBlockTime(), peer.lastAcceptedTransactionTime(), relevant, relays, false,
                         metadata.netGroup(), metadata.preferEvict(),
-                        EvictionNetGroup.local(metadata.address()), network, false, true));
+                        EvictionNetGroup.local(metadata.address()), network, peer.hasPermission(PeerPermission.NOBAN), true));
             }
             var id = InboundPeerEviction.select(candidates);
             if (id.isEmpty()) return false;

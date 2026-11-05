@@ -2,6 +2,7 @@ package ru.bitcoin.node.app.service;
 
 import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.p2p.Peer;
+import ru.bitcoin.node.p2p.PeerPermission;
 import ru.bitcoin.node.p2p.message.InventoryVector;
 
 import java.time.Duration;
@@ -39,9 +40,10 @@ final class TransactionRequestScheduler {
         Objects.requireNonNull(vector, "vector");
         if (vector.type() != InventoryVector.MSG_TX && vector.type() != 5) return;
         var sources = candidates.get(vector.hash());
-        if (sources != null && (sources.containsKey(peer) || sources.size() >= MAX_SOURCES_PER_HASH)) return;
-        if (candidateCounts.getOrDefault(peer, 0) >= MAX_CANDIDATES_PER_PEER) return;
-        if (sources == null && candidates.size() >= MAX_CANDIDATES) return;
+        boolean unlimited = peer.hasPermission(PeerPermission.RELAY);
+        if (sources != null && (sources.containsKey(peer) || (!unlimited && sources.size() >= MAX_SOURCES_PER_HASH))) return;
+        if (!unlimited && candidateCounts.getOrDefault(peer, 0) >= MAX_CANDIDATES_PER_PEER) return;
+        if (!unlimited && sources == null && candidates.size() >= MAX_CANDIDATES) return;
         candidates.computeIfAbsent(vector.hash(), ignored -> new LinkedHashMap<>())
                 .put(peer, new Announcement(vector.type(), now));
         candidateCounts.merge(peer, 1, Integer::sum);

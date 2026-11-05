@@ -5,14 +5,15 @@ public enum PeerConnectionRole {
     INBOUND,
     FULL_RELAY,
     BLOCK_RELAY_ONLY,
-    FEELER;
+    FEELER,
+    MANUAL;
 
     public boolean relaysTransactions() {
-        return this == INBOUND || this == FULL_RELAY;
+        return this == INBOUND || this == FULL_RELAY || this == MANUAL;
     }
 
     public boolean relaysAddresses() {
-        return this == INBOUND || this == FULL_RELAY;
+        return this == INBOUND || this == FULL_RELAY || this == MANUAL;
     }
 
     public boolean persistentOutbound() {

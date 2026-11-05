@@ -20,6 +20,40 @@ import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class NodeValidationServiceTest {
+
+    @Test void locatorUsesFirstMatchAndGenesisFallbackWithoutSortingPeerInput() {
+        try (var db = new RocksDbDatabase(directory)) {
+            var service = new NodeValidationService(db, PARAMS, () -> 1_800_000_000L, new Mempool());
+            var genesis = service.activeTip();
+            var first = block(genesis, 1, List.of()); service.processBlock(first);
+            var second = block(service.activeTip(), 2, List.of()); service.processBlock(second);
+            var unknown = Hash256.fromDisplayHex("21".repeat(32));
+            assertEquals(Optional.of(genesis.hash()), service.bestActiveLocator(List.of(unknown, genesis.hash(), second.hash())));
+            assertEquals(Optional.of(second.hash()), service.bestActiveLocator(List.of(second.hash(), first.hash())));
+            assertEquals(Optional.of(genesis.hash()), service.bestActiveLocator(List.of(unknown)));
+            assertEquals(Optional.of(genesis.hash()), service.bestActiveLocator(List.of()));
+            assertEquals(List.of(first.header(), second.header()), service.headers(List.of(genesis.hash(), second.hash()), unknown));
+        }
+    }
+
+    @Test void locatorRecognizesHeaderDescendantOfActiveTipButSkipsCompetingBranch() {
+        try (var db = new RocksDbDatabase(directory)) {
+            var service = new NodeValidationService(db, PARAMS, () -> 1_800_000_000L, new Mempool());
+            var genesis = service.activeTip();
+            var first = block(genesis, 1, List.of()); service.processBlock(first);
+            var ahead = block(service.activeTip(), 2, List.of());
+            var side = block(genesis, 3, List.of());
+            var side2 = block(BlockIndexFactory.createChild(genesis, side.header()), 4, List.of());
+            var side3 = block(BlockIndexFactory.createChild(BlockIndexFactory.createChild(genesis, side.header()), side2.header()), 5, List.of());
+            var sync = new ru.bitcoin.node.app.sync.NodeSyncInfrastructure(db, PARAMS, () -> 1_800_000_000L);
+            service.processHeaders(sync.headerSyncService(), new ru.bitcoin.node.p2p.message.HeadersMessage(List.of(ahead.header())));
+            service.processHeaders(sync.headerSyncService(), new ru.bitcoin.node.p2p.message.HeadersMessage(List.of(side.header(), side2.header(), side3.header())));
+            assertEquals(Optional.of(first.hash()), service.bestActiveLocator(List.of(side3.hash(), ahead.hash(), genesis.hash())));
+            assertEquals(Optional.of(genesis.hash()), service.bestActiveLocator(List.of(side3.hash(), genesis.hash(), first.hash())));
+            assertEquals(List.of(), service.headers(List.of(ahead.hash(), genesis.hash()), new Hash256(new byte[32])));
+            assertEquals(first.hash(), service.activeTip().hash(), "Locator handling must not activate header-only descendants");
+        }
+    }
     @Test
     void publishedIbdStateReflectsPersistedTipImmediatelyAfterStartup() {
         long genesisTime = GenesisBlockFactory.create(PARAMS).header().timestamp().value();
@@ -109,7 +143,8 @@ class NodeValidationServiceTest {
             assertTrue(service.activeBlockDepth(main.hash()).isEmpty());
             assertEquals(List.of(side.header()), service.headers(List.of(main.hash(), genesis.hash()), side.hash()));
             assertEquals(List.of(side.header(), second.header()), service.headers(List.of(genesis.hash()), new Hash256(new byte[32])));
-            assertEquals(Optional.of(second.hash()), service.bestActiveLocator(List.of(genesis.hash(), second.hash())));
+            assertEquals(Optional.of(genesis.hash()), service.bestActiveLocator(List.of(genesis.hash(), second.hash())));
+            assertEquals(Optional.of(second.hash()), service.bestActiveLocator(List.of(second.hash(), genesis.hash())));
         }
     }
 

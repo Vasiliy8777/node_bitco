@@ -68,6 +68,9 @@ final class MempoolGraphPolicy {
         Map<Hash256, MempoolEntry> after = new LinkedHashMap<>(entries);
         evicted.forEach(after::remove);
         after.put(replacement.transaction().txId(), replacement);
+        // Core's CalculateChunksForRBF checks prospective graph limits before
+        // optimizing any chunks. Do not run the solver on an oversized cluster.
+        checkClusterLimits(after, replacement.transaction().txId(), limits);
         int diagram = ClusterLinearization.compareDiagrams(
                 ClusterLinearization.mempoolDiagram(after),
                 ClusterLinearization.mempoolDiagram(entries));
@@ -79,16 +82,53 @@ final class MempoolGraphPolicy {
         return ClusterLinearization.connected(entries, List.of(root));
     }
 
+    /** Prospective component for a single conflict-free addition. The existing
+     * spent-outpoint index supplies child edges without scanning unrelated pools. */
+    static Map<Hash256, MempoolEntry> additionCluster(Map<Hash256, MempoolEntry> entries,
+            Map<OutPoint, Hash256> spent, MempoolEntry added, int maximumCount) {
+        Hash256 root = added.transaction().txId();
+        var cluster = new LinkedHashMap<Hash256, MempoolEntry>();
+        var pending = new ArrayDeque<Hash256>(); pending.add(root);
+        while (!pending.isEmpty()) {
+            Hash256 id = pending.removeFirst();
+            if (cluster.containsKey(id)) continue;
+            MempoolEntry entry = id.equals(root) ? added : entries.get(id);
+            if (entry == null) continue;
+            cluster.put(id, entry);
+            // Count rejection precedes size/TRUC policy. Stop before traversing
+            // all clusters joined by an oversized transaction.
+            if (cluster.size() > maximumCount) fail("cluster-count-limit");
+            for (var input : entry.transaction().inputs()) pending.add(input.previousOutput().transactionId());
+            for (int output = 0; output < entry.transaction().outputs().size(); output++) {
+                Hash256 child = spent.get(new OutPoint(id, new ru.bitcoin.node.common.types.UInt32(output)));
+                if (child != null) pending.add(child);
+            }
+        }
+        return cluster;
+    }
+
 
     /**
      * Core v31 cluster limits replace the legacy ancestor/descendant limits and CPFP carve-out.
      */
     static void checkLimits(Map<Hash256, MempoolEntry> entries, Hash256 added, MempoolLimits limits) {
-        Set<Hash256> cluster = connected(entries, added);
-        if (cluster.size() > limits.clusterCount()) fail("cluster-count-limit");
-        if (size(entries, cluster) > limits.clusterVirtualBytes()) fail("cluster-size-limit");
+        checkClusterLimits(entries, added, limits);
 
         // TRUC version inheritance, two-generation topology and size limits remain separate policy.
+        checkTrucLimits(entries, added);
+    }
+
+    private static void checkClusterLimits(Map<Hash256, MempoolEntry> entries, Hash256 added, MempoolLimits limits) {
+        Set<Hash256> cluster = connected(entries, added);
+        if (cluster.size() > limits.clusterCount()) fail("cluster-count-limit");
+        long adjustedWeight = 0;
+        for (Hash256 id : cluster) adjustedWeight = Math.addExact(adjustedWeight, entries.get(id).adjustedWeight());
+        // Core's graph limit is expressed in weight units: do not round every
+        // transaction separately before comparing the complete cluster.
+        if (Math.ceilDiv(adjustedWeight, 4L) > limits.clusterVirtualBytes()) fail("cluster-size-limit");
+    }
+
+    private static void checkTrucLimits(Map<Hash256, MempoolEntry> entries, Hash256 added) {
         Set<Hash256> ancestors = ancestors(entries, added);
         for (Hash256 id : ancestors) {
             Transaction tx = entries.get(id).transaction();

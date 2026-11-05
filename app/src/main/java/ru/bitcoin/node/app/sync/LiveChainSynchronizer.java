@@ -102,7 +102,11 @@ public final class LiveChainSynchronizer implements AutoCloseable {
                         try {
                             new HeaderSyncCoordinator(new HeaderSynchronizer(peer, timeout),
                                     infrastructure.headerSyncService(), infrastructure.headerChainState(),
-                                    infrastructure.blockLocatorBuilder()).onValidatedBatch(batch -> {
+                                    infrastructure.blockLocatorBuilder()).onNewValidatedHeader(index -> {
+                                        if (!infrastructure.downloadBlockFailed(index)
+                                                && index.chainWork().compareTo(validation.downloadTip().chainWork()) > 0)
+                                            peer.recordNewBlockAnnouncement();
+                                    }).onValidatedBatch(batch -> {
                                         if (!batch.isEmpty() && !infrastructure.downloadBlockFailed(batch.getLast())
                                                 && batch.getLast().chainWork().compareTo(validation.downloadTip().chainWork()) >= 0)
                                             peers.protectChainSync(peer);
@@ -152,6 +156,27 @@ public final class LiveChainSynchronizer implements AutoCloseable {
 
 
     private void replaceFailedPeer(Peer peer, Exception exception) {
+        if (exception instanceof ru.bitcoin.node.consensus.block.BlockHeaderValidationException invalid) {
+            var reason = invalid.reason();
+            // Match HEADERS relay policy: future time is temporary; a cached
+            // invalid branch does not punish an inbound sender. Neither is
+            // accepted as valid or counted as successful synchronization.
+            if (reason == ru.bitcoin.node.consensus.block.BlockHeaderValidationException.Reason.TIME_FUTURE
+                    || (reason == ru.bitcoin.node.consensus.block.BlockHeaderValidationException.Reason.CACHED_INVALID
+                        && peer.isInboundConnection())) return;
+            // Peer owns NoBan/manual exemptions and protocol-close bookkeeping.
+            peer.disconnectForProtocolViolation("Rejected headers during live synchronization", invalid);
+            return;
+        }
+        // Core switches header sources without disconnecting a NoBan peer on
+        // a headers timeout. Transport failures and block timeouts still close.
+        // Do not acknowledge a response that was never received: the peer's
+        // GETHEADERS admission deadline remains in force for a later retry.
+        if (exception instanceof ru.bitcoin.node.p2p.sync.HeaderSynchronizationTimeoutException
+                && peer.hasPermission(PeerPermission.NOBAN) && peer.state() != PeerState.CLOSED) {
+            log.debug("Header synchronization timed out for NoBan peer {}; trying another source", peer.remoteAddress());
+            return;
+        }
         // A failed connection cannot undo successful verification by another
         // peer. Freshness expiry, loss of all peers and tip mismatch still gate mining.
         if (peer.state() == PeerState.CLOSED) {

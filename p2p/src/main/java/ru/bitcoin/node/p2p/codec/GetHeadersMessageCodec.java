@@ -9,6 +9,10 @@ import java.util.List;
 
 public final class GetHeadersMessageCodec {
 
+    public static final class TooManyLocatorHashesException extends IllegalArgumentException {
+        public TooManyLocatorHashesException(long count) { super("Too many locator hashes: " + count); }
+    }
+
     private GetHeadersMessageCodec() {
     }
 
@@ -67,19 +71,10 @@ public final class GetHeadersMessageCodec {
         long count =
                 cursor.readCompactSize();
 
-        if (count == 0) {
-            throw new IllegalArgumentException(
-                    "getheaders locator must not be empty"
-            );
-        }
-
         if (count
                 > GetHeadersMessage.MAX_LOCATOR_HASHES) {
 
-            throw new IllegalArgumentException(
-                    "Too many locator hashes: "
-                            + count
-            );
+            throw new TooManyLocatorHashesException(count);
         }
 
         List<Hash256> locatorHashes =

@@ -72,6 +72,12 @@ public final class NodeLifecycleService
             new AtomicLong();
     private final ru.bitcoin.node.app.sync.LiveChainSynchronizer liveSync;
     private boolean automaticConnectionsEnabled = true;
+    private boolean manualConnectionsConfigured;
+
+    public synchronized void manualConnectionsConfigured(boolean configured) {
+        if (state != NodeLifecycleState.NEW) throw new IllegalStateException("Configure networking before startup");
+        manualConnectionsConfigured = configured;
+    }
 
     public synchronized void automaticConnectionsEnabled(boolean enabled) {
         if (state != NodeLifecycleState.NEW) throw new IllegalStateException("Configure networking before startup");
@@ -79,7 +85,7 @@ public final class NodeLifecycleService
     }
 
     public boolean isMiningReady() {
-        return automaticConnectionsEnabled && isRunning()
+        return (automaticConnectionsEnabled || manualConnectionsConfigured) && isRunning()
                 && !validationService.downloadInitialBlockDownload()
                 && liveSync.isCurrent();
     }
@@ -279,14 +285,14 @@ public final class NodeLifecycleService
                     NodeLifecycleState.STARTING
             );
 
-            if (!automaticConnectionsEnabled) {
+            if (!automaticConnectionsEnabled && !manualConnectionsConfigured) {
                 if (listen) bitcoinServer.start(listenPort, Math.toIntExact(validationService.activeTip().height()));
                 setState(NodeLifecycleState.RUNNING);
                 mempoolCheckpointService.start();
                 return;
             }
 
-            bootstrapAddresses();
+            if (automaticConnectionsEnabled) bootstrapAddresses();
 
             ensureNotStopping();
 
@@ -323,10 +329,9 @@ public final class NodeLifecycleService
              * from PeerManager because PeerManager may also
              * contain other peers.
              */
-            OutboundPeerConnection activeOutboundConnection =
-                    synchronizeHeadersWithFailover(
-                            startHeight
-                    );
+            OutboundPeerConnection activeOutboundConnection = null;
+            if (automaticConnectionsEnabled) activeOutboundConnection = synchronizeHeadersWithFailover(startHeight);
+            else synchronizeManualHeaders();
 
             ensureNotStopping();
 
@@ -342,9 +347,7 @@ public final class NodeLifecycleService
              * and will discover a replacement peer through PeerManager
              * after OutboundPeerSupervisor reconnects.
              */
-            outboundPeerSupervisor.start(
-                    activeOutboundConnection
-            );
+            if (automaticConnectionsEnabled) outboundPeerSupervisor.start(activeOutboundConnection);
 
             ensureNotStopping();
 
@@ -451,7 +454,11 @@ public final class NodeLifecycleService
                         syncInfrastructure.headerSyncService(),
                         syncInfrastructure.headerChainState(),
                         syncInfrastructure.blockLocatorBuilder()
-                ).onValidatedBatch(batch -> {
+                ).onNewValidatedHeader(index -> {
+                    if (!syncInfrastructure.downloadBlockFailed(index)
+                            && index.chainWork().compareTo(validationService.downloadTip().chainWork()) > 0)
+                        peer.recordNewBlockAnnouncement();
+                }).onValidatedBatch(batch -> {
                     if (!batch.isEmpty() && !syncInfrastructure.downloadBlockFailed(batch.getLast())
                             && batch.getLast().chainWork().compareTo(validationService.downloadTip().chainWork()) >= 0)
                         peerManager.protectChainSync(peer);
@@ -591,6 +598,21 @@ public final class NodeLifecycleService
                  */
                 return connection;
 
+            } catch (ru.bitcoin.node.consensus.block.BlockHeaderValidationException
+                     | IllegalArgumentException rejectedHeaders) {
+                if (isStoppingOrStopped()) throw new IOException("Header synchronization cancelled", rejectedHeaders);
+                failure.addSuppressed(new IOException("Peer sent rejected headers", rejectedHeaders));
+                failedAddresses.add(connection.address());
+                // A peer-local header rejection must not abort initial sync.
+                // Future time is temporary; other failures use Peer's ordinary
+                // protocol policy, including its NoBan/manual exemptions.
+                if (!(rejectedHeaders instanceof ru.bitcoin.node.consensus.block.BlockHeaderValidationException invalid
+                        && invalid.reason() == ru.bitcoin.node.consensus.block.BlockHeaderValidationException.Reason.TIME_FUTURE)) {
+                    peer.disconnectForProtocolViolation("Rejected headers during initial synchronization", rejectedHeaders);
+                }
+                log.warn("HEADER SYNC rejected peer={} bestHeaderHeight={} cause={}; trying another source",
+                        connection.address(), syncInfrastructure.headerChainState().bestHeaderTip().height(),
+                        rejectedHeaders.toString());
             } catch (IOException syncFailure) {
                 handleHeaderSyncPeerFailure(connection, peer, failedAddresses, failure, syncFailure);
             } catch (IllegalStateException stalePeerFailure) {
@@ -612,6 +634,43 @@ public final class NodeLifecycleService
         }
     }
 
+
+    private void synchronizeManualHeaders() throws IOException {
+        var retryAfter = new java.util.IdentityHashMap<Peer, Long>();
+        setState(NodeLifecycleState.SYNCHRONIZING_HEADERS);
+        while (true) {
+            ensureNotStopping();
+            var ready = peerManager.readyPeers();
+            retryAfter.keySet().removeIf(peer -> !ready.contains(peer));
+            for (Peer peer : ready) {
+                if (!peer.isManualConnection() || System.nanoTime() < retryAfter.getOrDefault(peer, Long.MIN_VALUE)) continue;
+                long services = peer.remoteVersion().services();
+                if ((services & ru.bitcoin.node.p2p.message.VersionMessage.NODE_WITNESS) == 0
+                        || (services & (ru.bitcoin.node.p2p.message.VersionMessage.NODE_NETWORK
+                            | ru.bitcoin.node.p2p.message.VersionMessage.NODE_NETWORK_LIMITED)) == 0) continue;
+                try {
+                    synchronizeHeaders(peer);
+                    if (syncInfrastructure.headerChainState().bestHeaderTip().chainWork().compareTo(minimumChainWork) >= 0) return;
+                    // A short/empty low-work reply does not finish initial sync.
+                } catch (ru.bitcoin.node.consensus.block.BlockHeaderValidationException | IllegalArgumentException invalid) {
+                    if (!(invalid instanceof ru.bitcoin.node.consensus.block.BlockHeaderValidationException rejected
+                            && rejected.reason() == ru.bitcoin.node.consensus.block.BlockHeaderValidationException.Reason.TIME_FUTURE))
+                        peer.disconnectForProtocolViolation("Rejected headers during manual synchronization", invalid);
+                } catch (IOException failure) {
+                    if (!(failure instanceof ru.bitcoin.node.p2p.sync.HeaderSynchronizationTimeoutException
+                            && peer.hasPermission(PeerPermission.NOBAN))) {
+                        try { peer.close(); } catch (IOException closeFailure) { failure.addSuppressed(closeFailure); }
+                    }
+                } catch (IllegalStateException failure) {
+                    if (peer.state() != PeerState.CLOSED) throw failure;
+                }
+                // A reconnect is a new peer and can be tried immediately. An
+                // unchanged connection cannot make a tight invalid/low-work loop.
+                retryAfter.put(peer, System.nanoTime() + Duration.ofSeconds(5).toNanos());
+            }
+            waitForHeaderRaceRetry();
+        }
+    }
 
     private static boolean isNoKnownHeaderPeerFailure(Throwable failure) {
         if (failure == null) {
@@ -658,6 +717,13 @@ public final class NodeLifecycleService
 
         aggregateFailure.addSuppressed(syncFailure);
         failedAddresses.add(connection.address());
+        // Switch header sources without closing or unregistering an open NoBan
+        // connection. An unanswered request must not release GETHEADERS admission.
+        if (syncFailure instanceof ru.bitcoin.node.p2p.sync.HeaderSynchronizationTimeoutException
+                && peer.hasPermission(PeerPermission.NOBAN) && peer.state() != PeerState.CLOSED) {
+            log.debug("HEADER SYNC timed out for NoBan peer={}; trying another source", connection.address());
+            return;
+        }
         peerManager.remove(peer);
 
         log.warn(

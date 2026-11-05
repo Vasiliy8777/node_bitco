@@ -12,6 +12,25 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class GetHeadersMessageCodecTest {
 
+    @Test void acceptsNullLocatorForDirectHeaderRequestsWithoutRelaxingFraming() {
+        var stop = Hash256.fromDisplayHex("12".repeat(32));
+        byte[] wire = GetHeadersMessageCodec.encode(new GetHeadersMessage(70016, List.of(), stop));
+        assertEquals(37, wire.length);
+        assertEquals(0, wire[4]);
+        var decoded = GetHeadersMessageCodec.decode(wire);
+        assertEquals(List.of(), decoded.locatorHashes());
+        assertEquals(stop, decoded.stopHash());
+        assertThrows(IllegalArgumentException.class,
+                () -> GetHeadersMessageCodec.decode(java.util.Arrays.copyOf(wire, 36)));
+        assertThrows(IllegalArgumentException.class,
+                () -> GetHeadersMessageCodec.decode(java.util.Arrays.copyOf(wire, 38)));
+        byte[] nonCanonical = new byte[39];
+        System.arraycopy(wire, 0, nonCanonical, 0, 4);
+        nonCanonical[4] = (byte) 0xfd;
+        System.arraycopy(wire, 5, nonCanonical, 7, 32);
+        assertThrows(IllegalArgumentException.class, () -> GetHeadersMessageCodec.decode(nonCanonical));
+    }
+
     @Test
     void shouldEncodeSingleLocatorHash()
             throws Exception {

@@ -9,6 +9,7 @@ import ru.bitcoin.node.protocol.network.NetworkParametersRegistry;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class BlockHeaderValidatorTest {
 
@@ -187,7 +188,7 @@ class BlockHeaderValidatorTest {
                         .MAX_FUTURE_BLOCK_TIME_SECONDS
                         - 1L;
 
-        assertThrows(
+        var rejection = assertThrows(
                 BlockHeaderValidationException.class,
                 () -> BlockHeaderValidator.validate(
                         header,
@@ -197,5 +198,24 @@ class BlockHeaderValidatorTest {
                         REGTEST
                 )
         );
+        assertEquals(BlockHeaderValidationException.Reason.TIME_FUTURE, rejection.reason());
+        assertDoesNotThrow(() -> BlockHeaderValidator.validate(header, header.bits(),
+                header.timestamp().value() - 1, adjustedTime + 1, REGTEST));
+    }
+
+    @Test
+    void futureTimestampDoesNotHideInvalidWorkOrDifficulty() {
+        var valid = regtestGenesis();
+        long now = valid.timestamp().value() - BlockHeaderValidator.MAX_FUTURE_BLOCK_TIME_SECONDS - 1;
+        var wrongDifficulty = assertThrows(BlockHeaderValidationException.class,
+                () -> BlockHeaderValidator.validate(valid, new UInt32(0x207ffffeL),
+                        valid.timestamp().value() - 1, now, REGTEST));
+        assertEquals(BlockHeaderValidationException.Reason.INVALID, wrongDifficulty.reason());
+        var invalidWork = new BlockHeader(valid.version(), valid.previousBlockHash(), valid.merkleRoot(),
+                valid.timestamp(), new UInt32(0), valid.nonce());
+        var rejected = assertThrows(BlockHeaderValidationException.class,
+                () -> BlockHeaderValidator.validate(invalidWork, valid.bits(),
+                        valid.timestamp().value() - 1, now, REGTEST));
+        assertEquals(BlockHeaderValidationException.Reason.INVALID, rejected.reason());
     }
 }

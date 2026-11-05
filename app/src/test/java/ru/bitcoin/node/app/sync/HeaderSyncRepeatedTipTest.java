@@ -24,13 +24,13 @@ class HeaderSyncRepeatedTipTest {
         var transport = mock(HeaderSynchronizer.class);
         when(transport.download(anyList(), any())).thenReturn(wire);
         var service = mock(HeaderSyncService.class);
-        when(service.process(eq(wire), any())).thenReturn(List.of(tip));
+        when(service.processWithReception(eq(wire), any(), any())).thenReturn(new ru.bitcoin.node.chain.HeaderBatchProcessor.Reception(List.of(tip), false));
         var locator = mock(BlockLocatorBuilder.class);
         var hash = tip.hash();
         when(locator.build(any())).thenReturn(List.of(hash));
         var coordinator = new HeaderSyncCoordinator(transport, service, new HeaderChainState(tip), locator);
         assertEquals(List.of(), coordinator.synchronize(new Hash256(new byte[32])));
-        verify(service).process(eq(wire), any());
+        verify(service).processWithReception(eq(wire), any(), any());
         verify(transport).download(anyList(), any());
     }
 
@@ -42,7 +42,7 @@ class HeaderSyncRepeatedTipTest {
         var transport = mock(HeaderSynchronizer.class);
         when(transport.download(anyList(), any())).thenReturn(wire);
         var service = mock(HeaderSyncService.class);
-        when(service.process(eq(wire), any())).thenReturn(List.of(next));
+        when(service.processWithReception(eq(wire), any(), any())).thenReturn(new ru.bitcoin.node.chain.HeaderBatchProcessor.Reception(List.of(next), false));
         var locator = mock(BlockLocatorBuilder.class);
         var hash = first.hash();
         when(locator.build(any())).thenReturn(List.of(hash));
@@ -59,7 +59,7 @@ class HeaderSyncRepeatedTipTest {
         var transport = mock(HeaderSynchronizer.class);
         when(transport.download(anyList(), any())).thenReturn(wire);
         var service = mock(HeaderSyncService.class);
-        when(service.process(eq(wire), any())).thenReturn(List.of(next), List.of(first));
+        when(service.processWithReception(eq(wire), any(), any())).thenReturn(new HeaderBatchProcessor.Reception(List.of(next), true), new HeaderBatchProcessor.Reception(List.of(first), false));
         var locator = mock(BlockLocatorBuilder.class);
         var hash = first.hash();
         when(locator.build(any())).thenReturn(List.of(hash));

@@ -16,6 +16,34 @@ import static org.junit.jupiter.api.Assertions.*;
 class SingleRbfClusterPolicyTest {
     private static final MempoolLimits LIMITS = MempoolLimits.DEFAULT;
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"cluster-count-limit", "cluster-size-limit"})
+    void oversizedProspectiveClusterIsRejectedBeforeDiagramCalculation(String reason) {
+        Transaction original = tx(List.of(external(1)), 1);
+        var old = new LinkedHashMap<Hash256, MempoolEntry>();
+        old.put(original.txId(), entry(original, 100));
+        var tips = new ArrayList<OutPoint>();
+        int length = reason.equals("cluster-count-limit") ? 32 : 1;
+        for (int branch = 0; branch < 2; branch++) {
+            OutPoint previous = external(branch + 2);
+            for (int depth = 0; depth < length; depth++) {
+                var parent = tx(List.of(previous), 10 + branch * 100 + depth);
+                long sigops = reason.equals("cluster-size-limit") ? 3000 : 0;
+                old.put(parent.txId(), new MempoolEntry(parent, 100,
+                        TransactionWeight.calculate(parent), 0, sigops));
+                previous = point(parent);
+            }
+            tips.add(previous);
+        }
+        var inputs = new ArrayList<OutPoint>(); inputs.add(external(1)); inputs.addAll(tips);
+        var replacement = entry(tx(inputs, 999), 1_000_000);
+        var before = new LinkedHashMap<>(old);
+        var rejected = assertThrows(MempoolAdmissionException.class, () -> MempoolGraphPolicy.replacement(
+                old, Set.of(original.txId()), Set.of(original.txId()), replacement, LIMITS));
+        assertEquals(reason, rejected.getMessage());
+        assertEquals(before, old, "Rejected prospective changes must not mutate the live pool");
+    }
+
     @Test
     void replacementMayAddAnUnconfirmedInputWhenDiagramAndFeesImprove() {
         Transaction original = tx(List.of(external(1)), 1);
