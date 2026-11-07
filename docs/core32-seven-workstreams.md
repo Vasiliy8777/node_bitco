@@ -49,11 +49,70 @@ verify a single healthy restarted process after a completed implementation batch
    пула при бесконфликтном приёме/восстановлении; [проверки](mempool-admission-local-work-core32.md).
    Также исправлены RBF-проверка лимита до оптимизации и расчёт размера кластера
    по суммарному adjusted weight; [проверки](rbf-cluster-preflight-core32.md).
+   Устранена повторная TRUC-проверка исторических предков после reorg;
+   [сценарий и пределы исправления](truc-reorg-inheritance-core32.md).
+   Реализовано TRUC-исключение для прямой замены потомка в семье после reorg;
+   косвенное удаление через другую ветку исключения не даёт.
+   [Проверки и оставшийся объём](truc-reorg-replacement-core32.md).
+   По live-стеку устранён квадратичный обход при RBF-сравнении диаграмм;
+   [доказательства и проверки](rbf-diagram-traversal-core32.md). Это не заменяет
+   бюджетный оптимизатор Core.
+   Исправлены округление adjusted weight вытесненного пакета и обновление
+   rolling floor при нулевой/отрицательной ставке; [проверки и пределы](eviction-chunk-floor-core32.md).
+   Package-RBF теперь считает конфликтующие кластеры, а не сумму потомков;
+   [проверки 120 транзакций и границы 100/101](package-rbf-cluster-count-core32.md).
+   Добавлены ранний отказ сверх лимита и однократное построение связей на
+   проверку; [535 mempool-проверок и оставшийся объём](rbf-preflight-work-core32.md).
+   Ephemeral dust теперь требует нулевых base fee и modified fee одновременно;
+   [проверки и нативное сравнение](ephemeral-dust-base-fee-core32.md).
+   Обход потомков больше не пересканирует весь пул на каждом уровне графа;
+   [300 DAG, цепочка 10 000 записей и пределы](descendant-traversal-core32.md).
+   Одиночный RBF больше не оптимизирует несвязанные кластеры;
+   [сравнение 300 DAG и пределы](rbf-affected-diagrams-core32.md).
+   Выбор chunk для вытеснения не пересканирует потомков всего пула для
+   каждого кластера; [проверки и пределы](eviction-tail-work-core32.md).
+   TRUC sibling-кандидат ищется через spent index без сканирования пула;
+   [500 DAG и пределы](sibling-conflict-index-core32.md).
+   Комиссии, RBF и перспективные ограничения проверяются до исполнения скриптов;
+   [проверки приоритета и пределы](admission-script-order-core32.md).
+   Отрицательная modified fee после prioritisation даёт отказ политики,
+   а не ошибку аргумента; [проверки и пределы](negative-modified-fee-core32.md).
+   Положительный rolling minimum проверяется до minrelay;
+   [проверки приоритета и пределы](fee-floor-priority-core32.md).
+   Имена одиночных RPC-отказов minrelay/rolling minimum приведены к Core;
+   [проверки и пределы](fee-rpc-reasons-core32.md).
+   Числовые reject-details одиночных комиссионных отказов передаются
+   структурированно; [сравнение и пределы](fee-rpc-details-core32.md).
+   Пакетные комиссионные отказы сохраняют индекс и детали вместо общей
+   package-error; [сравнение и пределы](package-fee-index-core32.md).
+   Скрипты пакетной пробы исполняются после предварительных проверок всех
+   транзакций; [нативное сравнение и пределы](package-precheck-phase-core32.md).
 5. RPC: набор методов и вложенных схем остаётся подмножеством Core. Поле
    presynced_headers реализовано и проверено. Нативное сравнение теперь выгружает
    инвентарь методов; полная семантика остальных методов ещё не реализована.
    Для одиночного testmempoolaccept обе причины превышения лимита кластера
    приведены к Core-имени too-large-cluster; проверен нативный RBF-сценарий.
+   Multi-transaction testmempoolaccept переведён в режим индивидуальных комиссий
+   без CPFP-агрегации; исправлены effective-feerate/effective-includes.
+   [Проверки и оставшийся объём RPC](testmempoolaccept-fee-mode-core32.md).
+   Пробы допускают общую топологическую форму пакета; предварительная проверка
+   submitpackage использует собственные CPFP/RBF-правила.
+   [Сценарии и пределы](package-probe-topology-core32.md).
+   Имена, приоритет и RPC-форма структурных отказов пакета приведены к Core;
+   [проверки и открытые частичные результаты](package-structural-errors-core32.md).
+   maxfeerate в testmempoolaccept использует base fee, округление Core и
+   последовательную выдачу результатов; [проверки и пределы](testaccept-maxfee-core32.md).
+   Одиночная проба различает точный повтор и тот же txid с другим witness;
+   [нативное сравнение и пределы](known-single-probe-core32.md).
+   Пакетная проба больше не дедуплицирует известные транзакции и сообщает
+   индекс индивидуального отказа; [проверки и пределы](known-package-probe-core32.md).
+   submitpackage сохраняет известный witness и сообщает other-wtxid;
+   [дедупликация и оставшийся объём](submission-witness-dedup-core32.md).
+   maxfeerate не применяется повторно к известным записям submitpackage;
+   [проверки и пределы](known-submission-maxfee-core32.md).
+   missing-inputs в одиночной и пакетной пробе имеет Core-форму с индексом
+   отказа и незавершёнными остальными записями;
+   [проверки и пределы](missing-input-probe-core32.md).
 6. Сеть: отсутствуют полноценные Tor/I2P-транспорты, private broadcast и загрузка
    внешнего ASMap. Разбор адресов BIP155 сам по себе эти функции не реализует.
 

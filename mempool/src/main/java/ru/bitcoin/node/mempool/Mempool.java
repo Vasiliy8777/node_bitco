@@ -14,6 +14,10 @@ import java.util.*;
  * Replacement and resource checks complete before committing a prospective pool.
  */
 public final class Mempool {
+    /** Keeps missing-input classification independent of diagnostic text. */
+    private static final class MissingInput extends MempoolAdmissionException {
+        MissingInput(String message) { super(message); }
+    }
     private final MempoolPolicy policy;
     private final MempoolLimits limits;
     private final java.time.Clock clock;
@@ -60,11 +64,32 @@ public final class Mempool {
     }
     private MempoolEntry admitInternal(Transaction transaction, MempoolValidationContext context, UtxoView chainUtxos,
                                        boolean packageMode, boolean bypassLimits, Long restoredArrivalTime, Long restoredAdmissionHeight) {
+        return admitInternal(transaction, context, chainUtxos, packageMode, bypassLimits,
+                restoredArrivalTime, restoredAdmissionHeight, packageMode);
+    }
+    private MempoolEntry admitInternal(Transaction transaction, MempoolValidationContext context, UtxoView chainUtxos,
+                                       boolean packageMode, boolean bypassLimits, Long restoredArrivalTime,
+                                       Long restoredAdmissionHeight, boolean packageFeerates) {
+        return admitInternal(transaction, context, chainUtxos, packageMode, bypassLimits,
+                restoredArrivalTime, restoredAdmissionHeight, packageFeerates, null);
+    }
+    private record DeferredScript(Transaction transaction, UtxoView coins) {}
+    private static void validateOrDeferScripts(Transaction transaction, UtxoView coins, List<DeferredScript> deferred) {
+        if (deferred == null) MempoolValidator.validateScripts(transaction, coins);
+        else deferred.add(new DeferredScript(transaction, coins));
+    }
+    /** Deferred scripts are used only in the isolated testAccept clone. */
+    private MempoolEntry admitInternal(Transaction transaction, MempoolValidationContext context, UtxoView chainUtxos,
+                                       boolean packageMode, boolean bypassLimits, Long restoredArrivalTime,
+                                       Long restoredAdmissionHeight, boolean packageFeerates, List<DeferredScript> deferred) {
         Objects.requireNonNull(transaction, "transaction");
         Objects.requireNonNull(context, "context");
         Objects.requireNonNull(chainUtxos, "chainUtxos");
         Hash256 txId = transaction.txId();
-        if (entries.containsKey(txId)) throw new MempoolAdmissionException("Transaction already exists: " + txId);
+        var existing = entries.get(txId);
+        if (existing != null) throw new MempoolAdmissionException(
+                existing.transaction().wtxId().equals(transaction.wtxId())
+                        ? "txn-already-in-mempool" : "txn-same-nonwitness-data-in-mempool");
         if (transaction.isCoinbase()) throw new MempoolAdmissionException("Coinbase cannot enter mempool");
         long weight = TransactionWeight.calculate(transaction);
         policy.validateStandardStructure(transaction, weight);
@@ -73,7 +98,10 @@ public final class Mempool {
             Hash256 conflict = spent.get(input.previousOutput());
             if (conflict != null) conflicts.add(conflict);
         }
-        if (!packageMode) MempoolGraphPolicy.addSiblingConflict(entries, transaction, conflicts);
+        if (!packageMode) {
+            MempoolGraphPolicy.addSiblingConflict(entries, spent, transaction, conflicts);
+            MempoolGraphPolicy.checkConflictClusterLimit(entries, conflicts, "too-many-conflicting-clusters");
+        }
         Set<Hash256> evicted = MempoolGraphPolicy.descendants(entries, conflicts);
         Map<OutPoint, UtxoEntry> coins = new HashMap<>();
         for (var input : transaction.inputs()) {
@@ -82,26 +110,32 @@ public final class Mempool {
             MempoolEntry parent = entries.get(point.transactionId());
             if (parent != null) {
                 long index = point.outputIndex().value();
-                if (index >= parent.transaction().outputs().size()) throw new MempoolAdmissionException("Invalid parent output index");
+                if (index >= parent.transaction().outputs().size()) throw new MissingInput("Invalid parent output index");
                 var output = parent.transaction().outputs().get((int) index);
                 coins.put(point, new UtxoEntry(output.value(), output.scriptPubKey(), context.nextBlockHeight(), false));
             } else {
-                coins.put(point, chainUtxos.find(point).orElseThrow(() -> new MempoolAdmissionException("Missing UTXO: " + point)));
+                coins.put(point, chainUtxos.find(point).orElseThrow(() -> new MissingInput("Missing UTXO: " + point)));
             }
         }
         UtxoView view = point -> Optional.ofNullable(coins.get(point));
-        long fee = MempoolValidator.validate(transaction, context, view);
+        long fee = MempoolValidator.validatePreChecks(transaction, context, view);
         long sigops = ru.bitcoin.node.consensus.transaction.TransactionSigOpCost.calculate(transaction, view,
                 ru.bitcoin.node.mempool.policy.StandardScriptVerifyFlags.STANDARD);
         long feeDelta = feeDeltas.getOrDefault(txId, 0L);
         long modifiedFee = Math.addExact(fee, feeDelta);
-        if (!packageMode) policy.validateFee(modifiedFee, Math.max(weight, Math.multiplyExact(sigops, 80)));
-        ru.bitcoin.node.mempool.policy.StandardTransactionPolicy.validateDustFee(transaction, modifiedFee, policy.dustRelaySatPerKvB());
+        ru.bitcoin.node.mempool.policy.StandardTransactionPolicy.validateDustFee(transaction, fee, modifiedFee, policy.dustRelaySatPerKvB());
         PackagePolicy.ephemeralSpends(transaction, entries, policy.dustRelaySatPerKvB());
         long arrivalTime = restoredArrivalTime != null ? restoredArrivalTime : clock.instant().getEpochSecond();
         long admissionHeight = restoredAdmissionHeight != null ? restoredAdmissionHeight : Math.max(0L, context.nextBlockHeight() - 1L);
         var entry = new MempoolEntry(transaction, fee, weight, arrivalTime, sigops, feeDelta, admissionHeight);
-        if (!packageMode && entry.modifiedFee() < new FeeRate(minimumFeeRate()).feeForVSize(entry.virtualSize())) throw new MempoolAdmissionException("mempool-min-fee");
+        if (!packageFeerates) {
+            long rollingMinimum = new FeeRate(minimumFeeRate()).feeForVSize(entry.virtualSize());
+            // Core checks a positive rolling floor before minrelay. A zero
+            // floor must not misclassify a negative modified fee as a rolling rejection.
+            if (rollingMinimum > 0 && entry.modifiedFee() < rollingMinimum)
+                throw new MempoolFeeException("mempool-min-fee", "mempool min fee not met", entry.modifiedFee(), rollingMinimum);
+            policy.validateFee(modifiedFee, entry.adjustedWeight());
+        }
         MempoolGraphPolicy.replacement(entries, conflicts, evicted, entry, limits);
         // Conflict-free additions only affect their connected component.
         // Preserve staged RBF/eviction and the package capacity boundary.
@@ -112,6 +146,7 @@ public final class Mempool {
             // No removal or eviction is needed. All validation precedes commit;
             // package admission retains its existing deferred-capacity boundary.
             if (packageMode || proposedSize <= limits.maxPoolVirtualBytes()) {
+                validateOrDeferScripts(transaction, view, deferred);
                 entries.put(txId, entry);
                 for (var input : transaction.inputs()) spent.put(input.previousOutput(), txId);
                 totalVirtualBytes = proposedSize;
@@ -122,13 +157,18 @@ public final class Mempool {
         Map<Hash256, MempoolEntry> candidate = new LinkedHashMap<>(entries);
         evicted.forEach(candidate::remove);
         candidate.put(txId, entry);
-        if (!bypassLimits) MempoolGraphPolicy.checkLimits(candidate, txId, limits);
+        if (!bypassLimits) {
+            if (packageMode) MempoolGraphPolicy.checkLimits(candidate, txId, limits);
+            else MempoolGraphPolicy.checkLimits(candidate, txId, limits, entries, conflicts);
+        }
+        int beforeTrim = candidate.size();
+        validateOrDeferScripts(transaction, view, deferred);
         long removedRate = packageMode ? 0 : MempoolGraphPolicy.trim(candidate, limits.maxPoolVirtualBytes(), txId);
         entries.clear();
         entries.putAll(candidate);
         unbroadcast.retainAll(entries.keySet());
         rebuildSpent();
-        if (removedRate > 0) rollingFee.bump(removedRate, limits.incrementalRelaySatPerKvB(), clock.instant().getEpochSecond());
+        if (candidate.size() < beforeTrim) rollingFee.bump(removedRate, limits.incrementalRelaySatPerKvB(), clock.instant().getEpochSecond());
         sequence++;
         return entry;
     }
@@ -137,7 +177,7 @@ public final class Mempool {
      * deduplicated by txid/wtxid and cannot subsidize a new child a second time.
      */
     public synchronized List<MempoolEntry> admitPackage(List<Transaction> transactions, MempoolValidationContext context, UtxoView chainUtxos) {
-        return admitPackageInternal(transactions, context, chainUtxos, true);
+        return admitPackageInternal(transactions, context, chainUtxos, true, true);
     }
 
     /**
@@ -148,17 +188,18 @@ public final class Mempool {
     private List<MempoolEntry> admitPackageInternal(List<Transaction> transactions,
                                                     MempoolValidationContext context,
                                                     UtxoView chainUtxos,
-                                                    boolean allowReplacement) {
+                                                    boolean allowReplacement, boolean packageFeerates) {
         List<Transaction> txs = List.copyOf(transactions);
         Objects.requireNonNull(context); Objects.requireNonNull(chainUtxos);
-        PackagePolicy.validate(txs);
+        PackagePolicy.validate(txs, packageFeerates);
         if (txs.size() == 1 && !entries.containsKey(txs.getFirst().txId())) return List.of(admit(txs.getFirst(), context, chainUtxos));
         Set<Hash256> conflicts = new HashSet<>();
         List<Transaction> fresh = new ArrayList<>();
         for (var tx : txs) {
             var known = entries.get(tx.txId());
             if (known != null) {
-                if (!known.transaction().wtxId().equals(tx.wtxId())) throw new MempoolAdmissionException("package-different-witness");
+                // Core submission retains the accepted witness and reports its
+                // wtxid, without validating/replacing the supplied alternative.
                 continue;
             }
             fresh.add(tx);
@@ -169,6 +210,7 @@ public final class Mempool {
         }
         if (!allowReplacement && !conflicts.isEmpty())
             throw new MempoolAdmissionException("txn-mempool-conflict");
+        if (allowReplacement) PackagePolicy.replacementContext(fresh, entries, conflicts);
         Set<Hash256> removed = MempoolGraphPolicy.descendants(entries, conflicts);
         for (var tx : txs) {
             if (removed.contains(tx.txId())) throw new MempoolAdmissionException("package-replaces-own-parent");
@@ -177,15 +219,16 @@ public final class Mempool {
         Mempool staged = new Mempool(policy, limits, clock);
         staged.entries.putAll(entries);
         staged.feeDeltas.putAll(feeDeltas);
+        staged.rollingFee.restoreFrom(rollingFee);
         staged.unbroadcast.addAll(unbroadcast);
         removed.forEach(staged.entries::remove);
         staged.rebuildSpent();
         long fee = 0, size = 0;
         long floor = Math.max(minimumFeeRate(), policy.minRelayFeeRate().satoshisPerKiloByte());
         for (var tx : fresh) {
-            var entry = staged.admitInternal(tx, context, chainUtxos, true);
+            var entry = staged.admitInternal(tx, context, chainUtxos, true, false, null, null, packageFeerates);
             // Parents that pass individual admission do not contribute fees to a low-fee child.
-            if (tx == txs.getLast() || entry.modifiedFee() < new FeeRate(floor).feeForVSize(entry.virtualSize())) {
+            if (packageFeerates && (tx == txs.getLast() || entry.modifiedFee() < new FeeRate(floor).feeForVSize(entry.virtualSize()))) {
                 fee = Math.addExact(fee, entry.modifiedFee()); size = Math.addExact(size, entry.virtualSize());
             }
         }
@@ -194,11 +237,12 @@ public final class Mempool {
             PackagePolicy.replacement(fresh, entries, staged.entries, conflicts, removed, limits);
         // Check limits again with the complete package; no carve-outs or sibling eviction.
         for (var tx : fresh) MempoolGraphPolicy.checkLimits(staged.entries, tx.txId(), limits);
+        int beforeTrim = staged.entries.size();
         long removedRate = MempoolGraphPolicy.trim(staged.entries, limits.maxPoolVirtualBytes(), txs.getLast().txId());
         List<MempoolEntry> result = txs.stream().map(tx -> staged.entries.get(tx.txId())).toList();
         if (result.stream().anyMatch(Objects::isNull)) throw new MempoolAdmissionException("package-evicted");
         entries.clear(); entries.putAll(staged.entries); unbroadcast.retainAll(entries.keySet()); rebuildSpent();
-        if (removedRate > 0) rollingFee.bump(removedRate, limits.incrementalRelaySatPerKvB(), clock.instant().getEpochSecond());
+        if (staged.entries.size() < beforeTrim) rollingFee.bump(removedRate, limits.incrementalRelaySatPerKvB(), clock.instant().getEpochSecond());
         if (!fresh.isEmpty() || !removed.isEmpty()) sequence++;
         return result;
     }
@@ -222,9 +266,26 @@ public final class Mempool {
     public synchronized boolean isUnbroadcast(Hash256 txid) { return unbroadcast.contains(txid); }
     public synchronized Set<Hash256> unbroadcastTransactions() { return Set.copyOf(unbroadcast); }
 
-    public record TestAcceptResult(List<MempoolEntry> entries, String rejectReason) {
-        public TestAcceptResult { entries = List.copyOf(entries); }
+    public record TestAcceptResult(List<MempoolEntry> entries, String rejectReason, int failedTransactionIndex,
+                                   Set<Hash256> knownSubmissionTxids, String rejectDetails) {
+        public TestAcceptResult(List<MempoolEntry> entries, String rejectReason, int failedTransactionIndex,
+                                Set<Hash256> knownSubmissionTxids) {
+            this(entries, rejectReason, failedTransactionIndex, knownSubmissionTxids, null);
+        }
+        public TestAcceptResult(List<MempoolEntry> entries, String rejectReason, int failedTransactionIndex) {
+            this(entries, rejectReason, failedTransactionIndex, Set.of());
+        }
+        public TestAcceptResult(List<MempoolEntry> entries, String rejectReason) { this(entries, rejectReason, -1); }
+        public TestAcceptResult { entries = List.copyOf(entries); knownSubmissionTxids = Set.copyOf(knownSubmissionTxids); }
         public boolean allowed() { return rejectReason == null; }
+        /** Package-wide structural rejection, before any individual tx validation. */
+        public boolean packagePolicyFailure() {
+            return rejectReason != null && switch (rejectReason) {
+                case "package-too-many-transactions", "package-too-large", "package-contains-duplicates",
+                        "package-not-sorted", "conflict-in-package" -> true;
+                default -> false;
+            };
+        }
     }
 
     /**
@@ -234,6 +295,18 @@ public final class Mempool {
      */
     public synchronized TestAcceptResult testAccept(List<Transaction> transactions,
                                                     MempoolValidationContext context, UtxoView chainUtxos) {
+        return testAcceptInternal(transactions, context, chainUtxos, false);
+    }
+
+    /** Non-mutating preflight using submitpackage's CPFP and replacement rules. */
+    public synchronized TestAcceptResult testSubmitPackage(List<Transaction> transactions,
+                                                           MempoolValidationContext context, UtxoView chainUtxos) {
+        return testAcceptInternal(transactions, context, chainUtxos, true);
+    }
+
+    private TestAcceptResult testAcceptInternal(List<Transaction> transactions,
+                                                MempoolValidationContext context, UtxoView chainUtxos,
+                                                boolean submission) {
         Objects.requireNonNull(transactions); Objects.requireNonNull(context); Objects.requireNonNull(chainUtxos);
         Mempool staged = new Mempool(policy, limits, clock);
         staged.entries.putAll(entries);
@@ -241,12 +314,49 @@ public final class Mempool {
         staged.rollingFee.restoreFrom(rollingFee);
         staged.rebuildSpent();
         try {
-            List<MempoolEntry> accepted = transactions.size() == 1
+            if (!submission && transactions.size() > 1) {
+                PackagePolicy.validate(transactions, false);
+                var accepted = new ArrayList<MempoolEntry>();
+                var deferred = new ArrayList<DeferredScript>();
+                for (int i = 0; i < transactions.size(); i++) {
+                    var tx = transactions.get(i);
+                    try {
+                        // A probe must validate every supplied transaction; unlike
+                        // submitpackage it must not deduplicate known entries.
+                        var known = staged.entries.get(tx.txId());
+                        if (known != null) throw new MempoolAdmissionException(
+                                known.transaction().wtxId().equals(tx.wtxId()) ? "txn-already-in-mempool"
+                                        : "txn-same-nonwitness-data-in-mempool");
+                        for (var input : tx.inputs())
+                            if (staged.spent.containsKey(input.previousOutput()))
+                                throw new MempoolAdmissionException("bip125-replacement-disallowed");
+                        accepted.add(staged.admitInternal(tx, context, chainUtxos, true, false, null, null, false, deferred));
+                    } catch (MempoolAdmissionException e) {
+                        if (e instanceof MissingInput) return new TestAcceptResult(List.of(), "missing-inputs", i);
+                        boolean indexed = e instanceof MempoolFeeException || switch (e.getMessage()) {
+                            case "txn-already-in-mempool", "txn-same-nonwitness-data-in-mempool",
+                                    "bip125-replacement-disallowed" -> true;
+                            default -> false;
+                        };
+                        return new TestAcceptResult(List.of(), e.getMessage(), indexed ? i : -1, Set.of(),
+                                e instanceof MempoolFeeException feeError ? feeError.rpcDetails() : null);
+                    }
+                }
+                // Core finishes all package PreChecks before executing any scripts.
+                // Each check retains the exact input snapshot validated above.
+                for (var check : deferred) MempoolValidator.validateScripts(check.transaction(), check.coins());
+                return new TestAcceptResult(accepted, null);
+            }
+            List<MempoolEntry> accepted = transactions.size() == 1 && !submission
                     ? List.of(staged.admit(transactions.getFirst(), context, chainUtxos))
-                    : staged.admitPackageInternal(transactions, context, chainUtxos, false);
-            return new TestAcceptResult(accepted, null);
+                    : staged.admitPackageInternal(transactions, context, chainUtxos, submission, submission);
+            Set<Hash256> known = submission ? transactions.stream().map(Transaction::txId)
+                    .filter(entries::containsKey).collect(java.util.stream.Collectors.toSet()) : Set.of();
+            return new TestAcceptResult(accepted, null, -1, known);
         } catch (MempoolAdmissionException e) {
-            return new TestAcceptResult(List.of(), e.getMessage());
+            if (!submission && e instanceof MissingInput) return new TestAcceptResult(List.of(), "missing-inputs");
+            return new TestAcceptResult(List.of(), e.getMessage(), -1, Set.of(),
+                    e instanceof MempoolFeeException feeError ? feeError.rpcDetails() : null);
         }
     }
 

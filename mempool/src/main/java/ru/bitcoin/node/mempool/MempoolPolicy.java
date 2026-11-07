@@ -165,12 +165,6 @@ public final class MempoolPolicy {
             long fee,
             long weight
     ) {
-        if (fee < 0) {
-            throw new IllegalArgumentException(
-                    "fee must not be negative"
-            );
-        }
-
         if (weight <= 0) {
             throw new IllegalArgumentException(
                     "weight must be positive"
@@ -187,13 +181,15 @@ public final class MempoolPolicy {
                         virtualSize
                 );
 
+        // This is the modified policy fee: a local mining delta may make it
+        // negative. Treat that as a fee-policy rejection, not an API error.
         if (fee < requiredFee) {
-            throw new MempoolAdmissionException(
+            throw new MempoolFeeException(
                     "Minimum relay fee not met: "
                             + fee
                             + " < "
                             + requiredFee
-                            + " sat"
+                            + " sat", "min relay fee not met", fee, requiredFee
             );
         }
     }

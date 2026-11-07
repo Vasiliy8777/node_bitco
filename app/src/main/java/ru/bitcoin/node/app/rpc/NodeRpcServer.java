@@ -1,5 +1,7 @@
 package ru.bitcoin.node.app.rpc;
 
+import ru.bitcoin.node.mempool.FeeRate;
+
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import tools.jackson.databind.json.JsonMapper;
@@ -364,47 +366,68 @@ public final class NodeRpcServer implements AutoCloseable {
                     throw new RpcException(-22, "TX decode failed");
                 }
                 var probe = validation.testMempoolAccept(transactions);
-                if (probe.allowed()) {
-                    for (int i = 0; i < transactions.size(); i++) {
-                        var entry = probe.entries().get(i);
-                        if (maxFeeRate != 0 && entry.modifiedFee() * 1000L > maxFeeRate * entry.virtualSize())
-                            yield rejectedTestMempoolAccept(transactions, "max-fee-exceeded");
-                    }
-                }
                 List<Map<String, Object>> results = new ArrayList<>(transactions.size());
                 if (!probe.allowed()) {
+                    if (probe.failedTransactionIndex() >= 0) {
+                        for (int i = 0; i < transactions.size(); i++) {
+                            var tx = transactions.get(i);
+                            var result = new LinkedHashMap<String, Object>();
+                            result.put("txid", tx.txId().toDisplayHex());
+                            result.put("wtxid", tx.wtxId().toDisplayHex());
+                            if (i == probe.failedTransactionIndex()) {
+                                result.put("allowed", false);
+                                result.put("reject-reason", testAcceptRejectReason(probe.rejectReason()));
+                                if (!"missing-inputs".equals(probe.rejectReason()))
+                                    result.put("reject-details", probe.rejectDetails() != null ? probe.rejectDetails() : probe.rejectReason());
+                            }
+                            results.add(result);
+                        }
+                        yield results;
+                    }
                     for (Transaction tx : transactions) {
                         var result = new LinkedHashMap<String, Object>();
                         result.put("txid", tx.txId().toDisplayHex());
                         result.put("wtxid", tx.wtxId().toDisplayHex());
-                        result.put("allowed", false);
+                        if (!probe.packagePolicyFailure()) result.put("allowed", false);
                         if (transactions.size() > 1) result.put("package-error", probe.rejectReason());
-                        else result.put("reject-reason", switch (probe.rejectReason()) {
-                            case "cluster-count-limit", "cluster-size-limit" -> "too-large-cluster";
-                            default -> probe.rejectReason();
-                        });
+                        else result.put("reject-reason", testAcceptRejectReason(probe.rejectReason()));
+                        if (transactions.size() == 1 && ("txn-already-in-mempool".equals(probe.rejectReason())
+                                || "txn-same-nonwitness-data-in-mempool".equals(probe.rejectReason())))
+                            result.put("reject-details", probe.rejectReason());
+                        if (transactions.size() == 1 && probe.rejectDetails() != null)
+                            result.put("reject-details", probe.rejectDetails());
                         results.add(result);
                     }
                     yield results;
                 }
-                long packageFee = probe.entries().stream().mapToLong(ru.bitcoin.node.mempool.MempoolEntry::modifiedFee).sum();
-                long packageVsize = probe.entries().stream().mapToLong(ru.bitcoin.node.mempool.MempoolEntry::virtualSize).sum();
-                double effectiveRate = packageVsize == 0 ? 0.0 : ((double) packageFee * 1000.0 / packageVsize) / 100_000_000.0;
-                List<String> includes = transactions.stream().map(tx -> tx.wtxId().toDisplayHex()).toList();
+                boolean maxFeeExceeded = false;
                 for (int i = 0; i < transactions.size(); i++) {
                     Transaction tx = transactions.get(i);
                     var entry = probe.entries().get(i);
                     var result = new LinkedHashMap<String, Object>();
                     result.put("txid", tx.txId().toDisplayHex());
                     result.put("wtxid", tx.wtxId().toDisplayHex());
+                    if (maxFeeExceeded) {
+                        results.add(result);
+                        continue;
+                    }
+                    // Core caps the base fee, independent of mining fee deltas,
+                    // against CFeeRate::GetFee's rounded-up satoshi amount.
+                    if (maxFeeRate != 0 && entry.fee() > new FeeRate(maxFeeRate).feeForVSize(entry.virtualSize())) {
+                        result.put("allowed", false);
+                        result.put("reject-reason", "max-fee-exceeded");
+                        maxFeeExceeded = true;
+                        results.add(result);
+                        continue;
+                    }
                     result.put("allowed", true);
                     result.put("vsize", entry.virtualSize());
                     result.put("vsize_adjusted", entry.virtualSize());
                     result.put("vsize_bip141", ru.bitcoin.node.consensus.transaction.TransactionWeight.virtualSize(entry.weight()));
                     var fees = new LinkedHashMap<String, Object>();
                     fees.put("base", satoshisToBtc(entry.fee()));
-                    fees.put("effective-feerate", effectiveRate);
-                    fees.put("effective-includes", includes);
+                    fees.put("effective-feerate", satoshisToBtc(entry.feeRate().satoshisPerKiloByte()));
+                    fees.put("effective-includes", List.of(tx.wtxId().toDisplayHex()));
                     result.put("fees", fees);
                     results.add(result);
                 }
@@ -427,11 +450,12 @@ public final class NodeRpcServer implements AutoCloseable {
                     throw new RpcException(-22, "TX decode failed");
                 }
                 try {
-                    var probe = validation.testMempoolAccept(transactions);
+                    var probe = validation.testPackageSubmission(transactions);
                     if (!probe.allowed()) throw new ru.bitcoin.node.mempool.MempoolAdmissionException(probe.rejectReason());
                     for (int i = 0; i < transactions.size(); i++) {
                         var entry = probe.entries().get(i);
-                        if (maxFeeRate != 0 && entry.modifiedFee() * 1000L > maxFeeRate * entry.virtualSize())
+                        if (!probe.knownSubmissionTxids().contains(transactions.get(i).txId())
+                                && maxFeeRate != 0 && entry.modifiedFee() * 1000L > maxFeeRate * entry.virtualSize())
                             throw new RpcException(-25, "Fee exceeds maximum configured by user (e.g. -maxtxfee, maxfeerate)");
                         if (burnAmount(transactions.get(i)) > maxBurnAmount)
                             throw new RpcException(-25, "Unspendable output exceeds maximum configured by user (maxburnamount)");
@@ -444,6 +468,11 @@ public final class NodeRpcServer implements AutoCloseable {
                         var entry = accepted.get(i);
                         var result = new LinkedHashMap<String, Object>();
                         result.put("txid", tx.txId().toDisplayHex());
+                        if (!entry.transaction().wtxId().equals(tx.wtxId())) {
+                            result.put("other-wtxid", entry.transaction().wtxId().toDisplayHex());
+                            txResults.put(tx.wtxId().toDisplayHex(), result);
+                            continue;
+                        }
                         result.put("vsize", entry.virtualSize());
                         result.put("vsize_adjusted", entry.virtualSize());
                         result.put("vsize_bip141", ru.bitcoin.node.consensus.transaction.TransactionWeight.virtualSize(entry.weight()));
@@ -1339,6 +1368,14 @@ public final class NodeRpcServer implements AutoCloseable {
             if (UnspendableScript.isUnspendable(output.scriptPubKey())) burn = Math.addExact(burn, output.value());
         }
         return burn;
+    }
+
+    private static String testAcceptRejectReason(String reason) {
+        return switch (reason) {
+            case "cluster-count-limit", "cluster-size-limit" -> "too-large-cluster";
+            case "mempool-min-fee" -> "mempool min fee not met";
+            default -> reason.startsWith("Minimum relay fee not met:") ? "min relay fee not met" : reason;
+        };
     }
 
     private static List<Map<String, Object>> rejectedTestMempoolAccept(List<Transaction> transactions, String reason) {

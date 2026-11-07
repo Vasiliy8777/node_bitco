@@ -11,24 +11,34 @@ final class PackagePolicy {
     }
 
     static void validate(List<Transaction> txs) {
-        if (txs.isEmpty() || txs.size() > 25) fail("package-count");
+        validate(txs, true);
+    }
+
+    static void validate(List<Transaction> txs, boolean requireChildWithParents) {
+        if (txs.isEmpty()) fail("package-count");
+        if (txs.size() > 25) fail("package-too-many-transactions");
         Set<Hash256> later = new HashSet<>();
         long weight = 0;
         for (var tx : txs) {
             Objects.requireNonNull(tx);
-            if (!later.add(tx.txId())) fail("package-duplicates");
+            later.add(tx.txId());
             weight += TransactionWeight.calculate(tx);
         }
-        if (txs.size() > 1 && weight > 404_000) fail("package-weight");
-        Set<OutPoint> spends = new HashSet<>();
+        if (txs.size() > 1 && weight > 404_000) fail("package-too-large");
+        if (later.size() != txs.size()) fail("package-contains-duplicates");
         for (var tx : txs) {
             for (var in : tx.inputs()) {
-                if (later.contains(in.previousOutput().transactionId())) fail("package-not-topological");
-                if (!spends.add(in.previousOutput())) fail("package-conflict");
+                if (later.contains(in.previousOutput().transactionId())) fail("package-not-sorted");
             }
             later.remove(tx.txId());
         }
-        if (txs.size() < 2) return;
+        Set<OutPoint> spends = new HashSet<>();
+        for (var tx : txs)
+            for (var in : tx.inputs())
+                if (!spends.add(in.previousOutput())) fail("conflict-in-package");
+        // PackageTestAccept checks general topological consistency; only actual
+        // child-with-parents submission imposes this additional shape.
+        if (!requireChildWithParents || txs.size() < 2) return;
         Set<Hash256> parents = new HashSet<>();
         for (int i = 0; i < txs.size() - 1; i++) parents.add(txs.get(i).txId());
         Set<Hash256> childParents = new HashSet<>();
@@ -60,16 +70,8 @@ final class PackagePolicy {
                             Map<Hash256, MempoolEntry> after, Set<Hash256> conflicts,
                             Set<Hash256> removed, MempoolLimits limits) {
         if (conflicts.isEmpty()) return;
-        if (txs.size() != 2) fail("package-rbf-requires-one-parent-one-child");
+        replacementContext(txs, before, conflicts);
         Set<Hash256> proposed = Set.of(txs.getFirst().txId(), txs.getLast().txId());
-        long potential = 0;
-        for (Hash256 id : conflicts) potential += MempoolGraphPolicy.descendants(before, Set.of(id)).size();
-        if (potential > 100) fail("package-rbf-too-many-conflicts");
-        for (var tx : txs)
-            for (var input : tx.inputs()) {
-                Hash256 id = input.previousOutput().transactionId();
-                if (before.containsKey(id) && !proposed.contains(id)) fail("package-rbf-mempool-ancestor");
-            }
         long oldFee = removed.stream().mapToLong(id -> before.get(id).modifiedFee()).sum();
         long newFee = proposed.stream().mapToLong(id -> after.get(id).modifiedFee()).sum();
         long newSize = proposed.stream().mapToLong(id -> after.get(id).virtualSize()).sum();
@@ -88,6 +90,18 @@ final class PackagePolicy {
         int diagram = ClusterLinearization.compareDiagrams(newCurve, oldCurve);
         if (diagram < 0) fail("package-rbf-worse-feerate-diagram");
         if (diagram == 0) fail("package-rbf-unchanged-feerate-diagram");
+    }
+
+    static void replacementContext(List<Transaction> txs, Map<Hash256, MempoolEntry> before, Set<Hash256> conflicts) {
+        if (conflicts.isEmpty()) return;
+        if (txs.size() != 2) fail("package-rbf-requires-one-parent-one-child");
+        Set<Hash256> proposed = Set.of(txs.getFirst().txId(), txs.getLast().txId());
+        for (var tx : txs)
+            for (var input : tx.inputs()) {
+                Hash256 id = input.previousOutput().transactionId();
+                if (before.containsKey(id) && !proposed.contains(id)) fail("package-rbf-mempool-ancestor");
+            }
+        MempoolGraphPolicy.checkConflictClusterLimit(before, conflicts, "package-rbf-too-many-conflicts");
     }
 
     private static void fail(String message) {

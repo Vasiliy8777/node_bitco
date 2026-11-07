@@ -9,6 +9,40 @@ import static org.junit.jupiter.api.Assertions.*;
 import static ru.bitcoin.node.mempool.PackageAdmissionTest.*;
 
 class ReorgTrucPolicyTest {
+    @Test void newTrucGrandchildStillViolatesTwoGenerationLimit() {
+        var pool = new Mempool();
+        var parent = tx(List.of(FUND), 3, 90_000);
+        var child = tx(List.of(point(parent, 0)), 3, 80_000);
+        pool.admit(parent, CONTEXT, COINS);
+        pool.admit(child, CONTEXT, COINS);
+        var grandchild = tx(List.of(point(child, 0)), 3, 70_000);
+        var error = assertThrows(MempoolAdmissionException.class, () -> pool.admit(grandchild, CONTEXT, COINS));
+        assertEquals("truc-topology", error.getMessage());
+        assertEquals(2, pool.size());
+        assertFalse(pool.contains(grandchild.txId()));
+    }
+
+    @Test void nonTrucChildCanExtendGrandfatheredNonTrucParentAfterTrucResurrection() {
+        var ancestor = tx(List.of(FUND), 3, 90_000);
+        var parent = tx(List.of(point(ancestor, 0)), 2, 80_000);
+        UtxoView confirmedAncestor = point -> point.equals(point(ancestor, 0))
+                ? Optional.of(new UtxoEntry(90_000, SCRIPT, 100, false)) : Optional.empty();
+        var pool = new Mempool();
+        pool.admit(parent, CONTEXT, confirmedAncestor);
+        pool.reconcile(CONTEXT, COINS, Set.of(), List.of(ancestor));
+        assertTrue(pool.contains(ancestor.txId()));
+        assertTrue(pool.contains(parent.txId()));
+        var child = tx(List.of(point(parent, 0)), 2, 70_000);
+        assertDoesNotThrow(() -> pool.admit(child, CONTEXT, COINS));
+        assertEquals(3, pool.size());
+        assertTrue(pool.contains(child.txId()));
+        // Grandfathering never permits a new mixed-version direct edge.
+        var bad = tx(List.of(point(child, 0)), 3, 60_000);
+        var error = assertThrows(MempoolAdmissionException.class, () -> pool.admit(bad, CONTEXT, COINS));
+        assertEquals("truc-version-inheritance", error.getMessage());
+        assertEquals(3, pool.size());
+    }
+
     @Test void disconnectedConflictMustPayForExistingTransactionAndDescendants() {
         var pool = new Mempool();
         var original = tx(List.of(FUND), 2, 90_000);

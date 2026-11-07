@@ -140,16 +140,71 @@ buffered UTXO mutations, estimator history gaps/reorgs, disk corruption and cold
 RPC error cases. Full reactor and reference-run logs are in
 `target/core-update-audit/`.
 
-The latest full Bitcoin/RVN reactor completed 5,225 test cases: 5,213 passed,
+The latest full Bitcoin/RVN reactor completed 5,314 test cases: 5,302 passed,
 12 opt-in cases skipped, zero failures/errors. Both applications packaged
-successfully (`core32-ordinary-base-fee-full-build.log`, November 6 01:15:48
-Bangkok). It includes ordinary INV base-fee filtering, Mempool permission/BIP35, Relay/ForceRelay, blocksonly, unsolicited admission,
+successfully (`core32-package-precheck-phase-full-build.log`, November 7 20:48:45
+Bangkok). It includes [package prechecks before deferred scripts](package-precheck-phase-core32.md),
+with native Core 32.1 full-response equality for missing-child-input vs bad-parent-signature priority;
+[indexed package fee failures](package-fee-index-core32.md),
+with native Core 32.1 full-response comparison of both parent/child positions;
+[numeric fee RPC rejection details](fee-rpc-details-core32.md),
+with native Core 32.1 full-object equality for zero/negative modified-fee failures;
+[single-probe fee RPC rejection names](fee-rpc-reasons-core32.md),
+with native Core 32.1 reason equality for zero/negative modified-fee scenarios;
+[positive rolling-floor priority before minrelay](fee-floor-priority-core32.md),
+with local eviction checks and native Core regression;
+[negative modified-fee policy rejection](negative-modified-fee-core32.md),
+with native Core 32.1 comparison and local CPFP checks;
+[fee/RBF/graph checks before script execution](admission-script-order-core32.md),
+with a native Core 32.1 fee-vs-bad-signature priority scenario;
+[TRUC sibling lookup through the spent index](sibling-conflict-index-core32.md),
+500 DAG comparisons and a 10,000-entry no-scan guard;
+[eviction-tail closure and bounded traversal](eviction-tail-work-core32.md),
+300 DAG comparisons and a 3,000-cluster work guard;
+[affected-cluster RBF diagrams](rbf-affected-diagrams-core32.md),
+300 signed-fee graph comparisons and unrelated-entry work checks;
+[missing-input classification and partial RPC results](missing-input-probe-core32.md),
+compared as complete responses against native Core 32.1;
+[known submitpackage entries and client maxfeerate](known-submission-maxfee-core32.md),
+compared against native Core 32.1;
+[submitpackage witness deduplication and other-wtxid](submission-witness-dedup-core32.md),
+compared against native Core 32.1;
+[known transaction rejection in package probes](known-package-probe-core32.md),
+with native Core 32.1 comparison of both witness variants in both positions;
+[known single-transaction rejection reasons and details](known-single-probe-core32.md),
+compared as complete RPC responses against native Core 32.1;
+[testmempoolaccept base-fee cap, rounding and early exit](testaccept-maxfee-core32.md),
+compared against native Core 32.1 with both signs of mining deltas;
+[structural package rejection names, precedence and RPC shape](package-structural-errors-core32.md),
+compared as complete JSON objects against native Core 32.1;
+[general probe topology and separate submission preflight](package-probe-topology-core32.md),
+native Core comparisons of three-generation and disconnected probes;
+[bounded descendant traversal](descendant-traversal-core32.md),
+300 random graph comparisons and a reverse-ordered 10,000-entry chain;
+individual testmempoolaccept fee checks and per-entry
+RPC fee metadata, compared against native Core 32.1 with both pools unchanged;
+[scope and evidence](testmempoolaccept-fee-mode-core32.md). It also includes
+the ephemeral-dust base/modified-fee predicate and its
+signed native submitpackage cancellation scenario,
+early RBF conflict preflight and single-build connectivity,
+the package-RBF distinct-cluster bound,
+eviction chunk-weight/zero/signed-rate floor fixes,
+TRUC direct-conflict/original-count replacement,
+TRUC/reorg inheritance and RBF diagram traversal fixes,
+ordinary INV base-fee filtering, Mempool permission/BIP35, Relay/ForceRelay, blocksonly, unsolicited admission,
 the ADDR permission/privacy cache, final
 RBF/cluster-weight/RPC corrections and the native signed replacement scenario.
-Original IDEA GPU node PID 130828 was verified RUNNING at height/headers
-974688/974688 with IBD=false, eight connections (two block relay), 37,866
+Original IDEA GPU node PID 124220 was verified RUNNING at height/headers
+974936/974936 with IBD=false, seven connections (two block relay), 35,889
 mempool entries and accepted GPU shares; exactly one Bitcoin process and no
-privileged peers were present. [Ordinary INV base-fee fix](ordinary-relay-base-fee-core32.md),
+privileged peers were present. [Ephemeral-dust fee fix and native comparison](ephemeral-dust-base-fee-core32.md),
+[Early RBF preflight/work fix](rbf-preflight-work-core32.md),
+[Package-RBF cluster-count fix](package-rbf-cluster-count-core32.md),
+[Eviction/floor fixes](eviction-chunk-floor-core32.md),
+[TRUC replacement fix](truc-reorg-replacement-core32.md),
+[TRUC/reorg fix](truc-reorg-inheritance-core32.md),
+[observed RBF stall and traversal fix](rbf-diagram-traversal-core32.md),
+[Ordinary INV base-fee fix](ordinary-relay-base-fee-core32.md),
 [Mempool implementation and remaining scope](mempool-permission-core32.md),
 [Relay implementation and remaining scope](relay-permissions-core32.md),
 [ADDR implementation](addr-permission-core32.md).

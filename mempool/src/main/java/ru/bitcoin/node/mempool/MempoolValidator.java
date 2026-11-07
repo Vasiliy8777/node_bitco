@@ -12,6 +12,13 @@ public final class MempoolValidator {
 
     /** Standard next-block admission, including BIP68 and BIP113. Returns the fee. */
     public static long validate(Transaction transaction, MempoolValidationContext context, UtxoView utxoView) {
+        long fee = validatePreChecks(transaction, context, utxoView);
+        validateScripts(transaction, utxoView);
+        return fee;
+    }
+
+    /** Contextual/input policy without executing scripts; used before fee/RBF checks. */
+    static long validatePreChecks(Transaction transaction, MempoolValidationContext context, UtxoView utxoView) {
         Objects.requireNonNull(transaction, "transaction");
         Objects.requireNonNull(context, "context");
         Objects.requireNonNull(utxoView, "utxoView");
@@ -39,7 +46,10 @@ public final class MempoolValidator {
             throw new MempoolAdmissionException("Non-final BIP68 sequence locks");
         }
         ru.bitcoin.node.mempool.policy.StandardTransactionPolicy.validateInputs(transaction, utxoView);
-        InputScriptValidator.validateAll(transaction, utxoView, StandardScriptVerifyFlags.STANDARD);
         return result.fee();
+    }
+
+    static void validateScripts(Transaction transaction, UtxoView utxoView) {
+        InputScriptValidator.validateAll(transaction, utxoView, StandardScriptVerifyFlags.STANDARD);
     }
 }

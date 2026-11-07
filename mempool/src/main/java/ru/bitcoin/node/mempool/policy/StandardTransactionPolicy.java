@@ -45,7 +45,11 @@ public final class StandardTransactionPolicy {
     /** Ephemeral dust is only allowed with zero fee; package relay must also enforce its spend. */
     public static void validateDustFee(Transaction tx, long fee) { validateDustFee(tx, fee, 3000); }
     public static void validateDustFee(Transaction tx, long fee, long dustRate) {
-        if (fee != 0 && tx.outputs().stream().anyMatch(out -> out.value() < dustThreshold(out, dustRate))) fail("dust-with-fee");
+        validateDustFee(tx, fee, fee, dustRate);
+    }
+    public static void validateDustFee(Transaction tx, long baseFee, long modifiedFee, long dustRate) {
+        if ((baseFee != 0 || modifiedFee != 0)
+                && tx.outputs().stream().anyMatch(out -> out.value() < dustThreshold(out, dustRate))) fail("dust-with-fee");
     }
 
     public static long validateInputs(Transaction tx, UtxoView view) {

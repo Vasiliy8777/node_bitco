@@ -1623,6 +1623,14 @@ public final class NodeValidationService implements AutoCloseable {
         }
     }
 
+    /** Non-mutating preflight for submitpackage, including package feerates and RBF. */
+    public Mempool.TestAcceptResult testPackageSubmission(List<Transaction> transactions) {
+        synchronized (chain) {
+            synchronizePool();
+            return mempool.testSubmitPackage(List.copyOf(transactions), context(), coins);
+        }
+    }
+
     /** Bitcoin Core-style latched Initial Block Download state. */
     public boolean isInitialBlockDownload() {
         synchronized (chain) {

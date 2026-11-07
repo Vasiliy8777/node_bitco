@@ -16,16 +16,20 @@ final class MempoolGraphPolicy {
 
     static Set<Hash256> descendants(Map<Hash256, MempoolEntry> entries, Set<Hash256> roots) {
         if (roots.isEmpty()) return Set.of();
+        // Build child edges once. Repeated whole-pool scans depend on insertion
+        // order and become quadratic for reverse-ordered chains after reorg.
+        Map<Hash256, List<Hash256>> children = new HashMap<>();
+        for (var entry : entries.entrySet()) {
+            for (var input : entry.getValue().transaction().inputs())
+                children.computeIfAbsent(input.previousOutput().transactionId(), ignored -> new ArrayList<>())
+                        .add(entry.getKey());
+        }
         Set<Hash256> result = new HashSet<>(roots);
-        boolean changed;
-        do {
-            changed = false;
-            for (var e : entries.entrySet()) {
-                if (!result.contains(e.getKey()) && e.getValue().transaction().inputs().stream()
-                        .anyMatch(in -> result.contains(in.previousOutput().transactionId())))
-                    changed |= result.add(e.getKey());
-            }
-        } while (changed);
+        Deque<Hash256> pending = new ArrayDeque<>(roots);
+        while (!pending.isEmpty()) {
+            for (Hash256 child : children.getOrDefault(pending.removeFirst(), List.of()))
+                if (result.add(child)) pending.addLast(child);
+        }
         return result;
     }
 
@@ -47,15 +51,7 @@ final class MempoolGraphPolicy {
 
         // Core v31 Rule #5 limits directly conflicting *clusters*, not the number of
         // transactions/descendants removed by the replacement.
-        int conflictingClusters = 0;
-        Set<Hash256> counted = new HashSet<>();
-        for (Hash256 conflict : conflicts) {
-            if (counted.contains(conflict)) continue;
-            Set<Hash256> cluster = ClusterLinearization.connected(entries, List.of(conflict));
-            counted.addAll(cluster);
-            conflictingClusters++;
-            if (conflictingClusters > 100) fail("too-many-conflicting-clusters");
-        }
+        checkConflictClusterLimit(entries, conflicts, "too-many-conflicting-clusters");
 
         long oldFee = 0;
         for (Hash256 id : evicted) oldFee = Math.addExact(oldFee, entries.get(id).modifiedFee());
@@ -71,11 +67,34 @@ final class MempoolGraphPolicy {
         // Core's CalculateChunksForRBF checks prospective graph limits before
         // optimizing any chunks. Do not run the solver on an oversized cluster.
         checkClusterLimits(after, replacement.transaction().txId(), limits);
-        int diagram = ClusterLinearization.compareDiagrams(
-                ClusterLinearization.mempoolDiagram(after),
-                ClusterLinearization.mempoolDiagram(entries));
+        int diagram = compareReplacementDiagrams(entries, after, conflicts, replacement);
         if (diagram < 0) fail("replacement-worse-feerate-diagram");
         if (diagram == 0) fail("replacement-unchanged-feerate-diagram");
+    }
+
+    /** Include old parents' clusters as well as conflicts, and every component
+     * left after removals split an affected cluster. Unchanged clusters cancel. */
+    static int compareReplacementDiagrams(Map<Hash256, MempoolEntry> before,
+                                          Map<Hash256, MempoolEntry> after,
+                                          Set<Hash256> conflicts, MempoolEntry replacement) {
+        var roots = new HashSet<>(conflicts);
+        for (var input : replacement.transaction().inputs()) roots.add(input.previousOutput().transactionId());
+        var oldIds = ClusterLinearization.connected(before, roots);
+        var newRoots = new HashSet<>(oldIds);
+        newRoots.add(replacement.transaction().txId());
+        var newIds = ClusterLinearization.connected(after, newRoots);
+        var oldAffected = new LinkedHashMap<Hash256, MempoolEntry>();
+        var newAffected = new LinkedHashMap<Hash256, MempoolEntry>();
+        for (var id : oldIds) oldAffected.put(id, before.get(id));
+        for (var id : newIds) newAffected.put(id, after.get(id));
+        return ClusterLinearization.compareDiagrams(ClusterLinearization.mempoolDiagram(newAffected),
+                ClusterLinearization.mempoolDiagram(oldAffected));
+    }
+
+    /** Shared Core GetEntriesForConflicts bound for single and package RBF. */
+    static void checkConflictClusterLimit(Map<Hash256, MempoolEntry> entries,
+                                          Set<Hash256> conflicts, String reason) {
+        if (ClusterLinearization.countConflictingClusters(entries, conflicts, 100) > 100) fail(reason);
     }
 
     static Set<Hash256> connected(Map<Hash256, MempoolEntry> entries, Hash256 root) {
@@ -112,10 +131,15 @@ final class MempoolGraphPolicy {
      * Core v31 cluster limits replace the legacy ancestor/descendant limits and CPFP carve-out.
      */
     static void checkLimits(Map<Hash256, MempoolEntry> entries, Hash256 added, MempoolLimits limits) {
+        checkLimits(entries, added, limits, Map.of(), Set.of());
+    }
+
+    static void checkLimits(Map<Hash256, MempoolEntry> entries, Hash256 added, MempoolLimits limits,
+                            Map<Hash256, MempoolEntry> previous, Set<Hash256> directConflicts) {
         checkClusterLimits(entries, added, limits);
 
         // TRUC version inheritance, two-generation topology and size limits remain separate policy.
-        checkTrucLimits(entries, added);
+        checkTrucLimits(entries, added, previous, directConflicts);
     }
 
     private static void checkClusterLimits(Map<Hash256, MempoolEntry> entries, Hash256 added, MempoolLimits limits) {
@@ -128,52 +152,83 @@ final class MempoolGraphPolicy {
         if (Math.ceilDiv(adjustedWeight, 4L) > limits.clusterVirtualBytes()) fail("cluster-size-limit");
     }
 
-    private static void checkTrucLimits(Map<Hash256, MempoolEntry> entries, Hash256 added) {
-        Set<Hash256> ancestors = ancestors(entries, added);
-        for (Hash256 id : ancestors) {
-            Transaction tx = entries.get(id).transaction();
-            Set<Hash256> parents = new HashSet<>();
-            for (var in : tx.inputs()) {
-                var parent = entries.get(in.previousOutput().transactionId());
-                if (parent == null) continue;
-                if ((tx.version() == 3) != (parent.transaction().version() == 3)) fail("truc-version-inheritance");
-                parents.add(parent.transaction().txId());
+    private static void checkTrucLimits(Map<Hash256, MempoolEntry> entries, Hash256 added,
+                                        Map<Hash256, MempoolEntry> previous, Set<Hash256> directConflicts) {
+        MempoolEntry entry = entries.get(added);
+        Transaction tx = entry.transaction();
+        Set<Hash256> parents = new HashSet<>();
+        // Core checks inheritance on the new transaction's direct edges only.
+        // Reorg resurrection may leave pre-existing policy-invalid edges in the
+        // pool; don't reapply their admission rules to an otherwise valid child.
+        for (var input : tx.inputs()) {
+            var parent = entries.get(input.previousOutput().transactionId());
+            if (parent == null) continue;
+            if ((tx.version() == 3) != (parent.transaction().version() == 3)) fail("truc-version-inheritance");
+            parents.add(parent.transaction().txId());
+        }
+        if (tx.version() != 3) return;
+        if (entry.virtualSize() > 10_000 || ancestors(entries, added).size() > 2) fail("truc-topology");
+        if (!parents.isEmpty() && entry.virtualSize() > 1000) fail("truc-child-size");
+        for (Hash256 parent : parents) {
+            Set<Hash256> previousDescendants = previous.containsKey(parent)
+                    ? descendants(previous, Set.of(parent)) : null;
+            // Core checks the original count plus the new child. An unrelated
+            // conflict can remove descendants indirectly; that must not turn
+            // a forbidden family into an allowed single-transaction admission.
+            boolean exceeds = previousDescendants != null ? previousDescendants.size() + 1 > 2
+                    : descendants(entries, Set.of(parent)).size() > 2;
+            if (!exceeds) continue;
+            // SingleTRUCChecks exempts a directly conflicting descendant in the
+            // pre-replacement graph, including multiple descendants after reorg.
+            // A conflict elsewhere must never grant this parent's exception.
+            if (previousDescendants != null && !directConflicts.isEmpty()) {
+                previousDescendants.remove(parent);
+                if (!Collections.disjoint(previousDescendants, directConflicts)) continue;
             }
-            if (tx.version() == 3) {
-                if (entries.get(id).virtualSize() > 10_000 || ancestors(entries, id).size() > 2
-                        || descendants(entries, Set.of(id)).size() > 2) fail("truc-topology");
-                if (!parents.isEmpty() && entries.get(id).virtualSize() > 1000) fail("truc-child-size");
-            }
+            fail("truc-topology");
         }
     }
 
     static long trim(Map<Hash256, MempoolEntry> entries, long maximumSize, Hash256 added) {
         long removedRate = 0;
+        boolean removed = false;
         while (size(entries, entries.keySet()) > maximumSize) {
             Set<Hash256> worst = null;
             long worstFee = 0, worstSize = 1, worstVsize = 1;
             for (Set<Hash256> cluster : ClusterLinearization.clusters(entries)) {
                 List<ClusterLinearization.Chunk> chunks = ClusterLinearization.chunks(entries, cluster);
                 ClusterLinearization.Chunk tail = chunks.getLast();
-                Set<Hash256> candidate = descendants(entries, new HashSet<>(tail.transactions()));
-                long fee = candidate.stream().mapToLong(id -> entries.get(id).modifiedFee()).sum();
-                long bytes = candidate.stream().mapToLong(id -> entries.get(id).adjustedWeight()).sum();
+                // The final chunk is a suffix of a topological linearization:
+                // all descendants are already in it. Core evicts this chunk;
+                // rebuilding whole-pool child edges per cluster is redundant.
+                Set<Hash256> candidate = new HashSet<>(tail.transactions());
+                long fee = tail.fee();
+                long bytes = tail.adjustedWeight();
                 if (worst == null || ClusterLinearization.compareRate(fee, bytes, worstFee, worstSize) < 0) {
                     worst = candidate;
                     worstFee = fee;
                     worstSize = bytes;
-                    worstVsize = size(entries, candidate);
+                    // Core converts the chunk's aggregate adjusted weight to
+                    // vsize once, rather than summing individually rounded sizes.
+                    worstVsize = Math.ceilDiv(bytes, 4L);
                 }
             }
             if (worst == null) throw new IllegalStateException("Unable to select mempool eviction candidate");
             if (added != null && worst.contains(added)) fail("mempool-full");
-            removedRate = Math.max(removedRate, Math.multiplyExact(worstFee, 1000) / worstVsize);
+            // Core EvaluateFeeDown uses wide multiplication and floors signed
+            // fractions. Negative mining deltas must not be clamped to zero.
+            var scaled = BigInteger.valueOf(worstFee).multiply(BigInteger.valueOf(1000))
+                    .divideAndRemainder(BigInteger.valueOf(worstVsize));
+            long rate = scaled[0].subtract(scaled[1].signum() < 0 ? BigInteger.ONE : BigInteger.ZERO).longValueExact();
+            removedRate = removed ? Math.max(removedRate, rate) : rate;
+            removed = true;
             worst.forEach(entries::remove);
         }
         return removedRate;
     }
 
-    static void addSiblingConflict(Map<Hash256, MempoolEntry> entries, Transaction transaction, Set<Hash256> conflicts) {
+    static void addSiblingConflict(Map<Hash256, MempoolEntry> entries, Map<OutPoint, Hash256> spent,
+                                   Transaction transaction, Set<Hash256> conflicts) {
         if (transaction.version() != 3) return;
         Set<Hash256> parents = new HashSet<>();
         for (var input : transaction.inputs())
@@ -182,10 +237,20 @@ final class MempoolGraphPolicy {
         if (parents.size() != 1) return;
         Hash256 parent = parents.iterator().next();
         if (entries.get(parent).transaction().version() != 3) return;
-        Set<Hash256> family = descendants(entries, Set.of(parent));
-        if (family.size() != 2) return;
-        family.remove(parent);
-        Hash256 sibling = family.iterator().next();
+        // There must be exactly one direct child and no grandchildren. Use
+        // the maintained spent index instead of building whole-pool adjacency.
+        Hash256 sibling = null;
+        var parentTx = entries.get(parent).transaction();
+        for (int i = 0; i < parentTx.outputs().size(); i++) {
+            Hash256 child = spent.get(new OutPoint(parent, new ru.bitcoin.node.common.types.UInt32(i)));
+            if (child == null) continue;
+            if (sibling != null && !sibling.equals(child)) return;
+            sibling = child;
+        }
+        if (sibling == null) return;
+        var siblingTx = entries.get(sibling).transaction();
+        for (int i = 0; i < siblingTx.outputs().size(); i++)
+            if (spent.containsKey(new OutPoint(sibling, new ru.bitcoin.node.common.types.UInt32(i)))) return;
         if (ancestors(entries, sibling).size() == 2) conflicts.add(sibling);
     }
 

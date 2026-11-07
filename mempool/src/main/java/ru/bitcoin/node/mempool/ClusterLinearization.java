@@ -125,9 +125,11 @@ public final class ClusterLinearization {
         TreeSet<Long> points = new TreeSet<>();
         addBreakpoints(left, points);
         addBreakpoints(right, points);
+        var leftCursor = new DiagramCursor(left);
+        var rightCursor = new DiagramCursor(right);
         int result = 0;
         for (long x : points) {
-            Rational l = valueAt(left, x), r = valueAt(right, x);
+            Rational l = leftCursor.valueAt(x), r = rightCursor.valueAt(x);
             int cmp = l.numerator.multiply(r.denominator).compareTo(r.numerator.multiply(l.denominator));
             if (cmp < 0) return -1;
             if (cmp > 0) result = 1;
@@ -139,6 +141,23 @@ public final class ClusterLinearization {
         Objects.requireNonNull(entries);
         Objects.requireNonNull(roots);
         return connectedNeighbors(neighbors(entries), roots);
+    }
+
+    /** Build adjacency once and stop as soon as the conflicting-component bound is exceeded. */
+    static int countConflictingClusters(Map<Hash256, MempoolEntry> entries, Set<Hash256> roots, int maximum) {
+        Objects.requireNonNull(entries);
+        Objects.requireNonNull(roots);
+        if (maximum < 0) throw new IllegalArgumentException("Negative cluster bound");
+        if (roots.isEmpty()) return 0;
+        var graph = neighbors(entries);
+        var counted = new HashSet<Hash256>();
+        int count = 0;
+        for (var root : roots) {
+            if (counted.contains(root)) continue;
+            if (++count > maximum) return count;
+            counted.addAll(connectedNeighbors(graph, List.of(root)));
+        }
+        return count;
     }
 
     /** Build both directions once, rather than scanning every transaction per visited node. */
@@ -200,16 +219,31 @@ public final class ClusterLinearization {
     private record Rational(BigInteger numerator, BigInteger denominator) {
     }
 
-    private static Rational valueAt(List<Chunk> chunks, long x) {
-        BigInteger fee = BigInteger.ZERO;
-        long remaining = x;
-        for (Chunk chunk : chunks) {
-            if (remaining <= 0) break;
-            if (remaining < chunk.adjustedWeight())
-                return new Rational(fee.multiply(BigInteger.valueOf(chunk.adjustedWeight())).add(BigInteger.valueOf(chunk.fee()).multiply(BigInteger.valueOf(remaining))), BigInteger.valueOf(chunk.adjustedWeight()));
-            fee = fee.add(BigInteger.valueOf(chunk.fee()));
-            remaining -= chunk.adjustedWeight();
+    /** Breakpoints are ascending: consume each segment once instead of rescanning
+     * the complete diagram at every point while holding the chainstate lock. */
+    private static final class DiagramCursor {
+        private final Iterator<Chunk> chunks;
+        private Chunk current;
+        private long weight;
+        private BigInteger fee = BigInteger.ZERO;
+
+        DiagramCursor(List<Chunk> chunks) {
+            this.chunks = chunks.iterator();
+            advance();
         }
-        return new Rational(fee, BigInteger.ONE);
+
+        private void advance() { current = chunks.hasNext() ? chunks.next() : null; }
+
+        Rational valueAt(long x) {
+            while (current != null && x - weight >= current.adjustedWeight()) {
+                weight = Math.addExact(weight, current.adjustedWeight());
+                fee = fee.add(BigInteger.valueOf(current.fee()));
+                advance();
+            }
+            if (current == null || x == weight) return new Rational(fee, BigInteger.ONE);
+            var denominator = BigInteger.valueOf(current.adjustedWeight());
+            return new Rational(fee.multiply(denominator).add(BigInteger.valueOf(current.fee())
+                    .multiply(BigInteger.valueOf(x - weight))), denominator);
+        }
     }
 }

@@ -1222,13 +1222,14 @@ public final class NodeRelayService implements AutoCloseable {
         Set<Hash256> after = validation.mempoolEntries().stream()
                 .map(entry -> entry.transaction().txId()).collect(java.util.stream.Collectors.toSet());
         List<Hash256> replaced = before.stream().filter(id -> !after.contains(id)).toList();
-        for (Transaction transaction : packageTransactions) {
+        for (var entry : accepted) {
+            Transaction transaction = entry.transaction();
             validation.markMempoolUnbroadcast(transaction.txId());
             orphanage.remove(transaction);
             orphanage.removeConflicts(transaction);
             announceTransaction(transaction, null);
         }
-        for (Transaction transaction : packageTransactions) reconsiderOrphanDescendants(transaction);
+        for (var entry : accepted) reconsiderOrphanDescendants(entry.transaction());
         return new PackageSubmission(accepted, replaced);
     }
 

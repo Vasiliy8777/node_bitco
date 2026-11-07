@@ -126,13 +126,13 @@ class MempoolPolicyTest {
     }
 
     @Test
-    void invalidArgumentsMustBeRejected() {
+    void negativeModifiedFeeIsPolicyFailureAndInvalidWeightIsArgumentFailure() {
 
         MempoolPolicy policy =
                 new MempoolPolicy();
 
         assertThrows(
-                IllegalArgumentException.class,
+                ru.bitcoin.node.mempool.MempoolAdmissionException.class,
                 () ->
                         policy.validateFee(
                                 -1L,

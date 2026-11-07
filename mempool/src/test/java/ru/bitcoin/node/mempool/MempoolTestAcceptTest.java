@@ -64,7 +64,7 @@ class MempoolTestAcceptTest {
         // ...but PackageTestAccept in Core v31 has allow_replacement=false.
         var probe = pool.testAccept(List.of(parent, child), CONTEXT, COINS);
         assertFalse(probe.allowed());
-        assertEquals("txn-mempool-conflict", probe.rejectReason());
+        assertEquals("bip125-replacement-disallowed", probe.rejectReason());
         assertTrue(pool.contains(original.txId()));
         assertEquals(1, pool.size());
     }
