@@ -14,6 +14,10 @@ import java.util.function.*;
 
 /** Core 31.1 ProcessBlockAvailability / FindNextBlocksToDownload eligibility. */
 public final class CoreBlockDownloadPeerPolicy implements BlockDownloadPeerPolicy {
+    public interface HeadersRequests {
+        void check(Peer peer) throws IOException;
+        boolean trySend(Peer peer, GetHeadersMessage request) throws IOException;
+    }
     private final BlockIndexLookup lookup;
     private final Supplier<BlockIndex> activeTip;
     private final HeaderChainState headers;
@@ -22,6 +26,8 @@ public final class CoreBlockDownloadPeerPolicy implements BlockDownloadPeerPolic
     private final Predicate<BlockIndex> failed;
     private final BooleanSupplier initialDownload;
     private final Supplier<BlockIndex> snapshotBase;
+    private final Predicate<Peer> downloadSource;
+    private final HeadersRequests headersRequests;
     private final Map<Peer, State> states = new IdentityHashMap<>();
     private final Object refreshLock = new Object();
     private final Map<ForkKey, BlockIndex> forks = new LinkedHashMap<>(256, 0.75f, true) {
@@ -43,6 +49,20 @@ public final class CoreBlockDownloadPeerPolicy implements BlockDownloadPeerPolic
     public CoreBlockDownloadPeerPolicy(BlockIndexLookup lookup, Supplier<BlockIndex> activeTip,
             HeaderChainState headers, BlockLocatorBuilder locators, NetworkParameters parameters,
             Predicate<BlockIndex> failed, BooleanSupplier initialDownload, Supplier<BlockIndex> snapshotBase) {
+        this(lookup, activeTip, headers, locators, parameters, failed, initialDownload, snapshotBase, peer -> true);
+    }
+
+    public CoreBlockDownloadPeerPolicy(BlockIndexLookup lookup, Supplier<BlockIndex> activeTip,
+            HeaderChainState headers, BlockLocatorBuilder locators, NetworkParameters parameters,
+            Predicate<BlockIndex> failed, BooleanSupplier initialDownload, Supplier<BlockIndex> snapshotBase,
+            Predicate<Peer> downloadSource) {
+        this(lookup, activeTip, headers, locators, parameters, failed, initialDownload, snapshotBase, downloadSource, null);
+    }
+
+    public CoreBlockDownloadPeerPolicy(BlockIndexLookup lookup, Supplier<BlockIndex> activeTip,
+            HeaderChainState headers, BlockLocatorBuilder locators, NetworkParameters parameters,
+            Predicate<BlockIndex> failed, BooleanSupplier initialDownload, Supplier<BlockIndex> snapshotBase,
+            Predicate<Peer> downloadSource, HeadersRequests headersRequests) {
         this.lookup = Objects.requireNonNull(lookup);
         this.activeTip = Objects.requireNonNull(activeTip);
         this.headers = Objects.requireNonNull(headers);
@@ -51,6 +71,8 @@ public final class CoreBlockDownloadPeerPolicy implements BlockDownloadPeerPolic
         this.failed = Objects.requireNonNull(failed);
         this.initialDownload = Objects.requireNonNull(initialDownload);
         this.snapshotBase = Objects.requireNonNull(snapshotBase);
+        this.downloadSource = Objects.requireNonNull(downloadSource);
+        this.headersRequests = headersRequests;
     }
 
     @Override
@@ -74,6 +96,19 @@ public final class CoreBlockDownloadPeerPolicy implements BlockDownloadPeerPolic
             if (!peer.isReady()) continue;
             State state = updated.get(peer);
             if (state == null) continue;
+            if (headersRequests != null) {
+                try { headersRequests.check(peer); }
+                catch (ru.bitcoin.node.p2p.sync.HeaderSynchronizationTimeoutException timeout) {
+                    state.nextHeadersRequest = 0;
+                    if (!peer.hasPermission(ru.bitcoin.node.p2p.PeerPermission.NOBAN)) {
+                        try { peer.close(); } catch (IOException ignored) { }
+                    }
+                    continue;
+                } catch (IOException ignored) { continue; }
+            }
+            // Keep one source decision for this scheduling pass. Rechecking
+            // after its first GETDATA would shrink an inbound pipeline to one.
+            state.downloadSource = downloadSource.test(peer);
             Hash256 announcement = peer.lastBlockAnnouncement();
             if (announcement != null && !announcement.equals(state.resolvedAnnouncement)) {
                 BlockIndex announced = lookup.find(announcement);
@@ -101,12 +136,21 @@ public final class CoreBlockDownloadPeerPolicy implements BlockDownloadPeerPolic
             // the best header's parent asks a same-chain peer to announce that tip.
             if ((state.bestKnown == null || state.bestKnown.height() < headerTip.height())
                     && now >= state.nextHeadersRequest) {
-                state.nextHeadersRequest = now + Duration.ofMinutes(2).toNanos();
+                // Building ancestry is a local storage/state operation, not a
+                // transport failure. Never hide it as an unresponsive peer.
+                var request = new GetHeadersMessage(
+                        Math.min(VersionMessage.CURRENT_PROTOCOL_VERSION, peer.remoteVersion().version()),
+                        availabilityLocator(headerTip), new Hash256(new byte[32]));
                 try {
-                    peer.sendAsync(BitcoinMessages.getHeaders(new GetHeadersMessage(
-                            Math.min(VersionMessage.CURRENT_PROTOCOL_VERSION, peer.remoteVersion().version()),
-                            availabilityLocator(headerTip), new Hash256(new byte[32]))));
-                } catch (IOException | IllegalStateException ignored) {
+                    if (headersRequests == null) {
+                        state.nextHeadersRequest = now + Duration.ofMinutes(2).toNanos();
+                        peer.sendAsync(BitcoinMessages.getHeaders(request));
+                    } else if (headersRequests.trySend(peer, request)) {
+                        state.nextHeadersRequest = now + Duration.ofMinutes(2).toNanos();
+                    }
+                } catch (IllegalStateException failure) {
+                    if (peer.state() != ru.bitcoin.node.p2p.PeerState.CLOSED) throw failure;
+                } catch (IOException ignored) {
                     // Transport owns disconnection and retry; this does not make the peer eligible.
                 }
             }
@@ -130,6 +174,7 @@ public final class CoreBlockDownloadPeerPolicy implements BlockDownloadPeerPolic
     public synchronized boolean canTraverse(Peer peer, Hash256 hash, Long height) {
         State state = states.get(peer);
         if (!peer.isReady() || state == null || state.bestKnown == null || state.lastCommon == null) return false;
+        if (initialDownload.getAsBoolean() && !state.downloadSource) return false;
         BlockIndex best = state.bestKnown;
         if (best.chainWork().compareTo(activeTip.get().chainWork()) < 0
                 || best.chainWork().compareTo(parameters.minimumChainWork()) < 0 || failed.test(best)) return false;
@@ -197,6 +242,7 @@ public final class CoreBlockDownloadPeerPolicy implements BlockDownloadPeerPolic
         BlockIndex bestKnown, lastCommon, bestAtUpdate;
         Hash256 resolvedAnnouncement, activeAtUpdate;
         long nextHeadersRequest;
+        boolean downloadSource;
 
         State(State previous) {
             if (previous == null) return;
@@ -206,6 +252,7 @@ public final class CoreBlockDownloadPeerPolicy implements BlockDownloadPeerPolic
             resolvedAnnouncement = previous.resolvedAnnouncement;
             activeAtUpdate = previous.activeAtUpdate;
             nextHeadersRequest = previous.nextHeadersRequest;
+            downloadSource = previous.downloadSource;
         }
     }
 }

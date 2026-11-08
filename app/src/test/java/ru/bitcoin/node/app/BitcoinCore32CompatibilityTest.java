@@ -91,13 +91,23 @@ class BitcoinCore32CompatibilityTest {
                         String address = core("getnewaddress").strip();
                         core("generatetoaddress", "200", address);
                         importBlocks(validation, 1, 200);
+                        compareChainWaitRpc(client, uri);
                         for (int round = 0; round < 8; round++) {
                             for (int tx = 0; tx < 8; tx++) {
                                 String txid = core("-named", "sendtoaddress", "address=" + address, "amount=0.01", "fee_rate=2").strip();
                                 validation.admit(TransactionParser.parse(HexFormat.of().parseHex(core("getrawtransaction", txid).strip())));
                             }
+                            String waitingTip = validation.activeTip().hash().toDisplayHex();
+                            var referenceWait = round == 0 ? chainWaitAsync(client, URI.create("http://127.0.0.1:" + rpcPort), waitingTip) : null;
+                            var localWait = round == 0 ? chainWaitAsync(client, uri, waitingTip) : null;
                             core("generatetoaddress", "1", address);
                             importBlocks(validation, 201 + round, 201 + round);
+                            if (round == 0) {
+                                var expectedWait = json.readValue(referenceWait.get(10, TimeUnit.SECONDS).body(), Map.class);
+                                var actualWait = json.readValue(localWait.get(10, TimeUnit.SECONDS).body(), Map.class);
+                                assertNull(expectedWait.get("error")); assertEquals(expectedWait.get("result"), actualWait.get("result"));
+                                assertEquals(201, ((Map<?, ?>) expectedWait.get("result")).get("height"));
+                            }
                             compareFees(client, uri, "block_policy");
                             compareFees(client, uri, "mempool_policy");
                             compareFees(client, uri, "auto");
@@ -110,6 +120,8 @@ class BitcoinCore32CompatibilityTest {
                         comparePackageProbeFeeModes(client, uri);
                         compareGeneralPackageProbes(client, uri);
                         compareKnownSingleProbes(client, uri);
+                        comparePartialSubmissions(client, uri);
+                        compareTrucStates(client, uri);
                         core("stop");
                         assertTrue(core.waitFor(15, TimeUnit.SECONDS));
                         var nativeStatistics = new MempoolFeeEstimator();
@@ -503,10 +515,26 @@ class BitcoinCore32CompatibilityTest {
         String missingChildHex = call(client, reference, "createrawtransaction", List.of(List.of(
                 Map.of("txid", validParent.txId().toDisplayHex(), "vout", 0), Map.of("txid", "33".repeat(32), "vout", 0)),
                 Map.of(core("getnewaddress").strip(), new java.math.BigDecimal("0.00100000")))).toString();
+        // Version/prevout rewrites intentionally invalidate signatures: a later
+        // missing input must still win before both shared TRUC checks and scripts.
+        var trucChain = new ArrayList<String>();
+        ru.bitcoin.node.common.types.Hash256 previousTruc = null;
+        for (var rawTx : chain) {
+            var parsed = TransactionParser.parse(HexFormat.of().parseHex(rawTx));
+            var originalInput = parsed.inputs().getFirst();
+            var prevout = previousTruc == null ? originalInput.previousOutput()
+                    : new ru.bitcoin.node.protocol.transaction.OutPoint(previousTruc, new ru.bitcoin.node.common.types.UInt32(0));
+            var converted = new ru.bitcoin.node.protocol.transaction.Transaction(3, List.of(
+                    new ru.bitcoin.node.protocol.transaction.TxIn(prevout, originalInput.scriptSig(), originalInput.sequence(), originalInput.witness())),
+                    parsed.outputs(), parsed.lockTime());
+            previousTruc = converted.txId();
+            trucChain.add(HexFormat.of().formatHex(ru.bitcoin.node.protocol.serialization.TransactionSerializer.serialize(converted)));
+        }
+        trucChain.add(missingHex);
         var missingPackages = List.of(List.of(missingHex), List.of(missingHex, chain.getFirst()),
                 List.of(chain.getFirst(), missingHex), List.of(chain.getFirst(), chain.get(1), missingHex),
-                List.of(badParentHex, missingChildHex));
-        var missingIndices = List.of(0, 0, 1, 2, 1);
+                List.of(badParentHex, missingChildHex), trucChain);
+        var missingIndices = List.of(0, 0, 1, 2, 1, 3);
         for (int i = 0; i < missingPackages.size(); i++) {
             var params = List.of(missingPackages.get(i));
             var expected = (List<?>) call(client, reference, "testmempoolaccept", params);
@@ -517,6 +545,267 @@ class BitcoinCore32CompatibilityTest {
             assertEquals(expectedPool, call(client, reference, "getrawmempool", List.of()));
             assertEquals(actualPool, call(client, uri, "getrawmempool", List.of()));
         }
+        var singleScriptParams = List.of(List.of(badParentHex));
+        assertEquals(call(client, reference, "testmempoolaccept", singleScriptParams),
+                call(client, uri, "testmempoolaccept", singleScriptParams));
+        // Script failures retain the successful prefix and leave the suffix unfinished.
+        for (int failedIndex = 0; failedIndex < chain.size(); failedIndex++) {
+            var scriptPackage = new ArrayList<>(chain);
+            var parsed = TransactionParser.parse(HexFormat.of().parseHex(chain.get(failedIndex)));
+            var input = parsed.inputs().getFirst();
+            var witness = new ArrayList<>(input.witness().items()); witness.getFirst()[10] ^= 1;
+            var invalid = new ru.bitcoin.node.protocol.transaction.Transaction(parsed.version(), List.of(
+                    new ru.bitcoin.node.protocol.transaction.TxIn(input.previousOutput(), input.scriptSig(), input.sequence(),
+                            new ru.bitcoin.node.protocol.transaction.Witness(witness))), parsed.outputs(), parsed.lockTime());
+            scriptPackage.set(failedIndex, HexFormat.of().formatHex(ru.bitcoin.node.protocol.serialization.TransactionSerializer.serialize(invalid)));
+            for (var cap : List.of(java.math.BigDecimal.ZERO, new java.math.BigDecimal("0.00001000"))) {
+                var params = List.of(scriptPackage, cap);
+                var expected = (List<?>) call(client, reference, "testmempoolaccept", params);
+                var actual = (List<?>) call(client, uri, "testmempoolaccept", params);
+                if (cap.signum() == 0) {
+                    for (int i = 0; i < failedIndex; i++) assertEquals(true, ((Map<?, ?>) expected.get(i)).get("allowed"));
+                    assertTrue(((Map<?, ?>) expected.get(failedIndex)).get("reject-reason").toString().startsWith("mempool-script-verify-flag-failed"));
+                    for (int i = failedIndex + 1; i < chain.size(); i++) assertFalse(((Map<?, ?>) expected.get(i)).containsKey("allowed"));
+                }
+                assertEquals(expected, actual, "script index " + failedIndex + ", cap " + cap);
+                assertEquals(expectedPool, call(client, reference, "getrawmempool", List.of()));
+                assertEquals(actualPool, call(client, uri, "getrawmempool", List.of()));
+            }
+        }
+        // Distinguish stack shape, DER, false result, and pubkey-hash failures.
+        var scriptChild = TransactionParser.parse(HexFormat.of().parseHex(chain.get(1)));
+        var scriptInput = scriptChild.inputs().getFirst();
+        var originalWitness = scriptInput.witness().items();
+        assertEquals(2, originalWitness.size(), "Fixture must spend P2WPKH");
+        byte[] wrongKey = originalWitness.get(1).clone(); wrongKey[10] ^= 1;
+        byte[] unknownHash = originalWitness.getFirst().clone(); unknownHash[unknownHash.length - 1] = 0;
+        var invalidWitnesses = List.of(List.<byte[]>of(), List.of(originalWitness.getFirst()),
+                List.of(new byte[]{0}, originalWitness.get(1)), List.of(new byte[0], originalWitness.get(1)),
+                List.of(originalWitness.getFirst(), wrongKey), List.of(unknownHash, originalWitness.get(1)));
+        for (var witness : invalidWitnesses) {
+            var invalid = new ru.bitcoin.node.protocol.transaction.Transaction(scriptChild.version(), List.of(
+                    new ru.bitcoin.node.protocol.transaction.TxIn(scriptInput.previousOutput(), scriptInput.scriptSig(), scriptInput.sequence(),
+                            new ru.bitcoin.node.protocol.transaction.Witness(witness))), scriptChild.outputs(), scriptChild.lockTime());
+            var scriptPackage = List.of(chain.getFirst(),
+                    HexFormat.of().formatHex(ru.bitcoin.node.protocol.serialization.TransactionSerializer.serialize(invalid)), chain.getLast());
+            var params = List.of(scriptPackage, java.math.BigDecimal.ZERO);
+            assertEquals(call(client, reference, "testmempoolaccept", params), call(client, uri, "testmempoolaccept", params));
+            assertEquals(expectedPool, call(client, reference, "getrawmempool", List.of()));
+            assertEquals(actualPool, call(client, uri, "getrawmempool", List.of()));
+        }
+    }
+
+    private java.util.concurrent.CompletableFuture<HttpResponse<String>> chainWaitAsync(HttpClient client, URI uri, String tip) {
+        var request = HttpRequest.newBuilder(uri).header("Authorization", "Basic " + Base64.getEncoder().encodeToString(
+                "test:test-password".getBytes(java.nio.charset.StandardCharsets.UTF_8))).POST(HttpRequest.BodyPublishers.ofString(
+                json.writeValueAsString(Map.of("id", 1, "method", "waitfornewblock", "params", List.of(5000, tip))))).build();
+        return client.sendAsync(request, HttpResponse.BodyHandlers.ofString());
+    }
+
+    private record WaitRpcCase(String method, Object params) {}
+    private void compareChainWaitRpc(HttpClient client, URI uri) throws Exception {
+        URI reference = URI.create("http://127.0.0.1:" + rpcPort);
+        var expectedDoc = (Map<?, ?>) call(client, reference, "getopenrpcinfo", List.of());
+        var actualDoc = (Map<?, ?>) call(client, uri, "getopenrpcinfo", List.of());
+        for (var method : List.of("waitfornewblock", "waitforblock", "waitforblockheight")) {
+            var expectedMethod = ((List<?>) expectedDoc.get("methods")).stream().filter(value -> ((Map<?, ?>) value).get("name").equals(method)).findFirst().orElseThrow();
+            var actualMethod = ((List<?>) actualDoc.get("methods")).stream().filter(value -> ((Map<?, ?>) value).get("name").equals(method)).findFirst().orElseThrow();
+            assertEquals(expectedMethod, actualMethod, "complete OpenRPC method " + method);
+            assertEquals(call(client, reference, "help", List.of(method)), call(client, uri, "help", List.of(method)));
+        }
+        String tip = call(client, reference, "getbestblockhash", List.of()).toString();
+        String genesis = call(client, reference, "getblockhash", List.of(0)).toString();
+        for (var test : List.of(new WaitRpcCase("waitfornewblock", List.of(1)),
+                new WaitRpcCase("waitfornewblock", List.of(0, "33".repeat(32))),
+                new WaitRpcCase("waitfornewblock", Map.of("current_tip", "33".repeat(32))),
+                new WaitRpcCase("waitfornewblock", Arrays.asList(null, "33".repeat(32))),
+                new WaitRpcCase("waitforblock", List.of(tip)), new WaitRpcCase("waitforblock", List.of(genesis, 1)),
+                new WaitRpcCase("waitforblock", Map.of("blockhash", tip)),
+                new WaitRpcCase("waitforblockheight", List.of(200)), new WaitRpcCase("waitforblockheight", List.of(-1)),
+                new WaitRpcCase("waitforblockheight", List.of(201, 1)),
+                new WaitRpcCase("waitforblockheight", Map.of("height", 201, "timeout", 1)),
+                new WaitRpcCase("waitforblockheight", Map.of("args", List.of(200), "timeout", 1))))
+            assertEquals(call(client, reference, test.method(), test.params()), call(client, uri, test.method(), test.params()), test.toString());
+        var errors = List.of(new WaitRpcCase("waitforblockheight", List.of()),
+                new WaitRpcCase("waitforblockheight", Arrays.asList(null, 1)), new WaitRpcCase("waitforblockheight", List.of("1", 1)),
+                new WaitRpcCase("waitforblockheight", List.of(1.25, 1)), new WaitRpcCase("waitforblockheight", List.of(-1.0, 1)),
+                new WaitRpcCase("waitforblockheight", List.of(2147483648L, 1)), new WaitRpcCase("waitforblockheight", List.of(1, -1)),
+                new WaitRpcCase("waitforblockheight", List.of(1, 1, 1)), new WaitRpcCase("waitforblockheight", Map.of("timeout", 1)),
+                new WaitRpcCase("waitforblockheight", Map.of("height", 1, "extra", 1)),
+                new WaitRpcCase("waitforblockheight", List.of("bad", "bad")),
+                new WaitRpcCase("waitforblockheight", Map.of("args", List.of(1), "height", 0, "timeout", 1)),
+                new WaitRpcCase("waitforblockheight", Map.of("args", "bad")),
+                new WaitRpcCase("waitforblock", List.of()), new WaitRpcCase("waitforblock", Arrays.asList(null, 1)),
+                new WaitRpcCase("waitforblock", List.of(1, 1)), new WaitRpcCase("waitforblock", List.of("zz", 1)),
+                new WaitRpcCase("waitforblock", List.of("g".repeat(64), 1)), new WaitRpcCase("waitforblock", List.of("zz", -1)),
+                new WaitRpcCase("waitfornewblock", List.of(-1)), new WaitRpcCase("waitfornewblock", List.of(1, "zz")),
+                new WaitRpcCase("waitfornewblock", List.of(-1, "zz")), new WaitRpcCase("waitfornewblock", List.of(2147483648L)),
+                new WaitRpcCase("waitfornewblock", List.of(1.25)), new WaitRpcCase("waitfornewblock", List.of(true)));
+        for (var test : errors) {
+            var expected = callResponse(client, reference, test.method(), test.params()).get("error");
+            assertNotNull(expected, test.toString());
+            assertEquals(expected, callResponse(client, uri, test.method(), test.params()).get("error"), test.toString());
+        }
+    }
+
+    private void comparePartialSubmissions(HttpClient client, URI uri) throws Exception {
+        URI reference = URI.create("http://127.0.0.1:" + rpcPort);
+        var coins = ((List<?>) call(client, reference, "listunspent", List.of())).stream().map(value -> (Map<?, ?>) value)
+                .filter(value -> new java.math.BigDecimal(value.get("amount").toString()).compareTo(java.math.BigDecimal.ONE) > 0)
+                .limit(3).toList();
+        assertEquals(3, coins.size());
+        var pack = createSubmissionFixture(client, reference, coins.getFirst(), "0.00010000", "0.00010000");
+        var child = TransactionParser.parse(HexFormat.of().parseHex(pack.getLast()));
+        var input = child.inputs().getFirst(); var witness = new ArrayList<>(input.witness().items()); witness.getFirst()[10] ^= 1;
+        var invalid = new ru.bitcoin.node.protocol.transaction.Transaction(child.version(), List.of(
+                new ru.bitcoin.node.protocol.transaction.TxIn(input.previousOutput(), input.scriptSig(), input.sequence(),
+                        new ru.bitcoin.node.protocol.transaction.Witness(witness))), child.outputs(), child.lockTime());
+        var invalidPackage = List.of(pack.getFirst(), HexFormat.of().formatHex(ru.bitcoin.node.protocol.serialization.TransactionSerializer.serialize(invalid)));
+        var cpfp = createSubmissionFixture(client, reference, coins.get(1), "0.00000000", "0.00010000");
+        var capped = createSubmissionFixture(client, reference, coins.get(2), "0.00000100", "0.00010000");
+        var retryParent = TransactionParser.parse(HexFormat.of().parseHex(cpfp.getFirst()));
+        var retryChild = TransactionParser.parse(HexFormat.of().parseHex(cpfp.getLast()));
+        var missingInputs = new ArrayList<>(retryChild.inputs());
+        missingInputs.add(new ru.bitcoin.node.protocol.transaction.TxIn(new ru.bitcoin.node.protocol.transaction.OutPoint(
+                ru.bitcoin.node.common.types.Hash256.fromDisplayHex("33".repeat(32)), new ru.bitcoin.node.common.types.UInt32(0)),
+                new byte[0], ru.bitcoin.node.protocol.transaction.TxIn.FINAL_SEQUENCE));
+        var missingRetry = new ru.bitcoin.node.protocol.transaction.Transaction(retryChild.version(), missingInputs, retryChild.outputs(), retryChild.lockTime());
+        var zeroRetry = new ru.bitcoin.node.protocol.transaction.Transaction(retryChild.version(), retryChild.inputs(), List.of(
+                new ru.bitcoin.node.protocol.transaction.TxOut(retryParent.outputs().getFirst().value(), retryChild.outputs().getFirst().scriptPubKey())), retryChild.lockTime());
+        var badRetryParent = corruptSubmissionWitness(cpfp.getFirst());
+        var dustRetryParent = new ru.bitcoin.node.protocol.transaction.Transaction(retryParent.version(), retryParent.inputs(), List.of(
+                retryParent.outputs().getFirst(), new ru.bitcoin.node.protocol.transaction.TxOut(0, retryParent.outputs().getFirst().scriptPubKey())), retryParent.lockTime());
+        var dustChildInput = retryChild.inputs().getFirst();
+        var dustRetryChild = new ru.bitcoin.node.protocol.transaction.Transaction(retryChild.version(), List.of(new ru.bitcoin.node.protocol.transaction.TxIn(
+                new ru.bitcoin.node.protocol.transaction.OutPoint(dustRetryParent.txId(), new ru.bitcoin.node.common.types.UInt32(0)),
+                dustChildInput.scriptSig(), dustChildInput.sequence(), dustChildInput.witness())), retryChild.outputs(), retryChild.lockTime());
+        var phaseCases = List.of(List.of(badRetryParent, HexFormat.of().formatHex(ru.bitcoin.node.protocol.serialization.TransactionSerializer.serialize(missingRetry))),
+                List.of(badRetryParent, HexFormat.of().formatHex(ru.bitcoin.node.protocol.serialization.TransactionSerializer.serialize(zeroRetry))),
+                List.of(badRetryParent, cpfp.getLast()), List.of(cpfp.getFirst(), corruptSubmissionWitness(cpfp.getLast())),
+                List.of(HexFormat.of().formatHex(ru.bitcoin.node.protocol.serialization.TransactionSerializer.serialize(dustRetryParent)),
+                        HexFormat.of().formatHex(ru.bitcoin.node.protocol.serialization.TransactionSerializer.serialize(dustRetryChild))));
+        var referenceBeforeRetry = call(client, reference, "getrawmempool", List.of());
+        var localBeforeRetry = call(client, uri, "getrawmempool", List.of());
+        for (int i = 0; i < phaseCases.size(); i++) {
+            var params = List.of(phaseCases.get(i));
+            var expected = (Map<?, ?>) call(client, reference, "submitpackage", params);
+            assertEquals(i == 4 ? "unspent-dust" : "transaction failed", expected.get("package_msg"));
+            assertEquals(expected, call(client, uri, "submitpackage", params), "shared submission phase " + i);
+            assertEquals(referenceBeforeRetry, call(client, reference, "getrawmempool", List.of()));
+            assertEquals(localBeforeRetry, call(client, uri, "getrawmempool", List.of()));
+        }
+        var badTopology = List.of(List.of(pack.getFirst(), cpfp.getFirst()));
+        var topologyError = callResponse(client, reference, "submitpackage", badTopology).get("error");
+        assertNotNull(topologyError);
+        assertEquals(topologyError, callResponse(client, uri, "submitpackage", badTopology).get("error"));
+        var burnInput = TransactionParser.parse(HexFormat.of().parseHex(pack.getFirst())).inputs().getFirst();
+        for (byte opcode : new byte[]{0x6a, (byte) 0xff}) {
+            var burn = new ru.bitcoin.node.protocol.transaction.Transaction(2, List.of(burnInput),
+                    List.of(new ru.bitcoin.node.protocol.transaction.TxOut(100, new byte[]{opcode})), new ru.bitcoin.node.common.types.UInt32(0));
+            var hex = HexFormat.of().formatHex(ru.bitcoin.node.protocol.serialization.TransactionSerializer.serialize(burn));
+            var params = List.of(List.of(hex, "not-hex"));
+            var expected = callResponse(client, reference, "submitpackage", params).get("error");
+            assertNotNull(expected);
+            assertEquals(expected, callResponse(client, uri, "submitpackage", params).get("error"));
+        }
+        // The burn cap is per output: two outputs at the cap must reach script
+        // validation, even though their sum exceeds the cap. Signatures commit
+        // to the original outputs, so this probe cannot consume the fixture coin.
+        var splitBurn = new ru.bitcoin.node.protocol.transaction.Transaction(2, List.of(burnInput), List.of(
+                new ru.bitcoin.node.protocol.transaction.TxOut(100, new byte[]{0x6a}),
+                new ru.bitcoin.node.protocol.transaction.TxOut(100, new byte[]{0x6a})), new ru.bitcoin.node.common.types.UInt32(0));
+        var splitBurnParams = List.of(List.of(HexFormat.of().formatHex(ru.bitcoin.node.protocol.serialization.TransactionSerializer.serialize(splitBurn))),
+                java.math.BigDecimal.ZERO, new java.math.BigDecimal("0.00000100"));
+        var splitBurnExpected = (Map<?, ?>) call(client, reference, "submitpackage", splitBurnParams);
+        assertEquals("transaction failed", splitBurnExpected.get("package_msg"));
+        assertEquals(splitBurnExpected, call(client, uri, "submitpackage", splitBurnParams));
+        var submissions = List.of(List.of(invalidPackage), List.of(invalidPackage), List.of(pack),
+                List.of(pack, new java.math.BigDecimal("0.00000001")), List.of(cpfp),
+                List.of(capped, new java.math.BigDecimal("0.00010000")));
+        for (int i = 0; i < submissions.size(); i++) {
+            var expected = (Map<?, ?>) call(client, reference, "submitpackage", submissions.get(i));
+            assertEquals(i < 2 || i == 5 ? "transaction failed" : "success", expected.get("package_msg"));
+            assertEquals(expected, call(client, uri, "submitpackage", submissions.get(i)), "submission case " + i);
+            assertEquals(new HashSet<>((List<?>) call(client, reference, "getrawmempool", List.of())),
+                    new HashSet<>((List<?>) call(client, uri, "getrawmempool", List.of())));
+        }
+    }
+
+    private void compareTrucStates(HttpClient client, URI uri) throws Exception {
+        URI reference=URI.create("http://127.0.0.1:"+rpcPort);
+        var coin=((List<?>)call(client,reference,"listunspent",List.of())).stream().map(value->(Map<?,?>)value)
+                .filter(value->new java.math.BigDecimal(value.get("amount").toString()).compareTo(java.math.BigDecimal.ONE)>0).findFirst().orElseThrow();
+        var fixture=createSubmissionFixture(client,reference,coin,"0.00010000","0.00010000");
+        var parent=TransactionParser.parse(HexFormat.of().parseHex(fixture.getFirst()));
+        var child=TransactionParser.parse(HexFormat.of().parseHex(fixture.getLast()));
+        for(int version:List.of(2,3)) {
+            var freeParent=new ru.bitcoin.node.protocol.transaction.Transaction(version,parent.inputs(),List.of(
+                    new ru.bitcoin.node.protocol.transaction.TxOut(new java.math.BigDecimal(coin.get("amount").toString()).movePointRight(8).longValueExact(),
+                            parent.outputs().getFirst().scriptPubKey())),parent.lockTime());
+            var oldInput=child.inputs().getFirst();
+            var incompatibleChild=new ru.bitcoin.node.protocol.transaction.Transaction(version==3?2:3,List.of(new ru.bitcoin.node.protocol.transaction.TxIn(
+                    new ru.bitcoin.node.protocol.transaction.OutPoint(freeParent.txId(),new ru.bitcoin.node.common.types.UInt32(0)),
+                    oldInput.scriptSig(),oldInput.sequence(),oldInput.witness())),child.outputs(),child.lockTime());
+            var params=List.of(List.of(rawTransaction(freeParent),rawTransaction(incompatibleChild)));
+            var expected=(Map<?,?>)call(client,reference,"submitpackage",params);
+            assertTrue(expected.get("package_msg").toString().startsWith("TRUC-violation, "));
+            assertEquals(expected,call(client,uri,"submitpackage",params));
+        }
+        var version3=new ru.bitcoin.node.protocol.transaction.Transaction(3,parent.inputs(),parent.outputs(),parent.lockTime());
+        var signed=(Map<?,?>)call(client,reference,"signrawtransactionwithwallet",List.of(rawTransaction(version3)));
+        assertEquals(true,signed.get("complete"));String parentHex=signed.get("hex").toString();
+        var acceptedParent=TransactionParser.parse(HexFormat.of().parseHex(parentHex));
+        assertEquals(call(client,reference,"sendrawtransaction",List.of(parentHex)),call(client,uri,"sendrawtransaction",List.of(parentHex)));
+        var old=child.inputs().getFirst();
+        var version3Child=new ru.bitcoin.node.protocol.transaction.Transaction(3,List.of(new ru.bitcoin.node.protocol.transaction.TxIn(
+                new ru.bitcoin.node.protocol.transaction.OutPoint(acceptedParent.txId(),new ru.bitcoin.node.common.types.UInt32(0)),old.scriptSig(),old.sequence(),old.witness())),child.outputs(),child.lockTime());
+        var prevout=Map.of("txid",acceptedParent.txId().toDisplayHex(),"vout",0,"scriptPubKey",HexFormat.of().formatHex(parent.outputs().getFirst().scriptPubKey()),
+                "amount",java.math.BigDecimal.valueOf(parent.outputs().getFirst().value(),8));
+        var signedChild=(Map<?,?>)call(client,reference,"signrawtransactionwithwallet",List.of(rawTransaction(version3Child),List.of(prevout)));
+        assertEquals(true,signedChild.get("complete"));
+        String childHex=signedChild.get("hex").toString();var acceptedChild=TransactionParser.parse(HexFormat.of().parseHex(childHex));
+        var wrong=new ru.bitcoin.node.protocol.transaction.Transaction(2,acceptedChild.inputs(),acceptedChild.outputs(),acceptedChild.lockTime());String wrongHex=rawTransaction(wrong);
+        for(var pack:List.of(List.of(wrongHex),List.of(wrongHex,fixture.getFirst()))) {
+            var expected=(List<?>)call(client,reference,"testmempoolaccept",List.of(pack));
+            assertEquals("TRUC-violation",((Map<?,?>)expected.getFirst()).get("reject-reason"));
+            assertEquals(expected,call(client,uri,"testmempoolaccept",List.of(pack)));
+        }
+        assertEquals(call(client,reference,"submitpackage",List.of(List.of(wrongHex))),call(client,uri,"submitpackage",List.of(List.of(wrongHex))));
+        assertEquals(call(client,reference,"sendrawtransaction",List.of(childHex)),call(client,uri,"sendrawtransaction",List.of(childHex)));
+        var expected=(List<?>)call(client,reference,"testmempoolaccept",List.of(List.of(wrongHex)));
+        assertEquals("TRUC-violation",((Map<?,?>)expected.getFirst()).get("reject-reason"));
+        assertEquals(expected,call(client,uri,"testmempoolaccept",List.of(List.of(wrongHex))),"TRUC before economic RBF failure");
+    }
+
+    private static String rawTransaction(ru.bitcoin.node.protocol.transaction.Transaction tx) {
+        return HexFormat.of().formatHex(ru.bitcoin.node.protocol.serialization.TransactionSerializer.serialize(tx));
+    }
+
+    private static String corruptSubmissionWitness(String raw) {
+        var tx = TransactionParser.parse(HexFormat.of().parseHex(raw)); var in = tx.inputs().getFirst();
+        var witness = new ArrayList<>(in.witness().items()); witness.getFirst()[10] ^= 1;
+        var bad = new ru.bitcoin.node.protocol.transaction.Transaction(tx.version(), List.of(
+                new ru.bitcoin.node.protocol.transaction.TxIn(in.previousOutput(), in.scriptSig(), in.sequence(),
+                        new ru.bitcoin.node.protocol.transaction.Witness(witness))), tx.outputs(), tx.lockTime());
+        return HexFormat.of().formatHex(ru.bitcoin.node.protocol.serialization.TransactionSerializer.serialize(bad));
+    }
+
+    private List<String> createSubmissionFixture(HttpClient client, URI reference, Map<?, ?> coin, String parentFee, String childFee) throws Exception {
+        String destination = core("getnewaddress").strip();
+        var amount = new java.math.BigDecimal(coin.get("amount").toString()).subtract(new java.math.BigDecimal(parentFee));
+        var raw = call(client, reference, "createrawtransaction", List.of(
+                List.of(Map.of("txid", coin.get("txid"), "vout", coin.get("vout"))), Map.of(destination, amount)));
+        var signed = (Map<?, ?>) call(client, reference, "signrawtransactionwithwallet", List.of(raw));
+        assertEquals(true, signed.get("complete"));
+        String parentHex = signed.get("hex").toString();
+        String parentId = TransactionParser.parse(HexFormat.of().parseHex(parentHex)).txId().toDisplayHex();
+        var script = ((Map<?, ?>) call(client, reference, "getaddressinfo", List.of(destination))).get("scriptPubKey");
+        var childRaw = call(client, reference, "createrawtransaction", List.of(
+                List.of(Map.of("txid", parentId, "vout", 0)), Map.of(core("getnewaddress").strip(), amount.subtract(new java.math.BigDecimal(childFee)))));
+        var childSigned = (Map<?, ?>) call(client, reference, "signrawtransactionwithwallet", List.of(childRaw,
+                List.of(Map.of("txid", parentId, "vout", 0, "scriptPubKey", script, "amount", amount))));
+        assertEquals(true, childSigned.get("complete"));
+        return List.of(parentHex, childSigned.get("hex").toString());
     }
 
     private String broadcastSpend(HttpClient client, NodeValidationService validation, String parent, int output, Map<String, java.math.BigDecimal> outputs) throws Exception {
@@ -542,11 +831,15 @@ class BitcoinCore32CompatibilityTest {
     }
 
     private Object call(HttpClient client, URI uri, String method, Object params) throws Exception {
+        var response = callResponse(client, uri, method, params);
+        assertNull(response.get("error"), response.toString()); return response.get("result");
+    }
+
+    private Map<?, ?> callResponse(HttpClient client, URI uri, String method, Object params) throws Exception {
         var request = HttpRequest.newBuilder(uri).header("Authorization", "Basic " + Base64.getEncoder()
                         .encodeToString("test:test-password".getBytes(java.nio.charset.StandardCharsets.UTF_8)))
                 .POST(HttpRequest.BodyPublishers.ofString(json.writeValueAsString(Map.of("id", 1, "method", method, "params", params)))).build();
-        var response = json.readValue(client.send(request, HttpResponse.BodyHandlers.ofString()).body(), Map.class);
-        assertNull(response.get("error"), response.toString()); return response.get("result");
+        return json.readValue(client.send(request, HttpResponse.BodyHandlers.ofString()).body(), Map.class);
     }
 
     private String core(String... arguments) throws Exception {

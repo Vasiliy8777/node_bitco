@@ -984,7 +984,7 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
             if (stopping || slot.connection != connection) return;
             slot.headersStarted = true;
         }
-        try { recoveryView.requestHeaders(connection.peer(), work.locator()); }
+        try { recoveryView.requestInitialHeaders(connection.peer(), work.locator()); }
         catch (IOException | IllegalStateException failure) { log.log(System.Logger.Level.DEBUG, "Initial recovery headers request failed", failure); }
     }
 
@@ -1066,6 +1066,7 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
         if (recoveryView == null || stopping || !started.get()) return;
         List<OutboundPeerConnection> victims = new ArrayList<>();
         var probes = new java.util.IdentityHashMap<Peer, List<ru.bitcoin.node.common.types.Hash256>>();
+        var initialProbes = new java.util.IdentityHashMap<Peer, List<ru.bitcoin.node.common.types.Hash256>>();
         synchronized (monitor) {
             var full = slots.stream().filter(slot -> slot.role == PeerConnectionRole.FULL_RELAY)
                     .filter(slot -> slot.connection != null && slot.connection.peer().isReady()).toList();
@@ -1104,9 +1105,9 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
                 var work = recoveryView.chainWork(peer);
                 if (!slot.headersStarted && work != null) {
                     slot.headersStarted = true;
-                    probes.put(peer, work.locator());
+                    initialProbes.put(peer, work.locator());
                 }
-                if (!slot.headersStarted) continue;
+                if (!slot.headersStarted || !recoveryView.headersSyncStarted(peer)) continue;
                 var action = slot.chainSync.check(now, protectedRecoveryPeers.contains(peer), work);
                 if (action == PeerChainSyncPolicy.Action.REQUEST_HEADERS) probes.put(peer, slot.chainSync.locator());
                 if (action == PeerChainSyncPolicy.Action.DISCONNECT) victims.add(slot.connection);
@@ -1140,6 +1141,11 @@ public final class OutboundPeerSupervisor implements AutoCloseable {
             }
             monitor.notifyAll();
         }
+        initialProbes.forEach((peer, locator) -> {
+            if (victims.stream().anyMatch(connection -> connection.peer() == peer)) return;
+            try { recoveryView.requestInitialHeaders(peer, locator); }
+            catch (IOException | IllegalStateException failure) { log.log(System.Logger.Level.DEBUG, "Initial headers request failed", failure); }
+        });
         probes.forEach((peer, locator) -> {
             if (victims.stream().anyMatch(connection -> connection.peer() == peer)) return;
             try { recoveryView.requestHeaders(peer, locator); }

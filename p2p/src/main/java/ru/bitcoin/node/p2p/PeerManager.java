@@ -14,6 +14,64 @@ public final class PeerManager
             new ArrayList<>();
     private final List<java.util.function.Consumer<Peer>> listeners = new ArrayList<>();
     private final Map<Peer, PeerConnectionRole> roles = new IdentityHashMap<>();
+    private final Map<Peer, ru.bitcoin.node.p2p.sync.HeadersSyncTimeoutPolicy.State> headerSync = new IdentityHashMap<>();
+    private final java.util.Set<Peer> headersSending = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+
+    /** Nonblocking ownership across initial/live/availability send attempts. */
+    public synchronized boolean tryBeginHeadersSend(Peer peer) {
+        return roles.containsKey(peer) && headersSending.add(peer);
+    }
+    public synchronized void endHeadersSend(Peer peer) { headersSending.remove(peer); }
+
+    private boolean canServeBlocks(Peer peer) {
+        return peer.isReady() && (peer.remoteVersion().services() &
+                (ru.bitcoin.node.p2p.message.VersionMessage.NODE_NETWORK | ru.bitcoin.node.p2p.message.VersionMessage.NODE_NETWORK_LIMITED)) != 0;
+    }
+    private boolean preferred(Peer peer) {
+        return roles.containsKey(peer) && ru.bitcoin.node.p2p.sync.HeadersSyncTimeoutPolicy.preferred(
+                peer.isInboundConnection(), peer.hasPermission(PeerPermission.NOBAN),
+                roles.get(peer) == PeerConnectionRole.ADDR_FETCH, canServeBlocks(peer));
+    }
+    public synchronized int preferredDownloadPeerCount() { return (int) peers.stream().filter(this::preferred).count(); }
+    public synchronized boolean canSyncFrom(Peer peer, boolean blocksInFlight) {
+        return roles.containsKey(peer) && canServeBlocks(peer)
+                && ru.bitcoin.node.p2p.sync.HeadersSyncTimeoutPolicy.mayFetch(true, preferred(peer),
+                        roles.get(peer) == PeerConnectionRole.ADDR_FETCH, preferredDownloadPeerCount(), blocksInFlight);
+    }
+    public synchronized int headersSyncStartedCount() { return (int) headerSync.values().stream().filter(ru.bitcoin.node.p2p.sync.HeadersSyncTimeoutPolicy.State::started).count(); }
+    public synchronized boolean headersSyncStarted(Peer peer) {
+        var state = headerSync.get(peer);
+        return state != null && state.started();
+    }
+    public record HeaderSyncReservation(boolean allowed, boolean newlyStarted) {}
+    public synchronized HeaderSyncReservation reserveHeadersSync(Peer peer, long nowMicros, long nowSeconds,
+            long bestHeaderSeconds, long spacingSeconds, boolean blocksInFlight) {
+        if (!roles.containsKey(peer) || !canServeBlocks(peer)) return new HeaderSyncReservation(false, false);
+        var state = headerSync.computeIfAbsent(peer, ignored -> new ru.bitcoin.node.p2p.sync.HeadersSyncTimeoutPolicy.State());
+        if (state.started()) return new HeaderSyncReservation(true, false);
+        if (!ru.bitcoin.node.p2p.sync.HeadersSyncTimeoutPolicy.mayStart(true, false, preferred(peer),
+                roles.get(peer) == PeerConnectionRole.ADDR_FETCH, preferredDownloadPeerCount(), blocksInFlight,
+                headersSyncStartedCount(), nowSeconds, bestHeaderSeconds)) return new HeaderSyncReservation(false, false);
+        state.start(nowMicros, nowSeconds, bestHeaderSeconds, spacingSeconds);
+        state.observe(nowSeconds, bestHeaderSeconds);
+        return new HeaderSyncReservation(true, true);
+    }
+    public synchronized void rollbackHeadersSync(Peer peer, HeaderSyncReservation reservation) {
+        if (reservation.newlyStarted()) { var state = headerSync.get(peer); if (state != null) state.reset(); }
+    }
+    public synchronized ru.bitcoin.node.p2p.sync.HeadersSyncTimeoutPolicy.Action headersSyncTimeout(
+            Peer peer, long nowMicros, long nowSeconds, long bestHeaderSeconds) {
+        var state = headerSync.get(peer);
+        return state == null ? ru.bitcoin.node.p2p.sync.HeadersSyncTimeoutPolicy.Action.NONE : state.evaluate(
+                nowMicros, nowSeconds, bestHeaderSeconds, headersSyncStartedCount(), preferredDownloadPeerCount(),
+                preferred(peer), peer.hasPermission(PeerPermission.NOBAN));
+    }
+    public synchronized void observeHeadersTip(Peer peer, long nowSeconds, long bestHeaderSeconds) {
+        var state = headerSync.get(peer); if (state != null) state.observe(nowSeconds, bestHeaderSeconds);
+    }
+    public synchronized long headersSyncBudgetMicros(Peer peer) {
+        var state = headerSync.get(peer); return state == null ? 0 : state.budgetMicros();
+    }
     private final java.util.Set<Peer> chainSyncProtected = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
 
     /** Call only after a complete validated headers batch proves at least active-tip work. */
@@ -116,6 +174,8 @@ public final class PeerManager
         synchronized (this) {
             peers.remove(peer);
             roles.remove(peer);
+            headerSync.remove(peer);
+            headersSending.remove(peer);
             chainSyncProtected.remove(peer);
         }
         if (isProtocolViolation(cause) && !peer.hasPermission(PeerPermission.NOBAN) && !peer.isManualConnection()) {
@@ -162,6 +222,8 @@ public final class PeerManager
                 peer
         );
         roles.remove(peer);
+        headerSync.remove(peer);
+        headersSending.remove(peer);
         chainSyncProtected.remove(peer);
     }
 
@@ -234,6 +296,8 @@ public final class PeerManager
 
             peers.clear();
             roles.clear();
+            headerSync.clear();
+            headersSending.clear();
             chainSyncProtected.clear();
         }
 

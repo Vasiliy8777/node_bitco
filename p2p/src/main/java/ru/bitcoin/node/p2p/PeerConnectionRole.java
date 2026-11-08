@@ -6,6 +6,7 @@ public enum PeerConnectionRole {
     FULL_RELAY,
     BLOCK_RELAY_ONLY,
     FEELER,
+    ADDR_FETCH,
     MANUAL;
 
     public boolean relaysTransactions() {

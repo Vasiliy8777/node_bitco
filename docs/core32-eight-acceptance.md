@@ -8,7 +8,7 @@
 
 | № | Направление | Состояние и критерий завершения |
 | --- | --- | --- |
-| 1 | Сроки синхронизации / предпочтительные пиры | Открыто. Нужны модель сроков Core, условия переходов, preferred-peer counters и независимые сценарии с управляемыми часами. Существующие пятисекундный live-предел и последовательный обход нельзя объявлять эквивалентными асинхронному планированию Core. |
+| 1 | Сроки синхронизации / предпочтительные пиры | Формула, строгие условия срока, NoBan reset и учёт предпочтительных готовых пиров реализованы в стандартном режиме. Независимые задачи пиров заменяют последовательное ожидание. Управляемые часы и нативный двухпировый Core wire-тест подтверждают границы. Окно VERSION/VERACK, полный scheduler и import/reindex остаются открытыми. [Проверки и границы](header-sync-timing-core32.md). |
 | 2 | Начальная синхронизация только через ручные подключения | Реализовано для `maxconnections=0` с явным `manual-peers`: ожидание соединения, загрузка заголовков/блока, минимальная работа, live-sync и готовность майнинга без автоматических слотов. Настоящий P2P regtest-блок принят; отмена ожидания проверена. Полная сборка и рабочий перезапуск фиксируются отдельно. |
 | 3 | Остальные разрешения пиров | Частично. [Addr](addr-permission-core32.md), [Relay/ForceRelay](relay-permissions-core32.md) и [Mempool/BIP35](mempool-permission-core32.md) имеют реальные обработчики и проверки. Для Mempool реализованы доступ, trickle, feefilter по базовой комиссии, MSG_TX/MSG_WTX и INV ≤50 000. Bloom, upload-target/GETDATA sequence и полная нативная wire-матрица остаются открытыми. |
 | 4 | Оптимизатор mempool | Открыто. Требуются независимые сравнения промежуточных результатов при ограниченном бюджете Core, вставках/удалениях/reorg/изменении fees и равных ставках; действующие unlimited-reference случаи не закрывают этот пункт. |
@@ -22,8 +22,8 @@
 
 Оставшиеся отличия: [core32-seven-workstreams.md](core32-seven-workstreams.md).
 
-RPC inventory including hidden Core commands: 176 reference names, 52 local
-names, 124 missing names and zero additional names. Categories and complete
+RPC inventory including hidden Core commands: 176 reference names, 55 local
+names, 121 missing names and zero additional names. Categories and complete
 lists: [core32-rpc-method-inventory.md](core32-rpc-method-inventory.md).
 This is a name inventory, not schema/behavior verification.
 
@@ -52,7 +52,125 @@ Its native fixture uses submitpackage. The subsequent
 removes CPFP aggregation from probes and reports individual effective fees.
 Full RPC reason/partial-result shape parity remains open under direction 5.
 
-Latest package-precheck-phase batch: 5,314 full-reactor cases (5,302 passed,
+Latest availability ownership batch: 5,364 full-reactor cases (5,352 passed,
+12 skipped), zero failures/errors; both applications packaged. Availability
+GETHEADERS shares initial/live admission, locator and timeout state. Deferred
+attempts do not add cooldown, and nonblocking send ownership prevents rollback
+races. Original IDEA GPU PID 29204 verified RUNNING, height=headers=975064,
+IBD=false, five peers (two block relay), 30,877 mempool entries, zero privileged
+peers, accepted CUDA shares and one Bitcoin application process.
+[Implementation and remaining limits](availability-headers-owner-core32.md).
+
+Previous IBD source-preference batch: 5,360 full-reactor cases (5,348 passed,
+12 skipped), zero failures/errors; both applications packaged. Block assignment
+uses preferred-source/fallback rules and a stable eligibility snapshot per pass.
+Availability-header requests were subsequently integrated in the follow-up above.
+Original IDEA GPU PID 29024 verified RUNNING, height=headers=975049,
+IBD=false, eight peers (two block relay), 31,818 mempool entries, zero privileged
+peers, accepted CUDA shares and one Bitcoin application process.
+[Implementation and remaining path](ibd-source-preference-core32.md).
+
+Previous chainwork-null-locator batch: 5,359 full-reactor cases (5,347 passed,
+12 skipped), zero failures/errors; both applications packaged. Final chainwork
+probes at genesis use a null locator. Native Core wire checks confirm strict
+20/2-minute boundaries and initial/final locator forms; Java checks cover cache
+transitions and the frozen old benchmark. Original IDEA GPU PID 83732 verified
+RUNNING, height=headers=975045, IBD=false, seven peers (two block relay), 34,027
+mempool entries, zero privileged peers, accepted CUDA shares and one Bitcoin
+application process. [Implementation and limits](chainwork-null-locator-core32.md).
+
+Previous chainwork-start gate batch: 5,356 full-reactor cases (5,344 passed,
+12 skipped), zero failures/errors; both applications packaged. Deferred peers
+do not start chainwork eviction until headers sync is actually admitted.
+Strict 20/2-minute boundaries and explicit legacy timeouts are preserved.
+Original IDEA GPU PID 15448 verified RUNNING, height=headers=975044,
+IBD=false, eight peers (two block relay), 35,075 mempool entries, zero privileged
+peers, accepted CUDA shares and one Bitcoin application process.
+[Implementation and limits](chainwork-start-gate-core32.md).
+
+Previous initial-locator batch: 5,355 full-reactor cases (5,343 passed,
+12 skipped), zero failures/errors; both applications packaged. The first
+GETHEADERS starts from the best header's parent (genesis remains genesis),
+using one tip snapshot for deadline and locator. Gate retry and continuation
+semantics are covered by two explicit vectors. Original IDEA GPU PID 127368
+verified RUNNING, height=headers=975042, IBD=false, seven peers (two block relay),
+35,204 mempool entries, zero privileged peers, accepted CUDA shares and one
+Bitcoin application process. [Implementation and limits](initial-locator-core32.md).
+
+Previous initial-recovery ownership batch: 5,353 full-reactor cases (5,341 passed,
+12 skipped), zero failures/errors; both applications packaged. Initial requests
+for seed and replacement peers delegate to the download coordinator, preserving
+preferred-source admission and its timer. Chainwork probes remain separate.
+Original IDEA GPU PID 147092 verified RUNNING, height=headers=975042,
+IBD=false, seven peers (two block relay), 32,819 mempool entries, zero privileged
+peers, accepted CUDA shares and one Bitcoin application process.
+[Implementation and evidence](initial-recovery-owner-core32.md).
+
+Previous lifecycle-fixture follow-up: 5,352 full-reactor cases (5,340 passed,
+12 skipped), zero failures/errors; both applications packaged. Repeated
+locators and maintenance PING no longer falsely close the test source. One
+deterministic wire regression and ten repeated failovers passed. Original
+IDEA GPU PID 143444 verified RUNNING, height=headers=975036, IBD=false,
+eight peers (two block relay), 19,947 mempool entries, no privileged peers,
+accepted CUDA shares and one Bitcoin application process.
+[Diagnosis, scope and evidence](header-failover-fixture-core32.md).
+
+Previous header-timing/TRUC batch: 5,351 full-reactor cases (5,339 passed,
+12 skipped), zero failures/errors; Bitcoin and RVN applications packaged.
+Native Core wire cases confirm timeout boundaries and alternatives for ordinary
+and NoBan sources; full RPC comparisons confirm TRUC inheritance details and
+priority before economic RBF checks. Original IDEA GPU PID 19404 verified
+RUNNING, height=headers=975028, IBD=false, ten peers (two block relay),
+28,466 mempool entries, zero privileged peers, accepted CUDA shares and exactly
+one Bitcoin application process. [Timing scope](header-sync-timing-core32.md),
+[remaining mempool work](mempool-core32-execution.md).
+
+Previous RPC chain-wait batch: 5,338 full-reactor cases (5,326 passed,
+12 skipped), zero failures/errors; both applications packaged. Three new
+methods have full native OpenRPC/help, 12 successful/25 error response
+comparisons, and asynchronous same-block waiting. Five local tests include
+reorg, spurious wakeups and shutdown registration races. Original IDEA GPU
+PID 145416 verified RUNNING, height=headers=974991, IBD=false, nine peers
+(two block relay), 30,939 mempool entries, accepted CUDA shares and one
+Bitcoin process. All three methods exercised on the live node; catalog has
+55 implemented names and 121 missing names.
+[RPC scope and remaining work](core32-rpc-execution.md).
+
+Previous shared-submission-phase batch: 5,333 full-reactor cases (5,321 passed,
+12 skipped), zero failures/errors; both applications packaged. Native Core
+32.1 full RPC comparisons confirm later missing-input/aggregate-fee/ephemeral
+failures precede invalid parent scripts, and script failures do not commit
+a partial retry. Original IDEA GPU PID 75688 verified RUNNING,
+height=headers=974984, IBD=false, seven peers (two block relay),
+24,825 mempool entries, accepted CUDA shares and exactly one Bitcoin process.
+[Implementation and remaining scope](shared-submission-phase-core32.md).
+
+Previous partial-submission batch: 5,327 full-reactor cases (5,315 passed,
+12 skipped), zero failures/errors; both applications packaged. Native Core
+32.1 full RPC/pool comparisons cover committed parents on child failure,
+known transactions, corrected child witness, CPFP metadata, client caps,
+topology and per-output burn limits/priority. Original IDEA GPU PID 70084
+verified RUNNING, height=headers=974981, IBD=false, seven peers (two block
+relay), 26,052 mempool entries, accepted CUDA shares and one Bitcoin process.
+[Implementation and remaining scope](submitpackage-partial-core32.md).
+
+Previous script-results batch: 5,322 full-reactor cases (5,310 passed,
+12 skipped), zero failures/errors; both applications packaged. Native Core
+32.1 full RPC comparison covers script failures at every package position,
+successful prefixes, unfinished suffixes, maxfeerate precedence, single
+probes and six witness failure variants. Original IDEA GPU PID 77936 verified
+RUNNING, height=headers=974978, IBD=false, seven peers (two block relay),
+23,868 mempool entries and exactly one Bitcoin process.
+[Implementation and remaining diagnostics](package-script-results-core32.md).
+
+Previous shared-policy-phase batch: 5,319 full-reactor cases (5,307 passed,
+12 skipped), zero failures/errors; both applications packaged. Native Core
+32.1 comparison confirms missing-input precedence over in-package TRUC topology
+and invalid signatures. Original IDEA GPU PID 131144 verified RUNNING,
+height=headers=974973, IBD=false, six peers (two block relay), 24,426 mempool
+entries and exactly one Bitcoin process. [Scope and remaining work](mempool-core32-execution.md).
+
+Previous package-precheck-phase batch: 5,314 full-reactor cases (5,302 passed,
 12 skipped), zero failures/errors. Native Core 32.1 comparison confirms a later
 missing input precedes an earlier corrupted signature, with full RPC equality.
 Both applications packaged. Original IDEA GPU PID 124220 verified RUNNING,

@@ -62,6 +62,8 @@ public final class NodeRpcServer implements AutoCloseable {
     private final long localServices;
     private final long startedNanos = System.nanoTime();
     private final ConcurrentHashMap<Long, ActiveCommand> activeCommands = new ConcurrentHashMap<>();
+    private volatile boolean running = true;
+    private final java.util.concurrent.atomic.AtomicInteger tipWaiters = new java.util.concurrent.atomic.AtomicInteger();
 
     public NodeRpcServer(InetSocketAddress address, String user, String password, MiningController mining,
                          NodeValidationService validation, NodeRelayService relay, NodeSyncInfrastructure sync,
@@ -311,6 +313,7 @@ public final class NodeRpcServer implements AutoCloseable {
                                 "duration", Math.max(0L, (now - command.startedNanos()) / 1_000L)))
                         .toList());
             }
+            case "waitfornewblock", "waitforblock", "waitforblockheight" -> waitForChain(method, params);
             case "ping" -> {
                 requireNoParams(method, params);
                 requirePeerManager().requestPings();
@@ -367,7 +370,7 @@ public final class NodeRpcServer implements AutoCloseable {
                 }
                 var probe = validation.testMempoolAccept(transactions);
                 List<Map<String, Object>> results = new ArrayList<>(transactions.size());
-                if (!probe.allowed()) {
+                if (!probe.allowed() && probe.entries().isEmpty()) {
                     if (probe.failedTransactionIndex() >= 0) {
                         for (int i = 0; i < transactions.size(); i++) {
                             var tx = transactions.get(i);
@@ -403,7 +406,6 @@ public final class NodeRpcServer implements AutoCloseable {
                 boolean maxFeeExceeded = false;
                 for (int i = 0; i < transactions.size(); i++) {
                     Transaction tx = transactions.get(i);
-                    var entry = probe.entries().get(i);
                     var result = new LinkedHashMap<String, Object>();
                     result.put("txid", tx.txId().toDisplayHex());
                     result.put("wtxid", tx.wtxId().toDisplayHex());
@@ -411,6 +413,16 @@ public final class NodeRpcServer implements AutoCloseable {
                         results.add(result);
                         continue;
                     }
+                    if (i >= probe.entries().size()) {
+                        if (i == probe.failedTransactionIndex()) {
+                            result.put("allowed", false);
+                            result.put("reject-reason", testAcceptRejectReason(probe.rejectReason()));
+                            result.put("reject-details", probe.rejectDetails());
+                        }
+                        results.add(result);
+                        continue;
+                    }
+                    var entry = probe.entries().get(i);
                     // Core caps the base fee, independent of mining fee deltas,
                     // against CFeeRate::GetFee's rounded-up satoshi amount.
                     if (maxFeeRate != 0 && entry.fee() > new FeeRate(maxFeeRate).feeForVSize(entry.virtualSize())) {
@@ -444,30 +456,29 @@ public final class NodeRpcServer implements AutoCloseable {
                 try {
                     for (Object raw : rawPackage) {
                         if (!(raw instanceof String hex)) throw new RpcException(-32602, "Package transactions must be hex strings");
-                        transactions.add(TransactionParser.parse(HexFormat.of().parseHex(hex)));
+                        var transaction = TransactionParser.parse(HexFormat.of().parseHex(hex));
+                        for (var output : transaction.outputs()) if (packageBurnOutput(output.scriptPubKey()) && output.value() > maxBurnAmount)
+                            throw new RpcException(-25, "Unspendable output exceeds maximum configured by user (maxburnamount)");
+                        transactions.add(transaction);
                     }
                 } catch (IllegalArgumentException | java.nio.BufferUnderflowException exception) {
                     throw new RpcException(-22, "TX decode failed");
                 }
                 try {
-                    var probe = validation.testPackageSubmission(transactions);
-                    if (!probe.allowed()) throw new ru.bitcoin.node.mempool.MempoolAdmissionException(probe.rejectReason());
-                    for (int i = 0; i < transactions.size(); i++) {
-                        var entry = probe.entries().get(i);
-                        if (!probe.knownSubmissionTxids().contains(transactions.get(i).txId())
-                                && maxFeeRate != 0 && entry.modifiedFee() * 1000L > maxFeeRate * entry.virtualSize())
-                            throw new RpcException(-25, "Fee exceeds maximum configured by user (e.g. -maxtxfee, maxfeerate)");
-                        if (burnAmount(transactions.get(i)) > maxBurnAmount)
-                            throw new RpcException(-25, "Unspendable output exceeds maximum configured by user (maxburnamount)");
-                    }
-                    var submission = relay.submitPackage(transactions);
-                    var accepted = submission.entries();
+                    if (!ru.bitcoin.node.mempool.Mempool.isSubmissionTopologyAllowed(transactions))
+                        throw new RpcException(-25, "package topology disallowed. not child-with-parents or parents depend on each other.");
+                    var submission = relay.submitPackage(transactions, maxFeeRate);
                     var txResults = new LinkedHashMap<String, Object>();
-                    for (int i = 0; i < transactions.size(); i++) {
-                        Transaction tx = transactions.get(i);
-                        var entry = accepted.get(i);
+                    for (Transaction tx : transactions) {
+                        var txResult = submission.transactions().get(tx.wtxId());
                         var result = new LinkedHashMap<String, Object>();
                         result.put("txid", tx.txId().toDisplayHex());
+                        if (txResult.error() != null) {
+                            result.put("error", txResult.error());
+                            txResults.put(tx.wtxId().toDisplayHex(), result);
+                            continue;
+                        }
+                        var entry = txResult.entry();
                         if (!entry.transaction().wtxId().equals(tx.wtxId())) {
                             result.put("other-wtxid", entry.transaction().wtxId().toDisplayHex());
                             txResults.put(tx.wtxId().toDisplayHex(), result);
@@ -476,11 +487,17 @@ public final class NodeRpcServer implements AutoCloseable {
                         result.put("vsize", entry.virtualSize());
                         result.put("vsize_adjusted", entry.virtualSize());
                         result.put("vsize_bip141", ru.bitcoin.node.consensus.transaction.TransactionWeight.virtualSize(entry.weight()));
-                        result.put("fees", Map.of("base", satoshisToBtc(entry.fee())));
+                        var fees = new LinkedHashMap<String, Object>();
+                        fees.put("base", satoshisToBtc(entry.fee()));
+                        if (!txResult.known()) {
+                            fees.put("effective-feerate", satoshisToBtc(txResult.effectiveFeeRate()));
+                            fees.put("effective-includes", txResult.effectiveIncludes().stream().map(Hash256::toDisplayHex).toList());
+                        }
+                        result.put("fees", fees);
                         txResults.put(tx.wtxId().toDisplayHex(), result);
                     }
                     var result = new LinkedHashMap<String, Object>();
-                    result.put("package_msg", "success");
+                    result.put("package_msg", submission.packageMessage());
                     result.put("tx-results", txResults);
                     result.put("replaced-transactions", submission.replacedTransactions().stream()
                             .map(Hash256::toDisplayHex).toList());
@@ -1370,6 +1387,15 @@ public final class NodeRpcServer implements AutoCloseable {
         return burn;
     }
 
+    private static boolean packageBurnOutput(byte[] script) {
+        if (UnspendableScript.isUnspendable(script)) return true;
+        try {
+            for (var instruction : ru.bitcoin.node.script.ScriptParser.parse(script))
+                if (instruction.opcode() > 0xba || instruction.dataLength() > 520) return true;
+            return false;
+        } catch (ru.bitcoin.node.script.ScriptParseException malformed) { return true; }
+    }
+
     private static String testAcceptRejectReason(String reason) {
         return switch (reason) {
             case "cluster-count-limit", "cluster-size-limit" -> "too-large-cluster";
@@ -1470,7 +1496,46 @@ public final class NodeRpcServer implements AutoCloseable {
         var methods = RpcMethods.names();
         if (command == null) return String.join("\n", methods);
         if (!methods.contains(command)) throw new RpcException(-32601, "Method not found");
+        String canonical = RpcMethods.canonicalHelp(command);
+        if (canonical != null) return canonical;
         return command + " - supported by java-bitcoin-node RPC";
+    }
+
+    private Object waitForChain(String method, List<?> params) throws InterruptedException {
+        RpcMethods.validateChainWaitParameters(method, params);
+        java.util.function.Predicate<ru.bitcoin.node.chain.BlockIndex> satisfied;
+        int timeout;
+        if (method.equals("waitfornewblock")) {
+            timeout = waitInteger(params, 0, 0);
+            if (timeout < 0) throw new RpcException(-1, "Negative timeout");
+            var current = validation.activeTip().hash();
+            var tip = params.size() < 2 || params.get(1) == null ? current : waitHash((String) params.get(1), "current_tip");
+            satisfied = index -> !index.hash().equals(tip);
+        } else {
+            var hash = method.equals("waitforblock") ? waitHash((String) params.getFirst(), "blockhash") : null;
+            int height = method.equals("waitforblockheight") ? waitInteger(params, 0, 0) : 0;
+            timeout = waitInteger(params, 1, 0);
+            if (timeout < 0) throw new RpcException(-1, "Negative timeout");
+            satisfied = method.equals("waitforblock") ? index -> index.hash().equals(hash) : index -> index.height() >= height;
+        }
+        tipWaiters.incrementAndGet();
+        try {
+            var tip = validation.awaitChainTip(satisfied, timeout, () -> running);
+            return Map.of("hash", tip.hash().toDisplayHex(), "height", tip.height());
+        } finally { tipWaiters.decrementAndGet(); }
+    }
+
+    private static int waitInteger(List<?> params, int position, int fallback) {
+        if (params.size() <= position || params.get(position) == null) return fallback;
+        try { return Integer.parseInt(params.get(position).toString()); }
+        catch (NumberFormatException error) { throw new RpcException(-1, "JSON integer out of range"); }
+    }
+
+    private static Hash256 waitHash(String value, String name) {
+        int length = value.getBytes(StandardCharsets.UTF_8).length;
+        if (length != 64) throw new RpcException(-8, name + " must be of length 64 (not " + length + ", for '" + value + "')");
+        if (!value.matches("[0-9a-fA-F]{64}")) throw new RpcException(-8, name + " must be hexadecimal string (not '" + value + "')");
+        return Hash256.fromDisplayHex(value);
     }
 
     private void respondNoContent(HttpExchange exchange) throws IOException {
@@ -1486,8 +1551,12 @@ public final class NodeRpcServer implements AutoCloseable {
 
     @Override
     public void close() {
+        boolean waiting = tipWaiters.get() != 0 || activeCommands.values().stream()
+                .anyMatch(command -> Set.of("waitfornewblock", "waitforblock", "waitforblockheight").contains(command.method()));
+        running = false;
+        validation.wakeChainTipWaiters();
         mining.close();
-        server.stop(0);
+        server.stop(waiting ? 1 : 0);
         executor.shutdownNow();
         try {
             if (!executor.awaitTermination(5, TimeUnit.SECONDS))

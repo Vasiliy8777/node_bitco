@@ -13,6 +13,166 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class CoreBlockDownloadPeerPolicyTest {
+    @Test
+    void missingLocatorAncestryIsFatalInsteadOfBeingIgnoredAsPeerFailure() throws Exception {
+        var tip = extend(genesis, 3, 1); headers.consider(tip);
+        var missing = ancestor(tip, 1).hash();
+        var broken = new BlockLocatorBuilder(hash -> hash.equals(missing) ? null : indexes.get(hash));
+        var actual = new CoreBlockDownloadPeerPolicy(lookup, active::get, headers, broken,
+                NetworkParametersRegistry.regtest(), failed::contains, ibd::get, snapshot::get);
+        var peer = peer(VersionMessage.DEFAULT_SERVICES);
+        var failure = assertThrows(IllegalStateException.class, () -> actual.refresh(List.of(peer)));
+        assertTrue(failure.getMessage().contains("Missing ancestor"));
+        verify(peer, never()).sendAsync(any());
+        verify(peer, never()).disconnectForProtocolViolation(anyString(), any());
+        verify(peer, never()).close();
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void availabilitySendStateFailureIsFatalUnlessConnectionClosed(boolean closed) throws Exception {
+        var peer = peer(VersionMessage.DEFAULT_SERVICES);
+        when(peer.state()).thenReturn(ru.bitcoin.node.p2p.PeerState.READY);
+        var requests = mock(CoreBlockDownloadPeerPolicy.HeadersRequests.class);
+        var failure = new IllegalStateException("Synthetic internal send state failure");
+        when(requests.trySend(eq(peer), any())).thenAnswer(call -> {
+            if (closed) when(peer.state()).thenReturn(ru.bitcoin.node.p2p.PeerState.CLOSED);
+            throw failure;
+        });
+        var actual = new CoreBlockDownloadPeerPolicy(lookup, active::get, headers, new BlockLocatorBuilder(lookup),
+                NetworkParametersRegistry.regtest(), failed::contains, ibd::get, snapshot::get, source -> true, requests);
+        if (closed) assertDoesNotThrow(() -> actual.refresh(List.of(peer)));
+        else assertSame(failure, assertThrows(IllegalStateException.class, () -> actual.refresh(List.of(peer))));
+        verify(peer, never()).disconnectForProtocolViolation(anyString(), any());
+        verify(peer, never()).close();
+    }
+
+    @Test
+    void transportFailureRemainsLocalAndDoesNotDelayTheNextAvailabilityAttempt() throws Exception {
+        var peer = peer(VersionMessage.DEFAULT_SERVICES);
+        var requests = mock(CoreBlockDownloadPeerPolicy.HeadersRequests.class);
+        when(requests.trySend(eq(peer), any())).thenThrow(new java.io.IOException("Synthetic transport failure")).thenReturn(true);
+        var actual = new CoreBlockDownloadPeerPolicy(lookup, active::get, headers, new BlockLocatorBuilder(lookup),
+                NetworkParametersRegistry.regtest(), failed::contains, ibd::get, snapshot::get, source -> true, requests);
+        assertDoesNotThrow(() -> actual.refresh(List.of(peer)));
+        assertDoesNotThrow(() -> actual.refresh(List.of(peer)));
+        verify(requests, times(2)).trySend(eq(peer), any());
+        verify(peer, never()).disconnectForProtocolViolation(anyString(), any());
+    }
+    @Test
+    void availabilityDeferralDoesNotDelayRetryOrBypassInitialSourceAdmission() throws Exception {
+        var tip = extend(genesis, 4, 1); headers.consider(tip);
+        var first = peer(VersionMessage.DEFAULT_SERVICES); var second = peer(VersionMessage.DEFAULT_SERVICES);
+        var send = new AtomicBoolean();
+        when(first.trySendGetHeadersAsync(any())).thenAnswer(call -> send.get());
+        when(second.trySendGetHeadersAsync(any())).thenReturn(true);
+        var clock = new AtomicLong(1_800_000_000_000_000L);
+        try (var peers = new ru.bitcoin.node.p2p.PeerManager()) {
+            peers.add(first);
+            var actual = managedAvailability(peers, clock);
+            actual.refresh(peers.readyPeers());
+            assertEquals(0, peers.headersSyncStartedCount());
+            send.set(true);
+            actual.refresh(peers.readyPeers());
+            verify(first, times(2)).trySendGetHeadersAsync(any());
+            assertTrue(peers.headersSyncStarted(first));
+            peers.add(second);
+            actual.refresh(peers.readyPeers());
+            assertFalse(peers.headersSyncStarted(second));
+            verify(second, never()).trySendGetHeadersAsync(any());
+            peers.remove(first);
+            actual.refresh(peers.readyPeers());
+            assertTrue(peers.headersSyncStarted(second), "A deferred peer must retry without an extra two-minute cooldown");
+            verify(first, never()).trySendGetHeaders(any());
+            verify(second, never()).sendAsync(argThat(message -> message.command().equals("getheaders")));
+        }
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void availabilityChecksInitialDeadlineEvenWhileItsProbeCooldownIsPending(boolean noBan) throws Exception {
+        var tip = extend(genesis, 4, 1); headers.consider(tip);
+        var first = peer(VersionMessage.DEFAULT_SERVICES);
+        when(first.hasPermission(ru.bitcoin.node.p2p.PeerPermission.NOBAN)).thenReturn(noBan);
+        when(first.trySendGetHeadersAsync(any())).thenReturn(true);
+        var clock = new AtomicLong(1_800_000_000_000_000L);
+        try (var peers = new ru.bitcoin.node.p2p.PeerManager()) {
+            peers.add(first);
+            doAnswer(call -> { peers.remove(first); return null; }).when(first).close();
+            var actual = managedAvailability(peers, clock);
+            actual.refresh(peers.readyPeers());
+            peers.add(peer(VersionMessage.DEFAULT_SERVICES));
+            long deadline = ru.bitcoin.node.p2p.sync.HeadersSyncTimeoutPolicy.initialDeadline(
+                    clock.get(), clock.get() / 1_000_000, tip.header().timestamp().value(), 600);
+            clock.set(deadline);
+            actual.refresh(List.of(first));
+            verify(first, never()).close();
+            clock.incrementAndGet();
+            actual.refresh(List.of(first));
+            verify(first, noBan ? never() : times(1)).close();
+            assertFalse(peers.headersSyncStarted(first));
+            verify(first, times(1)).trySendGetHeadersAsync(any());
+            if (noBan) {
+                actual.refresh(List.of(first));
+                assertTrue(peers.headersSyncStarted(first));
+                verify(first, times(2)).trySendGetHeadersAsync(any());
+            }
+        }
+    }
+
+    private CoreBlockDownloadPeerPolicy managedAvailability(ru.bitcoin.node.p2p.PeerManager peers, AtomicLong clock) {
+        var locators = new BlockLocatorBuilder(lookup);
+        return new CoreBlockDownloadPeerPolicy(lookup, active::get, headers, locators,
+                NetworkParametersRegistry.regtest(), failed::contains, ibd::get, snapshot::get,
+                source -> peers.canSyncFrom(source, false),
+                new CoreAvailabilityHeaders(peers, headers, locators, 600, () -> false, clock::get));
+    }
+    @Test
+    void ibdUsesPreferredSourcesWithInboundFallbackAndOneDecisionPerPass() throws Exception {
+        var tip = extend(genesis, 4, 1);
+        var outbound = peer(VersionMessage.DEFAULT_SERVICES);
+        var inbound = peer(VersionMessage.DEFAULT_SERVICES);
+        var noBan = peer(VersionMessage.DEFAULT_SERVICES);
+        var fetch = peer(VersionMessage.DEFAULT_SERVICES);
+        var limited = peer(VersionMessage.NODE_NETWORK_LIMITED | VersionMessage.NODE_WITNESS);
+        var client = peer(VersionMessage.NODE_WITNESS);
+        when(inbound.isInboundConnection()).thenReturn(true);
+        when(noBan.isInboundConnection()).thenReturn(true);
+        when(noBan.hasPermission(ru.bitcoin.node.p2p.PeerPermission.NOBAN)).thenReturn(true);
+        var inFlight = new AtomicBoolean(true);
+        try (var peers = new ru.bitcoin.node.p2p.PeerManager()) {
+            for (var source : List.of(outbound, inbound, noBan, limited, client)) peers.add(source);
+            peers.add(fetch, ru.bitcoin.node.p2p.PeerConnectionRole.ADDR_FETCH);
+            for (var source : peers.readyPeers()) when(source.lastBlockAnnouncement()).thenReturn(tip.hash());
+            var actual = new CoreBlockDownloadPeerPolicy(lookup, active::get, headers, new BlockLocatorBuilder(lookup),
+                    NetworkParametersRegistry.regtest(), failed::contains, ibd::get, snapshot::get,
+                    source -> peers.canSyncFrom(source, inFlight.get()));
+            actual.refresh(peers.readyPeers());
+            assertTrue(actual.canDownload(outbound, tip.hash(), 4L));
+            assertTrue(actual.canDownload(noBan, tip.hash(), 4L));
+            assertFalse(actual.canDownload(inbound, tip.hash(), 4L));
+            assertFalse(actual.canTraverse(inbound, tip.hash(), 4L), "Ineligible sources must not become stall candidates");
+            assertFalse(actual.canDownload(fetch, tip.hash(), 4L));
+            assertFalse(actual.canDownload(limited, tip.hash(), 4L));
+            assertFalse(actual.canDownload(client, tip.hash(), 4L));
+            inFlight.set(false);
+            actual.refresh(peers.readyPeers());
+            assertTrue(actual.canDownload(inbound, tip.hash(), 4L));
+            inFlight.set(true);
+            assertTrue(actual.canDownload(inbound, tip.hash(), 4L), "First assignment must not disable the rest of this batch");
+            actual.refresh(peers.readyPeers());
+            assertFalse(actual.canDownload(inbound, tip.hash(), 4L));
+            ibd.set(false);
+            assertTrue(actual.canDownload(inbound, tip.hash(), 4L));
+            assertTrue(actual.canDownload(fetch, tip.hash(), 4L));
+            assertTrue(actual.canDownload(limited, tip.hash(), 4L));
+            ibd.set(true);
+            peers.remove(outbound); peers.remove(noBan); peers.remove(limited);
+            actual.refresh(peers.readyPeers());
+            assertTrue(actual.canDownload(inbound, tip.hash(), 4L), "No preferred sources: inbound fallback remains available");
+            assertFalse(actual.canDownload(fetch, tip.hash(), 4L));
+        }
+    }
     private final Map<Hash256, BlockIndex> indexes = new HashMap<>();
     private final BlockIndex genesis = BlockIndexFactory.createGenesis(
             GenesisBlockFactory.create(NetworkParametersRegistry.regtest()).header());

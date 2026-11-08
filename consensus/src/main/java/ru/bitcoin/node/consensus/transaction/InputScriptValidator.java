@@ -17,6 +17,12 @@ public final class InputScriptValidator {
             UtxoView utxoView,
             int scriptVerifyFlags
     ) {
+        validate(transaction, inputIndex, utxoView, scriptVerifyFlags, false);
+    }
+
+    /** Diagnostic form for RPC probes; boolean-verifier callers keep their existing behavior. */
+    public static void validate(Transaction transaction, int inputIndex, UtxoView utxoView,
+                                int scriptVerifyFlags, boolean detailed) {
         if (transaction == null) {
             throw new IllegalArgumentException(
                     "transaction must not be null"
@@ -117,7 +123,7 @@ public final class InputScriptValidator {
                         input,
                         utxo,
                         witnessProgram.get(),
-                        scriptVerifyFlags
+                        scriptVerifyFlags, detailed
                 );
 
                 return;
@@ -196,7 +202,7 @@ public final class InputScriptValidator {
                         input,
                         utxo,
                         wrappedWitnessProgram.get(),
-                        scriptVerifyFlags
+                        scriptVerifyFlags, detailed
                 );
 
                 return;
@@ -250,7 +256,7 @@ public final class InputScriptValidator {
             TxIn input,
             UtxoEntry utxo,
             WitnessProgram witnessProgram,
-            int scriptVerifyFlags
+            int scriptVerifyFlags, boolean detailed
     ) {
 
         /*
@@ -284,7 +290,7 @@ public final class InputScriptValidator {
                                         input.witness(),
                                         witnessProgram,
                                         utxo.amount(),
-                                        scriptVerifyFlags
+                                        scriptVerifyFlags, detailed
                                 );
 
                 if (!valid) {
@@ -308,7 +314,7 @@ public final class InputScriptValidator {
                                         input.witness(),
                                         witnessProgram,
                                         utxo.amount(),
-                                        scriptVerifyFlags
+                                        scriptVerifyFlags, detailed
                                 );
 
                 if (!valid) {
@@ -365,7 +371,7 @@ public final class InputScriptValidator {
             TxIn input,
             UtxoEntry utxo,
             WitnessProgram witnessProgram,
-            int scriptVerifyFlags
+            int scriptVerifyFlags, boolean detailed
     ) {
 
         /*
@@ -405,7 +411,7 @@ public final class InputScriptValidator {
                                         input.witness(),
                                         witnessProgram,
                                         utxo.amount(),
-                                        scriptVerifyFlags
+                                        scriptVerifyFlags, detailed
                                 );
 
                 if (!valid) {
@@ -429,7 +435,7 @@ public final class InputScriptValidator {
                                         input.witness(),
                                         witnessProgram,
                                         utxo.amount(),
-                                        scriptVerifyFlags
+                                        scriptVerifyFlags, detailed
                                 );
 
                 if (!valid) {

@@ -24,6 +24,7 @@ public final class LiveChainSynchronizer implements AutoCloseable {
     private final BlockSyncCoordinator blocks;
     private final NodeValidationService validation;
     private final Duration timeout;
+    private final boolean coreTiming;
     private final Semaphore wakeup = new Semaphore(0);
     private final Set<Peer> observed = new HashSet<>();
     private volatile boolean closed;
@@ -49,9 +50,10 @@ public final class LiveChainSynchronizer implements AutoCloseable {
         this.infrastructure = infrastructure;
         this.blocks = blocks;
         this.validation = validation;
-        // Initial header IBD may allow long responses. Live polling must fail
-        // over promptly so one silent peer cannot exhaust the 60-second freshness window.
-        this.timeout = timeout.compareTo(MAX_LIVE_HEADER_RESPONSE_TIMEOUT) > 0
+        // Default Core timing uses independent peer waiters. Explicit custom
+        // timeouts retain the legacy bounded live-polling behavior.
+        this.coreTiming = timeout.equals(HeaderSynchronizer.DEFAULT_RESPONSE_TIMEOUT);
+        this.timeout = !coreTiming && timeout.compareTo(MAX_LIVE_HEADER_RESPONSE_TIMEOUT) > 0
                 ? MAX_LIVE_HEADER_RESPONSE_TIMEOUT : timeout;
     }
 
@@ -77,6 +79,7 @@ public final class LiveChainSynchronizer implements AutoCloseable {
     }
 
     public void run() throws IOException {
+        if (coreTiming) { runCore(); return; }
         long nextPoll = 0;
         try {
             while (!closed) {
@@ -151,6 +154,77 @@ public final class LiveChainSynchronizer implements AutoCloseable {
             observed.forEach(this::detach);
             observed.clear();
             lastSuccess = 0;
+        }
+    }
+
+    private HeaderSyncCoordinator coreCoordinator(Peer peer) {
+        return new HeaderSyncCoordinator(infrastructure.headerSynchronizer(peer, peers, timeout, blocks::blocksInFlight),
+                infrastructure.headerSyncService(), infrastructure.headerChainState(), infrastructure.blockLocatorBuilder())
+                .onNewValidatedHeader(index -> {
+                    if (!infrastructure.downloadBlockFailed(index) && index.chainWork().compareTo(validation.downloadTip().chainWork()) > 0)
+                        peer.recordNewBlockAnnouncement();
+                }).onValidatedBatch(batch -> {
+                    if (!batch.isEmpty() && !infrastructure.downloadBlockFailed(batch.getLast())
+                            && batch.getLast().chainWork().compareTo(validation.downloadTip().chainWork()) >= 0) peers.protectChainSync(peer);
+                });
+    }
+
+    /** Independent per-peer waiters: a silent caught-up peer cannot block other sources. */
+    private void runCore() throws IOException {
+        var workers = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor();
+        var pending = new java.util.IdentityHashMap<Peer, java.util.concurrent.Future<?>>();
+        var nextPoll = new java.util.IdentityHashMap<Peer, Long>();
+        try {
+            while (!closed) {
+                var ready = peers.readyPeers();
+                observed.removeIf(peer -> { if (ready.contains(peer)) return false; detach(peer); return true; });
+                for (var peer : ready) if (observed.add(peer)) {
+                    peer.addInventoryListener(inventoryListener); peer.addMessageListener(messageListener); requestSync();
+                }
+                boolean signalled = wakeup.tryAcquire();
+                boolean synchronizeBlocks = false;
+                var iterator = pending.entrySet().iterator();
+                while (iterator.hasNext()) {
+                    var task = iterator.next(); if (!task.getValue().isDone()) continue;
+                    var peer = task.getKey(); var future = task.getValue(); iterator.remove();
+                    nextPoll.put(peer, System.nanoTime() + Duration.ofSeconds(5).toNanos());
+                    try { future.get(); synchronizeBlocks = true; }
+                    catch (java.util.concurrent.ExecutionException failure) {
+                        var cause = failure.getCause();
+                        if (cause instanceof Error fatal) throw fatal;
+                        if (cause instanceof IllegalStateException state && peer.state() != PeerState.CLOSED) throw state;
+                        if (cause instanceof IOException || cause instanceof IllegalArgumentException || cause instanceof IllegalStateException
+                                || cause instanceof ru.bitcoin.node.consensus.block.BlockHeaderValidationException
+                                || cause instanceof ru.bitcoin.node.consensus.block.BlockValidationException
+                                || cause instanceof ru.bitcoin.node.consensus.transaction.TransactionValidationException)
+                            replaceFailedPeer(peer, (Exception) cause);
+                        else throw new IOException("Header synchronization failed", cause);
+                    }
+                }
+                nextPoll.keySet().removeIf(peer -> !ready.contains(peer));
+                for (var peer : ready) {
+                    if (!pending.containsKey(peer) && (signalled || System.nanoTime() >= nextPoll.getOrDefault(peer, 0L))
+                            && (peer.remoteVersion().services() & (ru.bitcoin.node.p2p.message.VersionMessage.NODE_NETWORK
+                            | ru.bitcoin.node.p2p.message.VersionMessage.NODE_NETWORK_LIMITED)) != 0)
+                        pending.put(peer, workers.submit(() -> coreCoordinator(peer).synchronize(new Hash256(new byte[32]))));
+                }
+                if (synchronizeBlocks && !closed) {
+                    blocks.synchronizeToTip();
+                    synchronized (wakeup) {
+                        if (wakeup.availablePermits() == 0 && validation.activeTip().hash().equals(infrastructure.headerChainState().bestHeaderTip().hash())) {
+                            confirmedTip = validation.activeTip().hash(); lastSuccess = System.nanoTime();
+                        }
+                    }
+                }
+                synchronized (this) { if (!closed && wakeup.availablePermits() == 0) wait(100); }
+            }
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt(); if (!closed) throw new IOException("Live synchronization interrupted", interrupted);
+        } finally {
+            pending.values().forEach(task -> task.cancel(true)); workers.shutdownNow();
+            try { workers.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS); }
+            catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+            observed.forEach(this::detach); observed.clear(); lastSuccess = 0;
         }
     }
 

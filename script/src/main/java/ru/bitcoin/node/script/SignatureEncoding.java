@@ -352,7 +352,7 @@ public final class SignatureEncoding {
                 signatureWithHashType
         )) {
 
-            throw new ScriptExecutionException(
+            throw new ScriptVerificationException(
                     "Non-canonical DER signature"
             );
         }
@@ -365,8 +365,8 @@ public final class SignatureEncoding {
                 signatureWithHashType
         )) {
 
-            throw new ScriptExecutionException(
-                    "Non-canonical high-S signature"
+            throw new ScriptVerificationException(
+                    "Non-canonical signature: S value is unnecessarily high", "Non-canonical high-S signature"
             );
         }
 
@@ -378,8 +378,8 @@ public final class SignatureEncoding {
                 signatureWithHashType
         )) {
 
-            throw new ScriptExecutionException(
-                    "Undefined signature hash type"
+            throw new ScriptVerificationException(
+                    "Signature hash type missing or not understood", "Undefined signature hash type"
             );
         }
     }
@@ -418,8 +418,8 @@ public final class SignatureEncoding {
                 publicKey
         )) {
 
-            throw new ScriptExecutionException(
-                    "Non-canonical public key encoding"
+            throw new ScriptVerificationException(
+                    "Public key is neither compressed or uncompressed", "Non-canonical public key encoding"
             );
         }
 
@@ -440,8 +440,8 @@ public final class SignatureEncoding {
                 publicKey
         )) {
 
-            throw new ScriptExecutionException(
-                    "WITNESS_PUBKEYTYPE requires compressed public key"
+            throw new ScriptVerificationException(
+                    "Using non-compressed keys in segwit", "WITNESS_PUBKEYTYPE requires compressed public key"
             );
         }
     }
@@ -464,8 +464,8 @@ public final class SignatureEncoding {
                 publicKey
         )) {
 
-            throw new ScriptExecutionException(
-                    "Non-canonical public key encoding"
+            throw new ScriptVerificationException(
+                    "Public key is neither compressed or uncompressed", "Non-canonical public key encoding"
             );
         }
     }

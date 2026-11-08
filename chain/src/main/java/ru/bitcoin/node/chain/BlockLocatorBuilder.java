@@ -29,6 +29,12 @@ public final class BlockLocatorBuilder {
         return List.copyOf(locator);
     }
 
+    /** Core starts a peer's first headers request one block before the best header. */
+    public List<Hash256> buildBeforeTip(BlockIndex tip) {
+        Objects.requireNonNull(tip, "tip");
+        return build(tip.height() == 0 ? tip : ancestor(tip, tip.height() - 1));
+    }
+
     private BlockIndex ancestor(BlockIndex index, long targetHeight) {
         if (targetHeight < 0 || targetHeight > index.height()) {
             throw new IllegalArgumentException("Invalid ancestor height: " + targetHeight);

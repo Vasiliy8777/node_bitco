@@ -50,6 +50,45 @@ import static org.junit.jupiter.api.Assertions.*;
 class NodeLifecycleServiceTest {
 
     @Test
+    void lifecyclePeerAnswersRepeatedOldLocatorsAndPingBeforeBlockDownload() throws Exception {
+        var parameters = NetworkParametersRegistry.regtest();
+        var genesis = BlockIndexFactory.createGenesis(GenesisBlockFactory.create(parameters).header());
+        var block = child(genesis, 1);
+        var stopping = new java.util.concurrent.atomic.AtomicBoolean();
+        try (var socket = new ServerSocket(0)) {
+            var server = CompletableFuture.runAsync(() -> runLifecyclePeer(socket, parameters, block, stopping::get));
+            try (var peers = new PeerManager()) {
+                try {
+                    var peer = new ru.bitcoin.node.p2p.BitcoinClient(parameters)
+                            .connectManaged("127.0.0.1", socket.getLocalPort(), 0);
+                    var pongs = new java.util.concurrent.LinkedBlockingQueue<Long>();
+                    peer.addMessageListener((source, message) -> {
+                        if (message.command().equals("pong")) pongs.add(BitcoinMessages.decodePong(message).nonce());
+                    });
+                    peers.add(peer);
+                    var headers = new ru.bitcoin.node.p2p.sync.HeaderSynchronizer(peer, java.time.Duration.ofSeconds(2));
+                    var stop = new Hash256(new byte[32]);
+                    // Force the ordering that two concurrent request producers
+                    // can generate, without relying on thread scheduling.
+                    for (int repeat = 0; repeat < 2; repeat++) {
+                        assertEquals(List.of(block.header()), headers.download(List.of(genesis.hash()), stop).headers());
+                        headers.headersValidated();
+                        if (repeat == 0) peer.send(BitcoinMessages.ping(new PingMessage(123L)));
+                    }
+                    assertEquals(Long.valueOf(123), pongs.poll(2, TimeUnit.SECONDS));
+                    assertTrue(headers.download(List.of(block.hash()), stop).isEmpty());
+                    var downloaded = new ru.bitcoin.node.p2p.sync.BlockSynchronizer(peer)
+                            .downloadAsync(block.hash()).get(2, TimeUnit.SECONDS);
+                    assertEquals(block.hash(), downloaded.hash());
+                } finally {
+                    stopping.set(true);
+                }
+            }
+            server.get(5, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
     void fatalStartupErrorIsRecordedAndStopsPeerActivity() throws Exception {
         var discovery = org.mockito.Mockito.mock(ru.bitcoin.node.p2p.sync.PeerDiscovery.class);
         var fatal = new OutOfMemoryError("Synthetic test failure; no actual heap exhaustion");
@@ -549,86 +588,35 @@ class NodeLifecycleServiceTest {
                     output
             );
 
-            BitcoinMessage firstGetHeaders =
-                    readProtocolMessage(
-                            reader,
-                            input
-                    );
-
-            assertEquals(
-                    "getheaders",
-                    firstGetHeaders.command()
-            );
-
-            GetHeadersMessage firstRequest =
-                    GetHeadersMessageCodec.decode(
-                            firstGetHeaders.payload()
-                    );
-
-            assertFalse(
-                    firstRequest.locatorHashes()
-                            .isEmpty()
-            );
-
-            output.write(
-                    encoder.encode(
-                            BitcoinMessages.headers(
-                                    new HeadersMessage(
-                                            List.of(
-                                                    block.header()
-                                            )
-                                    )
-                            )
-                    )
-            );
-
-            output.flush();
-
-            BitcoinMessage secondGetHeaders =
-                    readProtocolMessage(
-                            reader,
-                            input
-                    );
-
-            assertEquals(
-                    "getheaders",
-                    secondGetHeaders.command()
-            );
-
-            GetHeadersMessage secondRequest =
-                    GetHeadersMessageCodec.decode(
-                            secondGetHeaders.payload()
-                    );
-
-            assertEquals(
-                    block.hash(),
-                    secondRequest.locatorHashes()
-                            .get(0)
-            );
-
-            output.write(
-                    encoder.encode(
-                            BitcoinMessages.headers(
-                                    new HeadersMessage(
-                                            List.of()
-                                    )
-                            )
-                    )
-            );
-
-            output.flush();
-
-            BitcoinMessage getDataWire =
-                    readProtocolMessage(
-                            reader,
-                            input
-                    );
-
-            assertEquals(
-                    "getdata",
-                    getDataWire.command()
-            );
-
+            BitcoinMessage getDataWire;
+            int headerRequests = 0;
+            while (true) {
+                var message = readProtocolMessage(reader, input);
+                if (message.command().equals("ping")) {
+                    output.write(encoder.encode(BitcoinMessages.pong(new PongMessage(
+                            BitcoinMessages.decodePing(message).nonce()))));
+                    output.flush();
+                    continue;
+                }
+                if (!message.command().equals("getheaders")) {
+                    getDataWire = message;
+                    break;
+                }
+                assertTrue(++headerRequests <= 16, "Header requests did not converge");
+                var request = GetHeadersMessageCodec.decode(message.payload());
+                assertFalse(request.locatorHashes().isEmpty());
+                var first = request.locatorHashes().getFirst();
+                // Recovery and the lifecycle waiter may both snapshot the old
+                // locator before either response validates. Answer each request
+                // by its locator rather than assuming a fixed message order.
+                boolean atTip = first.equals(block.hash());
+                if (!atTip) assertEquals(block.header().previousBlockHash(), first);
+                output.write(encoder.encode(BitcoinMessages.headers(new HeadersMessage(
+                        atTip ? List.of() : List.of(block.header())))));
+                output.flush();
+            }
+            assertTrue(headerRequests > 0, "Block download preceded header synchronization");
+            assertEquals("getdata", getDataWire.command());
             GetDataMessage getData =
                     BitcoinMessages.decodeGetData(
                             getDataWire
@@ -970,10 +958,17 @@ class NodeLifecycleServiceTest {
                         TimeUnit.SECONDS
                 );
 
-                awaitRunning(
-                        lifecycle
-                );
-
+                try {
+                    awaitRunning(lifecycle);
+                } catch (AssertionError failure) {
+                    if (healthyServer.isCompletedExceptionally()) {
+                        try { healthyServer.join(); }
+                        catch (java.util.concurrent.CompletionException fixtureFailure) {
+                            failure.addSuppressed(fixtureFailure);
+                        }
+                    }
+                    throw failure;
+                }
                 assertTrue(
                         lifecycleThread.isAlive()
                 );

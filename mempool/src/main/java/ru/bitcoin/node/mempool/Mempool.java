@@ -18,6 +18,12 @@ public final class Mempool {
     private static final class MissingInput extends MempoolAdmissionException {
         MissingInput(String message) { super(message); }
     }
+    private static final class ProbeScriptFailure extends MempoolAdmissionException {
+        final String details;
+        ProbeScriptFailure(MempoolValidator.ScriptFailure failure) { super(failure.reason()); details = failure.details(); }
+    }
+    /** Enabled only on an isolated testmempoolaccept clone. */
+    private boolean probeScriptDiagnostics;
     private final MempoolPolicy policy;
     private final MempoolLimits limits;
     private final java.time.Clock clock;
@@ -74,14 +80,31 @@ public final class Mempool {
                 restoredArrivalTime, restoredAdmissionHeight, packageFeerates, null);
     }
     private record DeferredScript(Transaction transaction, UtxoView coins) {}
-    private static void validateOrDeferScripts(Transaction transaction, UtxoView coins, List<DeferredScript> deferred) {
-        if (deferred == null) MempoolValidator.validateScripts(transaction, coins);
-        else deferred.add(new DeferredScript(transaction, coins));
+    private void validateOrDeferScripts(MempoolEntry entry, UtxoView coins, List<DeferredScript> deferred, Long clientMaxFeeRate) {
+        var transaction = entry.transaction();
+        if (clientMaxFeeRate != null && clientMaxFeeRate != 0) {
+            var entryFee = java.math.BigInteger.valueOf(entry.modifiedFee()).multiply(java.math.BigInteger.valueOf(1000))
+                    .divide(java.math.BigInteger.valueOf(entry.virtualSize()));
+            if (entryFee.compareTo(java.math.BigInteger.valueOf(clientMaxFeeRate)) > 0)
+                throw new MempoolAdmissionException("max feerate exceeded");
+        }
+        if (deferred != null) deferred.add(new DeferredScript(transaction, coins));
+        else if (probeScriptDiagnostics || clientMaxFeeRate != null) {
+            var failure = MempoolValidator.testScripts(transaction, coins);
+            if (failure != null) throw new ProbeScriptFailure(failure);
+        } else MempoolValidator.validateScripts(transaction, coins);
     }
-    /** Deferred scripts are used only in the isolated testAccept clone. */
+    /** Deferred scripts are held only by isolated package/probe staging pools. */
     private MempoolEntry admitInternal(Transaction transaction, MempoolValidationContext context, UtxoView chainUtxos,
                                        boolean packageMode, boolean bypassLimits, Long restoredArrivalTime,
                                        Long restoredAdmissionHeight, boolean packageFeerates, List<DeferredScript> deferred) {
+        return admitInternal(transaction, context, chainUtxos, packageMode, bypassLimits, restoredArrivalTime,
+                restoredAdmissionHeight, packageFeerates, deferred, null);
+    }
+    private MempoolEntry admitInternal(Transaction transaction, MempoolValidationContext context, UtxoView chainUtxos,
+                                       boolean packageMode, boolean bypassLimits, Long restoredArrivalTime,
+                                       Long restoredAdmissionHeight, boolean packageFeerates, List<DeferredScript> deferred,
+                                       Long clientMaxFeeRate) {
         Objects.requireNonNull(transaction, "transaction");
         Objects.requireNonNull(context, "context");
         Objects.requireNonNull(chainUtxos, "chainUtxos");
@@ -124,7 +147,7 @@ public final class Mempool {
         long feeDelta = feeDeltas.getOrDefault(txId, 0L);
         long modifiedFee = Math.addExact(fee, feeDelta);
         ru.bitcoin.node.mempool.policy.StandardTransactionPolicy.validateDustFee(transaction, fee, modifiedFee, policy.dustRelaySatPerKvB());
-        PackagePolicy.ephemeralSpends(transaction, entries, policy.dustRelaySatPerKvB());
+        if (deferred == null) PackagePolicy.ephemeralSpends(transaction, entries, policy.dustRelaySatPerKvB());
         long arrivalTime = restoredArrivalTime != null ? restoredArrivalTime : clock.instant().getEpochSecond();
         long admissionHeight = restoredAdmissionHeight != null ? restoredAdmissionHeight : Math.max(0L, context.nextBlockHeight() - 1L);
         var entry = new MempoolEntry(transaction, fee, weight, arrivalTime, sigops, feeDelta, admissionHeight);
@@ -136,17 +159,19 @@ public final class Mempool {
                 throw new MempoolFeeException("mempool-min-fee", "mempool min fee not met", entry.modifiedFee(), rollingMinimum);
             policy.validateFee(modifiedFee, entry.adjustedWeight());
         }
+        // Core's individual TRUC precheck precedes economic RBF evaluation.
+        if (!bypassLimits && deferred == null) MempoolGraphPolicy.checkSingleTruc(entries, spent, entry, entries, conflicts);
         MempoolGraphPolicy.replacement(entries, conflicts, evicted, entry, limits);
         // Conflict-free additions only affect their connected component.
         // Preserve staged RBF/eviction and the package capacity boundary.
         if (conflicts.isEmpty()) {
-            if (!bypassLimits) MempoolGraphPolicy.checkLimits(
+            if (!bypassLimits && deferred == null) MempoolGraphPolicy.checkLimits(
                     MempoolGraphPolicy.additionCluster(entries, spent, entry, limits.clusterCount()), txId, limits);
             long proposedSize = Math.addExact(totalVirtualBytes, entry.virtualSize());
             // No removal or eviction is needed. All validation precedes commit;
             // package admission retains its existing deferred-capacity boundary.
             if (packageMode || proposedSize <= limits.maxPoolVirtualBytes()) {
-                validateOrDeferScripts(transaction, view, deferred);
+                validateOrDeferScripts(entry, view, deferred, clientMaxFeeRate);
                 entries.put(txId, entry);
                 for (var input : transaction.inputs()) spent.put(input.previousOutput(), txId);
                 totalVirtualBytes = proposedSize;
@@ -157,12 +182,12 @@ public final class Mempool {
         Map<Hash256, MempoolEntry> candidate = new LinkedHashMap<>(entries);
         evicted.forEach(candidate::remove);
         candidate.put(txId, entry);
-        if (!bypassLimits) {
+        if (!bypassLimits && deferred == null) {
             if (packageMode) MempoolGraphPolicy.checkLimits(candidate, txId, limits);
             else MempoolGraphPolicy.checkLimits(candidate, txId, limits, entries, conflicts);
         }
         int beforeTrim = candidate.size();
-        validateOrDeferScripts(transaction, view, deferred);
+        validateOrDeferScripts(entry, view, deferred, clientMaxFeeRate);
         long removedRate = packageMode ? 0 : MempoolGraphPolicy.trim(candidate, limits.maxPoolVirtualBytes(), txId);
         entries.clear();
         entries.putAll(candidate);
@@ -189,10 +214,30 @@ public final class Mempool {
                                                     MempoolValidationContext context,
                                                     UtxoView chainUtxos,
                                                     boolean allowReplacement, boolean packageFeerates) {
+        return admitPackageInternal(transactions, context, chainUtxos, allowReplacement, packageFeerates, null);
+    }
+    private static final class SubmissionFailure extends MempoolAdmissionException {
+        final Hash256 wtxid;
+        final MempoolAdmissionException failure;
+        final String packageMessage;
+        SubmissionFailure(Hash256 wtxid, MempoolAdmissionException failure) {
+            this(wtxid, failure, "transaction failed");
+        }
+        SubmissionFailure(Hash256 wtxid, MempoolAdmissionException failure, String packageMessage) {
+            super(failure.getMessage()); this.wtxid = wtxid; this.failure = failure; this.packageMessage = packageMessage;
+        }
+    }
+    private static final class SharedPackageFailure extends MempoolAdmissionException {
+        SharedPackageFailure(String reason) { super(reason); }
+    }
+    private List<MempoolEntry> admitPackageInternal(List<Transaction> transactions,
+                                                    MempoolValidationContext context, UtxoView chainUtxos,
+                                                    boolean allowReplacement, boolean packageFeerates, Long clientMaxFeeRate) {
         List<Transaction> txs = List.copyOf(transactions);
         Objects.requireNonNull(context); Objects.requireNonNull(chainUtxos);
         PackagePolicy.validate(txs, packageFeerates);
-        if (txs.size() == 1 && !entries.containsKey(txs.getFirst().txId())) return List.of(admit(txs.getFirst(), context, chainUtxos));
+        if (txs.size() == 1 && !entries.containsKey(txs.getFirst().txId())) return List.of(
+                admitInternal(txs.getFirst(), context, chainUtxos, false, false, null, null, false, null, clientMaxFeeRate));
         Set<Hash256> conflicts = new HashSet<>();
         List<Transaction> fresh = new ArrayList<>();
         for (var tx : txs) {
@@ -225,18 +270,56 @@ public final class Mempool {
         staged.rebuildSpent();
         long fee = 0, size = 0;
         long floor = Math.max(minimumFeeRate(), policy.minRelayFeeRate().satoshisPerKiloByte());
+        // RPC retry completes every PreCheck before shared policy and scripts.
+        List<DeferredScript> deferred = clientMaxFeeRate != null ? new ArrayList<>() : null;
         for (var tx : fresh) {
-            var entry = staged.admitInternal(tx, context, chainUtxos, true, false, null, null, packageFeerates);
+            MempoolEntry entry;
+            try {
+                entry = staged.admitInternal(tx, context, chainUtxos, true, false, null, null, packageFeerates, deferred, clientMaxFeeRate);
+                if (deferred != null) MempoolGraphPolicy.checkProbeTruc(entries, spent, entry);
+            }
+            catch (MempoolAdmissionException failure) {
+                if (clientMaxFeeRate != null) throw new SubmissionFailure(tx.wtxId(), failure);
+                throw failure;
+            }
             // Parents that pass individual admission do not contribute fees to a low-fee child.
-            if (packageFeerates && (tx == txs.getLast() || entry.modifiedFee() < new FeeRate(floor).feeForVSize(entry.virtualSize()))) {
+            if (packageFeerates && (deferred != null || tx == txs.getLast() || entry.modifiedFee() < new FeeRate(floor).feeForVSize(entry.virtualSize()))) {
                 fee = Math.addExact(fee, entry.modifiedFee()); size = Math.addExact(size, entry.virtualSize());
             }
         }
-        if (size > 0 && fee < new FeeRate(floor).feeForVSize(size)) throw new MempoolAdmissionException("package-feerate");
+        if (deferred != null) {
+            try {
+                for (var tx : fresh) MempoolGraphPolicy.checkTrucLimits(staged.entries, tx.txId(), Map.of(), Set.of());
+            } catch (MempoolAdmissionException error) { throw new SharedPackageFailure(
+                    error instanceof TrucPolicyException truc ? truc.rpcDetails() : "TRUC-violation"); }
+        }
+        if (size > 0 && fee < new FeeRate(floor).feeForVSize(size)) {
+            if (clientMaxFeeRate != null) {
+                long rolling = new FeeRate(minimumFeeRate()).feeForVSize(size);
+                throw rolling > 0 && fee < rolling
+                        ? new MempoolFeeException("mempool-min-fee", "mempool min fee not met", fee, rolling)
+                        : new MempoolFeeException("package-feerate", "min relay fee not met", fee, new FeeRate(floor).feeForVSize(size));
+            }
+            throw new MempoolAdmissionException("package-feerate");
+        }
         if (allowReplacement)
             PackagePolicy.replacement(fresh, entries, staged.entries, conflicts, removed, limits);
         // Check limits again with the complete package; no carve-outs or sibling eviction.
-        for (var tx : fresh) MempoolGraphPolicy.checkLimits(staged.entries, tx.txId(), limits);
+        for (var tx : fresh) {
+            if (deferred == null) MempoolGraphPolicy.checkLimits(staged.entries, tx.txId(), limits);
+            else try { MempoolGraphPolicy.checkClusterLimits(staged.entries, tx.txId(), limits); }
+            catch (MempoolAdmissionException error) { throw new SharedPackageFailure("too-large-cluster"); }
+        }
+        if (deferred != null) {
+            for (var tx : fresh) {
+                try { PackagePolicy.ephemeralSpends(tx, staged.entries, policy.dustRelaySatPerKvB()); }
+                catch (MempoolAdmissionException error) { throw new SubmissionFailure(tx.wtxId(), error, "unspent-dust"); }
+            }
+            for (var check : deferred) {
+                var failure = MempoolValidator.testScripts(check.transaction(), check.coins());
+                if (failure != null) throw new SubmissionFailure(check.transaction().wtxId(), new ProbeScriptFailure(failure));
+            }
+        }
         int beforeTrim = staged.entries.size();
         long removedRate = MempoolGraphPolicy.trim(staged.entries, limits.maxPoolVirtualBytes(), txs.getLast().txId());
         List<MempoolEntry> result = txs.stream().map(tx -> staged.entries.get(tx.txId())).toList();
@@ -245,6 +328,111 @@ public final class Mempool {
         if (staged.entries.size() < beforeTrim) rollingFee.bump(removedRate, limits.incrementalRelaySatPerKvB(), clock.instant().getEpochSecond());
         if (!fresh.isEmpty() || !removed.isEmpty()) sequence++;
         return result;
+    }
+
+    public record SubmissionTxResult(MempoolEntry entry, String error, boolean known,
+                                      Long effectiveFeeRate, List<Hash256> effectiveIncludes) {
+        public SubmissionTxResult { effectiveIncludes = List.copyOf(effectiveIncludes); }
+    }
+    public record SubmissionResult(String packageMessage, Map<Hash256, SubmissionTxResult> transactions,
+                                    List<Hash256> replacedTransactions) {
+        public SubmissionResult {
+            transactions = Collections.unmodifiableMap(new LinkedHashMap<>(transactions));
+            replacedTransactions = List.copyOf(replacedTransactions);
+        }
+        public List<MempoolEntry> entries() {
+            return transactions.values().stream().map(SubmissionTxResult::entry).filter(Objects::nonNull).toList();
+        }
+    }
+    private static long effectiveRate(long fee, long size) {
+        return java.math.BigInteger.valueOf(fee).multiply(java.math.BigInteger.valueOf(1000))
+                .divide(java.math.BigInteger.valueOf(size)).longValueExact();
+    }
+    private static SubmissionTxResult submissionError(MempoolAdmissionException error) {
+        String details = error instanceof ProbeScriptFailure script ? script.details
+                : error instanceof MempoolFeeException fee ? fee.rpcDetails()
+                : error instanceof PackagePolicy.EphemeralSpendFailure ephemeral ? ephemeral.rpcDetails()
+                : error instanceof TrucPolicyException truc ? truc.rpcDetails()
+                : error instanceof MissingInput ? "bad-txns-inputs-missingorspent" : error.getMessage();
+        return new SubmissionTxResult(null, details, false, null, List.of());
+    }
+
+    public static boolean isSubmissionTopologyAllowed(List<Transaction> transactions) {
+        return PackagePolicy.submissionTopologyError(transactions) == null;
+    }
+
+    private static boolean reconsiderable(MempoolAdmissionException error) {
+        return error instanceof MempoolFeeException || error instanceof MissingInput || switch (error.getMessage()) {
+            case "replacement-fee", "replacement-worse-feerate-diagram", "replacement-unchanged-feerate-diagram", "mempool-full" -> true;
+            default -> false;
+        };
+    }
+
+    /** Core RPC submission: individual acceptance is committed even if a later member fails. */
+    public synchronized SubmissionResult submitPackage(List<Transaction> transactions, MempoolValidationContext context,
+                                                        UtxoView chainUtxos, long clientMaxFeeRate) {
+        var txs = List.copyOf(transactions);
+        if (clientMaxFeeRate < 0) throw new IllegalArgumentException("Negative client fee rate");
+        var results = new LinkedHashMap<Hash256, SubmissionTxResult>();
+        try { PackagePolicy.validate(txs, true); }
+        catch (MempoolAdmissionException error) {
+            for (var tx : txs) results.put(tx.wtxId(), new SubmissionTxResult(null, "package-not-validated", false, null, List.of()));
+            return new SubmissionResult(error.getMessage(), results, List.of());
+        }
+        var before = Set.copyOf(entries.keySet());
+        var pending = new ArrayList<Transaction>();
+        boolean hardFailure = false;
+        String message = "success";
+        for (var tx : txs) {
+            var known = entries.get(tx.txId());
+            if (known != null) {
+                results.put(tx.wtxId(), new SubmissionTxResult(known, null, true, null, List.of()));
+                continue;
+            }
+            try {
+                var entry = admitInternal(tx, context, chainUtxos, false, false, null, null, false, null, clientMaxFeeRate);
+                results.put(tx.wtxId(), new SubmissionTxResult(entry, null, false,
+                        effectiveRate(entry.modifiedFee(), entry.virtualSize()), List.of(tx.wtxId())));
+            } catch (MempoolAdmissionException error) {
+                results.put(tx.wtxId(), submissionError(error));
+                if (txs.size() > 1 && reconsiderable(error)) pending.add(tx);
+                else { hardFailure = true; message = "transaction failed"; }
+            } catch (ru.bitcoin.node.consensus.transaction.TransactionValidationException
+                     | ru.bitcoin.node.script.ScriptExecutionException | ru.bitcoin.node.script.ScriptParseException error) {
+                results.put(tx.wtxId(), new SubmissionTxResult(null, error.getMessage(), false, null, List.of()));
+                hardFailure = true; message = "transaction failed";
+            }
+        }
+        if (!hardFailure && !pending.isEmpty()) {
+            try {
+                var accepted = admitPackageInternal(pending, context, chainUtxos, true, true, clientMaxFeeRate);
+                long fee = 0, size = 0;
+                for (var entry : accepted) { fee = Math.addExact(fee, entry.modifiedFee()); size = Math.addExact(size, entry.virtualSize()); }
+                var includes = pending.stream().map(Transaction::wtxId).toList();
+                long rate = effectiveRate(fee, size);
+                for (var entry : accepted) results.put(entry.transaction().wtxId(),
+                        new SubmissionTxResult(entry, null, false, rate, includes));
+            } catch (MempoolAdmissionException error) {
+                message = "transaction failed";
+                if (error instanceof SubmissionFailure failure) {
+                    message = failure.packageMessage;
+                    results.put(failure.wtxid, submissionError(failure.failure));
+                } else if (error instanceof SharedPackageFailure) message = error.getMessage();
+                else if (error instanceof MempoolFeeException || pending.size() == 1)
+                    results.put(pending.getLast().wtxId(), submissionError(error));
+                else if (error.getMessage().equals("cluster-count-limit") || error.getMessage().equals("cluster-size-limit"))
+                    message = "too-large-cluster";
+            }
+        }
+        for (var tx : txs) {
+            var result = results.get(tx.wtxId());
+            if (result.entry() != null && !entries.containsKey(tx.txId())) {
+                results.put(tx.wtxId(), new SubmissionTxResult(null, "mempool full", false, null, List.of()));
+                message = "transaction failed";
+            }
+        }
+        var replaced = before.stream().filter(id -> !entries.containsKey(id)).sorted(Comparator.comparing(Hash256::toDisplayHex)).toList();
+        return new SubmissionResult(message, results, replaced);
     }
 
     /** Result of a non-mutating mempool/package acceptance probe. */
@@ -280,11 +468,12 @@ public final class Mempool {
         public boolean allowed() { return rejectReason == null; }
         /** Package-wide structural rejection, before any individual tx validation. */
         public boolean packagePolicyFailure() {
-            return rejectReason != null && switch (rejectReason) {
+            if (failedTransactionIndex >= 0) return false;
+            return rejectReason != null && (rejectReason.startsWith("TRUC-violation,") || switch (rejectReason) {
                 case "package-too-many-transactions", "package-too-large", "package-contains-duplicates",
-                        "package-not-sorted", "conflict-in-package" -> true;
+                        "package-not-sorted", "conflict-in-package", "TRUC-violation", "too-large-cluster" -> true;
                 default -> false;
-            };
+            });
         }
     }
 
@@ -309,6 +498,7 @@ public final class Mempool {
                                                 boolean submission) {
         Objects.requireNonNull(transactions); Objects.requireNonNull(context); Objects.requireNonNull(chainUtxos);
         Mempool staged = new Mempool(policy, limits, clock);
+        staged.probeScriptDiagnostics = !submission;
         staged.entries.putAll(entries);
         staged.feeDeltas.putAll(feeDeltas);
         staged.rollingFee.restoreFrom(rollingFee);
@@ -330,8 +520,12 @@ public final class Mempool {
                         for (var input : tx.inputs())
                             if (staged.spent.containsKey(input.previousOutput()))
                                 throw new MempoolAdmissionException("bip125-replacement-disallowed");
-                        accepted.add(staged.admitInternal(tx, context, chainUtxos, true, false, null, null, false, deferred));
+                        var entry = staged.admitInternal(tx, context, chainUtxos, true, false, null, null, false, deferred);
+                        MempoolGraphPolicy.checkProbeTruc(entries, spent, entry);
+                        accepted.add(entry);
                     } catch (MempoolAdmissionException e) {
+                        if (e instanceof TrucPolicyException truc)
+                            return new TestAcceptResult(List.of(), "TRUC-violation", i, Set.of(), truc.rpcDetails());
                         if (e instanceof MissingInput) return new TestAcceptResult(List.of(), "missing-inputs", i);
                         boolean indexed = e instanceof MempoolFeeException || switch (e.getMessage()) {
                             case "txn-already-in-mempool", "txn-same-nonwitness-data-in-mempool",
@@ -342,9 +536,34 @@ public final class Mempool {
                                 e instanceof MempoolFeeException feeError ? feeError.rpcDetails() : null);
                     }
                 }
+                // Core's shared package checks follow all individual PreChecks.
+                try {
+                    for (var entry : accepted) MempoolGraphPolicy.checkTrucLimits(staged.entries,
+                            entry.transaction().txId(), Map.of(), Set.of());
+                } catch (MempoolAdmissionException error) {
+                    return new TestAcceptResult(List.of(), error instanceof TrucPolicyException truc ? truc.rpcDetails() : "TRUC-violation");
+                }
+                try {
+                    for (var entry : accepted) MempoolGraphPolicy.checkClusterLimits(staged.entries,
+                            entry.transaction().txId(), limits);
+                } catch (MempoolAdmissionException error) {
+                    return new TestAcceptResult(List.of(), "too-large-cluster");
+                }
+                for (int i = 0; i < transactions.size(); i++) {
+                    try { PackagePolicy.ephemeralSpends(transactions.get(i), staged.entries, policy.dustRelaySatPerKvB()); }
+                    catch (MempoolAdmissionException error) {
+                        return new TestAcceptResult(List.of(), error.getMessage(), i, Set.of(),
+                                error instanceof PackagePolicy.EphemeralSpendFailure ephemeral ? ephemeral.rpcDetails() : null);
+                    }
+                }
                 // Core finishes all package PreChecks before executing any scripts.
                 // Each check retains the exact input snapshot validated above.
-                for (var check : deferred) MempoolValidator.validateScripts(check.transaction(), check.coins());
+                for (int i = 0; i < deferred.size(); i++) {
+                    var check = deferred.get(i);
+                    var failure = MempoolValidator.testScripts(check.transaction(), check.coins());
+                    if (failure != null) return new TestAcceptResult(accepted.subList(0, i), failure.reason(), i,
+                            Set.of(), failure.details());
+                }
                 return new TestAcceptResult(accepted, null);
             }
             List<MempoolEntry> accepted = transactions.size() == 1 && !submission
@@ -354,9 +573,12 @@ public final class Mempool {
                     .filter(entries::containsKey).collect(java.util.stream.Collectors.toSet()) : Set.of();
             return new TestAcceptResult(accepted, null, -1, known);
         } catch (MempoolAdmissionException e) {
+            if (!submission && e instanceof TrucPolicyException truc) return new TestAcceptResult(List.of(), "TRUC-violation", 0, Set.of(), truc.rpcDetails());
+            if (e instanceof ProbeScriptFailure script) return new TestAcceptResult(List.of(), e.getMessage(), 0, Set.of(), script.details);
             if (!submission && e instanceof MissingInput) return new TestAcceptResult(List.of(), "missing-inputs");
             return new TestAcceptResult(List.of(), e.getMessage(), -1, Set.of(),
-                    e instanceof MempoolFeeException feeError ? feeError.rpcDetails() : null);
+                    e instanceof MempoolFeeException feeError ? feeError.rpcDetails()
+                            : e instanceof PackagePolicy.EphemeralSpendFailure ephemeral ? ephemeral.rpcDetails() : null);
         }
     }
 

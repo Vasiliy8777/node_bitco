@@ -10,7 +10,7 @@ the stated scope; successful packaging alone does not close it.
 | # | Workstream | Current acceptance work |
 | --- | --- | --- |
 | 1 | Low-work header protection | Production PRESYNC/REDOWNLOAD is connected to initial/live/async reception after explicit user approval. Dynamic threshold, salted commitments, bounded lookahead, reset and separate peer cursors are verified by state tests, real P2P tests and the native Core 32.1 wire comparison. Explicit NoBan exemption implemented under 4; RPC statistics remain under 6. See [behavior/evidence and remaining limits](headers-presync-core32.md). |
-| 2 | GETHEADERS response ownership and failover | Shared preflight release implemented for pending and asynchronous replies; missing ancestry retains ownership. Live NoBan timeout and future/cached-invalid policies implemented. Initial header-validation/malformed-response failures now try another source instead of failing startup; internal state errors remain fatal. See [initial regression/evidence](initial-header-rejection-core32.md), [live timeout](live-header-timeout-core32.md) and [live rejection](live-header-rejection-core32.md). Complete timing/preferred-peer policy and remaining block/transaction failover still need comparison. |
+| 2 | GETHEADERS response ownership and failover | Shared preflight release, missing-ancestry ownership, NoBan and future/cached-invalid policies are implemented. Initial validation/malformed failures select another source; internal state errors remain fatal. Default initial/live timing now uses Core's formula and preferred ready-peer conditions with independent peer workers. See [timing evidence and remaining scheduler limits](header-sync-timing-core32.md). Remaining block/transaction failover still needs comparison. |
 | 3 | Compact blocks | Negotiated-version guard before decoding and a one-block GETBLOCKTXN cache exemption implemented and tested. Cached requests still validate indexes; the next connected block replaces the cache. Full optimistic side-block cache/announcement and request-authorization behavior remain to compare. |
 | 4 | Peer permissions/manual connections | Immutable local CIDR permissions, NoBan inheritance, misbehavior/local-address rules, manual reconnect and RPC metadata implemented. NoBan PRESYNC/history and Download GETHEADERS exceptions implemented. Manual-only bootstrap now passes real P2P block acceptance and cancellation checks. Broader failover and additional permission flags remain open. See [peer access](peer-access-core32.md) and [manual bootstrap](manual-bootstrap-presync-rpc-core32.md). |
 | 5 | Mempool optimizer | Differential checks for bounded optimizer work and fallback ordering, including incremental mutations; optimal unlimited reference cases alone do not close this. |
@@ -26,11 +26,15 @@ verify a single healthy restarted process after a completed implementation batch
 
 Текущий статус подтверждённых направлений:
 
-1. Синхронизация: полная формула начального срока загрузки заголовков, условия
-   тайм-аутов и учёт предпочтительных пиров Core ещё не воспроизведены. Live-путь
-   использует собственный пятисекундный предел ожидания. Исключения NoBan для
-   тайм-аута уже реализованы в live и начальном пути;
-   [проверка начального пути](initial-noban-timeout-core32.md).
+1. Синхронизация: в стандартном режиме реализованы формула начального срока,
+   условия тайм-аутов, NoBan reset и учёт предпочтительных готовых пиров.
+   Начальный и live пути обслуживают пиры независимо. Нативный Core wire-тест
+   проверяет срок и альтернативу для обоих вариантов NoBan.
+   Открыты окно VERSION/VERACK, полный scheduler и прочие ошибки источников;
+   [реализация, проверки и границы](header-sync-timing-core32.md).
+   Предпочтение источников заданий блоков при IBD реализовано. Availability
+   GETHEADERS в refresh block policy используют общее состояние координатора;
+   [допуск, таймеры и проверки](availability-headers-owner-core32.md).
 2. Ручная начальная синхронизация реализована для нулевого автоматического бюджета
    и явных manual-peers. Настоящий P2P regtest-блок принят; готовность майнинга
    и отмена ожидания проверены. [Реализация и проверки](manual-bootstrap-presync-rpc-core32.md).
@@ -87,6 +91,17 @@ verify a single healthy restarted process after a completed implementation batch
    package-error; [сравнение и пределы](package-fee-index-core32.md).
    Скрипты пакетной пробы исполняются после предварительных проверок всех
    транзакций; [нативное сравнение и пределы](package-precheck-phase-core32.md).
+   TRUC/cluster/ephemeral проверки пробного пакета выделены в общую фазу;
+   [проверки и пределы](package-shared-policy-phase-core32.md).
+Скриптовый отказ пробы сохраняет успешный префикс и подробности входа;
+[реализация и оставшаяся диагностика](package-script-results-core32.md).
+RPC submitpackage поддерживает частичный приём родителей, результаты каждой
+транзакции и новые effective-fee metadata;
+[границы реализации и проверки](submitpackage-partial-core32.md).
+Повторная CPFP-оценка выполняет общие проверки до скриптов;
+[порядок, независимые сценарии и ограничения](shared-submission-phase-core32.md).
+Добавлены waitfornewblock/waitforblock/waitforblockheight с эталонными схемами,
+help и сравнениями ошибок; [RPC-объём](core32-rpc-execution.md).
 5. RPC: набор методов и вложенных схем остаётся подмножеством Core. Поле
    presynced_headers реализовано и проверено. Нативное сравнение теперь выгружает
    инвентарь методов; полная семантика остальных методов ещё не реализована.

@@ -39,15 +39,22 @@ final class PackagePolicy {
         // PackageTestAccept checks general topological consistency; only actual
         // child-with-parents submission imposes this additional shape.
         if (!requireChildWithParents || txs.size() < 2) return;
+        String topologyError = submissionTopologyError(txs);
+        if (topologyError != null) fail(topologyError);
+    }
+
+    static String submissionTopologyError(List<Transaction> txs) {
+        if (txs.size() < 2) return null;
         Set<Hash256> parents = new HashSet<>();
         for (int i = 0; i < txs.size() - 1; i++) parents.add(txs.get(i).txId());
         Set<Hash256> childParents = new HashSet<>();
         for (var in : txs.getLast().inputs()) childParents.add(in.previousOutput().transactionId());
-        if (!childParents.containsAll(parents)) fail("package-not-child-with-parents");
+        if (!childParents.containsAll(parents)) return "package-not-child-with-parents";
         for (int i = 0; i < txs.size() - 1; i++)
             for (var in : txs.get(i).inputs()) {
-                if (parents.contains(in.previousOutput().transactionId())) fail("package-parents-not-independent");
+                if (parents.contains(in.previousOutput().transactionId())) return "package-parents-not-independent";
             }
+        return null;
     }
 
     static void ephemeralSpends(Transaction tx, Map<Hash256, MempoolEntry> entries, long dustRate) {
@@ -63,7 +70,17 @@ final class PackagePolicy {
             }
         }
         for (var in : tx.inputs()) required.remove(in.previousOutput());
-        if (!required.isEmpty()) fail("missing-ephemeral-spends");
+        if (!required.isEmpty()) throw new EphemeralSpendFailure(tx);
+    }
+
+    static final class EphemeralSpendFailure extends MempoolAdmissionException {
+        private final String details;
+        EphemeralSpendFailure(Transaction tx) {
+            super("missing-ephemeral-spends");
+            details = getMessage() + ", tx " + tx.txId().toDisplayHex() + " (wtxid=" + tx.wtxId().toDisplayHex()
+                    + ") did not spend parent's ephemeral dust";
+        }
+        String rpcDetails() { return details; }
     }
 
     static void replacement(List<Transaction> txs, Map<Hash256, MempoolEntry> before,

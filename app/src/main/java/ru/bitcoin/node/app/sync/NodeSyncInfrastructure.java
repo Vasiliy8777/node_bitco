@@ -21,6 +21,7 @@ public final class NodeSyncInfrastructure {
     private final HeaderSyncService headerSyncService;
     private final BlockLocatorBuilder blockLocatorBuilder;
     private final BlockFailureResolver failureResolver;
+    private final long targetSpacingSeconds;
 
     public NodeSyncInfrastructure(
             RocksDbDatabase database,
@@ -42,6 +43,7 @@ public final class NodeSyncInfrastructure {
                 parameters,
                 "parameters"
         );
+        this.targetSpacingSeconds = parameters.targetSpacingSeconds();
 
         Objects.requireNonNull(
                 adjustedTime,
@@ -153,5 +155,16 @@ public final class NodeSyncInfrastructure {
 
     public boolean downloadBlockFailed(BlockIndex index) {
         return failureResolver.isFailed(index);
+    }
+    public CoreBlockDownloadPeerPolicy.HeadersRequests availabilityHeaders(ru.bitcoin.node.p2p.PeerManager peers,
+            java.util.function.BooleanSupplier blocksInFlight) {
+        return new CoreAvailabilityHeaders(peers, headerChainState, blockLocatorBuilder, targetSpacingSeconds, blocksInFlight);
+    }
+    public ru.bitcoin.node.p2p.sync.HeaderSynchronizer headerSynchronizer(ru.bitcoin.node.p2p.Peer peer,
+            ru.bitcoin.node.p2p.PeerManager peers, java.time.Duration timeout, java.util.function.BooleanSupplier blocksInFlight) {
+        return timeout.equals(ru.bitcoin.node.p2p.sync.HeaderSynchronizer.DEFAULT_RESPONSE_TIMEOUT)
+                ? new ru.bitcoin.node.p2p.sync.HeaderSynchronizer(peer, timeout,
+                    new CoreHeadersResponseControl(peer, peers, headerChainState, targetSpacingSeconds, blocksInFlight, blockLocatorBuilder))
+                : new ru.bitcoin.node.p2p.sync.HeaderSynchronizer(peer, timeout);
     }
 }

@@ -16,6 +16,8 @@ and reuse of unchanged mempool cluster computations.
 
 | Area | Implementation and checks |
 | --- | --- |
+| Initial header deadline / preferred peers | Default initial/live mode uses Core's microsecond formula, strict timeout/24-hour boundaries, alternate preferred-peer requirement and NoBan reset. Independent peer tasks retain the shared dispatcher. Native Core mocktime wire cases cover both permission variants. [Evidence and scheduler/handshake limits](header-sync-timing-core32.md). |
+| TRUC inheritance rejection state | Detailed txid/wtxid diagnostics, indexed probe failures and shared CPFP errors match native Core cases. Individual inheritance checks precede economic RBF checks. [Evidence and remaining mempool work](truc-rpc-state-core32.md). |
 | Local peer access and manual connections | Explicit immutable CIDR rules, misbehavior/local-address handling, manual reconnect, RPC metadata and explicitly approved NoBan PRESYNC/history and Download GETHEADERS exceptions. See [implementation, tests and remaining scope](peer-access-core32.md). |
 | Live NoBan header timeout | An unanswered GETHEADERS switches source without disconnecting NoBan or fabricating a response acknowledgment. Transport failures retain cleanup. Four regression variants and related sync checks passed; [scope/evidence](live-header-timeout-core32.md). |
 | Live header rejection | Future time and inbound cached-invalid do not directly close a peer. Other header rejections delegate to the protocol-misbehavior handler, preserving NoBan/manual rules. [Regression/runtime evidence](live-header-rejection-core32.md). |
@@ -140,10 +142,54 @@ buffered UTXO mutations, estimator history gaps/reorgs, disk corruption and cold
 RPC error cases. Full reactor and reference-run logs are in
 `target/core-update-audit/`.
 
-The latest full Bitcoin/RVN reactor completed 5,314 test cases: 5,302 passed,
+The latest full Bitcoin/RVN reactor completed 5,364 test cases: 5,352 passed,
 12 opt-in cases skipped, zero failures/errors. Both applications packaged
-successfully (`core32-package-precheck-phase-full-build.log`, November 7 20:48:45
-Bangkok). It includes [package prechecks before deferred scripts](package-precheck-phase-core32.md),
+successfully (`core32-availability-owner-full-build.log`, November 8
+20:02:26 Bangkok). Availability GETHEADERS now shares initial/live admission,
+locator and timeout state. Nonblocking send ownership prevents reservation
+rollback races; deferred attempts do not add a cooldown. Real P2P ownership
+and block-IBD reconnection cases pass. [Implementation and limits](availability-headers-owner-core32.md).
+IBD block assignments respect preferred ready peers,
+inbound fallback and ADDR_FETCH exclusion, with one eligibility snapshot per
+scheduling pass. Availability-header integration is covered by the follow-up above.
+[Implementation and limits](ibd-source-preference-core32.md).
+Final chainwork probes at genesis use a null locator.
+A native Core wire test confirms initial/final locator differences and strict
+20/2-minute boundaries; Java checks cover cache transitions and preserving the
+old benchmark locator. [Implementation and evidence](chainwork-null-locator-core32.md).
+Chainwork eviction waits for actual initial headers-sync
+admission, rather than the supervisor's initialization notification. Explicit
+legacy timeouts preserve their previous mode. [Implementation and evidence](chainwork-start-gate-core32.md).
+The first per-peer locator starts before the best header
+when a parent exists; transport-gate retries and continuation locators are
+covered by explicit vectors. [Implementation and evidence](initial-locator-core32.md).
+Initial supervisor requests delegate to the download
+coordinator for both seed and replacement connections; chainwork probes retain
+their separate path. [Implementation and evidence](initial-recovery-owner-core32.md).
+The preceding follow-up fixes two lifecycle peer-fixture
+assumptions (repeated locators and maintenance PING); a deterministic wire
+regression and ten repeated failovers passed. [Diagnosis and evidence](header-failover-fixture-core32.md).
+Coverage includes [Core header timing and preferred-peer
+conditions](header-sync-timing-core32.md) and [TRUC rejection state/order](truc-rpc-state-core32.md).
+The original IDEA GPU node PID 29204 was verified RUNNING at
+height=headers=975064, IBD=false, five peers (two block relay), 30,877 mempool
+entries, zero privileged peers and accepted CUDA shares. Exactly one Bitcoin
+application process runs. Evidence: `core32-availability-owner-live.json`.
+Earlier coverage includes [three chain-wait RPCs](rpc-chain-wait-core32.md),
+with full native OpenRPC/help equality, 12 successful and 25 error calls,
+same-block asynchronous waiting, and local reorg/shutdown-race tests;
+[shared real-CPFP policy before scripts](shared-submission-phase-core32.md),
+with five native Core 32.1 full RPC/pool comparisons covering missing inputs,
+aggregate fees, failed scripts and ephemeral-spend diagnostics;
+[partial submission and new fee metadata](submitpackage-partial-core32.md),
+with native Core 32.1 full RPC/pool comparison of partial parent acceptance,
+known transactions, CPFP, per-transaction caps, topology and per-output burn limits;
+[script failure results and successful probe prefixes](package-script-results-core32.md),
+with native Core 32.1 full RPC equality for failed signatures at each position,
+maxfeerate precedence, single probes and six witness failure variants;
+[shared TRUC/cluster/ephemeral probe checks](package-shared-policy-phase-core32.md),
+with native Core 32.1 full-response equality for later missing inputs before package TRUC/script failures;
+[package prechecks before deferred scripts](package-precheck-phase-core32.md),
 with native Core 32.1 full-response equality for missing-child-input vs bad-parent-signature priority;
 [indexed package fee failures](package-fee-index-core32.md),
 with native Core 32.1 full-response comparison of both parent/child positions;
@@ -194,9 +240,9 @@ TRUC/reorg inheritance and RBF diagram traversal fixes,
 ordinary INV base-fee filtering, Mempool permission/BIP35, Relay/ForceRelay, blocksonly, unsolicited admission,
 the ADDR permission/privacy cache, final
 RBF/cluster-weight/RPC corrections and the native signed replacement scenario.
-Original IDEA GPU node PID 124220 was verified RUNNING at height/headers
-974936/974936 with IBD=false, seven connections (two block relay), 35,889
-mempool entries and accepted GPU shares; exactly one Bitcoin process and no
+Original IDEA GPU node PID 145416 was verified RUNNING at height/headers
+974991/974991 with IBD=false, nine connections (two block relay), 30,939
+mempool entries and accepted CUDA shares; exactly one Bitcoin process and no
 privileged peers were present. [Ephemeral-dust fee fix and native comparison](ephemeral-dust-base-fee-core32.md),
 [Early RBF preflight/work fix](rbf-preflight-work-core32.md),
 [Package-RBF cluster-count fix](package-rbf-cluster-count-core32.md),

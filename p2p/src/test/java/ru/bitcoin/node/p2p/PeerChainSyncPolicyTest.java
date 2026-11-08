@@ -8,6 +8,22 @@ import static org.junit.jupiter.api.Assertions.*;
 import static ru.bitcoin.node.p2p.PeerChainSyncPolicy.Action.*;
 
 class PeerChainSyncPolicyTest {
+    @Test void finalProbeKeepsOriginalBenchmarkLocatorUntilPeerReachesItsWork() {
+        var policy = new PeerChainSyncPolicy();
+        var oldLocator = List.of(Hash256.fromDisplayHex("11".repeat(32)));
+        var newLocator = List.of(Hash256.fromDisplayHex("22".repeat(32)));
+        policy.check(1000, false, new OutboundPeerRecoveryView.ChainWork(BigInteger.valueOf(100), BigInteger.ONE, oldLocator));
+        assertEquals(REQUEST_HEADERS, policy.check(2201, false,
+                new OutboundPeerRecoveryView.ChainWork(BigInteger.valueOf(200), BigInteger.valueOf(99), newLocator)));
+        assertEquals(oldLocator, policy.locator());
+        assertEquals(NONE, policy.check(2202, false,
+                new OutboundPeerRecoveryView.ChainWork(BigInteger.valueOf(200), BigInteger.valueOf(100), newLocator)));
+        assertEquals(NONE, policy.check(3402, false,
+                new OutboundPeerRecoveryView.ChainWork(BigInteger.valueOf(200), BigInteger.valueOf(100), newLocator)));
+        assertEquals(REQUEST_HEADERS, policy.check(3403, false,
+                new OutboundPeerRecoveryView.ChainWork(BigInteger.valueOf(200), BigInteger.valueOf(100), newLocator)));
+        assertEquals(newLocator, policy.locator());
+    }
     private static OutboundPeerRecoveryView.ChainWork work(long tip, Long peer) {
         return new OutboundPeerRecoveryView.ChainWork(BigInteger.valueOf(tip),
                 peer == null ? null : BigInteger.valueOf(peer), List.of(Hash256.fromDisplayHex("01".repeat(32))));

@@ -31,8 +31,10 @@ class PackagePrecheckPhaseTest {
             if (reads.incrementAndGet() > 1) throw new AssertionError("External inputs reread in script phase");
             return COINS.find(out);
         };
-        assertThrows(ru.bitcoin.node.consensus.transaction.TransactionValidationException.class,
-                () -> pool.testAccept(List.of(parent, child), CONTEXT, coins));
+        var result = pool.testAccept(List.of(parent, child), CONTEXT, coins);
+        assertEquals(0, result.failedTransactionIndex());
+        assertEquals("mempool-script-verify-flag-failed (Witness program hash mismatch)", result.rejectReason());
+        assertTrue(result.entries().isEmpty());
         assertEquals(1, reads.get()); assertEquals(before, pool.snapshot());
     }
     private static Transaction invalid(Transaction tx) {

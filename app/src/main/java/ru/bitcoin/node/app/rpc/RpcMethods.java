@@ -8,6 +8,40 @@ final class RpcMethods {
     private record Parameter(String name, String type, boolean required, Object defaultValue) { }
     private record Method(String name, String resultType, List<Parameter> parameters) { }
     private static final Map<String, Method> METHODS = create();
+    private record Canonical(Map<String, Map<String, Object>> methods, Map<String, String> help) {}
+    private static final Canonical CHAIN_WAIT = loadChainWait();
+
+    @SuppressWarnings("unchecked")
+    private static Canonical loadChainWait() {
+        try (var input = RpcMethods.class.getResourceAsStream("/rpc/core32-wait-methods.json")) {
+            if (input == null) throw new IllegalStateException("Missing Core RPC chain-wait metadata");
+            var root = tools.jackson.databind.json.JsonMapper.builder().build().readValue(input, Map.class);
+            var methods = new LinkedHashMap<String, Map<String, Object>>();
+            for (var entry : (List<Map<String, Object>>) root.get("methods")) methods.put((String) entry.get("name"), entry);
+            return new Canonical(Map.copyOf(methods), Map.copyOf((Map<String, String>) root.get("help")));
+        } catch (java.io.IOException error) { throw new ExceptionInInitializerError(error); }
+    }
+
+    static String canonicalHelp(String method) { return CHAIN_WAIT.help().get(method); }
+
+    static void validateChainWaitParameters(String method, List<?> params) {
+        var definition = METHODS.get(method);
+        long required = definition.parameters().stream().filter(Parameter::required).count();
+        if (params.size() < required || params.size() > definition.parameters().size())
+            throw new RpcException(-1, canonicalHelp(method));
+        var errors = new ArrayList<String>();
+        for (int i = 0; i < params.size(); i++) {
+            var parameter = definition.parameters().get(i); var value = params.get(i);
+            if (value == null && !parameter.required()) continue;
+            boolean valid = parameter.type().equals("number") ? value instanceof Number : value instanceof String;
+            if (valid) continue;
+            String actual = value == null ? "null" : value instanceof Boolean ? "bool" : value instanceof Number ? "number"
+                    : value instanceof String ? "string" : value instanceof List<?> ? "array" : "object";
+            errors.add("    \"Position " + (i + 1) + " (" + parameter.name() + ")\": \"JSON value of type " + actual
+                    + " is not of expected type " + parameter.type() + "\"");
+        }
+        if (!errors.isEmpty()) throw new RpcException(-3, "Wrong type passed:\n{\n" + String.join(",\n", errors) + "\n}");
+    }
 
     private static Map<String, Method> create() {
         // name, result type, then positional parameter descriptors. '?' denotes optional.
@@ -37,6 +71,9 @@ final class RpcMethods {
                 gettxout any txid:string n:number include_mempool:boolean?=true
                 gettxoutsetinfo object hash_type:string?=hash_serialized_3 hash_or_height:any? use_index:boolean?=true
                 getblockhash string height:number
+                waitfornewblock object timeout:number?=0 current_tip:string?
+                waitforblock object blockhash:string timeout:number?=0
+                waitforblockheight object height:number timeout:number?=0
                 getblockheader any blockhash:string verbose:boolean?=true
                 getblock any blockhash:string verbosity:number?=1
                 getconnectioncount number
@@ -95,19 +132,24 @@ final class RpcMethods {
     static List<?> positional(String methodName, Map<?, ?> named) {
         var method = METHODS.get(methodName);
         if (method == null) throw new RpcException(-32601, "Method not found");
+        boolean chainWait = CHAIN_WAIT.methods().containsKey(methodName);
+        List<?> positional = chainWait && named.get("args") instanceof List<?> list ? list : List.of();
         var known = new HashSet<String>();
         for (var parameter : method.parameters()) known.add(parameter.name());
         for (var key : named.keySet())
-            if (!known.contains(key)) throw new RpcException(-8, "Unknown named parameter " + key);
-        int last = -1;
+            if (!known.contains(key) && !(chainWait && key.equals("args"))) throw new RpcException(-8, "Unknown named parameter " + key);
+        int last = positional.size() - 1;
         for (int i = 0; i < method.parameters().size(); i++)
-            if (named.containsKey(method.parameters().get(i).name())) last = i;
+            if (named.containsKey(method.parameters().get(i).name())) last = Math.max(last, i);
         var result = new ArrayList<Object>();
         for (int i = 0; i <= last; i++) {
+            if (i >= method.parameters().size()) { result.add(positional.get(i)); continue; }
             var parameter = method.parameters().get(i);
-            Object value = named.get(parameter.name());
+            if (i < positional.size() && named.containsKey(parameter.name()))
+                throw new RpcException(-8, "Parameter " + parameter.name() + " specified twice both as positional and named argument");
+            Object value = i < positional.size() ? positional.get(i) : named.get(parameter.name());
             if (value == null) value = parameter.defaultValue();
-            if (value == null && parameter.required() && !named.containsKey(parameter.name()))
+            if (value == null && parameter.required() && !named.containsKey(parameter.name()) && !chainWait)
                 throw new RpcException(-8, "Missing required parameter " + parameter.name());
             result.add(value);
         }
@@ -117,6 +159,8 @@ final class RpcMethods {
     static Map<String, Object> discovery() {
         var methods = new ArrayList<Map<String, Object>>();
         for (var method : METHODS.values()) {
+            var canonical = CHAIN_WAIT.methods().get(method.name());
+            if (canonical != null) { methods.add(canonical); continue; }
             var params = new ArrayList<Map<String, Object>>();
             for (var parameter : method.parameters()) {
                 var descriptor = new LinkedHashMap<String, Object>();

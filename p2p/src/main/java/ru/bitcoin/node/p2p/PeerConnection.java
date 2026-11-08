@@ -411,7 +411,7 @@ public final class PeerConnection implements AutoCloseable {
         java.util.Objects.requireNonNull(message, "message");
         java.util.Objects.requireNonNull(onFailure, "onFailure");
         synchronized (asyncLock) {
-            ensureConnected();
+            if (!isConnected()) throw new IOException("Peer connection is not open for asynchronous write");
             var reservation = writeBudget.reserve(message.payloadLength());
             try {
                 if (asyncWriter == null) {

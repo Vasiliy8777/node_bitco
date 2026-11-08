@@ -28,6 +28,8 @@ class InitialHeaderRejectionTest {
         var tip = BlockIndexFactory.createGenesis(header);
         var validation = mock(NodeValidationService.class); when(validation.activeTip()).thenReturn(tip);
         var infrastructure = mock(NodeSyncInfrastructure.class);
+        when(infrastructure.headerSynchronizer(any(), any(), any(), any())).thenAnswer(call ->
+                new ru.bitcoin.node.p2p.sync.HeaderSynchronizer(call.getArgument(0), call.getArgument(2)));
         when(infrastructure.headerChainState()).thenReturn(new HeaderChainState(tip));
         var headers = mock(HeaderSyncService.class); when(infrastructure.headerSyncService()).thenReturn(headers);
         var locators = mock(BlockLocatorBuilder.class); when(locators.build(any())).thenReturn(List.of(header.hash()));

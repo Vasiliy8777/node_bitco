@@ -12,6 +12,11 @@ public interface OutboundPeerRecoveryView {
     record ChainWork(java.math.BigInteger tipWork, java.math.BigInteger peerWork,
                      java.util.List<ru.bitcoin.node.common.types.Hash256> locator) { }
     default ChainWork chainWork(Peer peer) { return null; }
+    /** Whether the download coordinator has actually admitted initial headers sync. */
+    default boolean headersSyncStarted(Peer peer) { return true; }
+    /** New connections may delegate initial admission to their download coordinator. */
+    default void requestInitialHeaders(Peer peer, java.util.List<ru.bitcoin.node.common.types.Hash256> locator)
+            throws java.io.IOException { requestHeaders(peer, locator); }
     default void requestHeaders(Peer peer, java.util.List<ru.bitcoin.node.common.types.Hash256> locator)
             throws java.io.IOException { }
 }

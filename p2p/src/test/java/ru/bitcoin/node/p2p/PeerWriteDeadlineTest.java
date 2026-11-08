@@ -11,6 +11,14 @@ import java.util.concurrent.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class PeerWriteDeadlineTest {
+    @Test void asynchronousSubmissionAfterSocketCloseIsATransportFailure() throws Exception {
+        var socket = new ControlledSocket(false);
+        try (var connection = connection(socket, 1000)) {
+            // The socket can close before the peer's reader publishes CLOSED.
+            socket.close();
+            assertThrows(IOException.class, () -> connection.sendAsync(MESSAGE, ignored -> fail("Nothing was queued")));
+        }
+    }
     private static final BitcoinMessage MESSAGE = new BitcoinMessage("ping", new byte[8]);
 
     @Test

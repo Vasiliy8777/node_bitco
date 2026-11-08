@@ -98,17 +98,24 @@ class OutboundPeerRecoveryTest {
             peers.add(initial, PeerConnectionRole.FULL_RELAY);
             var tip = new java.util.concurrent.atomic.AtomicLong(100);
             var requests = new AtomicInteger();
+            var initialRequests = new AtomicInteger();
+            var syncStarted = new java.util.concurrent.atomic.AtomicBoolean();
             var view = new OutboundPeerRecoveryView() {
                 public long lastTipUpdateSeconds() { return Long.MAX_VALUE; }
                 public boolean enabled() { return true; }
                 public boolean blocksInFlight() { return false; }
                 public boolean blocksInFlight(Peer peer) { return false; }
                 public boolean hasTipWork(Peer peer) { return protect && tip.get() == 100; }
+                public boolean headersSyncStarted(Peer peer) { return syncStarted.get(); }
                 public ChainWork chainWork(Peer peer) {
                     return new ChainWork(java.math.BigInteger.valueOf(tip.get()),
                             java.math.BigInteger.valueOf(protect ? 100 : 1), List.of());
                 }
                 public void requestHeaders(Peer peer, List<ru.bitcoin.node.common.types.Hash256> locator) { requests.incrementAndGet(); }
+                public void requestInitialHeaders(Peer peer, List<ru.bitcoin.node.common.types.Hash256> locator) {
+                    initialRequests.incrementAndGet();
+                    requestHeaders(peer, locator);
+                }
             };
             try (var supervisor = new OutboundPeerSupervisor(manager, () -> 0, 1, 0,
                     Duration.ofMillis(5), Duration.ofMillis(10), Duration.ofHours(1), Duration.ZERO).recovery(view, 600)) {
@@ -117,11 +124,19 @@ class OutboundPeerRecoveryTest {
                 long now = System.currentTimeMillis() / 1000;
                 supervisor.checkRecovery(now);
                 assertEquals(1, requests.get());
+                assertEquals(1, initialRequests.get(), "Seed initialization must use the initial-admission callback");
+                supervisor.checkRecovery(now + 3600);
+                assertEquals(1, requests.get(), "Deferred initial admission must not start chainwork probes");
+                assertTrue(initial.isReady(), "A peer waiting for initial admission must not be evicted");
+                syncStarted.set(true);
+                now += 3600;
+                supervisor.checkRecovery(now);
                 tip.set(200);
                 supervisor.checkRecovery(now + 1200);
                 assertEquals(1, requests.get());
                 supervisor.checkRecovery(now + 1201);
                 assertEquals(protect ? 1 : 2, requests.get());
+                assertEquals(1, initialRequests.get(), "Chainwork probing must not restart initial admission");
                 assertTrue(initial.isReady());
                 supervisor.checkRecovery(now + 1321);
                 assertTrue(initial.isReady());
@@ -131,6 +146,7 @@ class OutboundPeerRecoveryTest {
                     await(() -> supervisor.activeConnectionCount() == 1 && supervisor.connection().peer() != initial && requests.get() >= 3);
                     assertFalse(initial.isReady());
                     assertTrue(requests.get() >= 3, "Replacement immediately requests headers");
+                    assertTrue(initialRequests.get() >= 2, "Replacement must also use initial admission");
                 }
             }
         }

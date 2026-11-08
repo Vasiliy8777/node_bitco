@@ -30,7 +30,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class MiningRpcTest {
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.CsvSource({"false,false", "true,true", "false,true"})
-    void submitPackagePreflightUsesSubmissionRulesInsteadOfTestAccept(boolean known, boolean tinyCap) throws Exception {
+    void submitPackageReturnsPartialResultsAndPassesClientLimit(boolean known, boolean tinyCap) throws Exception {
         var parameters = NetworkParametersRegistry.regtest();
         try (var db = new RocksDbDatabase(directory)) {
             var validation = org.mockito.Mockito.spy(new NodeValidationService(db, parameters, () -> 1_800_000_000L, new Mempool()));
@@ -45,11 +45,14 @@ class MiningRpcTest {
                     new byte[0], ru.bitcoin.node.protocol.transaction.TxIn.FINAL_SEQUENCE)),
                     List.of(new ru.bitcoin.node.protocol.transaction.TxOut(99000, new byte[]{0x51})), new UInt32(0));
             var entries = List.of(new MempoolEntry(parent, 0, 400, 0), new MempoolEntry(child, 1000, 400, 0));
-            org.mockito.Mockito.doReturn(new Mempool.TestAcceptResult(entries, null, -1,
-                    known ? Set.of(parent.txId(), child.txId()) : Set.of())).when(validation)
-                    .testPackageSubmission(org.mockito.ArgumentMatchers.anyList());
-            org.mockito.Mockito.when(relay.submitPackage(org.mockito.ArgumentMatchers.anyList()))
-                    .thenReturn(new NodeRelayService.PackageSubmission(entries, List.of()));
+            boolean rejected = tinyCap && !known;
+            var txResults = new LinkedHashMap<ru.bitcoin.node.common.types.Hash256, Mempool.SubmissionTxResult>();
+            txResults.put(parent.wtxId(), new Mempool.SubmissionTxResult(entries.getFirst(), null, known, known ? null : 0L, List.of(parent.wtxId())));
+            txResults.put(child.wtxId(), rejected
+                    ? new Mempool.SubmissionTxResult(null, "max feerate exceeded", false, null, List.of())
+                    : new Mempool.SubmissionTxResult(entries.getLast(), null, known, known ? null : 10000L, List.of(child.wtxId())));
+            org.mockito.Mockito.when(relay.submitPackage(org.mockito.ArgumentMatchers.anyList(), org.mockito.ArgumentMatchers.anyLong()))
+                    .thenReturn(new Mempool.SubmissionResult(rejected ? "transaction failed" : "success", txResults, List.of()));
             var mining = new MiningController(validation, relay, parameters, () -> true, new byte[]{0x51}, 4_000_000, new FeeRate(0));
             try (var rpc = new NodeRpcServer(new InetSocketAddress("127.0.0.1", 0), "test", "test-password",
                     mining, validation, relay, sync, () -> true); var client = HttpClient.newHttpClient()) {
@@ -58,16 +61,15 @@ class MiningRpcTest {
                         HexFormat.of().formatHex(TransactionSerializer.serialize(child)));
                 var params = tinyCap ? List.of(rawTransactions, new java.math.BigDecimal("0.00000001")) : List.of(rawTransactions);
                 var response = call(client, URI.create("http://127.0.0.1:" + rpc.port()), "submitpackage", params);
-                if (tinyCap && !known) {
-                    assertEquals(-25, error(response));
-                    org.mockito.Mockito.verify(relay, org.mockito.Mockito.never()).submitPackage(org.mockito.ArgumentMatchers.anyList());
-                    return;
-                }
                 assertNull(response.get("error"), response.toString());
-                assertEquals("success", ((Map<?, ?>) response.get("result")).get("package_msg"));
-                org.mockito.Mockito.verify(validation).testPackageSubmission(org.mockito.ArgumentMatchers.anyList());
+                assertEquals(rejected ? "transaction failed" : "success", ((Map<?, ?>) response.get("result")).get("package_msg"));
+                var actualResults = (Map<?, ?>) ((Map<?, ?>) response.get("result")).get("tx-results");
+                var childResult = (Map<?, ?>) actualResults.get(child.wtxId().toDisplayHex());
+                if (rejected) assertEquals("max feerate exceeded", childResult.get("error"));
+                else assertEquals(!known, ((Map<?, ?>) childResult.get("fees")).containsKey("effective-feerate"));
+                org.mockito.Mockito.verify(validation, org.mockito.Mockito.never()).testPackageSubmission(org.mockito.ArgumentMatchers.anyList());
                 org.mockito.Mockito.verify(validation, org.mockito.Mockito.never()).testMempoolAccept(org.mockito.ArgumentMatchers.anyList());
-                org.mockito.Mockito.verify(relay).submitPackage(org.mockito.ArgumentMatchers.anyList());
+                org.mockito.Mockito.verify(relay).submitPackage(org.mockito.ArgumentMatchers.anyList(), org.mockito.ArgumentMatchers.anyLong());
             }
         }
     }

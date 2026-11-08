@@ -2,13 +2,13 @@
 
 Generated from the native Core getopenrpcinfo catalog with show_hidden=true and the Java node catalog.
 
-Reference: 176 methods; local: 52; missing names: 124; local names absent from Core: 0.
+Reference: 176 methods; local: 55; missing names: 121; local names absent from Core: 0.
 
 This compares names only. Matching names do not prove parameter, result-schema or behavioral equivalence. Wallet and hidden/regtest commands are included and categorized separately.
 
 | Core category | Missing count | Missing method names |
 | --- | ---: | --- |
-| blockchain | 15 | getblockfrompeer, getblockstats, getchaintxstats, getdeploymentinfo, getdescriptoractivity, gettxoutproof, importmempool, preciousblock, scanblocks, scantxoutset, verifychain, verifytxoutproof, waitforblock, waitforblockheight, waitfornewblock |
+| blockchain | 12 | getblockfrompeer, getblockstats, getchaintxstats, getdeploymentinfo, getdescriptoractivity, gettxoutproof, importmempool, preciousblock, scanblocks, scantxoutset, verifychain, verifytxoutproof |
 | control | 3 | getmemoryinfo, logging, stop |
 | hidden | 16 | addconnection, addpeeraddress, echo, echoipc, echojson, estimaterawfee, generate, generateblock, generatetoaddress, generatetodescriptor, getorphantxs, getrawaddrman, mockscheduler, sendmsgtopeer, setmocktime, syncwithvalidationinterfacequeue |
 | mining | 1 | submitheader |
@@ -20,5 +20,9 @@ This compares names only. Matching names do not prove parameter, result-schema o
 | zmq | 1 | getzmqnotifications |
 
 Evidence: target/core-update-audit/core32-rpc-method-inventory.json.
+
+The three chain-wait methods additionally have full native OpenRPC/help and
+behavior/error comparisons: [implementation and limits](rpc-chain-wait-core32.md).
+The remaining RPC execution scope is tracked in [core32-rpc-execution.md](core32-rpc-execution.md).
 
 Acceptance for all eight directions: [core32-eight-acceptance.md](core32-eight-acceptance.md).

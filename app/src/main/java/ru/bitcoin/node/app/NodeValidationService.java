@@ -159,6 +159,25 @@ public final class NodeValidationService implements AutoCloseable {
         }
     }
 
+    /** Wait on committed active-tip changes, without holding the chain lock while sleeping. */
+    public BlockIndex awaitChainTip(java.util.function.Predicate<BlockIndex> satisfied, int timeoutMillis,
+                                    java.util.function.BooleanSupplier running) throws InterruptedException {
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(timeoutMillis);
+        synchronized (chain) {
+            while (running.getAsBoolean() && !satisfied.test(chain.activeTip())) {
+                if (timeoutMillis == 0) chain.wait();
+                else {
+                    long remaining = deadline - System.nanoTime();
+                    if (remaining <= 0) break;
+                    java.util.concurrent.TimeUnit.NANOSECONDS.timedWait(chain, remaining);
+                }
+            }
+            return chain.activeTip();
+        }
+    }
+
+    public void wakeChainTipWaiters() { synchronized (chain) { chain.notifyAll(); } }
+
 
     /** Snapshot of local pruning state for RPC/P2P policy. */
     public PruneInfo pruneInfo() {
@@ -1612,6 +1631,21 @@ public final class NodeValidationService implements AutoCloseable {
             } finally {
                 markMempoolPersistenceDirty(before);
             }
+        }
+    }
+
+    /** Non-mutating mempool/package acceptance probe used by testmempoolaccept. */
+    public Mempool.SubmissionResult submitPackage(List<Transaction> transactions, long clientMaxFeeRate) {
+        synchronized (chain) {
+            synchronizePool();
+            var before = mempool.entries();
+            try {
+                mempool.expire();
+                var result = mempool.submitPackage(transactions, context(), coins, clientMaxFeeRate);
+                revision++;
+                chain.notifyAll();
+                return result;
+            } finally { markMempoolPersistenceDirty(before); }
         }
     }
 

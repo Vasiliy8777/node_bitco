@@ -25,6 +25,12 @@ public final class HeaderSynchronizer {
 
     private final Peer peer;
     private final Duration responseTimeout;
+    public interface ResponseControl {
+        boolean trySend(GetHeadersMessage request) throws IOException;
+        void waiting() throws IOException;
+        void validated();
+    }
+    private final ResponseControl control;
 
     public Peer peer() { return peer; }
 
@@ -41,6 +47,10 @@ public final class HeaderSynchronizer {
             Peer peer,
             Duration responseTimeout
     ) {
+        this(peer, responseTimeout, null);
+    }
+    public HeaderSynchronizer(Peer peer, Duration responseTimeout, ResponseControl control) {
+        this.control = control;
         this.peer =
                 Objects.requireNonNull(
                         peer,
@@ -114,16 +124,18 @@ public final class HeaderSynchronizer {
             boolean sent = false;
             while (true) {
                 long remaining = deadline - System.nanoTime();
-                if (remaining <= 0) throw new HeaderSynchronizationTimeoutException(responseTimeout);
-                if (!future.isDone() && !sent) sent = peer.trySendGetHeaders(request);
+                if (control != null) control.waiting();
+                if (control == null && remaining <= 0) throw new HeaderSynchronizationTimeoutException(responseTimeout);
+                if (!future.isDone() && !sent) sent = control == null ? peer.trySendGetHeaders(request) : control.trySend(request);
                 // A response already dispatched to an asynchronous validator may
                 // release the gate without completing this newer waiter. Recheck
                 // admission without introducing another socket reader.
-                long wait = sent ? remaining : Math.min(remaining, TimeUnit.MILLISECONDS.toNanos(100));
+                long wait = control != null ? TimeUnit.MILLISECONDS.toNanos(100)
+                        : sent ? remaining : Math.min(remaining, TimeUnit.MILLISECONDS.toNanos(100));
                 try { return completedHeaders(future, Duration.ofNanos(wait)); }
                 catch (HeaderSynchronizationTimeoutException timeout) {
                     if (future.isDone()) return completedHeaders(future, Duration.ofNanos(1));
-                    if (sent || System.nanoTime() >= deadline)
+                    if (control == null && (sent || System.nanoTime() >= deadline))
                         throw new HeaderSynchronizationTimeoutException(responseTimeout);
                 }
             }
@@ -137,7 +149,7 @@ public final class HeaderSynchronizer {
     }
 
     /** Call after the downloaded nonempty batch validates and connects to the header tree. */
-    public void headersValidated() { peer.headersResponseValidated(); }
+    public void headersValidated() { peer.headersResponseValidated(); if (control != null) control.validated(); }
 
     private static HeadersMessage completedHeaders(
             CompletableFuture<HeadersMessage> future,

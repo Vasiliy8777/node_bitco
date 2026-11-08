@@ -52,4 +52,26 @@ public final class MempoolValidator {
     static void validateScripts(Transaction transaction, UtxoView utxoView) {
         InputScriptValidator.validateAll(transaction, utxoView, StandardScriptVerifyFlags.STANDARD);
     }
+
+    record ScriptFailure(String reason, String details) {}
+
+    /** Ordered input diagnostics for a non-mutating probe. Never catches infrastructure errors. */
+    static ScriptFailure testScripts(Transaction transaction, UtxoView utxoView) {
+        for (int i = 0; i < transaction.inputs().size(); i++) {
+            try {
+                InputScriptValidator.validate(transaction, i, utxoView, StandardScriptVerifyFlags.STANDARD, true);
+            } catch (ru.bitcoin.node.script.ScriptExecutionException
+                     | ru.bitcoin.node.script.ScriptParseException | TransactionValidationException error) {
+                String description = error instanceof ru.bitcoin.node.script.ScriptVerificationException script
+                        ? script.error() : error.getMessage();
+                String reason = "mempool-script-verify-flag-failed (" + description + ")";
+                var prevout = transaction.inputs().get(i).previousOutput();
+                String debug = "input " + i + " of " + transaction.txId().toDisplayHex()
+                        + " (wtxid " + transaction.wtxId().toDisplayHex() + "), spending "
+                        + prevout.transactionId().toDisplayHex() + ":" + prevout.outputIndex().value();
+                return new ScriptFailure(reason, reason + ", " + debug);
+            }
+        }
+        return null;
+    }
 }

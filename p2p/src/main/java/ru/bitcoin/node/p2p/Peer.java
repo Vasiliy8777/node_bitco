@@ -56,6 +56,12 @@ public final class Peer implements AutoCloseable {
         return sendHeadersMessage(BitcoinMessages.getHeaders(java.util.Objects.requireNonNull(request)), false);
     }
 
+    /** Queue through the same per-peer gate without waiting for the socket writer. */
+    public boolean trySendGetHeadersAsync(GetHeadersMessage request) throws IOException {
+        if (!isReady()) throw new IllegalStateException("Peer handshake is not complete");
+        return sendHeadersMessage(BitcoinMessages.getHeaders(java.util.Objects.requireNonNull(request)), true);
+    }
+
     private boolean sendHeadersMessage(BitcoinMessage message, boolean asynchronous) throws IOException {
         long token = headerRequestGate.acquire(PeerConnection.currentTimeMicros());
         if (token == 0) return false;
@@ -66,6 +72,11 @@ public final class Peer implements AutoCloseable {
             });
             else connection.send(message);
             return true;
+        } catch (IllegalStateException failure) {
+            headerRequestGate.failed(token);
+            // The transport may close before the reader publishes PeerState.CLOSED.
+            if (!connection.isConnected()) throw new IOException("Peer disconnected while sending getheaders", failure);
+            throw failure;
         } catch (IOException | RuntimeException failure) {
             headerRequestGate.failed(token);
             throw failure;

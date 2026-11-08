@@ -971,7 +971,7 @@ public final class ScriptInterpreter {
 
             case Opcode.OP_EQUALVERIFY -> {
                 executeEqual(machine);
-                executeVerify(machine);
+                executeVerify(machine, "Script failed an OP_EQUALVERIFY operation");
             }
 
             case Opcode.OP_VERIFY ->
@@ -1001,7 +1001,7 @@ public final class ScriptInterpreter {
                         lastCodeSeparatorOffset
                 );
 
-                executeVerify(machine);
+                executeVerify(machine, "Script failed an OP_CHECKSIGVERIFY operation");
             }
 
             case Opcode.OP_ADD,
@@ -1030,9 +1030,7 @@ public final class ScriptInterpreter {
                         context
                 );
 
-                executeVerify(
-                        machine
-                );
+                executeVerify(machine, "Script failed an OP_NUMEQUALVERIFY operation");
             }
 
             case Opcode.OP_WITHIN ->
@@ -1060,9 +1058,7 @@ public final class ScriptInterpreter {
                                 opCount
                         );
 
-                executeVerify(
-                        machine
-                );
+                executeVerify(machine, "Script failed an OP_CHECKMULTISIGVERIFY operation");
 
                 return updatedOpCount;
             }
@@ -1398,6 +1394,9 @@ public final class ScriptInterpreter {
     private static void executeVerify(
             ScriptMachine machine
     ) {
+        executeVerify(machine, "Script failed an OP_VERIFY operation");
+    }
+    private static void executeVerify(ScriptMachine machine, String error) {
         machine.requireStackSize(1);
 
         byte[] value =
@@ -1405,9 +1404,7 @@ public final class ScriptInterpreter {
 
         if (!ScriptNumber.castToBool(value)) {
 
-            throw new ScriptExecutionException(
-                    "OP_VERIFY failed"
-            );
+            throw new ScriptVerificationException(error, "OP_VERIFY failed");
         }
     }
 
@@ -1485,7 +1482,8 @@ public final class ScriptInterpreter {
         }
         boolean valid = checkSignature(signature, key, context, scriptCode);
         if (!valid && signature.length != 0 && ScriptVerifyFlags.has(context.flags(), ScriptVerifyFlags.NULLFAIL)) {
-            throw new ScriptExecutionException("NULLFAIL: non-empty signature failed OP_CHECKSIG");
+            throw new ScriptVerificationException("Signature must be zero for failed CHECK(MULTI)SIG operation",
+                    "NULLFAIL: non-empty signature failed OP_CHECKSIG");
         }
         machine.push(ScriptNumber.encode(valid ? 1 : 0));
     }
@@ -1699,9 +1697,8 @@ public final class ScriptInterpreter {
 
                 if (signature.length != 0) {
 
-                    throw new ScriptExecutionException(
-                            "NULLFAIL: non-empty signature failed OP_CHECKMULTISIG"
-                    );
+                    throw new ScriptVerificationException("Signature must be zero for failed CHECK(MULTI)SIG operation",
+                            "NULLFAIL: non-empty signature failed OP_CHECKMULTISIG");
                 }
             }
         }

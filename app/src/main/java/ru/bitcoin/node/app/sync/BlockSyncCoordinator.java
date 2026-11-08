@@ -16,6 +16,7 @@ import java.time.Duration;
 import java.util.*;
 
 public final class BlockSyncCoordinator {
+    public boolean blocksInFlight() { return blockDownloadScheduler.blocksInFlight(); }
 
     private static final System.Logger log =
             System.getLogger(BlockSyncCoordinator.class.getName());

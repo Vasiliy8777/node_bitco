@@ -8,6 +8,7 @@ import ru.bitcoin.node.chain.BlockProcessingResult;
 import ru.bitcoin.node.common.types.Hash256;
 import ru.bitcoin.node.mempool.MempoolAdmissionException;
 import ru.bitcoin.node.mempool.MempoolEntry;
+import ru.bitcoin.node.mempool.Mempool;
 import ru.bitcoin.node.consensus.money.Money;
 import ru.bitcoin.node.p2p.*;
 import ru.bitcoin.node.p2p.codec.GetHeadersMessageCodec;
@@ -56,6 +57,7 @@ public final class NodeRelayService implements AutoCloseable {
 
     private final NodeValidationService validation;
     private final boolean blocksOnly;
+    private final boolean coreHeadersPolicy;
     private final NodeSyncInfrastructure sync;
     private final PeerManager peers;
     private final BlockDownloadScheduler blockDownloadScheduler;
@@ -122,8 +124,11 @@ public final class NodeRelayService implements AutoCloseable {
 
     private synchronized List<Hash256> recoveryLocator(ru.bitcoin.node.chain.BlockIndex tip) {
         if (!tip.hash().equals(recoveryLocatorTip)) {
-            var parent = tip.height() == 0 ? tip : sync.blockIndexLookup().find(tip.previousBlockHash());
-            recoveryLocator = List.copyOf(sync.blockLocatorBuilder().build(Objects.requireNonNull(parent)));
+            if (tip.height() == 0) recoveryLocator = List.of();
+            else {
+                var parent = sync.blockIndexLookup().find(tip.previousBlockHash());
+                recoveryLocator = List.copyOf(sync.blockLocatorBuilder().build(Objects.requireNonNull(parent)));
+            }
             recoveryLocatorTip = tip.hash();
         }
         return recoveryLocator;
@@ -131,6 +136,7 @@ public final class NodeRelayService implements AutoCloseable {
 
     public OutboundPeerRecoveryView outboundRecoveryView() {
         return new OutboundPeerRecoveryView() {
+            public boolean headersSyncStarted(Peer peer) { return !coreHeadersPolicy || peers.headersSyncStarted(peer); }
             public long lastTipUpdateSeconds() { return lastTipUpdateSeconds; }
             public boolean enabled() { return !closed; }
             public boolean blocksInFlight() {
@@ -159,6 +165,11 @@ public final class NodeRelayService implements AutoCloseable {
             public ChainWork chainWork(Peer peer) {
                 var tip = validation.downloadTip();
                 return new ChainWork(tip.chainWork(), knownPeerWork(peer), recoveryLocator(tip));
+            }
+            public void requestInitialHeaders(Peer peer, List<Hash256> locator) {
+                // Initial/live synchronizers observe every READY peer and own
+                // initial admission, preferred-source selection and its timer.
+                // A supervisor send here would bypass that shared policy.
             }
             public void requestHeaders(Peer peer, List<Hash256> locator) throws IOException {
                 peer.sendAsync(BitcoinMessages.getHeaders(new GetHeadersMessage(
@@ -227,7 +238,14 @@ public final class NodeRelayService implements AutoCloseable {
 
     public NodeRelayService(NodeValidationService validation, NodeSyncInfrastructure sync, PeerManager peers,
                             BlockDownloadScheduler blockDownloadScheduler, int transactionSendRate, boolean blocksOnly) {
+        this(validation, sync, peers, blockDownloadScheduler, transactionSendRate, blocksOnly, true);
+    }
+
+    public NodeRelayService(NodeValidationService validation, NodeSyncInfrastructure sync, PeerManager peers,
+                            BlockDownloadScheduler blockDownloadScheduler, int transactionSendRate, boolean blocksOnly,
+                            boolean coreHeadersPolicy) {
         this.blocksOnly = blocksOnly;
+        this.coreHeadersPolicy = coreHeadersPolicy;
         inventoryBuckets = new TransactionRelayBuckets(transactionSendRate);
         this.validation = Objects.requireNonNull(validation, "validation");
         this.sync = Objects.requireNonNull(sync, "sync");
@@ -1231,6 +1249,20 @@ public final class NodeRelayService implements AutoCloseable {
         }
         for (var entry : accepted) reconsiderOrphanDescendants(entry.transaction());
         return new PackageSubmission(accepted, replaced);
+    }
+
+    /** Relay only transactions still accepted after Core-style partial submission. */
+    public Mempool.SubmissionResult submitPackage(List<Transaction> transactions, long clientMaxFeeRate) {
+        var submission = validation.submitPackage(List.copyOf(transactions), clientMaxFeeRate);
+        for (var entry : submission.entries()) {
+            var transaction = entry.transaction();
+            validation.markMempoolUnbroadcast(transaction.txId());
+            orphanage.remove(transaction);
+            orphanage.removeConflicts(transaction);
+            announceTransaction(transaction, null);
+        }
+        for (var entry : submission.entries()) reconsiderOrphanDescendants(entry.transaction());
+        return submission;
     }
 
     private void announceTransaction(Transaction transaction, Peer source) {

@@ -24,6 +24,14 @@ public final class WitnessV0ScriptVerifier {
     }
     public static boolean verifyP2wpkh(Transaction transaction, int inputIndex, byte[] scriptSig, Witness witness,
                                       WitnessProgram witnessProgram, long amount, int flags, ScriptDialect dialect) {
+        return verifyP2wpkh(transaction, inputIndex, scriptSig, witness, witnessProgram, amount, flags, dialect, false);
+    }
+    public static boolean verifyP2wpkh(Transaction transaction, int inputIndex, byte[] scriptSig, Witness witness,
+                                      WitnessProgram witnessProgram, long amount, int flags, boolean detailed) {
+        return verifyP2wpkh(transaction, inputIndex, scriptSig, witness, witnessProgram, amount, flags, ScriptDialect.BITCOIN, detailed);
+    }
+    private static boolean verifyP2wpkh(Transaction transaction, int inputIndex, byte[] scriptSig, Witness witness,
+                                       WitnessProgram witnessProgram, long amount, int flags, ScriptDialect dialect, boolean detailed) {
         java.util.Objects.requireNonNull(dialect);
         if (transaction == null) {
             throw new IllegalArgumentException(
@@ -84,7 +92,7 @@ public final class WitnessV0ScriptVerifier {
          * completely empty scriptSig.
          */
         if (scriptSig.length != 0) {
-            return false;
+            return failure(detailed, "Witness requires empty scriptSig");
         }
 
         /*
@@ -93,7 +101,10 @@ public final class WitnessV0ScriptVerifier {
          * witness = [signature, publicKey]
          */
         if (witness.size() != 2) {
-            return false;
+            return failure(detailed, "Witness program hash mismatch");
+        }
+        if (witness.item(0).length > 520 || witness.item(1).length > 520) {
+            return failure(detailed, "Push value size limit exceeded");
         }
 
         byte[] signature =
@@ -146,7 +157,7 @@ public final class WitnessV0ScriptVerifier {
 
         } catch (ScriptExecutionException
                  | ScriptParseException e) {
-
+            if (detailed) throw e;
             return false;
         }
 
@@ -157,12 +168,10 @@ public final class WitnessV0ScriptVerifier {
          * exactly one true item.
          */
         if (machine.size() != 1) {
-            return false;
+            return failure(detailed, "Stack size must be exactly one after execution");
         }
 
-        return ScriptNumber.castToBool(
-                machine.peek()
-        );
+        return ScriptNumber.castToBool(machine.peek()) || failure(detailed, "Script evaluated without error but finished with a false/empty top stack element");
     }
 
     public static byte[] createP2wpkhScriptCode(
@@ -228,6 +237,14 @@ public final class WitnessV0ScriptVerifier {
     }
     public static boolean verifyP2wsh(Transaction transaction, int inputIndex, byte[] scriptSig, Witness witness,
                                      WitnessProgram witnessProgram, long amount, int flags, ScriptDialect dialect) {
+        return verifyP2wsh(transaction, inputIndex, scriptSig, witness, witnessProgram, amount, flags, dialect, false);
+    }
+    public static boolean verifyP2wsh(Transaction transaction, int inputIndex, byte[] scriptSig, Witness witness,
+                                     WitnessProgram witnessProgram, long amount, int flags, boolean detailed) {
+        return verifyP2wsh(transaction, inputIndex, scriptSig, witness, witnessProgram, amount, flags, ScriptDialect.BITCOIN, detailed);
+    }
+    private static boolean verifyP2wsh(Transaction transaction, int inputIndex, byte[] scriptSig, Witness witness,
+                                      WitnessProgram witnessProgram, long amount, int flags, ScriptDialect dialect, boolean detailed) {
         java.util.Objects.requireNonNull(dialect);
         if (transaction == null) {
             throw new IllegalArgumentException(
@@ -284,7 +301,7 @@ public final class WitnessV0ScriptVerifier {
          * scriptSig must be exactly empty.
          */
         if (scriptSig.length != 0) {
-            return false;
+            return failure(detailed, "Witness requires empty scriptSig");
         }
 
         /*
@@ -293,7 +310,7 @@ public final class WitnessV0ScriptVerifier {
          * Therefore witness cannot be empty.
          */
         if (witness.isEmpty()) {
-            return false;
+            return failure(detailed, "Witness program was passed an empty witness");
         }
 
         byte[] witnessScript =
@@ -305,9 +322,6 @@ public final class WitnessV0ScriptVerifier {
          * BIP141:
          * witnessScript may be up to 10,000 bytes.
          */
-        if (witnessScript.length > 10_000) {
-            return false;
-        }
 
         /*
          * SHA256(witnessScript) must equal
@@ -322,7 +336,10 @@ public final class WitnessV0ScriptVerifier {
                 scriptHash,
                 witnessProgram.program()
         )) {
-            return false;
+            return failure(detailed, "Witness program hash mismatch");
+        }
+        if (witnessScript.length > 10_000) {
+            return failure(detailed, "Script is too big");
         }
 
         ScriptMachine machine =
@@ -343,7 +360,7 @@ public final class WitnessV0ScriptVerifier {
                     witness.item(i);
 
             if (item.length > 520) {
-                return false;
+                return failure(detailed, "Push value size limit exceeded");
             }
 
             machine.push(
@@ -371,7 +388,7 @@ public final class WitnessV0ScriptVerifier {
 
         } catch (ScriptExecutionException
                  | ScriptParseException e) {
-
+            if (detailed) throw e;
             return false;
         }
 
@@ -381,11 +398,14 @@ public final class WitnessV0ScriptVerifier {
          * exactly one true item must remain.
          */
         if (machine.size() != 1) {
-            return false;
+            return failure(detailed, "Stack size must be exactly one after execution");
         }
 
-        return ScriptNumber.castToBool(
-                machine.peek()
-        );
+        return ScriptNumber.castToBool(machine.peek()) || failure(detailed, "Script evaluated without error but finished with a false/empty top stack element");
+    }
+
+    private static boolean failure(boolean detailed, String error) {
+        if (detailed) throw new ScriptVerificationException(error);
+        return false;
     }
 }

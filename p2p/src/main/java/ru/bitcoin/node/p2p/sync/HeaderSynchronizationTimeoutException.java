@@ -27,4 +27,7 @@ public final class HeaderSynchronizationTimeoutException
     public Duration timeout() {
         return timeout;
     }
+    public HeaderSynchronizationTimeoutException(Duration timeout, String message) {
+        super(message); this.timeout = Objects.requireNonNull(timeout);
+    }
 }

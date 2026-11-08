@@ -224,7 +224,7 @@ public final class ScriptMachine {
         }
 
         if (stack.size() < required) {
-            throw new ScriptExecutionException(
+            throw new ScriptVerificationException("Operation not valid with the current stack size",
                     "Stack underflow: required "
                             + required
                             + " element(s), but found "
@@ -243,7 +243,7 @@ public final class ScriptMachine {
         }
 
         if (altStack.size() < required) {
-            throw new ScriptExecutionException(
+            throw new ScriptVerificationException("Operation not valid with the current altstack size",
                     "Altstack underflow: required "
                             + required
                             + " element(s), but found "
@@ -260,7 +260,7 @@ public final class ScriptMachine {
         if (total
                 > ScriptLimits.MAX_STACK_SIZE) {
 
-            throw new ScriptExecutionException(
+            throw new ScriptVerificationException("Stack size limit exceeded",
                     "Combined stack and altstack size exceeds consensus limit: "
                             + total
                             + " > "

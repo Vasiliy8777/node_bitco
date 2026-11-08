@@ -50,7 +50,8 @@ public class NodeConfiguration {
             PeerManager peers,
             BlockDownloadScheduler blockDownloadScheduler,
             @Value("${bitcoin.p2p.txsendrate:14}") int transactionSendRate,
-            @Value("${bitcoin.p2p.blocksonly:false}") boolean blocksOnly
+            @Value("${bitcoin.p2p.blocksonly:false}") boolean blocksOnly,
+            @Value("${bitcoin.p2p.header-response-timeout-millis:120000}") long headerResponseTimeoutMillis
     ) {
         return new ru.bitcoin.node.app.service.NodeRelayService(
                 validation,
@@ -58,7 +59,8 @@ public class NodeConfiguration {
                 peers,
                 blockDownloadScheduler,
                 transactionSendRate,
-                blocksOnly
+                blocksOnly,
+                headerResponseTimeoutMillis == ru.bitcoin.node.p2p.sync.HeaderSynchronizer.DEFAULT_RESPONSE_TIMEOUT.toMillis()
         );
     }
 
@@ -386,7 +388,8 @@ public class NodeConfiguration {
             NodeValidationService validationService,
             NodeSyncInfrastructure infrastructure,
             NetworkParameters parameters,
-            @Value("${bitcoin.p2p.max-blocks-in-flight-per-peer:16}") int maxBlocksInFlightPerPeer
+            @Value("${bitcoin.p2p.max-blocks-in-flight-per-peer:16}") int maxBlocksInFlightPerPeer,
+            @Value("${bitcoin.p2p.header-response-timeout-millis:120000}") long headerResponseTimeoutMillis
     ) {
         BlockDownloadScheduler scheduler = new BlockDownloadScheduler(
                 peerManager,
@@ -398,7 +401,10 @@ public class NodeConfiguration {
                 infrastructure.blockIndexLookup(), validationService::downloadTip,
                 infrastructure.headerChainState(), infrastructure.blockLocatorBuilder(), parameters,
                 infrastructure::downloadBlockFailed, validationService::downloadInitialBlockDownload,
-                validationService::downloadSnapshotBase));
+                validationService::downloadSnapshotBase,
+                peer -> peerManager.canSyncFrom(peer, scheduler.blocksInFlight()),
+                headerResponseTimeoutMillis == ru.bitcoin.node.p2p.sync.HeaderSynchronizer.DEFAULT_RESPONSE_TIMEOUT.toMillis()
+                        ? infrastructure.availabilityHeaders(peerManager, scheduler::blocksInFlight) : null));
         validationService.attachBackgroundBlockDownloadScheduler(scheduler);
         return scheduler;
     }

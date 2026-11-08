@@ -49,6 +49,7 @@ public final class NodeLifecycleService
     private final PeerDiscovery peerDiscovery;
     private final OutboundPeerManager outboundPeerManager;
     private final OutboundPeerSupervisor outboundPeerSupervisor;
+    private volatile boolean headerSupervisionStarted;
     private final PeerManager peerManager;
 
     private final BitcoinServer bitcoinServer;
@@ -347,7 +348,7 @@ public final class NodeLifecycleService
              * and will discover a replacement peer through PeerManager
              * after OutboundPeerSupervisor reconnects.
              */
-            if (automaticConnectionsEnabled) outboundPeerSupervisor.start(activeOutboundConnection);
+            if (automaticConnectionsEnabled && !headerSupervisionStarted) outboundPeerSupervisor.start(activeOutboundConnection);
 
             ensureNotStopping();
 
@@ -442,11 +443,8 @@ public final class NodeLifecycleService
                 NodeLifecycleState.SYNCHRONIZING_HEADERS
         );
 
-        HeaderSynchronizer headerSynchronizer =
-                new HeaderSynchronizer(
-                        peer,
-                        headerResponseTimeout
-                );
+        HeaderSynchronizer headerSynchronizer = syncInfrastructure.headerSynchronizer(
+                peer, peerManager, headerResponseTimeout, blockSyncCoordinator::blocksInFlight);
 
         HeaderSyncCoordinator coordinator =
                 new HeaderSyncCoordinator(
@@ -565,6 +563,13 @@ public final class NodeLifecycleService
             Peer peer =
                     connection.peer();
 
+            if (headerResponseTimeout.equals(HeaderSynchronizer.DEFAULT_RESPONSE_TIMEOUT)) {
+                outboundPeerSupervisor.start(connection);
+                headerSupervisionStarted = true;
+                synchronizeCoreHeaders();
+                return connection; // Supervisor already owns this seed and its replacement slot.
+            }
+
             try {
 
                 long processedHeaders = synchronizeHeaders(
@@ -635,7 +640,58 @@ public final class NodeLifecycleService
     }
 
 
+    private void synchronizeCoreHeaders() throws IOException {
+        setState(NodeLifecycleState.SYNCHRONIZING_HEADERS);
+        var tasks = new java.util.IdentityHashMap<Peer, java.util.concurrent.Future<Long>>();
+        var workers = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor();
+        try {
+            while (true) {
+                ensureNotStopping();
+                for (var peer : peerManager.readyPeers()) {
+                    if (!tasks.containsKey(peer) && (peer.remoteVersion().services() &
+                            (ru.bitcoin.node.p2p.message.VersionMessage.NODE_NETWORK | ru.bitcoin.node.p2p.message.VersionMessage.NODE_NETWORK_LIMITED)) != 0)
+                        tasks.put(peer, workers.submit(() -> synchronizeHeaders(peer)));
+                }
+                var iterator = tasks.entrySet().iterator();
+                while (iterator.hasNext()) {
+                    var task = iterator.next();
+                    if (!task.getValue().isDone()) continue;
+                    var peer = task.getKey(); var future = task.getValue(); iterator.remove();
+                    try {
+                        future.get();
+                        if (syncInfrastructure.headerChainState().bestHeaderTip().chainWork().compareTo(minimumChainWork) >= 0) return;
+                        throw new IOException("Header peer returned no progress below minimum chain work");
+                    } catch (java.util.concurrent.ExecutionException failure) {
+                        var cause = failure.getCause();
+                        if (cause instanceof Error fatal) throw fatal;
+                        if (cause instanceof IllegalStateException state && peer.state() != PeerState.CLOSED) throw state;
+                        if (cause instanceof IllegalStateException && peer.state() == PeerState.CLOSED) continue;
+                        if (!(cause instanceof IOException || cause instanceof IllegalArgumentException
+                                || cause instanceof ru.bitcoin.node.consensus.block.BlockHeaderValidationException
+                                || cause instanceof ru.bitcoin.node.consensus.block.BlockValidationException
+                                || cause instanceof ru.bitcoin.node.consensus.transaction.TransactionValidationException))
+                            throw new IOException("Header synchronization failed", cause);
+                        if (cause instanceof ru.bitcoin.node.p2p.sync.HeaderSynchronizationTimeoutException
+                                && peer.hasPermission(PeerPermission.NOBAN)) continue;
+                        if (cause instanceof ru.bitcoin.node.consensus.block.BlockHeaderValidationException invalid) {
+                            if (invalid.reason() != ru.bitcoin.node.consensus.block.BlockHeaderValidationException.Reason.TIME_FUTURE)
+                                peer.disconnectForProtocolViolation("Rejected headers during initial synchronization", invalid);
+                        } else peer.close();
+                    } catch (IOException failure) { peer.close(); }
+                }
+                Thread.sleep(100);
+            }
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt(); throw new IOException("Header synchronization cancelled", interrupted);
+        } finally {
+            tasks.values().forEach(task -> task.cancel(true)); workers.shutdownNow();
+            try { workers.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS); }
+            catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+        }
+    }
+
     private void synchronizeManualHeaders() throws IOException {
+        if (headerResponseTimeout.equals(HeaderSynchronizer.DEFAULT_RESPONSE_TIMEOUT)) { synchronizeCoreHeaders(); return; }
         var retryAfter = new java.util.IdentityHashMap<Peer, Long>();
         setState(NodeLifecycleState.SYNCHRONIZING_HEADERS);
         while (true) {

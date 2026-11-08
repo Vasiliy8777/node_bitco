@@ -142,7 +142,7 @@ final class MempoolGraphPolicy {
         checkTrucLimits(entries, added, previous, directConflicts);
     }
 
-    private static void checkClusterLimits(Map<Hash256, MempoolEntry> entries, Hash256 added, MempoolLimits limits) {
+    static void checkClusterLimits(Map<Hash256, MempoolEntry> entries, Hash256 added, MempoolLimits limits) {
         Set<Hash256> cluster = connected(entries, added);
         if (cluster.size() > limits.clusterCount()) fail("cluster-count-limit");
         long adjustedWeight = 0;
@@ -152,7 +152,7 @@ final class MempoolGraphPolicy {
         if (Math.ceilDiv(adjustedWeight, 4L) > limits.clusterVirtualBytes()) fail("cluster-size-limit");
     }
 
-    private static void checkTrucLimits(Map<Hash256, MempoolEntry> entries, Hash256 added,
+    static void checkTrucLimits(Map<Hash256, MempoolEntry> entries, Hash256 added,
                                         Map<Hash256, MempoolEntry> previous, Set<Hash256> directConflicts) {
         MempoolEntry entry = entries.get(added);
         Transaction tx = entry.transaction();
@@ -163,7 +163,7 @@ final class MempoolGraphPolicy {
         for (var input : tx.inputs()) {
             var parent = entries.get(input.previousOutput().transactionId());
             if (parent == null) continue;
-            if ((tx.version() == 3) != (parent.transaction().version() == 3)) fail("truc-version-inheritance");
+            if ((tx.version() == 3) != (parent.transaction().version() == 3)) throw new TrucPolicyException(tx, parent.transaction());
             parents.add(parent.transaction().txId());
         }
         if (tx.version() != 3) return;
@@ -187,6 +187,26 @@ final class MempoolGraphPolicy {
             }
             fail("truc-topology");
         }
+    }
+
+    /** Core's individual TRUC precheck sees parents in the original mempool,
+     * not outputs temporarily supplied by other package members. */
+    static void checkProbeTruc(Map<Hash256, MempoolEntry> original, Map<OutPoint, Hash256> spent,
+                               MempoolEntry added) {
+        checkSingleTruc(original, spent, added, Map.of(), Set.of());
+    }
+    static void checkSingleTruc(Map<Hash256, MempoolEntry> original, Map<OutPoint, Hash256> spent,
+                                MempoolEntry added, Map<Hash256, MempoolEntry> previous, Set<Hash256> conflicts) {
+        if (added.transaction().version() != 3) {
+            for (var input : added.transaction().inputs()) {
+                var parent = original.get(input.previousOutput().transactionId());
+                if (parent != null && parent.transaction().version() == 3)
+                    throw new TrucPolicyException(added.transaction(), parent.transaction());
+            }
+            return;
+        }
+        var cluster = additionCluster(original, spent, added, Integer.MAX_VALUE);
+        checkTrucLimits(cluster, added.transaction().txId(), previous, conflicts);
     }
 
     static long trim(Map<Hash256, MempoolEntry> entries, long maximumSize, Hash256 added) {

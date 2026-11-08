@@ -27,7 +27,8 @@ class PeerHeaderRequestIntegrationTest {
 
     @Test void syncAndAsyncProducersShareOneRequestAndEmptyHeadersReleaseAdmission() throws Exception {
         try (var fixture = new Fixture()) {
-            fixture.peer.sendAsync(BitcoinMessages.getHeaders(fixture.request));
+            assertTrue(fixture.peer.trySendGetHeadersAsync(fixture.request));
+            assertFalse(fixture.peer.trySendGetHeadersAsync(fixture.request));
             fixture.takeRequest();
             fixture.peer.send(BitcoinMessages.getHeaders(fixture.request));
             assertFalse(fixture.peer.trySendGetHeaders(fixture.request));
@@ -51,7 +52,7 @@ class PeerHeaderRequestIntegrationTest {
 
     @Test void synchronousWaiterCanConsumeTheEarlierAsyncResponseWithoutAnotherWireRequest() throws Exception {
         try (var fixture = new Fixture()) {
-            fixture.peer.sendAsync(BitcoinMessages.getHeaders(fixture.request)); fixture.takeRequest();
+            assertTrue(fixture.peer.trySendGetHeadersAsync(fixture.request)); fixture.takeRequest();
             var result = download(fixture);
             await(() -> fixture.peer.messageDispatcher().hasPendingHeaders());
             fixture.respond(List.of());

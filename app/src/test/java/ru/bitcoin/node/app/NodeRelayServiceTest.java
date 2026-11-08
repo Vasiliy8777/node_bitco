@@ -26,6 +26,39 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class NodeRelayServiceTest {
+    @Test void chainworkProbeUsesNullLocatorAtGenesisAndParentLocatorAfterAdvancing() throws Exception {
+        var validation = mock(NodeValidationService.class);
+        when(validation.downloadInitialBlockDownload()).thenReturn(true);
+        var sync = mock(NodeSyncInfrastructure.class);
+        var genesis = ru.bitcoin.node.chain.BlockIndexFactory.createGenesis(
+                ru.bitcoin.node.protocol.block.GenesisBlockFactory.create(NetworkParametersRegistry.regtest()).header());
+        var tip = new AtomicReference<>(genesis);
+        when(validation.downloadTip()).thenAnswer(call -> tip.get());
+        var lookup = mock(ru.bitcoin.node.chain.BlockIndexLookup.class);
+        var locators = mock(ru.bitcoin.node.chain.BlockLocatorBuilder.class);
+        when(sync.blockIndexLookup()).thenReturn(lookup);
+        when(sync.blockLocatorBuilder()).thenReturn(locators);
+        when(lookup.find(genesis.hash())).thenReturn(genesis);
+        when(locators.build(genesis)).thenReturn(List.of(genesis.hash()));
+        try (var peers = new PeerManager(); var relay = new NodeRelayService(validation, sync, peers)) {
+            var peer = mockPeer();
+            var view = relay.outboundRecoveryView();
+            assertTrue(view.chainWork(peer).locator().isEmpty());
+            view.requestHeaders(peer, view.chainWork(peer).locator());
+            verify(peer).sendAsync(argThat(message -> message.command().equals("getheaders")
+                    && ru.bitcoin.node.p2p.codec.GetHeadersMessageCodec.decode(message.payload()).locatorHashes().isEmpty()
+                    && ru.bitcoin.node.p2p.codec.GetHeadersMessageCodec.decode(message.payload()).stopHash().equals(new Hash256(new byte[32]))));
+            verifyNoInteractions(locators);
+            var child = new ru.bitcoin.node.chain.BlockIndex(Hash256.fromDisplayHex("11".repeat(32)),
+                    genesis.header(), 1, genesis.hash(), genesis.chainWork().add(java.math.BigInteger.ONE));
+            tip.set(child);
+            assertEquals(List.of(genesis.hash()), view.chainWork(peer).locator());
+            assertEquals(List.of(genesis.hash()), view.chainWork(peer).locator());
+            verify(locators, times(1)).build(genesis);
+            tip.set(genesis);
+            assertTrue(view.chainWork(peer).locator().isEmpty(), "Returning to genesis must clear the cached parent locator");
+        }
+    }
     @Test void downloadPermissionServesHeadersBelowMinimumWork() throws Exception {
         for (boolean download : List.of(false, true)) {
             var validation = mock(NodeValidationService.class);
