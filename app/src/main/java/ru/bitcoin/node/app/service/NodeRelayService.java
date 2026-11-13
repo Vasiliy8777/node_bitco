@@ -1217,10 +1217,14 @@ public final class NodeRelayService implements AutoCloseable {
     }
 
     public Hash256 submitTransaction(Transaction transaction) {
-        validation.admit(transaction);
-        validation.markMempoolUnbroadcast(transaction.txId());
-        announceTransaction(transaction, null);
-        reconsiderOrphanDescendants(transaction);
+        return submitTransaction(transaction, 0);
+    }
+
+    public Hash256 submitTransaction(Transaction transaction, long maxFeeRate) {
+        var admission = validation.admitForBroadcast(transaction, maxFeeRate);
+        var accepted = admission.entry().transaction();
+        announceTransaction(accepted, null);
+        if (admission.newlyAccepted()) reconsiderOrphanDescendants(accepted);
         return transaction.txId();
     }
 

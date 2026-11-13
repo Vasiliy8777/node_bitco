@@ -47,8 +47,9 @@ class FeeFloorPriorityTest {
         assertTrue(pool.isEmpty());
     }
     private static Mempool raisedFloor() {
-        var pool = new Mempool(new MempoolPolicy(), new MempoolLimits(64, 101000, 200, 1000, 100), java.time.Clock.systemUTC());
-        pool.reconcile(CONTEXT, COINS, Set.of(), List.of(tx(List.of(FUND), 2, 1000,1000,1000,1000,1000,1000,1000,1000)));
+        var pool = new Mempool(new MempoolPolicy(), new MempoolLimits(64, 101000, 2200, 1000, 100), java.time.Clock.systemUTC());
+        long[] outputs = new long[32]; Arrays.fill(outputs,1000);
+        pool.reconcile(CONTEXT, COINS, Set.of(), List.of(tx(List.of(FUND), 2, outputs)));
         assertTrue(pool.isEmpty()); assertTrue(pool.minimumFeeRate() > 10000); return pool;
     }
 }

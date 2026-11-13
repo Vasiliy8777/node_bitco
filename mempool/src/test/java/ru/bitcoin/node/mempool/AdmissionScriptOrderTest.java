@@ -25,9 +25,9 @@ class AdmissionScriptOrderTest {
     @Test void sufficientFeeStillRequiresValidScriptsBeforeAnyCommit() {
         var pool = new Mempool(); var before = pool.snapshot();
         var bad = invalidWitness(tx(List.of(FUND), 2, 90000));
-        assertThrows(ru.bitcoin.node.consensus.transaction.TransactionValidationException.class, () -> pool.admit(bad, CONTEXT, COINS));
+        assertThrows(ru.bitcoin.node.script.ScriptVerificationException.class, () -> pool.admit(bad, CONTEXT, COINS));
         assertEquals(before, pool.snapshot());
-        assertThrows(ru.bitcoin.node.consensus.transaction.TransactionValidationException.class, () -> MempoolValidator.validate(bad, CONTEXT, COINS));
+        assertThrows(ru.bitcoin.node.script.ScriptVerificationException.class, () -> MempoolValidator.validate(bad, CONTEXT, COINS));
     }
     private static Transaction invalidWitness(Transaction tx) {
         var input = tx.inputs().getFirst();

@@ -27,6 +27,11 @@ class OrdinaryRelayFeeFilterTest {
         when(validation.mempoolMiningOrder()).thenReturn(order);
         when(validation.mempoolEntry(any())).thenAnswer(call -> order.stream()
                 .filter(entry -> entry.transaction().txId().equals(call.getArgument(0))).findFirst());
+        when(validation.admitForBroadcast(any(), anyLong())).thenAnswer(call -> {
+            Transaction transaction = call.getArgument(0);
+            return new NodeValidationService.BroadcastAdmission(order.stream()
+                    .filter(entry -> entry.transaction().txId().equals(transaction.txId())).findFirst().orElseThrow(), false);
+        });
         var peer = mock(Peer.class);
         when(peer.isReady()).thenReturn(true);
         when(peer.hasPermission(PeerPermission.NOBAN)).thenReturn(true);

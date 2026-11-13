@@ -10,6 +10,15 @@ final class RpcMethods {
     private static final Map<String, Method> METHODS = create();
     private record Canonical(Map<String, Map<String, Object>> methods, Map<String, String> help) {}
     private static final Canonical CHAIN_WAIT = loadChainWait();
+    private static final Map<String, Object> CORE = loadCore();
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> loadCore() {
+        try (var input = RpcMethods.class.getResourceAsStream("/rpc/core32-methods.json")) {
+            if (input == null) throw new IllegalStateException("Missing Core RPC metadata");
+            return tools.jackson.databind.json.JsonMapper.builder().build().readValue(input, Map.class);
+        } catch (java.io.IOException error) { throw new ExceptionInInitializerError(error); }
+    }
 
     @SuppressWarnings("unchecked")
     private static Canonical loadChainWait() {
@@ -22,13 +31,49 @@ final class RpcMethods {
         } catch (java.io.IOException error) { throw new ExceptionInInitializerError(error); }
     }
 
-    static String canonicalHelp(String method) { return CHAIN_WAIT.help().get(method); }
+    static String canonicalHelp(String method) { return (String) ((Map<?, ?>) CORE.get("help")).get(method); }
+    static String helpList() { return (String) CORE.get("help_list"); }
+
+    @SuppressWarnings("unchecked")
+    static void validateRequest(String name, List<?> values) {
+        if (!METHODS.containsKey(name)) throw new RpcException(-32601, "Method not found");
+        Map<?, ?> method = ((List<Map<String, Object>>) CORE.get("methods")).stream()
+                .filter(entry -> name.equals(entry.get("name"))).findFirst().orElseThrow();
+        var parameters = (List<Map<String, Object>>) method.get("params");
+        int required = 0;
+        for (int i = 0; i < parameters.size(); i++) if (Boolean.TRUE.equals(parameters.get(i).get("required"))) required = i + 1;
+        if (values.size() < required || values.size() > parameters.size()) throw new RpcException(-1, canonicalHelp(name));
+        var errors = new ArrayList<String>();
+        for (int i = 0; i < parameters.size(); i++) {
+            var parameter = parameters.get(i);
+            Object value = i < values.size() ? values.get(i) : null;
+            if (value == null && !Boolean.TRUE.equals(parameter.get("required"))) continue;
+            Object type = ((Map<?, ?>) parameter.get("schema")).get("type");
+            if (!(type instanceof String expected)) continue;
+            if (expected.equals("integer")) expected = "number";
+            if (expected.equals("boolean")) expected = "bool";
+            String actual = value == null ? "null" : value instanceof Boolean ? "bool" : value instanceof Number ? "number"
+                    : value instanceof String ? "string" : value instanceof List<?> ? "array" : "object";
+            if (actual.equals(expected)) continue;
+            String label = parameter.get("name").toString();
+            if (parameter.get("x-bitcoin-aliases") instanceof List<?> aliases)
+                for (Object alias : aliases) label += "|" + alias;
+            errors.add("    \"Position " + (i + 1) + " (" + label + ")\": \"JSON value of type " + actual
+                    + " is not of expected type " + expected + "\"");
+        }
+        if (!errors.isEmpty()) throw new RpcException(-3, "Wrong type passed:\n{\n" + String.join(",\n", errors) + "\n}");
+    }
 
     static void validateChainWaitParameters(String method, List<?> params) {
         var definition = METHODS.get(method);
         long required = definition.parameters().stream().filter(Parameter::required).count();
         if (params.size() < required || params.size() > definition.parameters().size())
             throw new RpcException(-1, canonicalHelp(method));
+        validateParameterTypes(method, params);
+    }
+
+    static void validateParameterTypes(String method, List<?> params) {
+        var definition = METHODS.get(method);
         var errors = new ArrayList<String>();
         for (int i = 0; i < params.size(); i++) {
             var parameter = definition.parameters().get(i); var value = params.get(i);
@@ -60,7 +105,7 @@ final class RpcMethods {
                 submitpackage object package:array maxfeerate:any? maxburnamount:any?
                 decoderawtransaction object hexstring:string
                 getrawtransaction any txid:string verbosity:any?=0 blockhash:string?
-                prioritisetransaction boolean txid:string dummy:any fee_delta:number
+                prioritisetransaction boolean txid:string dummy:number? fee_delta:number
                 getprioritisedtransactions object
                 getmempoolentry object txid:string
                 getmempoolancestors any txid:string verbose:boolean?=false
@@ -129,59 +174,67 @@ final class RpcMethods {
 
     static Set<String> names() { return METHODS.keySet(); }
 
+    @SuppressWarnings("unchecked")
     static List<?> positional(String methodName, Map<?, ?> named) {
-        var method = METHODS.get(methodName);
-        if (method == null) throw new RpcException(-32601, "Method not found");
-        boolean chainWait = CHAIN_WAIT.methods().containsKey(methodName);
-        List<?> positional = chainWait && named.get("args") instanceof List<?> list ? list : List.of();
-        var known = new HashSet<String>();
-        for (var parameter : method.parameters()) known.add(parameter.name());
-        for (var key : named.keySet())
-            if (!known.contains(key) && !(chainWait && key.equals("args"))) throw new RpcException(-8, "Unknown named parameter " + key);
-        int last = positional.size() - 1;
-        for (int i = 0; i < method.parameters().size(); i++)
-            if (named.containsKey(method.parameters().get(i).name())) last = Math.max(last, i);
+        if (!METHODS.containsKey(methodName)) throw new RpcException(-32601, "Method not found");
+        if (named instanceof RpcProtocol.JsonObject object && !object.duplicates.isEmpty())
+            throw new RpcException(-8, "Parameter " + object.duplicates.getFirst() + " specified multiple times");
+        var definition = ((List<Map<String, Object>>) CORE.get("methods")).stream()
+                .filter(entry -> methodName.equals(entry.get("name"))).findFirst().orElseThrow();
+        var parameters = (List<Map<String, Object>>) definition.get("params");
+        var remaining = new LinkedHashMap<String, Object>();
+        named.forEach((key, value) -> remaining.put(key.toString(), value));
         var result = new ArrayList<Object>();
-        for (int i = 0; i <= last; i++) {
-            if (i >= method.parameters().size()) { result.add(positional.get(i)); continue; }
-            var parameter = method.parameters().get(i);
-            if (i < positional.size() && named.containsKey(parameter.name()))
-                throw new RpcException(-8, "Parameter " + parameter.name() + " specified twice both as positional and named argument");
-            Object value = i < positional.size() ? positional.get(i) : named.get(parameter.name());
-            if (value == null) value = parameter.defaultValue();
-            if (value == null && parameter.required() && !named.containsKey(parameter.name()) && !chainWait)
-                throw new RpcException(-8, "Missing required parameter " + parameter.name());
-            result.add(value);
+        int hole = 0, initialHole = 0;
+        String initialParameter = null;
+        for (var parameter : parameters) {
+            String name = parameter.get("name").toString();
+            var aliases = new ArrayList<String>();
+            aliases.add(name);
+            if (parameter.get("x-bitcoin-aliases") instanceof List<?> alternatives)
+                for (Object alias : alternatives) aliases.add(alias.toString());
+            String selected = aliases.stream().filter(remaining::containsKey).findFirst().orElse(null);
+            var options = new LinkedHashMap<String, Object>();
+            if (name.equals("options") && Set.of("gettxspendingprevout", "dumptxoutset").contains(methodName)) {
+                var schema = (Map<?, ?>) parameter.get("schema");
+                if (schema.get("properties") instanceof Map<?, ?> properties) {
+                    for (Object key : properties.keySet()) {
+                        if (remaining.containsKey(key.toString())) options.put(key.toString(), remaining.remove(key.toString()));
+                    }
+                }
+            }
+            if (selected != null || !options.isEmpty()) {
+                for (int i = 0; i < hole; i++) result.add(null);
+                hole = 0;
+                if (initialParameter == null) initialParameter = String.join("|", aliases);
+            } else {
+                hole++;
+                if (result.isEmpty()) initialHole = hole;
+            }
+            if (selected != null) {
+                if (!options.isEmpty()) throw new RpcException(-8, "Parameter " + selected + " conflicts with parameter " + options.keySet().iterator().next());
+                result.add(remaining.remove(selected));
+            }
+            if (!options.isEmpty()) result.add(options);
         }
+        Object positional = remaining.remove("args");
+        if (positional instanceof List<?> args) {
+            if (initialHole < args.size() && initialParameter != null)
+                throw new RpcException(-8, "Parameter " + initialParameter + " specified twice both as positional and named argument");
+            var merged = new ArrayList<Object>(args);
+            for (int i = merged.size(); i < result.size(); i++) merged.add(result.get(i));
+            result = merged;
+        }
+        if (!remaining.isEmpty()) throw new RpcException(-8, "Unknown named parameter " + new TreeSet<>(remaining.keySet()).first());
         return result;
     }
 
     static Map<String, Object> discovery() {
-        var methods = new ArrayList<Map<String, Object>>();
-        for (var method : METHODS.values()) {
-            var canonical = CHAIN_WAIT.methods().get(method.name());
-            if (canonical != null) { methods.add(canonical); continue; }
-            var params = new ArrayList<Map<String, Object>>();
-            for (var parameter : method.parameters()) {
-                var descriptor = new LinkedHashMap<String, Object>();
-                descriptor.put("name", parameter.name());
-                descriptor.put("required", parameter.required());
-                var schema = schema(parameter.type());
-                if (parameter.defaultValue() != null) schema.put("default", parameter.defaultValue());
-                descriptor.put("schema", schema);
-                params.add(descriptor);
-            }
-            methods.add(Map.of("name", method.name(), "paramStructure", "either", "params", params,
-                    "result", Map.of("name", "result", "schema", schema(method.resultType()))));
-        }
-        return Map.of("openrpc", "1.4.1", "info", Map.of("title", "java-bitcoin-node RPC", "version", "0.0.1"),
-                "methods", methods);
+        return discovery(false);
     }
-
-    private static Map<String, Object> schema(String type) {
-        var schema = new LinkedHashMap<String, Object>();
-        if (!type.equals("any")) schema.put("type", type);
-        if (type.equals("array")) schema.put("items", Map.of());
-        return schema;
+    static Map<String, Object> discovery(boolean showHidden) {
+        return Map.of("openrpc", "1.4.1", "info", Map.of("title", "java-bitcoin-node RPC", "version", "0.0.1",
+                "description", "Bitcoin Core 32.1 compatible RPC methods implemented by java-bitcoin-node."),
+                "methods", CORE.get(showHidden ? "methods" : "public_methods"));
     }
 }

@@ -13,4 +13,17 @@ final class TrucPolicyException extends MempoolAdmissionException {
                 + " (wtxid=" + parent.wtxId().toDisplayHex() + ")";
     }
     String rpcDetails() { return details; }
+    private TrucPolicyException(String diagnostic,String detail) {super(diagnostic);details="TRUC-violation, "+detail;}
+    static TrucPolicyException size(MempoolEntry entry,boolean child) {
+        return new TrucPolicyException(child?"truc-child-size":"truc-topology",
+                "version=3 "+(child?"child ":"")+label(entry.transaction())+" is too big: "+entry.virtualSize()
+                        +" > "+(child?1000:10000)+" virtual bytes");
+    }
+    static TrucPolicyException ancestors(Transaction tx) {
+        return new TrucPolicyException("truc-topology",label(tx)+" would have too many ancestors");
+    }
+    static TrucPolicyException descendants(Transaction tx) {
+        return new TrucPolicyException("truc-topology",label(tx)+" would exceed descendant count limit");
+    }
+    private static String label(Transaction tx) {return "tx "+tx.txId().toDisplayHex()+" (wtxid="+tx.wtxId().toDisplayHex()+")";}
 }

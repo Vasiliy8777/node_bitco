@@ -28,7 +28,7 @@ class SingleRbfClusterPolicyTest {
             OutPoint previous = external(branch + 2);
             for (int depth = 0; depth < length; depth++) {
                 var parent = tx(List.of(previous), 10 + branch * 100 + depth);
-                long sigops = reason.equals("cluster-size-limit") ? 3000 : 0;
+                long sigops = reason.equals("cluster-size-limit") ? 12000 : 0;
                 old.put(parent.txId(), new MempoolEntry(parent, 100,
                         TransactionWeight.calculate(parent), 0, sigops));
                 previous = point(parent);

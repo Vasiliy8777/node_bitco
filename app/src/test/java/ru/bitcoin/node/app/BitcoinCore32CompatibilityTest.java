@@ -29,6 +29,93 @@ class BitcoinCore32CompatibilityTest {
 
     @Test
     @EnabledIfSystemProperty(named = "bitcoin.core.binary", matches = ".+")
+    void acceptedDustPriorityMatchesCoreWithStandardPolicy() throws Exception {
+        Path binary = Path.of(System.getProperty("bitcoin.core.binary"));
+        cli = binary.resolveSibling(System.getProperty("os.name").startsWith("Windows") ? "bitcoin-cli.exe" : "bitcoin-cli");
+        coreData = Files.createDirectory(directory.resolve("strict-dust-core"));
+        try (var socket = new ServerSocket(0)) { rpcPort = socket.getLocalPort(); }
+        var process = new ProcessBuilder(binary.toString(), "-regtest", "-datadir=" + coreData,
+                "-server", "-listen=0", "-connect=0", "-dnsseed=0", "-discover=0", "-listenonion=0", "-natpmp=0",
+                "-acceptnonstdtxn=0", "-fallbackfee=0.00002", "-rpcuser=test", "-rpcpassword=test-password", "-rpcport=" + rpcPort)
+                .redirectErrorStream(true).redirectOutput(directory.resolve("strict-dust-core.log").toFile()).start();
+        try (var client = HttpClient.newHttpClient()) {
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+            while (true) {
+                try { core("getblockcount"); break; }
+                catch (Exception failure) { if (!process.isAlive() || System.nanoTime() > deadline) throw failure; Thread.sleep(100); }
+            }
+            core("createwallet", "oracle");
+            core("generatetoaddress", "101", core("getnewaddress").strip());
+            URI reference = URI.create("http://127.0.0.1:" + rpcPort);
+            var coin = (Map<?, ?>) ((List<?>) call(client, reference, "listunspent", List.of())).getFirst();
+            var fixture = createSubmissionFixture(client, reference, coin, "0", "0.00010000");
+            var template = TransactionParser.parse(HexFormat.of().parseHex(fixture.getFirst()));
+            var unsigned = new ru.bitcoin.node.protocol.transaction.Transaction(template.version(), template.inputs(),
+                    List.of(template.outputs().getFirst(), new ru.bitcoin.node.protocol.transaction.TxOut(0,
+                            template.outputs().getFirst().scriptPubKey())), template.lockTime());
+            var signed = (Map<?, ?>) call(client, reference, "signrawtransactionwithwallet", List.of(rawTransaction(unsigned)));
+            assertEquals(true, signed.get("complete"));
+            String parentHex = signed.get("hex").toString();
+            var parent = TransactionParser.parse(HexFormat.of().parseHex(parentHex));
+            var childTemplate = TransactionParser.parse(HexFormat.of().parseHex(fixture.getLast()));
+            var inputs = new ArrayList<ru.bitcoin.node.protocol.transaction.TxIn>();
+            var previous = new ArrayList<Map<String, Object>>();
+            for (int i = 0; i < 2; i++) {
+                inputs.add(new ru.bitcoin.node.protocol.transaction.TxIn(new ru.bitcoin.node.protocol.transaction.OutPoint(
+                        parent.txId(), new ru.bitcoin.node.common.types.UInt32(i)), new byte[0], childTemplate.inputs().getFirst().sequence()));
+                var output = parent.outputs().get(i);
+                previous.add(Map.of("txid", parent.txId().toDisplayHex(), "vout", i,
+                        "scriptPubKey", HexFormat.of().formatHex(output.scriptPubKey()), "amount", java.math.BigDecimal.valueOf(output.value(), 8)));
+            }
+            var unsignedChild = new ru.bitcoin.node.protocol.transaction.Transaction(childTemplate.version(), inputs,
+                    childTemplate.outputs(), childTemplate.lockTime());
+            var signedChild = (Map<?, ?>) call(client, reference, "signrawtransactionwithwallet", List.of(rawTransaction(unsignedChild), previous));
+            assertEquals(true, signedChild.get("complete"));
+            String childHex = signedChild.get("hex").toString();
+            var child = TransactionParser.parse(HexFormat.of().parseHex(childHex));
+            assertEquals("success", ((Map<?, ?>) call(client, reference, "submitpackage", List.of(List.of(parentHex, childHex)))).get("package_msg"));
+            var pool = new Mempool();
+            var funding = parent.inputs().getFirst().previousOutput();
+            long amount = new java.math.BigDecimal(coin.get("amount").toString()).movePointRight(8).longValueExact();
+            long height = ((Number) call(client, reference, "getblockcount", List.of())).longValue();
+            long now = System.currentTimeMillis() / 1000;
+            var entry = new ru.bitcoin.node.consensus.transaction.UtxoEntry(amount,
+                    HexFormat.of().parseHex(coin.get("scriptPubKey").toString()),
+                    height - ((Number) coin.get("confirmations")).longValue() + 1, true);
+            assertEquals(2, pool.admitPackage(List.of(parent, child), new MempoolValidationContext(height + 1, now, h -> now - 1),
+                    point -> point.equals(funding) ? Optional.of(entry) : Optional.empty()).size());
+            var before = pool.detailedSnapshot();
+            var priorities = pool.prioritisedTransactions();
+            var referencePool = call(client, reference, "getrawmempool", List.of(true));
+            var referencePriorities = call(client, reference, "getprioritisedtransactions", List.of());
+            for (long delta : new long[]{0, 1, -1}) {
+                var error = (Map<?, ?>) callResponse(client, reference, "prioritisetransaction", List.of(parent.txId().toDisplayHex(), 0, delta)).get("error");
+                assertNotNull(error, "Strict Core must reject even a zero delta on accepted dust");
+                assertEquals(-8, ((Number) error.get("code")).intValue());
+                var local = assertThrows(MempoolAdmissionException.class, () -> pool.prioritise(parent.txId(), delta));
+                assertEquals(error.get("message"), local.getMessage());
+                assertEquals(before, pool.detailedSnapshot());
+                assertEquals(priorities, pool.prioritisedTransactions());
+                assertEquals(referencePool, call(client, reference, "getrawmempool", List.of(true)));
+                assertEquals(referencePriorities, call(client, reference, "getprioritisedtransactions", List.of()));
+            }
+            for (long delta : new long[]{2, -1}) {
+                assertEquals(true, call(client, reference, "prioritisetransaction", List.of(child.txId().toDisplayHex(), 0, delta)));
+                pool.prioritise(child.txId(), delta);
+            }
+            var changed = (Map<?, ?>) ((Map<?, ?>) call(client, reference, "getprioritisedtransactions", List.of())).get(child.txId().toDisplayHex());
+            assertEquals(((Number) changed.get("fee_delta")).longValue(), pool.prioritisedTransactions().get(child.txId()).longValue());
+            assertEquals(((Number) changed.get("modified_fee")).longValue(), pool.find(child.txId()).orElseThrow().modifiedFee());
+        } finally {
+            if (process.isAlive()) {
+                try { core("stop"); } catch (Exception ignored) { }
+                if (!process.waitFor(15, TimeUnit.SECONDS)) { process.destroyForcibly(); process.waitFor(5, TimeUnit.SECONDS); }
+            }
+        }
+    }
+
+    @Test
+    @EnabledIfSystemProperty(named = "bitcoin.core.binary", matches = ".+")
     void discoveryAndBothFeeEstimatorsMatchColdAndWarmCore32() throws Exception {
         Path binary = Path.of(System.getProperty("bitcoin.core.binary"));
         cli = binary.resolveSibling(System.getProperty("os.name").startsWith("Windows") ? "bitcoin-cli.exe" : "bitcoin-cli");
@@ -122,6 +209,7 @@ class BitcoinCore32CompatibilityTest {
                         compareKnownSingleProbes(client, uri);
                         comparePartialSubmissions(client, uri);
                         compareTrucStates(client, uri);
+                        compareEqualFeeMiningOrder(client, uri, validation);
                         core("stop");
                         assertTrue(core.waitFor(15, TimeUnit.SECONDS));
                         var nativeStatistics = new MempoolFeeEstimator();
@@ -428,6 +516,9 @@ class BitcoinCore32CompatibilityTest {
             assertEquals("success", cappedExpected.get("package_msg"));
             assertEquals(cappedExpected.get("package_msg"), cappedActual.get("package_msg"));
             assertEquals(cappedExpected.get("tx-results"), cappedActual.get("tx-results"));
+            var repeatParams = List.of(cases.get(i), new java.math.BigDecimal("0.00000001"));
+            assertEquals(call(client, reference, "sendrawtransaction", repeatParams),
+                    call(client, uri, "sendrawtransaction", repeatParams), "known txid uses accepted witness and skips fee cap");
             assertEquals(expectedPool, call(client, reference, "getrawmempool", List.of()));
             assertEquals(actualPool, call(client, uri, "getrawmempool", List.of()));
         }
@@ -650,11 +741,141 @@ class BitcoinCore32CompatibilityTest {
 
     private void comparePartialSubmissions(HttpClient client, URI uri) throws Exception {
         URI reference = URI.create("http://127.0.0.1:" + rpcPort);
+        call(client, reference, "syncwithvalidationinterfacequeue", List.of());
         var coins = ((List<?>) call(client, reference, "listunspent", List.of())).stream().map(value -> (Map<?, ?>) value)
                 .filter(value -> new java.math.BigDecimal(value.get("amount").toString()).compareTo(java.math.BigDecimal.ONE) > 0)
-                .limit(3).toList();
-        assertEquals(3, coins.size());
+                .limit(4).toList();
+        assertEquals(4, coins.size());
+        var feeFixture = createSubmissionFixture(client, reference, coins.get(3), "0.00010000", "0.00010000");
+        var feeParent = TransactionParser.parse(HexFormat.of().parseHex(feeFixture.getFirst()));
+        long feeSize = ru.bitcoin.node.consensus.transaction.TransactionWeight.virtualSize(feeParent);
+        // Smallest integral sat/kvB rate whose ceil(rate*vsize/1000) pays 10000 sat.
+        long firstAllowedRate = (9999L * 1000 / feeSize) + 1;
+        var feeId = feeParent.txId().toDisplayHex();
+        for (var endpoint : List.of(reference, uri))
+            assertEquals(true, call(client, endpoint, "prioritisetransaction", List.of(feeId, 0, -1000)));
+        var rejectedCap = List.of(feeFixture.getFirst(), java.math.BigDecimal.valueOf(firstAllowedRate - 1, 8));
+        var rejected = callResponse(client, reference, "sendrawtransaction", rejectedCap).get("error");
+        assertNotNull(rejected);
+        assertEquals(rejected, callResponse(client, uri, "sendrawtransaction", rejectedCap).get("error"), "negative fee delta must not reduce client base-fee cap");
+        for (var endpoint : List.of(reference, uri)) {
+            assertFalse(((List<?>) call(client, endpoint, "getrawmempool", List.of())).contains(feeId));
+            assertEquals(true, call(client, endpoint, "prioritisetransaction", List.of(feeId, 0, 1_001_000)));
+        }
+        var acceptedCap = List.of(feeFixture.getFirst(), java.math.BigDecimal.valueOf(firstAllowedRate, 8));
+        assertEquals(feeId, call(client, reference, "sendrawtransaction", acceptedCap));
+        assertEquals(feeId, call(client, uri, "sendrawtransaction", acceptedCap), "ceil cap uses base fee despite positive fee delta");
         var pack = createSubmissionFixture(client, reference, coins.getFirst(), "0.00010000", "0.00010000");
+        String priorityId = "00".repeat(32);
+        var invalidPriorities = new ArrayList<Object>();
+        invalidPriorities.add(Arrays.asList(null, 0, 0));
+        invalidPriorities.add(List.of(1, 0, 0));
+        invalidPriorities.add(List.of(priorityId, "0", true));
+        invalidPriorities.add(List.of("ff", "0", true));
+        invalidPriorities.add(Map.of("txid", priorityId, "fee_delta", new java.math.BigDecimal("0.5")));
+        invalidPriorities.add(Map.of("txid", priorityId, "dummy", "0", "fee_delta", true));
+        invalidPriorities.add(Map.of("txid", 1, "dummy", "0", "fee_delta", true));
+        for (var delta : Arrays.asList(null, true, "1", List.of(), Map.of(), new java.math.BigDecimal("0.5"),
+                new java.math.BigDecimal("-0.5"), new java.math.BigDecimal("1.0"), new java.math.BigDecimal("1E+2"),
+                new java.math.BigInteger("9223372036854775808"), new java.math.BigInteger("-9223372036854775809")))
+            invalidPriorities.add(Arrays.asList(priorityId, 0, delta));
+        for (var dummy : Arrays.asList(true, "0", List.of(), Map.of(), new java.math.BigDecimal("0.5"),
+                new java.math.BigDecimal("-0.5"), 1, -1))
+            invalidPriorities.add(List.of(priorityId, dummy, 0));
+        invalidPriorities.add(List.of(priorityId, new java.math.BigDecimal("0.5"), new java.math.BigDecimal("0.5")));
+        for (var hash : List.of("", "ff", "zz".repeat(32), "é".repeat(32))) {
+            invalidPriorities.add(List.of(hash, 0, 0));
+            invalidPriorities.add(List.of(hash, new java.math.BigDecimal("0.5"), new java.math.BigDecimal("0.5")));
+        }
+        var priorityBeforeReference = call(client, reference, "getprioritisedtransactions", List.of());
+        var priorityBeforeLocal = call(client, uri, "getprioritisedtransactions", List.of());
+        for (var params : invalidPriorities) {
+            var expected = callResponse(client, reference, "prioritisetransaction", params).get("error");
+            assertNotNull(expected, "Invalid priority fixture: " + params);
+            assertEquals(expected, callResponse(client, uri, "prioritisetransaction", params).get("error"), "priority argument order/types " + params);
+        }
+        assertEquals(priorityBeforeReference, call(client, reference, "getprioritisedtransactions", List.of()));
+        assertEquals(priorityBeforeLocal, call(client, uri, "getprioritisedtransactions", List.of()));
+        var spend = TransactionParser.parse(HexFormat.of().parseHex(pack.getFirst()));
+        var spendInput = spend.inputs().getFirst();
+        var missing = new ru.bitcoin.node.protocol.transaction.Transaction(spend.version(), List.of(
+                new ru.bitcoin.node.protocol.transaction.TxIn(
+                        new ru.bitcoin.node.protocol.transaction.OutPoint(new ru.bitcoin.node.common.types.Hash256(new byte[32]),
+                                new ru.bitcoin.node.common.types.UInt32(0)),
+                        spendInput.scriptSig(), spendInput.sequence(), spendInput.witness())), spend.outputs(), spend.lockTime());
+        var badIndex = new ru.bitcoin.node.protocol.transaction.Transaction(spend.version(), List.of(
+                new ru.bitcoin.node.protocol.transaction.TxIn(
+                        new ru.bitcoin.node.protocol.transaction.OutPoint(spendInput.previousOutput().transactionId(),
+                                new ru.bitcoin.node.common.types.UInt32(ru.bitcoin.node.common.types.UInt32.MAX_VALUE)),
+                        spendInput.scriptSig(), spendInput.sequence(), spendInput.witness())), spend.outputs(), spend.lockTime());
+        String bestHash = call(client, reference, "getbestblockhash", List.of()).toString();
+        var bestBlock = (Map<?, ?>) call(client, reference, "getblock", List.of(bestHash, 1));
+        String confirmedId = ((List<?>) bestBlock.get("tx")).getFirst().toString();
+        String confirmedHex = call(client, reference, "getrawtransaction", List.of(confirmedId, false, bestHash)).toString();
+        for (var raw : List.of(rawTransaction(missing), rawTransaction(badIndex), confirmedHex)) {
+            for (var cap : List.of(java.math.BigDecimal.ZERO, new java.math.BigDecimal("0.00000001"), new java.math.BigDecimal("0.1"))) {
+                var params = List.of(raw, cap);
+                var expected = callResponse(client, reference, "sendrawtransaction", params).get("error");
+                assertNotNull(expected);
+                assertEquals(expected, callResponse(client, uri, "sendrawtransaction", params).get("error"), "broadcast missing/confirmed classification");
+            }
+        }
+        for (var method : List.of("sendrawtransaction", "testmempoolaccept", "submitpackage")) {
+            Object raw = method.equals("sendrawtransaction") ? "zz" : List.of("zz");
+            var amounts = Arrays.asList(null, true, List.of(), Map.of(), "", "x", "+1", "01", ".1", "1.", " 0", "0 ",
+                    "0.000000001", "-0.000000001", "-0.00000001", "21000000.00000001", "10000000000", "1e9999999999",
+                    "1e-9999999999", "1", 1, "1.00000001", "0", "-0", "0.000000010", "1e-8", "0.99999999");
+            for (var amount : amounts) {
+                var params = Arrays.asList(raw, amount);
+                var expected = callResponse(client, reference, method, params).get("error");
+                assertNotNull(expected);
+                assertEquals(expected, callResponse(client, uri, method, params).get("error"), method + " maxfeerate=" + amount);
+                if (!method.equals("testmempoolaccept")) {
+                    params = Arrays.asList(raw, 0, amount);
+                    expected = callResponse(client, reference, method, params).get("error");
+                    assertNotNull(expected);
+                    assertEquals(expected, callResponse(client, uri, method, params).get("error"), method + " maxburnamount=" + amount);
+                }
+            }
+        }
+        // Valid encoding ensures sendrawtransaction reaches its fee parser;
+        // every value here must fail before admission of this signed parent.
+        for (var amount : Arrays.asList(true, List.of(), Map.of(), "", "x", "+1", "01", ".1", "1.", " 0", "0 ",
+                "0.000000001", "-0.000000001", "-0.00000001", "21000000.00000001", "10000000000", "1e9999999999",
+                "1e-9999999999", "1", 1, "1.00000001")) {
+            var params = Arrays.asList(pack.getFirst(), amount);
+            var expected = callResponse(client, reference, "sendrawtransaction", params).get("error");
+            assertNotNull(expected);
+            assertEquals(expected, callResponse(client, uri, "sendrawtransaction", params).get("error"), "sendrawtransaction encoded maxfeerate=" + amount);
+        }
+        for (var method : List.of("testmempoolaccept", "submitpackage")) {
+            var beforeReference = call(client, reference, "getrawmempool", List.of());
+            var beforeLocal = call(client, uri, "getrawmempool", List.of());
+            var malformedParams = new ArrayList<List<?>>();
+            for (var value : Arrays.asList(null, 1, true, List.of(), Map.of())) {
+                malformedParams.add(List.of(Arrays.asList(value)));
+                malformedParams.add(List.of(Arrays.asList(pack.getFirst(), value)));
+                malformedParams.add(List.of(Arrays.asList("zz", value)));
+                malformedParams.add(List.of(Arrays.asList(value, "zz")));
+                malformedParams.add(List.of(Collections.nCopies(26, value)));
+            }
+            for (var hex : List.of("", "00", "zz", "0100000000010000000000")) {
+                malformedParams.add(List.of(List.of(hex)));
+                malformedParams.add(List.of(List.of(pack.getFirst(), hex)));
+            }
+            for (var rawPackage : List.of(List.of(), java.util.Collections.nCopies(26, "00"))) {
+                malformedParams.add(List.of(rawPackage));
+                malformedParams.add(List.of(rawPackage, "invalid-fee"));
+                if (method.equals("submitpackage")) malformedParams.add(List.of(rawPackage, 0, "invalid-burn"));
+            }
+            for (var params : malformedParams) {
+                var expected = callResponse(client, reference, method, params).get("error");
+                assertNotNull(expected, method + " fixture must fail: " + params);
+                assertEquals(expected, callResponse(client, uri, method, params).get("error"), method + " decoding/order " + params);
+            }
+            assertEquals(beforeReference, call(client, reference, "getrawmempool", List.of()));
+            assertEquals(beforeLocal, call(client, uri, "getrawmempool", List.of()));
+        }
         var child = TransactionParser.parse(HexFormat.of().parseHex(pack.getLast()));
         var input = child.inputs().getFirst(); var witness = new ArrayList<>(input.witness().items()); witness.getFirst()[10] ^= 1;
         var invalid = new ru.bitcoin.node.protocol.transaction.Transaction(child.version(), List.of(
@@ -707,6 +928,10 @@ class BitcoinCore32CompatibilityTest {
             var expected = callResponse(client, reference, "submitpackage", params).get("error");
             assertNotNull(expected);
             assertEquals(expected, callResponse(client, uri, "submitpackage", params).get("error"));
+            var sendParams = List.of(hex, "invalid-fee");
+            var sendExpected = callResponse(client, reference, "sendrawtransaction", sendParams).get("error");
+            assertNotNull(sendExpected);
+            assertEquals(sendExpected, callResponse(client, uri, "sendrawtransaction", sendParams).get("error"), "burn precedes fee parsing");
         }
         // The burn cap is per output: two outputs at the cap must reach script
         // validation, even though their sum exceeds the cap. Signatures commit
@@ -719,6 +944,10 @@ class BitcoinCore32CompatibilityTest {
         var splitBurnExpected = (Map<?, ?>) call(client, reference, "submitpackage", splitBurnParams);
         assertEquals("transaction failed", splitBurnExpected.get("package_msg"));
         assertEquals(splitBurnExpected, call(client, uri, "submitpackage", splitBurnParams));
+        var splitSendParams = List.of(rawTransaction(splitBurn), "invalid-fee", new java.math.BigDecimal("0.00000100"));
+        var splitSendExpected = callResponse(client, reference, "sendrawtransaction", splitSendParams).get("error");
+        assertNotNull(splitSendExpected);
+        assertEquals(splitSendExpected, callResponse(client, uri, "sendrawtransaction", splitSendParams).get("error"), "burn cap is per output before fee parsing");
         var submissions = List.of(List.of(invalidPackage), List.of(invalidPackage), List.of(pack),
                 List.of(pack, new java.math.BigDecimal("0.00000001")), List.of(cpfp),
                 List.of(capped, new java.math.BigDecimal("0.00010000")));
@@ -731,10 +960,62 @@ class BitcoinCore32CompatibilityTest {
         }
     }
 
+    private void compareEqualFeeMiningOrder(HttpClient client, URI uri, NodeValidationService validation) throws Exception {
+        URI reference = URI.create("http://127.0.0.1:" + rpcPort);
+        call(client, reference, "syncwithvalidationinterfacequeue", List.of());
+        var coins = ((List<?>) call(client, reference, "listunspent", List.of())).stream().map(value -> (Map<?, ?>) value)
+                .filter(value -> new java.math.BigDecimal(value.get("amount").toString()).compareTo(java.math.BigDecimal.ONE) > 0)
+                .limit(16).toList();
+        var groups = new HashMap<Long, List<String>>();
+        for (var coin : coins) {
+            String destination = call(client, reference, "getnewaddress", List.of()).toString();
+            var amount = new java.math.BigDecimal(coin.get("amount").toString()).subtract(new java.math.BigDecimal("0.00010000"));
+            var raw = call(client, reference, "createrawtransaction", List.of(
+                    List.of(Map.of("txid", coin.get("txid"), "vout", coin.get("vout"))), Map.of(destination, amount)));
+            var signed = (Map<?, ?>) call(client, reference, "signrawtransactionwithwallet", List.of(raw));
+            assertEquals(true, signed.get("complete"));
+            String hex = signed.get("hex").toString();
+            long weight = ru.bitcoin.node.consensus.transaction.TransactionWeight.calculate(TransactionParser.parse(HexFormat.of().parseHex(hex)));
+            groups.computeIfAbsent(weight, ignored -> new ArrayList<>()).add(hex);
+        }
+        var selected = groups.values().stream().max(Comparator.comparingInt(List::size)).orElseThrow().stream().limit(8).toList();
+        assertTrue(selected.size() >= 4, "Need independent signed transactions with exactly equal fee and weight");
+        var ids = new HashSet<String>();
+        for (var raw : selected) {
+            String id = call(client, reference, "sendrawtransaction", List.of(raw)).toString();
+            assertEquals(id, call(client, uri, "sendrawtransaction", List.of(raw)));
+            ids.add(id);
+        }
+        var params = List.of(Map.of("rules", List.of("segwit")));
+        var referenceTemplate = (Map<?, ?>) call(client, reference, "getblocktemplate", params);
+        var expected = ((List<?>) referenceTemplate.get("transactions")).stream().map(value -> ((Map<?, ?>) value).get("txid").toString())
+                .filter(ids::contains).toList();
+        assertEquals(selected.size(), expected.size());
+        var serializedOrder = ids.stream().map(ru.bitcoin.node.common.types.Hash256::fromDisplayHex)
+                .sorted(ru.bitcoin.node.common.types.Hash256::compareRawBytes).map(ru.bitcoin.node.common.types.Hash256::toDisplayHex).toList();
+        assertEquals(serializedOrder, expected, "Native Core singleton fallback is serialized txid order");
+        assertEquals(expected, validation.mempoolMiningOrder().stream().map(entry -> entry.transaction().txId().toDisplayHex())
+                .filter(ids::contains).toList(), "Java relay/mining graph order");
+        var localTemplate = (Map<?, ?>) call(client, uri, "getblocktemplate", params);
+        assertEquals(expected, ((List<?>) localTemplate.get("transactions")).stream()
+                .map(value -> ((Map<?, ?>) value).get("txid").toString()).filter(ids::contains).toList(), "Java block-template order");
+    }
+
     private void compareTrucStates(HttpClient client, URI uri) throws Exception {
         URI reference=URI.create("http://127.0.0.1:"+rpcPort);
-        var coin=((List<?>)call(client,reference,"listunspent",List.of())).stream().map(value->(Map<?,?>)value)
-                .filter(value->new java.math.BigDecimal(value.get("amount").toString()).compareTo(java.math.BigDecimal.ONE)>0).findFirst().orElseThrow();
+        // Earlier submissions notify the wallet asynchronously. The next fixture
+        // needs an independent unspent coin, not an accidental equal-fee RBF.
+        call(client, reference, "syncwithvalidationinterfacequeue", List.of());
+        Map<?, ?> coin = null;
+        for (var value : (List<?>) call(client, reference, "listunspent", List.of())) {
+            var candidate = (Map<?, ?>) value;
+            if (new java.math.BigDecimal(candidate.get("amount").toString()).compareTo(java.math.BigDecimal.ONE) <= 0) continue;
+            if (call(client, reference, "gettxout", List.of(candidate.get("txid"), candidate.get("vout"), true)) != null) {
+                coin = candidate;
+                break;
+            }
+        }
+        assertNotNull(coin, "TRUC fixture needs a coin unspent in Core's current mempool view");
         var fixture=createSubmissionFixture(client,reference,coin,"0.00010000","0.00010000");
         var parent=TransactionParser.parse(HexFormat.of().parseHex(fixture.getFirst()));
         var child=TransactionParser.parse(HexFormat.of().parseHex(fixture.getLast()));

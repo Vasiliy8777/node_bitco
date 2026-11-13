@@ -1,0 +1,7796 @@
+# Bitcoin Core v32.1 TxGraph; fully optimized snapshots; deterministic outer RNG and allocator shims
+# txgraph.cpp SHA256 ee315ee943c677c812f9a237f605b688e3228f3a3a464d0757e06cb3557ef28e
+# txgraph.h SHA256 4f0afb9821eee9e07f06450cc97f90e21820d94adade811d7a714ff76f4f11a1
+new
+add 1 -7270 570 0 
+query 0
+add 2 13063 2271 0 
+query 1
+start
+query 2
+add 3 37646 3363 1 1
+query 3
+add 4 -8808 2709 0 
+query 4
+add 5 9524 149 0 
+query 5
+add 6 1728 2644 0 
+query 6
+add 7 17865 2581 1 2
+query 7
+remove 2
+remove 7
+query 8
+abort
+query 9
+start
+query 10
+add 8 40040 1085 0 
+query 11
+add 9 -4840 3338 0 
+query 12
+commit
+query 13
+add 10 1056 3653 1 8
+query 14
+fee 9 -19172
+query 15
+remove 1
+query 16
+start
+query 17
+remove 2
+query 18
+commit
+query 19
+fee 9 6760
+query 20
+remove 8
+remove 10
+query 21
+start
+query 22
+remove 9
+query 23
+add 11 24770 2895 0 
+query 24
+fee 11 -7845
+query 25
+add 12 43146 3474 1 11
+query 26
+fee 12 -7612
+query 27
+add 13 38228 1826 0 
+query 28
+add 14 3454 2856 0 
+query 29
+add 15 -8485 2658 0 
+query 30
+fee 11 2376
+query 31
+remove 13
+query 32
+add 16 18471 3988 0 
+query 33
+add 17 2406 2051 0 
+query 34
+add 18 19254 1134 1 12
+query 35
+add 19 39888 2737 2 11 12
+query 36
+remove 18
+query 37
+add 20 27752 1821 1 14
+query 38
+commit
+query 39
+remove 16
+query 40
+remove 15
+query 41
+add 21 12795 3511 1 12
+query 42
+remove 11
+remove 12
+remove 21
+query 43
+remove 19
+query 44
+add 22 -2334 2918 1 14
+query 45
+start
+query 46
+add 23 -6780 2143 1 22
+query 47
+fee 22 2555
+query 48
+fee 23 7234
+query 49
+remove 14
+remove 20
+query 50
+remove 22
+query 51
+abort
+query 52
+start
+query 53
+commit
+query 54
+start
+query 55
+add 24 38442 3803 0 
+query 56
+add 25 24318 2962 1 14
+query 57
+commit
+query 58
+start
+query 59
+fee 24 28587
+query 60
+add 26 38907 1644 0 
+query 61
+add 27 23316 2108 2 20 22
+query 62
+abort
+query 63
+add 28 -6922 1392 0 
+query 64
+add 29 38622 1595 2 14 20
+query 65
+add 30 18560 3179 2 24 29
+query 66
+add 31 48904 3079 1 22
+query 67
+add 32 22615 2821 3 22 29 31
+query 68
+remove 14
+remove 20
+remove 22
+remove 29
+remove 31
+remove 32
+query 69
+remove 25
+query 70
+remove 28
+query 71
+start
+query 72
+abort
+query 73
+add 33 990 1846 0 
+query 74
+start
+query 75
+add 34 -3825 1959 1 30
+query 76
+add 35 11531 451 1 34
+query 77
+remove 24
+remove 30
+query 78
+remove 34
+remove 35
+query 79
+add 36 26209 1985 0 
+query 80
+remove 36
+query 81
+commit
+query 82
+start
+query 83
+add 37 5172 3788 0 
+query 84
+abort
+query 85
+remove 17
+query 86
+start
+query 87
+add 38 9330 3272 0 
+query 88
+add 39 44676 1528 1 33
+query 89
+remove 33
+query 90
+commit
+query 91
+add 40 30959 3207 0 
+query 92
+add 41 613 2958 0 
+query 93
+add 42 -6677 3382 0 
+query 94
+add 43 3308 1796 0 
+query 95
+start
+query 96
+commit
+query 97
+add 44 10061 3340 0 
+query 98
+add 45 14468 1811 2 39 44
+query 99
+add 46 45763 1897 1 42
+query 100
+add 47 29541 695 0 
+query 101
+add 48 44246 583 3 39 45 46
+query 102
+fee 48 36228
+query 103
+start
+query 104
+fee 41 44162
+query 105
+add 49 12773 2934 0 
+query 106
+add 50 45840 2021 1 38
+query 107
+abort
+query 108
+add 51 35659 1894 0 
+query 109
+fee 44 7816
+query 110
+add 52 12373 837 2 44 45
+query 111
+add 53 24892 3513 3 45 48 52
+query 112
+remove 44
+query 113
+remove 47
+query 114
+add 54 8521 336 2 51 53
+query 115
+add 55 43832 532 2 48 54
+query 116
+start
+query 117
+remove 39
+remove 45
+query 118
+add 56 38863 747 0 
+query 119
+remove 38
+query 120
+add 57 33462 1932 1 40
+query 121
+add 58 40370 1422 2 42 52
+query 122
+add 59 30505 2898 6 41 42 43 53 55 57
+query 123
+remove 43
+remove 59
+query 124
+fee 58 41963
+query 125
+remove 52
+remove 53
+remove 54
+remove 55
+remove 58
+query 126
+add 60 21023 923 1 40
+query 127
+add 61 33691 3131 2 40 51
+query 128
+add 62 34822 3125 2 42 61
+query 129
+add 63 30540 1910 4 40 42 48 51
+query 130
+commit
+query 131
+remove 40
+remove 57
+remove 60
+remove 61
+remove 62
+remove 63
+query 132
+fee 42 48829
+query 133
+remove 42
+query 134
+start
+query 135
+add 64 8484 2092 0 
+query 136
+add 65 3143 2396 1 48
+query 137
+remove 56
+query 138
+add 66 -3762 3074 2 48 64
+query 139
+add 67 43477 2033 0 
+query 140
+abort
+query 141
+add 68 39424 1841 0 
+query 142
+start
+query 143
+add 69 19545 1843 2 51 56
+query 144
+remove 51
+remove 56
+remove 69
+query 145
+fee 68 -5685
+query 146
+remove 48
+query 147
+add 70 -7674 2002 1 68
+query 148
+add 71 20311 652 1 68
+query 149
+abort
+new
+add 1 29452 3878 0 
+query 150
+fee 1 -3664
+query 151
+start
+query 152
+add 2 -4083 3093 1 1
+query 153
+remove 1
+query 154
+remove 2
+query 155
+add 3 19511 2659 0 
+query 156
+add 4 16190 3356 0 
+query 157
+fee 3 -4547
+query 158
+abort
+query 159
+add 5 30079 3773 0 
+query 160
+add 6 36781 1509 0 
+query 161
+add 7 -5846 3655 1 5
+query 162
+add 8 27223 2659 1 5
+query 163
+add 9 -1970 177 0 
+query 164
+add 10 20152 2743 3 1 5 9
+query 165
+fee 10 24579
+query 166
+start
+query 167
+add 11 40707 3042 0 
+query 168
+add 12 28750 1432 1 8
+query 169
+add 13 36513 3936 3 5 7 9
+query 170
+abort
+query 171
+add 14 5503 3837 1 6
+query 172
+fee 8 3579
+query 173
+start
+query 174
+add 15 -9241 2243 2 1 5
+query 175
+add 16 35464 2341 1 9
+query 176
+remove 1
+remove 5
+remove 9
+remove 10
+query 177
+abort
+query 178
+start
+query 179
+add 17 49553 1388 2 1 14
+query 180
+fee 1 46706
+query 181
+abort
+query 182
+remove 14
+query 183
+start
+query 184
+add 18 25451 218 0 
+query 185
+abort
+query 186
+remove 1
+query 187
+start
+query 188
+commit
+query 189
+add 19 32832 621 1 9
+query 190
+start
+query 191
+remove 5
+remove 9
+remove 10
+query 192
+add 20 9821 2480 0 
+query 193
+abort
+query 194
+fee 8 -8775
+query 195
+add 21 -350 2901 3 6 7 9
+query 196
+remove 5
+remove 8
+query 197
+remove 10
+query 198
+add 22 27285 3381 0 
+query 199
+fee 7 30090
+query 200
+remove 7
+query 201
+add 23 29203 2537 2 9 22
+query 202
+add 24 9872 2194 2 9 19
+query 203
+start
+query 204
+remove 21
+query 205
+add 25 13135 3056 0 
+query 206
+add 26 16623 3426 1 25
+query 207
+add 27 12336 3233 1 22
+query 208
+fee 19 12283
+query 209
+remove 19
+remove 24
+query 210
+abort
+query 211
+start
+query 212
+add 28 1880 2024 2 22 24
+query 213
+add 29 -3542 1615 3 9 22 24
+query 214
+add 30 -9355 2235 2 28 29
+query 215
+remove 9
+query 216
+add 31 2886 1036 2 6 19
+query 217
+remove 24
+remove 28
+remove 29
+remove 30
+query 218
+abort
+query 219
+remove 24
+query 220
+remove 6
+query 221
+fee 21 4618
+query 222
+start
+query 223
+commit
+query 224
+add 32 48572 1258 0 
+query 225
+add 33 -5725 666 1 22
+query 226
+add 34 22674 722 2 9 22
+query 227
+fee 19 870
+query 228
+start
+query 229
+commit
+query 230
+remove 22
+remove 33
+query 231
+add 35 26035 3016 1 19
+query 232
+remove 32
+query 233
+fee 9 27786
+query 234
+add 36 27568 734 1 19
+query 235
+remove 9
+remove 34
+query 236
+start
+query 237
+abort
+query 238
+remove 35
+query 239
+add 37 11463 3210 2 21 36
+query 240
+add 38 -8872 1423 0 
+query 241
+remove 37
+query 242
+remove 38
+query 243
+fee 36 6371
+query 244
+fee 19 32977
+query 245
+add 39 24508 2656 0 
+query 246
+remove 21
+query 247
+start
+query 248
+add 40 14147 1844 0 
+query 249
+abort
+query 250
+add 41 -8893 1640 0 
+query 251
+start
+query 252
+add 42 26533 3656 0 
+query 253
+abort
+query 254
+add 43 36975 2816 1 41
+query 255
+add 44 26377 2262 1 23
+query 256
+add 45 25200 3122 0 
+query 257
+add 46 4064 3267 1 19
+query 258
+remove 19
+remove 36
+query 259
+remove 41
+query 260
+start
+query 261
+add 47 46548 1628 1 45
+query 262
+commit
+query 263
+remove 23
+remove 44
+query 264
+start
+query 265
+add 48 47252 1073 0 
+query 266
+fee 48 6031
+query 267
+fee 47 29217
+query 268
+add 49 46322 2604 1 39
+query 269
+abort
+query 270
+add 50 30213 2572 1 43
+query 271
+remove 46
+query 272
+start
+query 273
+add 51 5862 3651 2 47 50
+query 274
+add 52 34433 3906 1 47
+query 275
+remove 43
+remove 50
+remove 51
+query 276
+fee 39 34587
+query 277
+add 53 32100 523 0 
+query 278
+add 54 -8643 669 0 
+query 279
+add 55 30378 242 0 
+query 280
+commit
+query 281
+start
+query 282
+fee 39 22285
+query 283
+add 56 26590 914 1 52
+query 284
+add 57 -5341 2306 1 54
+query 285
+add 58 17036 3985 0 
+query 286
+add 59 -5911 1313 1 52
+query 287
+add 60 18380 3187 2 45 47
+query 288
+commit
+query 289
+remove 54
+remove 57
+query 290
+fee 45 5806
+query 291
+start
+query 292
+fee 52 -10918
+query 293
+add 61 -5271 2452 1 45
+query 294
+remove 47
+remove 52
+remove 56
+remove 59
+remove 60
+query 295
+add 62 22419 3203 1 58
+query 296
+fee 55 2644
+query 297
+abort
+query 298
+remove 47
+remove 52
+remove 56
+remove 59
+remove 60
+query 299
+new
+add 1 -8703 3932 0 
+query 300
+start
+query 301
+commit
+query 302
+add 2 38095 836 0 
+query 303
+start
+query 304
+add 3 42587 576 0 
+query 305
+remove 1
+query 306
+add 4 17228 3225 0 
+query 307
+fee 2 43768
+query 308
+commit
+query 309
+start
+query 310
+abort
+query 311
+add 5 28408 686 0 
+query 312
+add 6 22846 428 0 
+query 313
+add 7 17501 1681 0 
+query 314
+add 8 15262 2270 1 6
+query 315
+add 9 18919 1652 0 
+query 316
+add 10 31696 1569 2 2 9
+query 317
+add 11 38016 3870 3 3 5 10
+query 318
+remove 9
+remove 10
+remove 11
+query 319
+add 12 16013 2964 1 6
+query 320
+add 13 -8556 1556 1 4
+query 321
+start
+query 322
+add 14 -6926 3667 2 3 6
+query 323
+fee 4 -12067
+query 324
+fee 2 1300
+query 325
+remove 14
+query 326
+add 15 31206 1909 1 3
+query 327
+add 16 -8218 2415 2 3 13
+query 328
+commit
+query 329
+remove 8
+query 330
+start
+query 331
+remove 15
+query 332
+commit
+query 333
+fee 4 -15958
+query 334
+add 17 29903 2959 0 
+query 335
+remove 4
+remove 13
+query 336
+start
+query 337
+add 18 24180 635 1 17
+query 338
+commit
+query 339
+add 19 29914 657 0 
+query 340
+remove 17
+remove 18
+query 341
+start
+query 342
+commit
+query 343
+start
+query 344
+remove 2
+query 345
+add 20 14622 986 1 19
+query 346
+fee 16 9644
+query 347
+add 21 45559 1264 1 5
+query 348
+fee 16 -11273
+query 349
+abort
+query 350
+add 22 4734 3616 1 6
+query 351
+remove 6
+remove 22
+query 352
+remove 5
+query 353
+add 23 39499 3341 1 16
+query 354
+add 24 -2975 3459 2 3 19
+query 355
+add 25 38674 160 2 3 24
+query 356
+remove 25
+query 357
+add 26 44300 3304 0 
+query 358
+add 27 46646 2071 1 16
+query 359
+remove 16
+remove 23
+remove 27
+query 360
+add 28 -9489 2573 1 3
+query 361
+add 29 18559 1719 0 
+query 362
+add 30 42022 1153 3 19 24 26
+query 363
+fee 28 43722
+query 364
+remove 29
+query 365
+start
+query 366
+fee 12 40932
+query 367
+add 31 17805 1204 0 
+query 368
+add 32 20104 3618 0 
+query 369
+remove 3
+remove 24
+remove 28
+remove 30
+query 370
+abort
+query 371
+add 33 40517 1866 1 24
+query 372
+remove 7
+query 373
+add 34 40307 2343 0 
+query 374
+add 35 42384 3672 2 28 34
+query 375
+add 36 12178 1122 1 30
+query 376
+add 37 22397 2000 3 19 24 26
+query 377
+add 38 37861 3350 1 30
+query 378
+add 39 34013 1005 2 12 24
+query 379
+add 40 6260 952 2 24 37
+query 380
+start
+query 381
+add 41 -6463 2491 2 24 40
+query 382
+add 42 5696 3802 1 24
+query 383
+add 43 22265 2176 5 24 28 33 35 41
+query 384
+remove 3
+remove 19
+remove 24
+remove 26
+remove 30
+query 385
+add 44 44516 2081 3 35 38 41
+query 386
+add 45 24737 1614 0 
+query 387
+commit
+query 388
+add 46 36885 1500 4 2 12 40 42
+query 389
+add 47 44756 1052 5 2 28 42 44 46
+query 390
+start
+query 391
+add 48 -3110 3471 3 35 37 46
+query 392
+add 49 10115 2623 2 37 42
+query 393
+fee 35 30391
+query 394
+fee 2 7284
+query 395
+fee 12 5765
+query 396
+commit
+query 397
+start
+query 398
+add 50 15964 947 5 2 35 40 41 46
+query 399
+add 51 17570 1125 2 2 35
+query 400
+remove 28
+remove 34
+remove 35
+remove 37
+remove 38
+remove 40
+remove 41
+remove 44
+query 401
+remove 45
+query 402
+commit
+query 403
+fee 42 31468
+query 404
+start
+query 405
+remove 50
+query 406
+add 52 5592 2335 3 2 47 48
+query 407
+remove 2
+query 408
+fee 12 47185
+query 409
+remove 46
+remove 47
+remove 48
+remove 52
+query 410
+commit
+query 411
+add 53 41070 2716 0 
+query 412
+add 54 -859 623 0 
+query 413
+add 55 29788 1781 1 53
+query 414
+fee 33 16129
+query 415
+start
+query 416
+add 56 19537 2097 1 54
+query 417
+commit
+query 418
+add 57 17378 1195 2 36 42
+query 419
+add 58 -6616 3506 3 54 55 56
+query 420
+remove 36
+remove 57
+query 421
+add 59 -6367 2796 1 55
+query 422
+fee 39 -8922
+query 423
+remove 55
+remove 58
+remove 59
+query 424
+fee 12 -7764
+query 425
+remove 12
+remove 39
+query 426
+add 60 -4419 963 4 33 49 53 54
+query 427
+add 61 1989 3571 0 
+query 428
+remove 42
+remove 49
+query 429
+add 62 12944 2023 1 61
+query 430
+add 63 35520 1547 2 51 54
+query 431
+start
+query 432
+fee 54 22568
+query 433
+remove 53
+remove 60
+query 434
+add 64 34821 1485 1 51
+query 435
+fee 62 -4070
+query 436
+add 65 -3602 2615 1 33
+query 437
+add 66 32188 1160 1 56
+query 438
+add 67 13131 1705 1 65
+query 439
+commit
+query 440
+start
+query 441
+add 68 13821 867 1 67
+query 442
+add 69 18844 3170 3 62 64 67
+query 443
+commit
+query 444
+add 70 42826 2566 3 51 61 67
+query 445
+remove 33
+remove 43
+remove 65
+remove 67
+remove 68
+remove 69
+remove 70
+query 446
+add 71 44919 1660 3 62 63 66
+query 447
+add 72 23373 1005 0 
+query 448
+add 73 -6215 1065 4 56 61 62 64
+query 449
+new
+add 1 22400 3493 0 
+query 450
+remove 1
+query 451
+add 2 28022 1158 0 
+query 452
+add 3 38511 1723 0 
+query 453
+add 4 -5964 3258 1 2
+query 454
+add 5 4364 1129 0 
+query 455
+start
+query 456
+add 6 37856 1497 0 
+query 457
+commit
+query 458
+start
+query 459
+add 7 25907 2995 1 2
+query 460
+remove 5
+query 461
+remove 2
+remove 4
+remove 7
+query 462
+fee 6 33361
+query 463
+add 8 13147 1272 0 
+query 464
+remove 6
+query 465
+add 9 45032 1279 0 
+query 466
+add 10 41630 2491 0 
+query 467
+add 11 42371 2838 2 3 10
+query 468
+fee 9 15453
+query 469
+fee 9 30452
+query 470
+add 12 46363 1928 2 9 11
+query 471
+add 13 2157 948 1 11
+query 472
+remove 3
+remove 9
+remove 10
+remove 11
+remove 12
+query 473
+add 14 -2909 1943 0 
+query 474
+add 15 44268 432 0 
+query 475
+remove 15
+query 476
+remove 14
+query 477
+remove 13
+query 478
+commit
+query 479
+add 16 -1166 3361 0 
+query 480
+start
+query 481
+add 17 21321 3543 0 
+query 482
+add 18 11952 342 0 
+query 483
+add 19 3088 255 0 
+query 484
+add 20 33836 2876 2 16 19
+query 485
+add 21 9565 1914 0 
+query 486
+add 22 44076 519 0 
+query 487
+remove 22
+query 488
+remove 17
+query 489
+abort
+query 490
+add 23 19944 1955 0 
+query 491
+start
+query 492
+add 24 1832 2690 0 
+query 493
+add 25 1264 3360 0 
+query 494
+commit
+query 495
+add 26 32810 101 2 23 24
+query 496
+remove 23
+remove 26
+query 497
+start
+query 498
+add 27 44635 2405 0 
+query 499
+add 28 -9023 270 1 25
+query 500
+add 29 41554 2726 2 8 27
+query 501
+add 30 29418 3572 0 
+query 502
+abort
+query 503
+add 31 38352 2537 0 
+query 504
+add 32 8149 503 0 
+query 505
+add 33 12487 880 1 24
+query 506
+add 34 -5315 905 3 24 31 32
+query 507
+add 35 22066 2452 1 25
+query 508
+fee 25 -9154
+query 509
+start
+query 510
+commit
+query 511
+add 36 2192 546 1 25
+query 512
+fee 35 13786
+query 513
+start
+query 514
+add 37 25830 2903 3 16 34 35
+query 515
+commit
+query 516
+remove 32
+remove 34
+remove 37
+query 517
+fee 33 13275
+query 518
+add 38 -6888 2960 2 16 24
+query 519
+add 39 -3935 903 0 
+query 520
+remove 25
+remove 35
+query 521
+add 40 42290 262 1 16
+query 522
+start
+query 523
+fee 36 4230
+query 524
+add 41 39161 276 1 31
+query 525
+add 42 7808 2759 1 24
+query 526
+commit
+query 527
+add 43 7434 3092 0 
+query 528
+remove 24
+remove 33
+remove 38
+remove 42
+query 529
+start
+query 530
+add 44 -3649 3202 1 41
+query 531
+fee 40 9766
+query 532
+fee 16 1168
+query 533
+abort
+query 534
+remove 16
+query 535
+start
+query 536
+fee 8 26559
+query 537
+add 45 30516 3093 0 
+query 538
+add 46 44844 2211 1 45
+query 539
+abort
+query 540
+start
+query 541
+remove 40
+query 542
+add 47 29670 109 1 8
+query 543
+add 48 10251 131 0 
+query 544
+remove 48
+query 545
+fee 36 16036
+query 546
+add 49 -4800 2042 3 8 31 36
+query 547
+abort
+query 548
+remove 39
+query 549
+add 50 -6990 952 2 31 43
+query 550
+add 51 -2484 2537 1 50
+query 551
+remove 31
+query 552
+remove 8
+query 553
+fee 50 4624
+query 554
+add 52 44915 1761 0 
+query 555
+add 53 11671 2763 3 41 43 51
+query 556
+start
+query 557
+add 54 36985 1714 2 50 51
+query 558
+commit
+query 559
+fee 40 29716
+query 560
+add 55 8518 3377 2 43 53
+query 561
+add 56 38186 3691 2 50 52
+query 562
+fee 43 25004
+query 563
+fee 54 -9789
+query 564
+add 57 48978 2993 0 
+query 565
+remove 43
+remove 50
+remove 51
+query 566
+remove 52
+remove 56
+query 567
+start
+query 568
+fee 55 -6833
+query 569
+add 58 35629 3509 2 55 57
+query 570
+commit
+query 571
+add 59 20800 1341 1 41
+query 572
+add 60 -9581 2021 2 53 54
+query 573
+remove 36
+query 574
+remove 41
+remove 53
+query 575
+add 61 17288 1775 2 55 58
+query 576
+start
+query 577
+add 62 34718 3667 1 55
+query 578
+add 63 -6462 1011 2 40 54
+query 579
+add 64 28662 1679 1 60
+query 580
+add 65 -6739 1515 2 61 62
+query 581
+add 66 10451 3002 2 59 61
+query 582
+add 67 -9063 3026 2 60 61
+query 583
+remove 55
+remove 57
+remove 58
+remove 61
+remove 62
+remove 65
+query 584
+remove 59
+remove 66
+query 585
+remove 60
+remove 64
+remove 67
+query 586
+add 68 21803 2327 0 
+query 587
+add 69 5253 582 3 54 63 68
+query 588
+add 70 34649 1505 1 63
+query 589
+remove 70
+query 590
+abort
+query 591
+add 71 40205 3321 1 60
+query 592
+fee 59 44271
+query 593
+add 72 28356 1729 2 40 55
+query 594
+fee 61 -1692
+query 595
+start
+query 596
+abort
+query 597
+remove 59
+query 598
+fee 71 45598
+query 599
+new
+add 1 1647 1063 0 
+query 600
+add 2 21092 2566 0 
+query 601
+remove 1
+query 602
+remove 2
+query 603
+add 3 -6888 1240 0 
+query 604
+remove 3
+query 605
+add 4 7147 1578 0 
+query 606
+add 5 29067 3622 0 
+query 607
+start
+query 608
+commit
+query 609
+add 6 10008 3330 0 
+query 610
+add 7 13470 2105 0 
+query 611
+remove 5
+query 612
+fee 4 15518
+query 613
+add 8 49285 189 0 
+query 614
+add 9 31597 2284 0 
+query 615
+remove 7
+query 616
+add 10 43809 859 0 
+query 617
+add 11 -36 1533 2 6 8
+query 618
+remove 10
+query 619
+start
+query 620
+remove 11
+query 621
+add 12 18718 3183 0 
+query 622
+remove 9
+query 623
+abort
+query 624
+fee 9 -7980
+query 625
+add 13 30179 173 1 8
+query 626
+remove 6
+query 627
+remove 4
+query 628
+add 14 2203 134 0 
+query 629
+fee 9 30405
+query 630
+fee 13 14128
+query 631
+fee 8 -17424
+query 632
+remove 13
+query 633
+remove 14
+query 634
+fee 8 31
+query 635
+remove 9
+query 636
+start
+query 637
+add 15 17955 1647 0 
+query 638
+add 16 -1647 2039 0 
+query 639
+add 17 -5889 2949 0 
+query 640
+add 18 43411 3119 1 15
+query 641
+add 19 40267 1285 0 
+query 642
+add 20 9203 762 2 16 18
+query 643
+add 21 14351 2233 0 
+query 644
+fee 8 20302
+query 645
+remove 21
+query 646
+fee 16 -6072
+query 647
+fee 15 27124
+query 648
+add 22 32356 2775 2 19 20
+query 649
+remove 22
+query 650
+commit
+query 651
+add 23 18083 2033 2 8 18
+query 652
+remove 11
+query 653
+add 24 37043 1481 1 19
+query 654
+add 25 -665 1586 0 
+query 655
+remove 15
+remove 18
+query 656
+add 26 4839 3842 2 8 24
+query 657
+fee 16 -19473
+query 658
+add 27 34712 1317 1 24
+query 659
+start
+query 660
+add 28 28912 2664 3 17 25 26
+query 661
+commit
+query 662
+add 29 -4268 2676 2 17 26
+query 663
+start
+query 664
+commit
+query 665
+start
+query 666
+commit
+query 667
+remove 16
+remove 20
+query 668
+start
+query 669
+fee 29 980
+query 670
+add 30 8115 1648 4 23 24 25 27
+query 671
+fee 27 21727
+query 672
+add 31 35318 3911 3 17 24 27
+query 673
+add 32 14607 2850 3 23 27 31
+query 674
+remove 27
+remove 30
+remove 31
+remove 32
+query 675
+add 33 -4437 632 3 8 25 29
+query 676
+remove 25
+query 677
+add 34 31313 736 0 
+query 678
+add 35 9331 641 1 29
+query 679
+commit
+query 680
+remove 23
+query 681
+fee 34 2744
+query 682
+add 36 6421 2928 2 28 34
+query 683
+start
+query 684
+fee 17 -13880
+query 685
+abort
+query 686
+remove 17
+remove 28
+remove 29
+remove 33
+remove 35
+remove 36
+query 687
+add 37 33593 1270 2 24 26
+query 688
+remove 19
+query 689
+start
+query 690
+add 38 37646 1214 1 37
+query 691
+fee 24 -16327
+query 692
+add 39 -3194 551 3 26 34 38
+query 693
+add 40 9192 3204 2 37 38
+query 694
+add 41 8907 2874 1 38
+query 695
+abort
+query 696
+fee 34 -15362
+query 697
+fee 8 -15072
+query 698
+remove 37
+query 699
+remove 34
+query 700
+add 42 46749 1229 1 8
+query 701
+add 43 40541 2155 0 
+query 702
+add 44 14268 341 1 24
+query 703
+start
+query 704
+commit
+query 705
+add 45 10093 1092 1 43
+query 706
+add 46 -8632 353 1 43
+query 707
+add 47 29965 2235 0 
+query 708
+fee 26 -6119
+query 709
+add 48 15668 3317 0 
+query 710
+remove 8
+remove 42
+query 711
+remove 47
+query 712
+add 49 11650 1712 0 
+query 713
+add 50 32375 1308 0 
+query 714
+start
+query 715
+add 51 43597 3269 0 
+query 716
+fee 44 17260
+query 717
+abort
+query 718
+add 52 35300 1829 2 45 49
+query 719
+start
+query 720
+add 53 28745 336 1 52
+query 721
+remove 48
+query 722
+fee 50 -9234
+query 723
+add 54 4575 2241 0 
+query 724
+add 55 37369 971 0 
+query 725
+add 56 33050 1483 2 43 52
+query 726
+add 57 19168 3737 2 44 53
+query 727
+add 58 -2966 805 4 49 50 52 56
+query 728
+commit
+query 729
+start
+query 730
+add 59 27354 802 2 43 55
+query 731
+remove 52
+remove 53
+remove 56
+remove 57
+remove 58
+query 732
+add 60 26219 2877 3 26 44 54
+query 733
+fee 55 39552
+query 734
+abort
+query 735
+remove 43
+remove 45
+remove 49
+remove 52
+remove 56
+query 736
+add 61 684 3422 2 46 55
+query 737
+remove 50
+remove 58
+query 738
+fee 57 -19387
+query 739
+start
+query 740
+commit
+query 741
+start
+query 742
+fee 57 32882
+query 743
+fee 26 34028
+query 744
+add 62 14902 1072 1 46
+query 745
+fee 54 11962
+query 746
+add 63 41292 1539 2 55 61
+query 747
+commit
+query 748
+start
+query 749
+abort
+new
+add 1 11648 2919 0 
+query 750
+remove 1
+query 751
+add 2 32474 256 0 
+query 752
+fee 2 25924
+query 753
+remove 2
+query 754
+add 3 36883 1568 0 
+query 755
+remove 3
+query 756
+add 4 3437 1942 0 
+query 757
+add 5 49572 3800 0 
+query 758
+start
+query 759
+fee 5 18686
+query 760
+add 6 43304 3658 1 5
+query 761
+add 7 -857 110 0 
+query 762
+add 8 43696 3528 0 
+query 763
+add 9 -1790 1077 0 
+query 764
+add 10 17077 2655 1 9
+query 765
+add 11 34566 2632 0 
+query 766
+add 12 -8668 1747 4 5 7 8 9
+query 767
+remove 6
+query 768
+fee 11 2483
+query 769
+fee 11 4759
+query 770
+fee 4 39101
+query 771
+fee 5 3334
+query 772
+add 13 -5572 841 2 11 12
+query 773
+abort
+query 774
+start
+query 775
+abort
+query 776
+remove 4
+query 777
+remove 5
+query 778
+add 14 41085 1978 0 
+query 779
+add 15 13343 3954 0 
+query 780
+start
+query 781
+add 16 34444 3386 1 14
+query 782
+remove 15
+query 783
+remove 14
+remove 16
+query 784
+add 17 28919 2393 0 
+query 785
+fee 17 -17256
+query 786
+add 18 46681 2540 0 
+query 787
+add 19 -9919 1187 0 
+query 788
+fee 18 29577
+query 789
+add 20 1421 2992 1 17
+query 790
+abort
+query 791
+start
+query 792
+commit
+query 793
+remove 15
+query 794
+remove 14
+query 795
+add 21 1629 780 0 
+query 796
+add 22 43258 3235 0 
+query 797
+add 23 37438 1462 0 
+query 798
+fee 21 45839
+query 799
+start
+query 800
+fee 22 42617
+query 801
+remove 22
+query 802
+abort
+query 803
+remove 22
+query 804
+add 24 15247 3721 0 
+query 805
+remove 23
+query 806
+remove 24
+query 807
+add 25 -8426 389 0 
+query 808
+start
+query 809
+commit
+query 810
+remove 25
+query 811
+add 26 16297 3796 0 
+query 812
+fee 21 -9209
+query 813
+start
+query 814
+add 27 -4928 2893 0 
+query 815
+add 28 41734 3478 0 
+query 816
+abort
+query 817
+remove 26
+query 818
+start
+query 819
+add 29 47355 2265 0 
+query 820
+add 30 41125 3289 0 
+query 821
+add 31 5608 3092 1 21
+query 822
+fee 29 -12101
+query 823
+abort
+query 824
+add 32 28023 2164 0 
+query 825
+add 33 31791 1276 0 
+query 826
+start
+query 827
+fee 32 4589
+query 828
+add 34 6224 1367 0 
+query 829
+fee 34 -3728
+query 830
+commit
+query 831
+fee 33 -18372
+query 832
+remove 32
+query 833
+add 35 30603 3356 0 
+query 834
+start
+query 835
+remove 21
+query 836
+add 36 15497 2348 1 34
+query 837
+fee 36 21898
+query 838
+remove 36
+query 839
+commit
+query 840
+add 37 38169 1771 0 
+query 841
+add 38 13127 2941 1 33
+query 842
+add 39 27817 1500 0 
+query 843
+remove 38
+query 844
+start
+query 845
+add 40 19993 2361 1 33
+query 846
+add 41 13415 2995 1 35
+query 847
+remove 34
+query 848
+add 42 -6697 714 1 39
+query 849
+abort
+query 850
+add 43 28988 189 0 
+query 851
+add 44 48975 675 1 34
+query 852
+start
+query 853
+add 45 37073 1003 1 37
+query 854
+remove 35
+query 855
+remove 43
+query 856
+remove 37
+remove 45
+query 857
+abort
+query 858
+start
+query 859
+add 46 20411 638 0 
+query 860
+remove 37
+query 861
+add 47 15086 2321 2 33 44
+query 862
+add 48 8006 1956 1 39
+query 863
+remove 34
+remove 44
+remove 47
+query 864
+remove 39
+remove 48
+query 865
+add 49 4177 2067 0 
+query 866
+add 50 21789 3698 0 
+query 867
+fee 49 -11950
+query 868
+add 51 12146 3643 1 50
+query 869
+remove 50
+query 870
+add 52 5244 2401 0 
+query 871
+add 53 36217 2259 0 
+query 872
+commit
+query 873
+start
+query 874
+add 54 -6229 2724 0 
+query 875
+commit
+query 876
+add 55 -3431 482 2 46 51
+query 877
+add 56 7489 2893 1 54
+query 878
+fee 43 41933
+query 879
+add 57 31273 1163 0 
+query 880
+add 58 29055 3425 3 43 51 54
+query 881
+start
+query 882
+abort
+query 883
+remove 57
+query 884
+add 59 23700 100 2 54 58
+query 885
+add 60 13661 3969 1 43
+query 886
+add 61 45522 448 2 53 55
+query 887
+start
+query 888
+fee 43 -1093
+query 889
+add 62 36332 1886 3 46 49 51
+query 890
+add 63 -1173 323 4 43 46 59 60
+query 891
+add 64 35837 1145 3 35 56 59
+query 892
+add 65 45874 2820 4 35 51 53 59
+query 893
+fee 58 -948
+query 894
+commit
+query 895
+add 66 -5870 646 2 43 49
+query 896
+start
+query 897
+commit
+query 898
+add 67 31927 1510 4 46 55 59 62
+query 899
+new
+add 1 -9314 876 0 
+query 900
+add 2 16363 980 0 
+query 901
+add 3 2704 1727 1 1
+query 902
+fee 1 1586
+query 903
+fee 2 -6571
+query 904
+start
+query 905
+abort
+query 906
+remove 1
+remove 3
+query 907
+remove 2
+query 908
+add 4 5582 1486 0 
+query 909
+remove 4
+query 910
+add 5 26142 2281 0 
+query 911
+add 6 15136 3638 0 
+query 912
+start
+query 913
+fee 5 31138
+query 914
+commit
+query 915
+remove 5
+query 916
+add 7 5703 2067 0 
+query 917
+start
+query 918
+add 8 31318 3471 0 
+query 919
+fee 7 -239
+query 920
+abort
+query 921
+add 9 29628 2934 1 6
+query 922
+fee 7 11186
+query 923
+start
+query 924
+add 10 23541 2790 0 
+query 925
+commit
+query 926
+remove 6
+remove 9
+query 927
+remove 7
+query 928
+remove 10
+query 929
+add 11 16650 1310 0 
+query 930
+fee 11 17669
+query 931
+fee 11 20420
+query 932
+remove 11
+query 933
+add 12 -5921 2866 0 
+query 934
+add 13 16155 3894 0 
+query 935
+add 14 49930 3638 1 13
+query 936
+remove 13
+remove 14
+query 937
+start
+query 938
+add 15 31632 2304 0 
+query 939
+add 16 -5502 627 0 
+query 940
+add 17 6913 3929 0 
+query 941
+add 18 9326 809 1 12
+query 942
+commit
+query 943
+remove 17
+query 944
+fee 16 8223
+query 945
+add 19 30517 3712 0 
+query 946
+start
+query 947
+abort
+query 948
+add 20 19736 2966 0 
+query 949
+add 21 48757 646 2 12 18
+query 950
+remove 15
+query 951
+start
+query 952
+add 22 -2279 1294 1 20
+query 953
+add 23 14826 3737 0 
+query 954
+add 24 434 2188 2 20 23
+query 955
+add 25 28615 2464 3 18 19 23
+query 956
+abort
+query 957
+start
+query 958
+add 26 -1486 1699 1 18
+query 959
+remove 20
+query 960
+fee 26 11365
+query 961
+fee 18 46835
+query 962
+abort
+query 963
+start
+query 964
+commit
+query 965
+start
+query 966
+fee 12 32092
+query 967
+add 27 38491 850 0 
+query 968
+add 28 493 3577 2 12 27
+query 969
+fee 18 24944
+query 970
+abort
+query 971
+fee 16 46119
+query 972
+add 29 43137 2966 2 16 21
+query 973
+start
+query 974
+commit
+query 975
+add 30 34811 530 1 21
+query 976
+start
+query 977
+remove 21
+remove 29
+remove 30
+query 978
+fee 19 27712
+query 979
+fee 12 48597
+query 980
+remove 12
+remove 18
+query 981
+fee 19 41297
+query 982
+abort
+query 983
+remove 16
+remove 29
+query 984
+add 31 -2981 1134 1 12
+query 985
+start
+query 986
+add 32 40611 895 1 12
+query 987
+add 33 35195 997 0 
+query 988
+remove 12
+remove 18
+query 989
+abort
+query 990
+fee 19 13719
+query 991
+start
+query 992
+add 34 -873 1937 1 12
+query 993
+add 35 40745 2960 1 19
+query 994
+remove 19
+remove 35
+query 995
+remove 20
+query 996
+fee 34 -1026
+query 997
+fee 34 7464
+query 998
+abort
+query 999
+remove 19
+query 1000
+add 36 21609 2630 2 12 31
+query 1001
+remove 12
+query 1002
+add 37 35158 2134 0 
+query 1003
+start
+query 1004
+abort
+query 1005
+add 38 10118 3748 1 21
+query 1006
+add 39 -2524 1685 2 18 21
+query 1007
+start
+query 1008
+add 40 -5392 2301 1 18
+query 1009
+remove 18
+remove 21
+remove 39
+query 1010
+add 41 17706 3564 3 20 37 40
+query 1011
+remove 31
+query 1012
+remove 20
+remove 41
+query 1013
+commit
+query 1014
+remove 40
+query 1015
+add 42 43211 2740 0 
+query 1016
+add 43 48092 3499 0 
+query 1017
+add 44 42091 767 0 
+query 1018
+add 45 49585 3944 0 
+query 1019
+start
+query 1020
+fee 37 12668
+query 1021
+add 46 28344 2294 3 30 36 43
+query 1022
+fee 38 36420
+query 1023
+commit
+query 1024
+add 47 34780 1864 1 46
+query 1025
+start
+query 1026
+remove 38
+query 1027
+commit
+query 1028
+add 48 5709 2891 3 30 36 46
+query 1029
+add 49 36557 1507 1 42
+query 1030
+add 50 44412 1109 3 36 37 49
+query 1031
+remove 48
+query 1032
+start
+query 1033
+abort
+query 1034
+start
+query 1035
+add 51 46075 2684 2 37 45
+query 1036
+add 52 17137 685 0 
+query 1037
+abort
+query 1038
+add 53 9697 3697 2 42 46
+query 1039
+fee 50 21733
+query 1040
+add 54 36948 1896 2 37 44
+query 1041
+start
+query 1042
+fee 53 -10503
+query 1043
+remove 37
+remove 44
+remove 54
+query 1044
+add 55 48052 623 1 49
+query 1045
+remove 42
+remove 49
+remove 55
+query 1046
+add 56 10124 2992 0 
+query 1047
+remove 30
+remove 46
+remove 47
+remove 53
+query 1048
+remove 43
+query 1049
+abort
+new
+add 1 15848 3667 0 
+query 1050
+add 2 43402 1366 0 
+query 1051
+add 3 -3508 3930 1 2
+query 1052
+start
+query 1053
+fee 3 34494
+query 1054
+remove 3
+query 1055
+add 4 42667 609 0 
+query 1056
+commit
+query 1057
+remove 4
+query 1058
+start
+query 1059
+abort
+query 1060
+remove 1
+query 1061
+add 5 -6091 2396 1 2
+query 1062
+remove 2
+remove 5
+query 1063
+add 6 5494 2760 0 
+query 1064
+remove 6
+query 1065
+add 7 34843 843 0 
+query 1066
+start
+query 1067
+commit
+query 1068
+add 8 23181 3157 0 
+query 1069
+remove 7
+query 1070
+add 9 32308 770 0 
+query 1071
+remove 8
+query 1072
+remove 9
+query 1073
+add 10 12791 169 0 
+query 1074
+add 11 35824 2516 0 
+query 1075
+remove 10
+query 1076
+start
+query 1077
+add 12 35299 507 0 
+query 1078
+remove 12
+query 1079
+commit
+query 1080
+add 13 902 801 0 
+query 1081
+fee 11 -1209
+query 1082
+add 14 -161 945 1 13
+query 1083
+start
+query 1084
+add 15 11871 3748 0 
+query 1085
+remove 15
+query 1086
+add 16 -4211 3806 0 
+query 1087
+add 17 15671 1672 0 
+query 1088
+fee 13 38659
+query 1089
+add 18 14385 2253 0 
+query 1090
+add 19 20198 2304 0 
+query 1091
+abort
+query 1092
+add 20 9098 174 0 
+query 1093
+add 21 28726 480 0 
+query 1094
+add 22 -8732 2691 2 11 13
+query 1095
+remove 13
+remove 14
+remove 22
+query 1096
+remove 11
+query 1097
+add 23 -9493 3465 0 
+query 1098
+remove 23
+query 1099
+add 24 619 2105 0 
+query 1100
+add 25 47012 3944 1 24
+query 1101
+start
+query 1102
+add 26 -110 3764 1 21
+query 1103
+abort
+query 1104
+add 27 48895 2501 0 
+query 1105
+add 28 35634 1360 0 
+query 1106
+add 29 41621 1972 1 21
+query 1107
+add 30 7775 3760 0 
+query 1108
+start
+query 1109
+add 31 36953 3669 1 20
+query 1110
+add 32 42599 2009 2 25 31
+query 1111
+add 33 8791 3356 0 
+query 1112
+abort
+query 1113
+start
+query 1114
+add 34 42327 2850 1 24
+query 1115
+add 35 47517 3930 3 21 24 27
+query 1116
+abort
+query 1117
+add 36 49084 794 2 21 27
+query 1118
+add 37 3241 2283 0 
+query 1119
+add 38 26892 3915 4 20 25 27 28
+query 1120
+add 39 45323 2600 2 21 29
+query 1121
+add 40 1653 2807 2 20 37
+query 1122
+remove 38
+query 1123
+add 41 -2658 953 0 
+query 1124
+add 42 -6813 1595 2 37 39
+query 1125
+remove 21
+remove 29
+remove 37
+remove 39
+remove 42
+query 1126
+start
+query 1127
+add 43 30809 1426 0 
+query 1128
+commit
+query 1129
+remove 27
+remove 36
+query 1130
+add 44 22381 3122 2 28 41
+query 1131
+start
+query 1132
+add 45 -4855 3814 1 28
+query 1133
+abort
+query 1134
+fee 28 31859
+query 1135
+start
+query 1136
+fee 43 32847
+query 1137
+remove 24
+remove 25
+query 1138
+remove 30
+query 1139
+remove 20
+query 1140
+commit
+query 1141
+add 46 24480 1404 1 43
+query 1142
+start
+query 1143
+fee 41 44112
+query 1144
+abort
+query 1145
+remove 41
+query 1146
+start
+query 1147
+commit
+query 1148
+start
+query 1149
+commit
+query 1150
+remove 43
+query 1151
+start
+query 1152
+abort
+query 1153
+add 47 44292 3595 1 46
+query 1154
+start
+query 1155
+add 48 -5053 3917 1 47
+query 1156
+add 49 5420 3003 0 
+query 1157
+add 50 26700 2703 0 
+query 1158
+add 51 1005 3740 2 40 50
+query 1159
+remove 46
+remove 47
+remove 48
+query 1160
+remove 28
+remove 44
+query 1161
+add 52 38874 2735 1 49
+query 1162
+remove 49
+remove 52
+query 1163
+add 53 28039 2809 0 
+query 1164
+remove 40
+query 1165
+abort
+query 1166
+start
+query 1167
+add 54 31155 2411 3 28 40 46
+query 1168
+fee 28 35270
+query 1169
+remove 28
+query 1170
+fee 54 46499
+query 1171
+fee 47 7789
+query 1172
+add 55 7957 3603 0 
+query 1173
+add 56 42722 3921 2 46 47
+query 1174
+add 57 10361 1495 2 40 44
+query 1175
+add 58 16938 3196 0 
+query 1176
+remove 46
+remove 47
+remove 54
+remove 56
+query 1177
+commit
+query 1178
+remove 55
+query 1179
+add 59 26821 3932 0 
+query 1180
+start
+query 1181
+remove 58
+query 1182
+remove 40
+remove 44
+remove 57
+query 1183
+add 60 44351 1608 1 59
+query 1184
+add 61 43975 3534 0 
+query 1185
+remove 59
+remove 60
+query 1186
+commit
+query 1187
+add 62 31181 3513 0 
+query 1188
+add 63 31030 3450 1 62
+query 1189
+add 64 49604 537 0 
+query 1190
+add 65 45663 1796 0 
+query 1191
+start
+query 1192
+commit
+query 1193
+fee 64 -10899
+query 1194
+start
+query 1195
+commit
+query 1196
+remove 64
+query 1197
+remove 65
+query 1198
+add 66 32616 950 0 
+query 1199
+new
+add 1 -557 164 0 
+query 1200
+fee 1 35117
+query 1201
+remove 1
+query 1202
+add 2 10757 2017 0 
+query 1203
+start
+query 1204
+add 3 31428 1778 0 
+query 1205
+add 4 48772 3122 0 
+query 1206
+commit
+query 1207
+add 5 -7531 2217 0 
+query 1208
+add 6 38974 755 0 
+query 1209
+add 7 32229 1896 0 
+query 1210
+add 8 24697 3297 2 3 7
+query 1211
+add 9 -5288 3719 0 
+query 1212
+remove 7
+query 1213
+fee 2 42755
+query 1214
+remove 4
+query 1215
+start
+query 1216
+fee 3 39624
+query 1217
+add 10 23433 887 2 2 3
+query 1218
+add 11 12185 1932 0 
+query 1219
+fee 9 -5841
+query 1220
+abort
+query 1221
+start
+query 1222
+abort
+query 1223
+add 12 5783 2039 2 8 9
+query 1224
+add 13 42581 2918 0 
+query 1225
+start
+query 1226
+remove 9
+remove 12
+query 1227
+commit
+query 1228
+add 14 43748 462 0 
+query 1229
+add 15 -1353 765 1 13
+query 1230
+remove 3
+remove 8
+query 1231
+add 16 18068 996 0 
+query 1232
+fee 16 -834
+query 1233
+start
+query 1234
+remove 14
+query 1235
+add 17 38944 622 1 2
+query 1236
+fee 16 41215
+query 1237
+add 18 49430 3655 0 
+query 1238
+add 19 18822 3291 2 5 16
+query 1239
+abort
+query 1240
+add 20 6967 2045 2 5 16
+query 1241
+add 21 12775 1560 1 15
+query 1242
+fee 16 3730
+query 1243
+add 22 26698 1264 4 5 14 16 20
+query 1244
+add 23 12304 2420 1 13
+query 1245
+add 24 -8269 655 0 
+query 1246
+start
+query 1247
+add 25 34384 1915 4 2 15 16 21
+query 1248
+fee 22 27325
+query 1249
+remove 24
+query 1250
+fee 5 48160
+query 1251
+add 26 47612 215 0 
+query 1252
+fee 16 31431
+query 1253
+remove 22
+query 1254
+abort
+query 1255
+start
+query 1256
+add 27 37887 2437 1 24
+query 1257
+remove 5
+remove 20
+remove 22
+query 1258
+add 28 20346 116 1 13
+query 1259
+remove 13
+remove 15
+remove 21
+remove 23
+remove 28
+query 1260
+fee 2 47055
+query 1261
+add 29 34408 3516 1 24
+query 1262
+remove 24
+remove 29
+query 1263
+commit
+query 1264
+add 30 39823 3535 0 
+query 1265
+start
+query 1266
+commit
+query 1267
+add 31 20348 2220 1 27
+query 1268
+add 32 36244 607 1 27
+query 1269
+fee 32 2208
+query 1270
+add 33 18516 2207 2 16 31
+query 1271
+add 34 18589 397 3 2 16 33
+query 1272
+add 35 4160 845 4 14 16 32 33
+query 1273
+start
+query 1274
+commit
+query 1275
+start
+query 1276
+fee 16 25148
+query 1277
+commit
+query 1278
+add 36 22441 116 2 30 33
+query 1279
+start
+query 1280
+add 37 36799 3654 1 32
+query 1281
+add 38 31838 2563 2 14 32
+query 1282
+remove 27
+query 1283
+remove 14
+remove 32
+remove 38
+query 1284
+add 39 727 3556 2 2 35
+query 1285
+fee 6 14186
+query 1286
+add 40 29665 1224 2 37 39
+query 1287
+add 41 18401 3013 2 33 40
+query 1288
+remove 36
+query 1289
+add 42 19111 957 2 31 39
+query 1290
+add 43 10255 2533 4 16 35 40 42
+query 1291
+remove 41
+query 1292
+abort
+query 1293
+fee 35 17662
+query 1294
+add 44 5367 551 4 6 16 31 34
+query 1295
+fee 44 36181
+query 1296
+fee 35 48597
+query 1297
+start
+query 1298
+add 45 11241 511 2 30 31
+query 1299
+add 46 49865 2277 1 30
+query 1300
+add 47 -1579 2767 6 14 27 30 31 32 35
+query 1301
+remove 16
+remove 27
+remove 30
+remove 31
+remove 33
+remove 36
+query 1302
+remove 2
+remove 6
+remove 34
+remove 44
+query 1303
+fee 46 30648
+query 1304
+commit
+query 1305
+add 48 -8351 186 2 32 45
+query 1306
+start
+query 1307
+add 49 -1831 2423 1 14
+query 1308
+commit
+query 1309
+add 50 -5286 1314 3 32 35 45
+query 1310
+start
+query 1311
+fee 32 8293
+query 1312
+add 51 45305 2520 3 14 49 50
+query 1313
+add 52 -2464 1146 1 46
+query 1314
+abort
+query 1315
+add 53 17688 1951 1 45
+query 1316
+add 54 -5375 2896 1 45
+query 1317
+start
+query 1318
+add 55 -2624 2725 2 47 48
+query 1319
+add 56 48998 2331 0 
+query 1320
+remove 45
+remove 48
+remove 50
+remove 53
+remove 54
+remove 55
+query 1321
+abort
+query 1322
+fee 32 -5047
+query 1323
+fee 46 21694
+query 1324
+add 57 8265 3998 0 
+query 1325
+remove 32
+remove 45
+remove 48
+query 1326
+fee 49 37631
+query 1327
+add 58 -4474 1001 3 46 49 50
+query 1328
+start
+query 1329
+add 59 24774 3910 1 57
+query 1330
+remove 14
+remove 35
+remove 47
+query 1331
+add 60 11321 1317 1 50
+query 1332
+add 61 -8841 2571 1 59
+query 1333
+add 62 31309 368 5 46 53 57 58 61
+query 1334
+remove 53
+remove 62
+query 1335
+fee 46 49366
+query 1336
+commit
+query 1337
+add 63 29925 1339 1 58
+query 1338
+start
+query 1339
+add 64 -5869 790 1 54
+query 1340
+add 65 4218 3325 1 57
+query 1341
+fee 54 27012
+query 1342
+remove 46
+remove 49
+remove 50
+remove 58
+remove 63
+query 1343
+add 66 45703 3444 4 54 57 60 61
+query 1344
+remove 57
+query 1345
+commit
+query 1346
+remove 59
+remove 61
+remove 66
+query 1347
+add 67 4904 2026 1 54
+query 1348
+start
+query 1349
+abort
+new
+add 1 40481 603 0 
+query 1350
+add 2 13378 1319 0 
+query 1351
+fee 2 35550
+query 1352
+remove 1
+query 1353
+add 3 1568 2050 0 
+query 1354
+add 4 22905 1913 0 
+query 1355
+remove 3
+query 1356
+start
+query 1357
+remove 2
+query 1358
+abort
+query 1359
+start
+query 1360
+remove 2
+query 1361
+remove 4
+query 1362
+add 5 -6582 915 0 
+query 1363
+remove 5
+query 1364
+add 6 35855 1827 0 
+query 1365
+abort
+query 1366
+start
+query 1367
+commit
+query 1368
+start
+query 1369
+commit
+query 1370
+start
+query 1371
+add 7 38295 3774 0 
+query 1372
+add 8 28942 1811 1 2
+query 1373
+add 9 46949 1123 0 
+query 1374
+remove 7
+query 1375
+add 10 34700 1354 0 
+query 1376
+abort
+query 1377
+start
+query 1378
+commit
+query 1379
+add 11 40055 1639 1 4
+query 1380
+add 12 23947 1295 1 2
+query 1381
+add 13 -571 978 0 
+query 1382
+fee 2 -7759
+query 1383
+add 14 6442 593 1 11
+query 1384
+add 15 8379 3693 1 11
+query 1385
+remove 2
+query 1386
+start
+query 1387
+abort
+query 1388
+add 16 21131 972 1 13
+query 1389
+remove 15
+query 1390
+add 17 17558 1795 0 
+query 1391
+remove 13
+remove 16
+query 1392
+start
+query 1393
+commit
+query 1394
+add 18 20737 2245 1 12
+query 1395
+add 19 22096 481 0 
+query 1396
+start
+query 1397
+abort
+query 1398
+start
+query 1399
+remove 12
+query 1400
+add 20 -8785 732 1 11
+query 1401
+add 21 44474 939 0 
+query 1402
+remove 11
+remove 14
+remove 20
+query 1403
+remove 21
+query 1404
+add 22 17335 3017 0 
+query 1405
+add 23 -4344 3000 2 18 19
+query 1406
+abort
+query 1407
+start
+query 1408
+add 24 46433 1164 0 
+query 1409
+commit
+query 1410
+fee 19 16254
+query 1411
+add 25 26852 3592 0 
+query 1412
+fee 25 -1742
+query 1413
+start
+query 1414
+remove 17
+query 1415
+fee 19 -19992
+query 1416
+add 26 36678 3957 1 18
+query 1417
+remove 4
+query 1418
+fee 25 -16654
+query 1419
+add 27 29929 595 2 18 19
+query 1420
+commit
+query 1421
+start
+query 1422
+commit
+query 1423
+remove 12
+remove 18
+remove 19
+remove 27
+query 1424
+start
+query 1425
+remove 24
+query 1426
+remove 14
+query 1427
+abort
+query 1428
+add 28 1271 2111 0 
+query 1429
+remove 24
+query 1430
+start
+query 1431
+add 29 42249 114 0 
+query 1432
+add 30 29537 3815 1 29
+query 1433
+remove 25
+query 1434
+add 31 30177 2387 0 
+query 1435
+add 32 18609 289 0 
+query 1436
+remove 26
+query 1437
+commit
+query 1438
+add 33 41675 2311 1 30
+query 1439
+remove 11
+remove 14
+query 1440
+fee 30 9635
+query 1441
+remove 28
+query 1442
+fee 31 49256
+query 1443
+remove 32
+query 1444
+add 34 35471 2236 0 
+query 1445
+start
+query 1446
+add 35 -6545 3211 0 
+query 1447
+fee 31 27364
+query 1448
+fee 31 -7451
+query 1449
+fee 34 23770
+query 1450
+add 36 30562 3970 2 29 30
+query 1451
+add 37 13863 1019 2 29 35
+query 1452
+add 38 13118 2505 1 29
+query 1453
+abort
+query 1454
+add 39 19425 1940 1 29
+query 1455
+add 40 9258 3483 0 
+query 1456
+fee 30 34709
+query 1457
+remove 29
+remove 30
+remove 33
+query 1458
+add 41 44797 502 2 39 40
+query 1459
+add 42 13119 2252 0 
+query 1460
+start
+query 1461
+remove 31
+query 1462
+add 43 34121 3217 1 39
+query 1463
+abort
+query 1464
+add 44 -5416 3447 2 34 39
+query 1465
+add 45 422 3749 1 44
+query 1466
+add 46 17719 3391 0 
+query 1467
+remove 34
+query 1468
+remove 39
+remove 44
+remove 45
+query 1469
+remove 46
+query 1470
+remove 42
+query 1471
+start
+query 1472
+fee 40 11382
+query 1473
+remove 31
+query 1474
+remove 40
+remove 41
+query 1475
+add 47 29564 3785 0 
+query 1476
+remove 47
+query 1477
+add 48 42072 2357 0 
+query 1478
+add 49 -9136 2650 0 
+query 1479
+remove 48
+query 1480
+add 50 14212 3771 0 
+query 1481
+add 51 46357 3890 1 50
+query 1482
+add 52 14429 1635 0 
+query 1483
+abort
+query 1484
+start
+query 1485
+add 53 49589 866 0 
+query 1486
+fee 53 49800
+query 1487
+commit
+query 1488
+fee 40 33302
+query 1489
+fee 53 25408
+query 1490
+add 54 24213 120 0 
+query 1491
+remove 54
+query 1492
+remove 31
+query 1493
+start
+query 1494
+fee 41 26528
+query 1495
+add 55 4338 907 1 41
+query 1496
+add 56 3135 576 0 
+query 1497
+fee 41 5050
+query 1498
+fee 40 31544
+query 1499
+abort
+new
+add 1 40133 3014 0 
+query 1500
+start
+query 1501
+remove 1
+query 1502
+add 2 6584 980 0 
+query 1503
+abort
+query 1504
+remove 1
+query 1505
+add 3 9513 3312 0 
+query 1506
+add 4 47246 449 1 3
+query 1507
+fee 3 4364
+query 1508
+add 5 4388 927 0 
+query 1509
+add 6 -1769 3334 0 
+query 1510
+remove 3
+remove 4
+query 1511
+remove 5
+query 1512
+start
+query 1513
+add 7 9271 989 0 
+query 1514
+abort
+query 1515
+add 8 22063 2731 0 
+query 1516
+start
+query 1517
+commit
+query 1518
+add 9 10880 3012 0 
+query 1519
+add 10 14762 3956 2 8 9
+query 1520
+remove 10
+query 1521
+add 11 41411 3961 0 
+query 1522
+add 12 16109 639 2 6 8
+query 1523
+add 13 46560 2583 0 
+query 1524
+start
+query 1525
+commit
+query 1526
+fee 11 47287
+query 1527
+start
+query 1528
+add 14 -9308 479 2 11 13
+query 1529
+add 15 8690 3925 3 8 11 12
+query 1530
+abort
+query 1531
+add 16 -8935 1655 1 9
+query 1532
+start
+query 1533
+fee 11 -1299
+query 1534
+commit
+query 1535
+fee 8 31966
+query 1536
+start
+query 1537
+add 17 40272 1485 0 
+query 1538
+fee 6 -9880
+query 1539
+add 18 49627 2824 1 11
+query 1540
+add 19 40443 1924 1 18
+query 1541
+remove 11
+query 1542
+commit
+query 1543
+add 20 13463 3795 1 19
+query 1544
+add 21 21565 3173 1 17
+query 1545
+start
+query 1546
+add 22 40738 3131 3 12 16 21
+query 1547
+abort
+query 1548
+add 23 4674 729 1 8
+query 1549
+add 24 -8597 3874 1 20
+query 1550
+start
+query 1551
+remove 19
+remove 20
+remove 24
+query 1552
+remove 21
+query 1553
+add 25 40329 3948 0 
+query 1554
+add 26 -7019 3173 2 13 16
+query 1555
+remove 6
+remove 12
+query 1556
+add 27 -5767 158 2 18 25
+query 1557
+remove 25
+remove 27
+query 1558
+add 28 10675 2838 0 
+query 1559
+abort
+query 1560
+add 29 12805 2559 2 18 24
+query 1561
+start
+query 1562
+add 30 12755 665 1 9
+query 1563
+commit
+query 1564
+fee 29 31356
+query 1565
+start
+query 1566
+add 31 42833 3102 0 
+query 1567
+remove 18
+remove 19
+remove 20
+remove 24
+remove 29
+query 1568
+abort
+query 1569
+add 32 29432 3225 4 6 9 17 21
+query 1570
+add 33 29018 3273 1 29
+query 1571
+remove 17
+remove 21
+query 1572
+start
+query 1573
+abort
+query 1574
+start
+query 1575
+remove 18
+remove 19
+remove 20
+remove 24
+remove 29
+query 1576
+add 34 45983 1492 1 12
+query 1577
+add 35 518 2564 1 8
+query 1578
+add 36 -4062 161 0 
+query 1579
+fee 8 -7981
+query 1580
+remove 6
+query 1581
+add 37 45246 1364 1 9
+query 1582
+remove 9
+remove 16
+remove 30
+remove 32
+remove 37
+query 1583
+add 38 42310 3494 2 34 36
+query 1584
+remove 12
+remove 34
+remove 38
+query 1585
+abort
+query 1586
+fee 9 40935
+query 1587
+add 39 2177 2223 2 29 30
+query 1588
+start
+query 1589
+add 40 -1345 1038 1 32
+query 1590
+add 41 41747 384 0 
+query 1591
+add 42 43040 1011 3 8 19 39
+query 1592
+add 43 33630 2762 2 23 24
+query 1593
+remove 18
+remove 19
+remove 20
+remove 24
+remove 29
+remove 33
+remove 39
+remove 42
+remove 43
+query 1594
+abort
+query 1595
+fee 13 22474
+query 1596
+add 44 47196 2066 1 13
+query 1597
+add 45 3930 845 3 19 23 24
+query 1598
+add 46 9960 439 5 6 12 13 18 45
+query 1599
+add 47 4771 3376 3 18 19 32
+query 1600
+add 48 -9936 219 2 39 47
+query 1601
+fee 20 33820
+query 1602
+remove 6
+remove 8
+remove 12
+query 1603
+add 49 922 3365 5 19 29 32 45 48
+query 1604
+add 50 3662 1631 1 39
+query 1605
+add 51 42562 1163 2 18 39
+query 1606
+fee 18 -1712
+query 1607
+add 52 36926 2784 4 20 29 33 47
+query 1608
+fee 39 26427
+query 1609
+start
+query 1610
+fee 23 23064
+query 1611
+add 53 3721 2738 1 50
+query 1612
+add 54 -8657 2821 3 18 46 50
+query 1613
+fee 16 23337
+query 1614
+add 55 20891 3315 3 18 46 54
+query 1615
+add 56 4346 3756 8 9 13 20 24 29 44 48 55
+query 1616
+remove 18
+remove 19
+remove 20
+query 1617
+add 57 1603 1265 2 24 49
+query 1618
+fee 56 43145
+query 1619
+fee 9 12451
+query 1620
+add 58 -6584 3087 5 9 16 45 51 52
+query 1621
+abort
+query 1622
+add 59 16179 3274 4 16 18 49 52
+query 1623
+add 60 44264 3462 4 9 16 32 49
+query 1624
+add 61 33969 721 1 47
+query 1625
+start
+query 1626
+add 62 34845 1841 4 9 18 52 61
+query 1627
+add 63 29856 1534 5 19 39 48 59 60
+query 1628
+abort
+query 1629
+remove 13
+remove 18
+remove 19
+remove 20
+remove 23
+remove 24
+remove 45
+remove 46
+query 1630
+fee 30 -1434
+query 1631
+start
+query 1632
+add 64 44315 2761 4 32 33 50 61
+query 1633
+remove 61
+remove 64
+query 1634
+abort
+query 1635
+fee 39 24655
+query 1636
+add 65 1533 3209 2 51 59
+query 1637
+fee 29 -13140
+query 1638
+fee 33 20810
+query 1639
+remove 9
+remove 29
+remove 30
+remove 39
+remove 50
+query 1640
+add 66 35639 2630 4 16 47 52 61
+query 1641
+remove 60
+query 1642
+add 67 9340 778 3 52 59 61
+query 1643
+add 68 48262 2673 1 49
+query 1644
+remove 32
+remove 33
+remove 47
+remove 52
+query 1645
+start
+query 1646
+commit
+query 1647
+remove 16
+remove 48
+remove 49
+remove 59
+query 1648
+add 69 21205 770 1 67
+query 1649
+new
+add 1 40602 2070 0 
+query 1650
+remove 1
+query 1651
+add 2 14027 1325 0 
+query 1652
+remove 2
+query 1653
+add 3 20863 1622 0 
+query 1654
+remove 3
+query 1655
+add 4 6984 538 0 
+query 1656
+remove 4
+query 1657
+add 5 31884 3983 0 
+query 1658
+add 6 38465 1618 0 
+query 1659
+remove 6
+query 1660
+remove 5
+query 1661
+add 7 43186 3649 0 
+query 1662
+remove 7
+query 1663
+add 8 34145 2290 0 
+query 1664
+add 9 -7250 1797 1 8
+query 1665
+add 10 4220 331 1 8
+query 1666
+start
+query 1667
+remove 9
+query 1668
+fee 10 -7265
+query 1669
+add 11 48808 2538 1 10
+query 1670
+add 12 -9174 494 1 8
+query 1671
+remove 8
+remove 12
+query 1672
+add 13 6950 1239 1 11
+query 1673
+commit
+query 1674
+start
+query 1675
+fee 10 -10896
+query 1676
+remove 13
+query 1677
+add 14 -1832 307 0 
+query 1678
+add 15 35337 3753 1 14
+query 1679
+add 16 45213 3701 3 10 14 15
+query 1680
+add 17 17486 3552 0 
+query 1681
+commit
+query 1682
+start
+query 1683
+fee 17 -16867
+query 1684
+remove 10
+query 1685
+fee 11 47551
+query 1686
+remove 14
+query 1687
+remove 17
+query 1688
+add 18 35849 2213 0 
+query 1689
+remove 15
+query 1690
+commit
+query 1691
+start
+query 1692
+fee 11 27464
+query 1693
+add 19 13128 3632 0 
+query 1694
+commit
+query 1695
+remove 19
+query 1696
+start
+query 1697
+commit
+query 1698
+start
+query 1699
+remove 18
+query 1700
+add 20 45246 461 1 11
+query 1701
+remove 11
+query 1702
+fee 20 33248
+query 1703
+add 21 -7285 1219 0 
+query 1704
+add 22 21502 2933 0 
+query 1705
+remove 20
+query 1706
+remove 21
+query 1707
+remove 16
+query 1708
+add 23 3426 1495 0 
+query 1709
+add 24 6391 3398 0 
+query 1710
+remove 22
+query 1711
+add 25 31201 1643 0 
+query 1712
+fee 23 -6467
+query 1713
+fee 24 -8239
+query 1714
+add 26 24096 1911 0 
+query 1715
+add 27 18323 429 0 
+query 1716
+add 28 -6364 600 1 23
+query 1717
+remove 23
+remove 28
+query 1718
+add 29 39449 2204 3 25 26 27
+query 1719
+fee 27 -17221
+query 1720
+add 30 29430 375 1 29
+query 1721
+add 31 48966 3465 0 
+query 1722
+add 32 22117 2139 2 26 29
+query 1723
+add 33 49931 2744 2 26 31
+query 1724
+add 34 3178 324 3 25 29 30
+query 1725
+commit
+query 1726
+start
+query 1727
+add 35 48857 2734 1 25
+query 1728
+add 36 1442 756 1 35
+query 1729
+fee 36 46995
+query 1730
+remove 25
+remove 29
+remove 30
+remove 32
+remove 34
+remove 35
+remove 36
+query 1731
+abort
+query 1732
+add 37 5444 2654 1 34
+query 1733
+remove 25
+remove 26
+remove 27
+remove 29
+query 1734
+add 38 15942 3186 1 33
+query 1735
+add 39 37846 2346 0 
+query 1736
+remove 31
+remove 33
+remove 38
+query 1737
+fee 39 15458
+query 1738
+remove 37
+query 1739
+remove 24
+query 1740
+fee 30 -2442
+query 1741
+add 40 40772 3780 1 32
+query 1742
+start
+query 1743
+abort
+query 1744
+add 41 17752 1683 2 30 34
+query 1745
+fee 30 1755
+query 1746
+start
+query 1747
+fee 32 15811
+query 1748
+remove 32
+query 1749
+add 42 24283 1788 0 
+query 1750
+remove 40
+query 1751
+fee 34 17709
+query 1752
+commit
+query 1753
+start
+query 1754
+add 43 13322 3661 0 
+query 1755
+abort
+query 1756
+remove 30
+remove 34
+query 1757
+remove 41
+query 1758
+remove 42
+query 1759
+add 44 21757 2651 0 
+query 1760
+remove 44
+query 1761
+add 45 -9727 3223 0 
+query 1762
+start
+query 1763
+add 46 9726 3038 0 
+query 1764
+abort
+query 1765
+start
+query 1766
+remove 39
+query 1767
+commit
+query 1768
+add 47 1156 2454 0 
+query 1769
+fee 47 -4571
+query 1770
+start
+query 1771
+add 48 29212 943 0 
+query 1772
+add 49 14146 3643 0 
+query 1773
+add 50 1178 103 0 
+query 1774
+remove 48
+query 1775
+abort
+query 1776
+remove 45
+query 1777
+remove 47
+query 1778
+add 51 9256 2297 0 
+query 1779
+remove 51
+query 1780
+add 52 11286 2734 0 
+query 1781
+remove 52
+query 1782
+add 53 7245 2840 0 
+query 1783
+add 54 43431 3524 0 
+query 1784
+add 55 29863 3699 0 
+query 1785
+fee 53 4473
+query 1786
+add 56 36755 1049 1 54
+query 1787
+remove 55
+query 1788
+add 57 -6944 1403 0 
+query 1789
+remove 54
+remove 56
+query 1790
+add 58 4594 2070 0 
+query 1791
+start
+query 1792
+fee 57 47929
+query 1793
+commit
+query 1794
+fee 57 38184
+query 1795
+start
+query 1796
+remove 53
+query 1797
+fee 58 34070
+query 1798
+add 59 27262 2868 0 
+query 1799
+abort
+new
+add 1 26342 2224 0 
+query 1800
+add 2 44373 882 0 
+query 1801
+start
+query 1802
+fee 1 30476
+query 1803
+commit
+query 1804
+add 3 6375 2647 0 
+query 1805
+add 4 21191 3073 0 
+query 1806
+start
+query 1807
+abort
+query 1808
+remove 1
+query 1809
+add 5 20896 487 0 
+query 1810
+add 6 31102 616 0 
+query 1811
+add 7 23250 3630 2 2 6
+query 1812
+start
+query 1813
+remove 2
+query 1814
+remove 5
+query 1815
+add 8 39593 585 1 4
+query 1816
+commit
+query 1817
+remove 6
+remove 7
+query 1818
+add 9 48139 175 0 
+query 1819
+remove 8
+query 1820
+start
+query 1821
+remove 4
+query 1822
+fee 9 6901
+query 1823
+remove 3
+query 1824
+commit
+query 1825
+add 10 7785 1556 0 
+query 1826
+start
+query 1827
+commit
+query 1828
+add 11 37966 2987 1 10
+query 1829
+add 12 26125 986 0 
+query 1830
+start
+query 1831
+add 13 27059 517 0 
+query 1832
+add 14 38136 3231 0 
+query 1833
+commit
+query 1834
+fee 10 -8356
+query 1835
+add 15 11696 1223 0 
+query 1836
+fee 11 41373
+query 1837
+add 16 31734 3233 1 10
+query 1838
+remove 13
+query 1839
+start
+query 1840
+add 17 43425 3343 3 11 15 16
+query 1841
+add 18 16499 2928 1 12
+query 1842
+abort
+query 1843
+fee 9 -4970
+query 1844
+add 19 24688 3016 1 15
+query 1845
+start
+query 1846
+abort
+query 1847
+add 20 39418 3806 1 14
+query 1848
+start
+query 1849
+add 21 15107 2401 1 10
+query 1850
+remove 12
+query 1851
+abort
+query 1852
+fee 14 33603
+query 1853
+start
+query 1854
+fee 20 28815
+query 1855
+remove 20
+query 1856
+commit
+query 1857
+remove 14
+query 1858
+remove 11
+query 1859
+add 22 28590 1285 1 16
+query 1860
+add 23 28359 819 1 19
+query 1861
+add 24 16172 3272 0 
+query 1862
+remove 12
+query 1863
+remove 10
+remove 16
+query 1864
+remove 22
+query 1865
+add 25 29774 248 2 19 24
+query 1866
+fee 15 21625
+query 1867
+fee 25 3540
+query 1868
+add 26 22896 2407 1 15
+query 1869
+add 27 4175 884 1 9
+query 1870
+add 28 -3812 3027 0 
+query 1871
+start
+query 1872
+add 29 41933 937 1 19
+query 1873
+commit
+query 1874
+remove 9
+remove 27
+query 1875
+remove 15
+remove 19
+remove 24
+remove 25
+query 1876
+add 30 16114 721 2 23 29
+query 1877
+add 31 11924 1363 0 
+query 1878
+remove 31
+query 1879
+start
+query 1880
+add 32 -8779 2952 1 30
+query 1881
+add 33 18991 2912 0 
+query 1882
+add 34 30266 1740 1 30
+query 1883
+add 35 49807 1655 2 30 32
+query 1884
+add 36 17219 3541 1 23
+query 1885
+remove 35
+query 1886
+add 37 20193 2429 1 34
+query 1887
+add 38 -4356 1799 0 
+query 1888
+add 39 47342 952 1 23
+query 1889
+commit
+query 1890
+add 40 -5681 741 0 
+query 1891
+remove 33
+query 1892
+remove 34
+remove 37
+query 1893
+fee 38 29721
+query 1894
+add 41 22931 3742 2 26 36
+query 1895
+start
+query 1896
+fee 39 29878
+query 1897
+add 42 16961 1861 2 23 29
+query 1898
+add 43 34493 2501 2 38 41
+query 1899
+remove 42
+query 1900
+fee 38 14818
+query 1901
+add 44 44834 3601 1 29
+query 1902
+add 45 32052 3565 2 26 32
+query 1903
+abort
+query 1904
+start
+query 1905
+add 46 20762 3328 2 28 38
+query 1906
+fee 36 33023
+query 1907
+add 47 1774 2746 2 26 30
+query 1908
+add 48 8153 2417 4 30 32 36 40
+query 1909
+commit
+query 1910
+start
+query 1911
+abort
+query 1912
+add 49 8866 3374 0 
+query 1913
+add 50 47003 244 0 
+query 1914
+add 51 -1362 3594 2 29 40
+query 1915
+add 52 -9845 2154 3 41 46 50
+query 1916
+add 53 26676 2389 3 30 39 52
+query 1917
+start
+query 1918
+remove 46
+remove 52
+remove 53
+query 1919
+fee 32 40480
+query 1920
+abort
+query 1921
+add 54 23756 3654 3 26 38 52
+query 1922
+add 55 11074 396 3 36 47 54
+query 1923
+remove 23
+remove 26
+remove 28
+remove 36
+remove 38
+remove 41
+remove 46
+remove 50
+remove 52
+remove 54
+query 1924
+start
+query 1925
+fee 32 700
+query 1926
+fee 53 -5804
+query 1927
+add 56 16804 938 1 39
+query 1928
+remove 29
+remove 30
+remove 32
+remove 47
+remove 48
+remove 51
+remove 53
+remove 55
+query 1929
+remove 40
+query 1930
+add 57 18098 1800 0 
+query 1931
+commit
+query 1932
+add 58 2145 3606 1 57
+query 1933
+add 59 49458 2016 0 
+query 1934
+add 60 7959 3392 0 
+query 1935
+remove 56
+query 1936
+remove 59
+query 1937
+add 61 3681 2360 0 
+query 1938
+add 62 23162 3153 2 58 61
+query 1939
+add 63 48402 3510 1 58
+query 1940
+add 64 22862 2605 1 57
+query 1941
+add 65 34318 3496 1 64
+query 1942
+add 66 49324 1631 0 
+query 1943
+add 67 -2639 2021 3 49 60 62
+query 1944
+fee 63 -16072
+query 1945
+add 68 -6602 1813 1 62
+query 1946
+start
+query 1947
+abort
+query 1948
+add 69 26648 2347 1 39
+query 1949
+new
+add 1 43873 2003 0 
+query 1950
+add 2 13539 3054 0 
+query 1951
+add 3 2120 2538 0 
+query 1952
+add 4 2515 3870 0 
+query 1953
+remove 4
+query 1954
+add 5 -9356 700 1 1
+query 1955
+add 6 36148 1791 0 
+query 1956
+remove 3
+query 1957
+start
+query 1958
+add 7 40861 3484 0 
+query 1959
+add 8 16801 3443 1 7
+query 1960
+remove 7
+remove 8
+query 1961
+commit
+query 1962
+remove 2
+query 1963
+remove 5
+query 1964
+remove 1
+query 1965
+fee 6 -219
+query 1966
+start
+query 1967
+add 9 22802 865 0 
+query 1968
+remove 9
+query 1969
+remove 6
+query 1970
+add 10 -4968 903 0 
+query 1971
+add 11 9852 709 0 
+query 1972
+abort
+query 1973
+fee 6 -5169
+query 1974
+start
+query 1975
+fee 6 -9179
+query 1976
+add 12 41204 1600 0 
+query 1977
+add 13 32841 3611 0 
+query 1978
+fee 12 9174
+query 1979
+abort
+query 1980
+fee 6 9124
+query 1981
+add 14 17520 1205 0 
+query 1982
+start
+query 1983
+fee 6 28984
+query 1984
+fee 6 23109
+query 1985
+remove 14
+query 1986
+abort
+query 1987
+add 15 32616 3318 1 14
+query 1988
+add 16 5700 660 0 
+query 1989
+add 17 37095 3204 0 
+query 1990
+start
+query 1991
+add 18 31097 1696 0 
+query 1992
+fee 16 -12558
+query 1993
+fee 17 8041
+query 1994
+remove 6
+query 1995
+abort
+query 1996
+remove 14
+remove 15
+query 1997
+add 19 29762 3846 0 
+query 1998
+fee 19 25386
+query 1999
+start
+query 2000
+add 20 33199 1117 2 6 16
+query 2001
+remove 20
+query 2002
+fee 16 6994
+query 2003
+remove 19
+query 2004
+add 21 -9886 899 1 17
+query 2005
+fee 21 20403
+query 2006
+add 22 30550 965 1 21
+query 2007
+remove 16
+query 2008
+abort
+query 2009
+add 23 17049 1776 0 
+query 2010
+add 24 32042 1704 1 17
+query 2011
+remove 19
+query 2012
+add 25 2919 227 0 
+query 2013
+add 26 40211 3675 2 6 25
+query 2014
+add 27 30458 3268 2 17 23
+query 2015
+start
+query 2016
+remove 23
+query 2017
+fee 16 12387
+query 2018
+add 28 -7887 1910 0 
+query 2019
+abort
+query 2020
+add 29 14258 347 1 27
+query 2021
+add 30 28365 3700 1 24
+query 2022
+add 31 12242 3905 1 16
+query 2023
+add 32 33577 3717 1 6
+query 2024
+fee 27 33418
+query 2025
+add 33 -185 2628 1 26
+query 2026
+add 34 22989 1186 3 23 29 33
+query 2027
+start
+query 2028
+add 35 -9815 3738 7 6 16 23 24 30 33 34
+query 2029
+abort
+query 2030
+remove 6
+query 2031
+add 36 -5872 2237 1 27
+query 2032
+remove 16
+remove 31
+query 2033
+start
+query 2034
+remove 33
+remove 34
+query 2035
+commit
+query 2036
+start
+query 2037
+remove 24
+remove 30
+query 2038
+add 37 5352 1877 1 26
+query 2039
+commit
+query 2040
+start
+query 2041
+add 38 16339 3719 0 
+query 2042
+add 39 -8028 203 1 25
+query 2043
+add 40 17498 2635 3 26 27 39
+query 2044
+add 41 8656 132 3 17 38 39
+query 2045
+add 42 25443 1748 1 41
+query 2046
+add 43 15543 3284 1 40
+query 2047
+add 44 -5085 881 0 
+query 2048
+add 45 23709 365 2 27 42
+query 2049
+fee 25 8320
+query 2050
+commit
+query 2051
+fee 29 10552
+query 2052
+add 46 48689 1635 4 23 27 32 36
+query 2053
+remove 17
+remove 25
+remove 38
+remove 39
+remove 41
+query 2054
+add 47 41196 2607 5 23 26 32 40 43
+query 2055
+remove 44
+query 2056
+remove 23
+remove 26
+remove 27
+remove 40
+remove 43
+query 2057
+add 48 47122 3234 2 42 46
+query 2058
+fee 47 22891
+query 2059
+add 49 1742 1225 2 47 48
+query 2060
+remove 36
+remove 46
+remove 48
+remove 49
+query 2061
+remove 47
+query 2062
+remove 37
+query 2063
+add 50 46822 1236 2 32 45
+query 2064
+start
+query 2065
+add 51 38183 3666 1 50
+query 2066
+add 52 21127 1165 2 42 45
+query 2067
+add 53 48554 111 1 52
+query 2068
+fee 45 21439
+query 2069
+add 54 27301 2899 1 42
+query 2070
+fee 50 39982
+query 2071
+commit
+query 2072
+add 55 28222 1324 3 42 45 52
+query 2073
+start
+query 2074
+add 56 40985 3947 2 29 53
+query 2075
+abort
+query 2076
+remove 42
+remove 45
+remove 52
+remove 55
+query 2077
+start
+query 2078
+add 57 8855 2969 0 
+query 2079
+abort
+query 2080
+add 58 10984 2395 1 53
+query 2081
+add 59 6645 1757 1 50
+query 2082
+remove 51
+query 2083
+fee 58 -360
+query 2084
+fee 59 27302
+query 2085
+remove 53
+remove 58
+query 2086
+start
+query 2087
+add 60 37737 3339 2 29 50
+query 2088
+abort
+query 2089
+remove 54
+query 2090
+remove 32
+remove 50
+query 2091
+add 61 -7790 1312 0 
+query 2092
+add 62 17198 193 1 59
+query 2093
+add 63 27256 1226 0 
+query 2094
+fee 29 30718
+query 2095
+start
+query 2096
+remove 29
+query 2097
+remove 59
+remove 62
+query 2098
+abort
+query 2099
+new
+add 1 29377 1293 0 
+query 2100
+add 2 24436 3851 0 
+query 2101
+remove 2
+query 2102
+fee 1 -6540
+query 2103
+add 3 17212 1105 0 
+query 2104
+start
+query 2105
+fee 3 -2810
+query 2106
+abort
+query 2107
+add 4 17600 3182 0 
+query 2108
+remove 4
+query 2109
+fee 3 1701
+query 2110
+start
+query 2111
+add 5 20681 1286 1 1
+query 2112
+fee 1 29791
+query 2113
+abort
+query 2114
+add 6 19595 210 0 
+query 2115
+add 7 24600 2910 1 6
+query 2116
+start
+query 2117
+add 8 42139 3458 2 3 6
+query 2118
+add 9 15043 435 0 
+query 2119
+add 10 -190 2851 2 6 8
+query 2120
+add 11 -6038 2395 0 
+query 2121
+commit
+query 2122
+remove 3
+remove 8
+remove 10
+query 2123
+add 12 -1495 893 0 
+query 2124
+remove 6
+query 2125
+start
+query 2126
+abort
+query 2127
+remove 12
+query 2128
+start
+query 2129
+add 13 16676 1983 1 1
+query 2130
+add 14 47931 849 0 
+query 2131
+remove 1
+remove 13
+query 2132
+fee 7 30783
+query 2133
+abort
+query 2134
+add 15 27316 901 1 7
+query 2135
+remove 11
+query 2136
+add 16 12164 130 2 1 7
+query 2137
+add 17 11433 1787 1 16
+query 2138
+remove 17
+query 2139
+add 18 36866 1763 3 1 9 16
+query 2140
+add 19 -4768 2117 0 
+query 2141
+start
+query 2142
+add 20 48121 2408 2 7 9
+query 2143
+abort
+query 2144
+add 21 25319 142 2 1 15
+query 2145
+start
+query 2146
+remove 1
+query 2147
+add 22 21993 1676 1 9
+query 2148
+add 23 24794 3721 1 22
+query 2149
+remove 7
+remove 15
+remove 16
+remove 18
+remove 21
+query 2150
+add 24 -7513 214 1 19
+query 2151
+add 25 27426 3512 1 9
+query 2152
+abort
+query 2153
+remove 19
+query 2154
+add 26 47073 1807 0 
+query 2155
+add 27 19505 1562 1 18
+query 2156
+start
+query 2157
+add 28 -8285 1903 0 
+query 2158
+add 29 -4247 3366 0 
+query 2159
+remove 26
+query 2160
+commit
+query 2161
+add 30 -959 3180 1 1
+query 2162
+fee 16 30362
+query 2163
+start
+query 2164
+remove 9
+remove 18
+remove 27
+query 2165
+add 31 -4549 604 1 7
+query 2166
+add 32 5441 231 2 7 29
+query 2167
+abort
+query 2168
+add 33 17603 3053 3 7 16 28
+query 2169
+start
+query 2170
+remove 27
+query 2171
+commit
+query 2172
+add 34 15498 583 2 9 15
+query 2173
+remove 28
+query 2174
+start
+query 2175
+remove 7
+remove 15
+query 2176
+fee 29 -11117
+query 2177
+commit
+query 2178
+remove 1
+remove 16
+remove 18
+remove 21
+remove 30
+remove 33
+query 2179
+add 35 31453 3250 0 
+query 2180
+start
+query 2181
+add 36 42137 2718 1 9
+query 2182
+remove 34
+query 2183
+add 37 35332 3922 2 35 36
+query 2184
+add 38 26310 1194 0 
+query 2185
+add 39 8977 2824 0 
+query 2186
+remove 29
+query 2187
+add 40 33728 697 3 9 35 39
+query 2188
+abort
+query 2189
+add 41 13494 2393 1 29
+query 2190
+start
+query 2191
+remove 29
+remove 41
+query 2192
+add 42 593 3422 0 
+query 2193
+fee 42 12224
+query 2194
+remove 34
+query 2195
+commit
+query 2196
+fee 9 45106
+query 2197
+remove 9
+query 2198
+add 43 38086 2994 0 
+query 2199
+remove 35
+query 2200
+start
+query 2201
+add 44 -3180 682 0 
+query 2202
+abort
+query 2203
+add 45 6683 411 0 
+query 2204
+add 46 -6140 3881 1 43
+query 2205
+start
+query 2206
+add 47 5659 3767 1 42
+query 2207
+add 48 27517 471 1 43
+query 2208
+add 49 1616 2899 1 42
+query 2209
+commit
+query 2210
+start
+query 2211
+abort
+query 2212
+fee 45 27427
+query 2213
+remove 42
+remove 47
+remove 49
+query 2214
+start
+query 2215
+remove 43
+query 2216
+commit
+query 2217
+fee 46 -9942
+query 2218
+start
+query 2219
+commit
+query 2220
+remove 46
+query 2221
+start
+query 2222
+remove 48
+query 2223
+fee 45 37130
+query 2224
+abort
+query 2225
+remove 45
+query 2226
+add 50 23855 3025 0 
+query 2227
+add 51 811 3601 0 
+query 2228
+add 52 20900 2361 0 
+query 2229
+add 53 47343 3016 1 51
+query 2230
+fee 53 -19719
+query 2231
+add 54 18554 1614 1 50
+query 2232
+add 55 37206 3447 1 54
+query 2233
+add 56 -9524 1842 1 51
+query 2234
+fee 55 49331
+query 2235
+remove 52
+query 2236
+fee 51 13670
+query 2237
+add 57 10963 1935 3 53 55 56
+query 2238
+start
+query 2239
+remove 51
+remove 53
+remove 56
+remove 57
+query 2240
+add 58 -1188 939 0 
+query 2241
+commit
+query 2242
+remove 55
+query 2243
+add 59 7356 1489 1 54
+query 2244
+add 60 49122 3252 0 
+query 2245
+add 61 43565 3782 1 50
+query 2246
+add 62 12545 1916 2 48 50
+query 2247
+start
+query 2248
+commit
+query 2249
+new
+add 1 20396 2472 0 
+query 2250
+add 2 36466 1352 0 
+query 2251
+start
+query 2252
+add 3 10327 503 0 
+query 2253
+remove 1
+query 2254
+add 4 12788 116 0 
+query 2255
+remove 2
+query 2256
+add 5 -8329 3608 0 
+query 2257
+add 6 -8914 252 2 4 5
+query 2258
+abort
+query 2259
+start
+query 2260
+add 7 -1382 251 0 
+query 2261
+abort
+query 2262
+fee 1 13692
+query 2263
+fee 1 -4464
+query 2264
+start
+query 2265
+add 8 31999 108 1 2
+query 2266
+add 9 7591 3614 1 8
+query 2267
+add 10 22401 1066 1 9
+query 2268
+commit
+query 2269
+remove 10
+query 2270
+start
+query 2271
+remove 2
+remove 8
+query 2272
+remove 9
+query 2273
+add 11 41633 374 0 
+query 2274
+commit
+query 2275
+start
+query 2276
+add 12 48077 2201 0 
+query 2277
+fee 1 -3014
+query 2278
+commit
+query 2279
+add 13 17858 2429 1 12
+query 2280
+start
+query 2281
+remove 13
+query 2282
+add 14 5921 3460 1 1
+query 2283
+abort
+query 2284
+remove 12
+remove 13
+query 2285
+start
+query 2286
+commit
+query 2287
+add 15 12514 3610 0 
+query 2288
+add 16 14189 906 0 
+query 2289
+add 17 48907 2112 0 
+query 2290
+remove 11
+query 2291
+add 18 45408 1275 0 
+query 2292
+fee 15 34311
+query 2293
+add 19 20211 2653 2 17 18
+query 2294
+add 20 8292 2121 1 19
+query 2295
+add 21 -9786 318 0 
+query 2296
+fee 15 -3109
+query 2297
+add 22 38091 1965 0 
+query 2298
+start
+query 2299
+remove 17
+remove 18
+remove 19
+query 2300
+abort
+query 2301
+start
+query 2302
+fee 18 8367
+query 2303
+add 23 39853 1784 3 1 18 21
+query 2304
+abort
+query 2305
+fee 21 971
+query 2306
+fee 15 26799
+query 2307
+start
+query 2308
+add 24 48671 3417 3 16 20 22
+query 2309
+commit
+query 2310
+start
+query 2311
+remove 22
+remove 24
+query 2312
+fee 15 35277
+query 2313
+abort
+query 2314
+fee 17 24327
+query 2315
+fee 18 -11576
+query 2316
+add 25 -4250 2961 0 
+query 2317
+remove 24
+query 2318
+remove 1
+query 2319
+start
+query 2320
+add 26 -4242 3521 1 21
+query 2321
+add 27 13441 447 0 
+query 2322
+add 28 -265 910 1 26
+query 2323
+add 29 28966 2891 2 20 27
+query 2324
+add 30 -6119 1984 4 19 20 21 28
+query 2325
+remove 18
+remove 19
+remove 20
+remove 29
+remove 30
+query 2326
+add 31 48596 1438 3 21 27 28
+query 2327
+add 32 -2072 699 2 15 16
+query 2328
+add 33 36852 781 1 32
+query 2329
+remove 21
+remove 26
+remove 27
+remove 28
+remove 31
+query 2330
+commit
+query 2331
+add 34 37116 1667 1 32
+query 2332
+add 35 18869 1023 0 
+query 2333
+remove 16
+remove 32
+remove 33
+remove 34
+query 2334
+add 36 41803 1565 2 15 17
+query 2335
+add 37 37696 3398 1 17
+query 2336
+fee 25 36702
+query 2337
+add 38 40152 1651 2 22 35
+query 2338
+start
+query 2339
+remove 15
+remove 36
+query 2340
+add 39 36473 2768 0 
+query 2341
+add 40 19059 3308 1 25
+query 2342
+add 41 22393 3534 1 35
+query 2343
+remove 22
+remove 38
+query 2344
+add 42 24239 3546 1 40
+query 2345
+fee 37 -2628
+query 2346
+abort
+query 2347
+add 43 4679 813 1 15
+query 2348
+fee 17 48671
+query 2349
+add 44 21206 2466 3 22 25 35
+query 2350
+add 45 -3894 3106 3 15 22 36
+query 2351
+add 46 36662 1753 3 36 37 38
+query 2352
+start
+query 2353
+commit
+query 2354
+remove 46
+query 2355
+add 47 19208 3736 1 22
+query 2356
+remove 25
+query 2357
+fee 22 -6081
+query 2358
+add 48 30913 1158 2 36 47
+query 2359
+fee 22 5251
+query 2360
+add 49 24946 2322 1 43
+query 2361
+start
+query 2362
+add 50 2933 1235 2 36 37
+query 2363
+add 51 36609 1384 5 22 36 43 48 50
+query 2364
+add 52 23256 3256 1 17
+query 2365
+abort
+query 2366
+remove 35
+query 2367
+add 53 20557 649 2 37 49
+query 2368
+add 54 11640 463 2 36 48
+query 2369
+start
+query 2370
+add 55 41537 1713 3 22 53 54
+query 2371
+remove 47
+remove 48
+remove 54
+remove 55
+query 2372
+fee 45 21052
+query 2373
+abort
+query 2374
+start
+query 2375
+abort
+query 2376
+add 56 14058 3562 0 
+query 2377
+start
+query 2378
+remove 56
+query 2379
+commit
+query 2380
+remove 22
+remove 38
+query 2381
+add 57 12540 401 3 17 37 47
+query 2382
+remove 45
+query 2383
+add 58 45166 3672 3 15 36 48
+query 2384
+add 59 4391 3474 1 36
+query 2385
+fee 48 27597
+query 2386
+remove 48
+remove 54
+remove 58
+query 2387
+fee 53 20980
+query 2388
+start
+query 2389
+add 60 -3878 2464 0 
+query 2390
+abort
+query 2391
+start
+query 2392
+add 61 39567 3106 2 36 37
+query 2393
+add 62 31118 1807 1 15
+query 2394
+fee 61 30804
+query 2395
+add 63 18995 488 0 
+query 2396
+add 64 -5316 1338 2 15 62
+query 2397
+fee 61 -9126
+query 2398
+add 65 28767 1239 2 47 64
+query 2399
+abort
+new
+add 1 45737 588 0 
+query 2400
+add 2 49262 2790 0 
+query 2401
+start
+query 2402
+fee 1 48929
+query 2403
+fee 1 18383
+query 2404
+add 3 29738 2913 0 
+query 2405
+add 4 31994 637 0 
+query 2406
+commit
+query 2407
+add 5 15917 199 0 
+query 2408
+add 6 -7931 1165 2 1 2
+query 2409
+add 7 -9744 1358 1 6
+query 2410
+start
+query 2411
+add 8 29742 2085 0 
+query 2412
+remove 3
+query 2413
+remove 2
+query 2414
+remove 4
+query 2415
+add 9 -6783 3372 1 5
+query 2416
+fee 7 48113
+query 2417
+add 10 12560 2557 2 6 7
+query 2418
+remove 1
+remove 6
+query 2419
+abort
+query 2420
+fee 2 43727
+query 2421
+add 11 7201 347 2 2 7
+query 2422
+add 12 -4967 2730 0 
+query 2423
+remove 1
+remove 6
+remove 7
+remove 11
+query 2424
+add 13 34916 2352 1 12
+query 2425
+add 14 30456 3962 1 13
+query 2426
+fee 13 -17828
+query 2427
+start
+query 2428
+add 15 -5972 1021 3 3 4 13
+query 2429
+commit
+query 2430
+add 16 36878 1158 1 4
+query 2431
+add 17 39999 3570 3 4 12 15
+query 2432
+remove 14
+query 2433
+remove 12
+remove 13
+remove 15
+remove 17
+query 2434
+start
+query 2435
+add 18 -2279 2677 1 3
+query 2436
+add 19 46608 3137 1 4
+query 2437
+abort
+query 2438
+start
+query 2439
+add 20 42615 2884 1 4
+query 2440
+add 21 11860 1837 1 16
+query 2441
+add 22 11425 2813 2 3 20
+query 2442
+remove 4
+remove 16
+remove 20
+remove 21
+remove 22
+query 2443
+fee 3 -13154
+query 2444
+fee 5 3735
+query 2445
+fee 3 49998
+query 2446
+commit
+query 2447
+add 23 3220 273 0 
+query 2448
+add 24 47995 1863 0 
+query 2449
+start
+query 2450
+add 25 15259 951 0 
+query 2451
+remove 5
+query 2452
+add 26 -2904 504 2 24 25
+query 2453
+abort
+query 2454
+remove 5
+query 2455
+start
+query 2456
+add 27 -5287 2393 0 
+query 2457
+fee 23 20446
+query 2458
+add 28 1806 2882 2 23 27
+query 2459
+abort
+query 2460
+start
+query 2461
+add 29 22524 3466 0 
+query 2462
+fee 3 36121
+query 2463
+fee 2 7013
+query 2464
+remove 24
+query 2465
+add 30 6663 1525 0 
+query 2466
+add 31 13873 3149 1 23
+query 2467
+fee 23 42028
+query 2468
+add 32 49320 1486 1 30
+query 2469
+commit
+query 2470
+add 33 -4439 1207 1 23
+query 2471
+start
+query 2472
+add 34 -7751 2206 1 33
+query 2473
+remove 3
+query 2474
+add 35 19018 313 1 29
+query 2475
+add 36 40438 2925 1 29
+query 2476
+add 37 39966 2572 1 30
+query 2477
+fee 34 -19439
+query 2478
+remove 29
+remove 36
+query 2479
+add 38 43850 2832 1 37
+query 2480
+add 39 34918 2205 0 
+query 2481
+add 40 10841 1651 0 
+query 2482
+abort
+query 2483
+add 41 42950 3260 1 32
+query 2484
+add 42 42875 2171 0 
+query 2485
+fee 42 -16117
+query 2486
+start
+query 2487
+abort
+query 2488
+fee 31 36010
+query 2489
+fee 32 25711
+query 2490
+start
+query 2491
+remove 23
+remove 31
+remove 33
+query 2492
+add 43 48509 2897 0 
+query 2493
+add 44 19178 3305 0 
+query 2494
+add 45 12084 1823 2 42 44
+query 2495
+add 46 28342 3320 5 3 29 32 42 44
+query 2496
+add 47 31065 655 0 
+query 2497
+remove 32
+remove 41
+remove 46
+query 2498
+add 48 33753 1970 1 45
+query 2499
+add 49 27382 2394 2 2 43
+query 2500
+remove 47
+query 2501
+remove 42
+remove 45
+remove 48
+query 2502
+remove 30
+query 2503
+commit
+query 2504
+add 50 49321 161 1 29
+query 2505
+add 51 24060 764 1 3
+query 2506
+remove 29
+remove 50
+query 2507
+start
+query 2508
+remove 3
+remove 51
+query 2509
+add 52 49069 1206 1 49
+query 2510
+add 53 31750 3913 1 52
+query 2511
+add 54 -9861 3674 0 
+query 2512
+add 55 755 2940 0 
+query 2513
+fee 43 -19566
+query 2514
+fee 54 33272
+query 2515
+commit
+query 2516
+fee 55 49942
+query 2517
+add 56 4748 216 1 55
+query 2518
+start
+query 2519
+add 57 12058 3863 2 52 54
+query 2520
+add 58 13051 1916 1 55
+query 2521
+commit
+query 2522
+remove 52
+remove 53
+remove 57
+query 2523
+add 59 6748 3491 1 43
+query 2524
+remove 43
+query 2525
+add 60 34284 1265 0 
+query 2526
+add 61 43116 1127 1 49
+query 2527
+remove 55
+remove 56
+query 2528
+start
+query 2529
+add 62 30943 1172 2 2 44
+query 2530
+add 63 -1714 3681 2 2 61
+query 2531
+remove 60
+query 2532
+add 64 -8394 1331 1 44
+query 2533
+add 65 43978 1271 0 
+query 2534
+abort
+query 2535
+remove 44
+query 2536
+add 66 42919 3181 4 2 49 59 60
+query 2537
+add 67 36024 2110 0 
+query 2538
+remove 59
+query 2539
+remove 49
+remove 61
+remove 66
+query 2540
+add 68 13220 2375 0 
+query 2541
+start
+query 2542
+remove 68
+query 2543
+commit
+query 2544
+start
+query 2545
+remove 60
+query 2546
+abort
+query 2547
+add 69 32449 2505 0 
+query 2548
+remove 2
+query 2549
+new
+add 1 6011 804 0 
+query 2550
+fee 1 47455
+query 2551
+start
+query 2552
+remove 1
+query 2553
+add 2 47567 637 0 
+query 2554
+commit
+query 2555
+add 3 26110 760 0 
+query 2556
+add 4 48571 3593 0 
+query 2557
+add 5 40912 3184 0 
+query 2558
+start
+query 2559
+abort
+query 2560
+add 6 -991 1932 0 
+query 2561
+start
+query 2562
+fee 2 25492
+query 2563
+add 7 14909 158 0 
+query 2564
+remove 2
+query 2565
+add 8 20508 2770 0 
+query 2566
+commit
+query 2567
+start
+query 2568
+add 9 31971 770 1 8
+query 2569
+remove 6
+query 2570
+commit
+query 2571
+start
+query 2572
+remove 7
+query 2573
+add 10 5905 1678 1 9
+query 2574
+add 11 1827 3513 0 
+query 2575
+remove 4
+query 2576
+add 12 47864 2110 0 
+query 2577
+abort
+query 2578
+add 13 -8835 1466 0 
+query 2579
+add 14 -5102 2333 0 
+query 2580
+remove 4
+query 2581
+fee 8 16370
+query 2582
+add 15 49372 3471 0 
+query 2583
+fee 13 34705
+query 2584
+remove 9
+query 2585
+remove 8
+query 2586
+add 16 42965 3777 1 13
+query 2587
+remove 15
+query 2588
+start
+query 2589
+add 17 47344 402 0 
+query 2590
+abort
+query 2591
+start
+query 2592
+add 18 -4393 3874 1 16
+query 2593
+abort
+query 2594
+add 19 47651 2334 0 
+query 2595
+add 20 45080 3294 1 5
+query 2596
+add 21 20372 2548 2 3 5
+query 2597
+fee 16 14073
+query 2598
+add 22 46454 1459 3 5 16 20
+query 2599
+start
+query 2600
+fee 5 19946
+query 2601
+fee 21 -7718
+query 2602
+add 23 46717 1160 1 14
+query 2603
+fee 21 29141
+query 2604
+add 24 1170 280 3 7 20 21
+query 2605
+remove 22
+query 2606
+remove 23
+query 2607
+add 25 30383 592 0 
+query 2608
+add 26 37387 2482 2 3 24
+query 2609
+commit
+query 2610
+fee 19 28857
+query 2611
+start
+query 2612
+abort
+query 2613
+add 27 36592 2078 1 26
+query 2614
+start
+query 2615
+abort
+query 2616
+add 28 1324 1955 4 16 19 20 25
+query 2617
+start
+query 2618
+add 29 13579 3281 2 5 20
+query 2619
+abort
+query 2620
+add 30 -4440 3572 0 
+query 2621
+remove 16
+remove 28
+query 2622
+add 31 -1216 2138 3 3 19 27
+query 2623
+remove 25
+query 2624
+add 32 42959 2693 0 
+query 2625
+add 33 18614 809 2 21 24
+query 2626
+add 34 33263 3311 5 3 7 24 26 33
+query 2627
+add 35 35951 3425 3 31 32 33
+query 2628
+add 36 36080 1037 2 14 26
+query 2629
+add 37 -5321 1276 4 5 7 32 33
+query 2630
+add 38 46586 2618 1 30
+query 2631
+add 39 -3551 2616 0 
+query 2632
+add 40 25214 3786 4 13 33 35 37
+query 2633
+remove 39
+query 2634
+add 41 -2604 3448 5 13 14 21 26 40
+query 2635
+start
+query 2636
+remove 3
+remove 5
+remove 7
+remove 13
+remove 19
+remove 20
+remove 21
+remove 24
+remove 26
+remove 27
+remove 31
+remove 32
+remove 33
+remove 35
+remove 37
+remove 40
+query 2637
+add 42 7392 3805 0 
+query 2638
+add 43 35907 616 0 
+query 2639
+commit
+query 2640
+add 44 -5583 2270 1 14
+query 2641
+add 45 -9642 829 2 38 43
+query 2642
+start
+query 2643
+abort
+query 2644
+fee 30 39299
+query 2645
+add 46 44450 1891 3 30 38 45
+query 2646
+add 47 8499 903 2 41 44
+query 2647
+start
+query 2648
+remove 30
+remove 38
+remove 45
+remove 46
+query 2649
+abort
+query 2650
+start
+query 2651
+fee 42 -14632
+query 2652
+add 48 29102 2097 1 36
+query 2653
+commit
+query 2654
+start
+query 2655
+remove 14
+remove 44
+query 2656
+add 49 33276 690 0 
+query 2657
+fee 47 49206
+query 2658
+remove 36
+remove 48
+query 2659
+add 50 -5254 1988 0 
+query 2660
+fee 45 22489
+query 2661
+commit
+query 2662
+add 51 -1707 2236 1 45
+query 2663
+remove 30
+remove 38
+remove 43
+remove 45
+remove 46
+query 2664
+add 52 -6792 1965 0 
+query 2665
+add 53 43916 3570 3 34 47 49
+query 2666
+fee 50 24061
+query 2667
+remove 50
+query 2668
+remove 47
+remove 53
+query 2669
+remove 49
+query 2670
+remove 42
+query 2671
+remove 41
+query 2672
+add 54 16783 1215 1 51
+query 2673
+remove 34
+query 2674
+fee 51 23914
+query 2675
+add 55 11738 3844 0 
+query 2676
+start
+query 2677
+add 56 9688 210 1 52
+query 2678
+abort
+query 2679
+add 57 10557 3017 0 
+query 2680
+add 58 19362 3247 0 
+query 2681
+start
+query 2682
+commit
+query 2683
+add 59 19677 180 1 55
+query 2684
+add 60 5486 1197 2 54 57
+query 2685
+remove 54
+remove 60
+query 2686
+start
+query 2687
+add 61 47587 1698 0 
+query 2688
+add 62 1186 1108 2 58 61
+query 2689
+add 63 22921 1992 2 58 61
+query 2690
+add 64 18261 1605 3 57 58 63
+query 2691
+add 65 18841 2426 1 51
+query 2692
+remove 52
+query 2693
+add 66 42608 2835 3 55 64 65
+query 2694
+remove 55
+remove 59
+query 2695
+commit
+query 2696
+add 67 26505 183 0 
+query 2697
+add 68 22683 1943 0 
+query 2698
+start
+query 2699
+abort
+new
+add 1 -1360 3982 0 
+query 2700
+add 2 16340 2556 0 
+query 2701
+remove 1
+query 2702
+remove 2
+query 2703
+add 3 29067 2280 0 
+query 2704
+start
+query 2705
+add 4 2020 1082 0 
+query 2706
+add 5 18249 2195 0 
+query 2707
+fee 3 -17079
+query 2708
+add 6 25752 834 1 4
+query 2709
+add 7 13494 2248 0 
+query 2710
+add 8 33795 1721 2 5 7
+query 2711
+add 9 7083 2577 0 
+query 2712
+abort
+query 2713
+add 10 49699 2140 0 
+query 2714
+start
+query 2715
+commit
+query 2716
+add 11 -8 3244 0 
+query 2717
+add 12 24208 1211 0 
+query 2718
+add 13 44104 3368 1 10
+query 2719
+remove 12
+query 2720
+add 14 16115 1003 1 10
+query 2721
+add 15 44681 1557 1 13
+query 2722
+fee 10 10769
+query 2723
+start
+query 2724
+remove 10
+query 2725
+fee 15 -1741
+query 2726
+commit
+query 2727
+add 16 23603 3793 1 11
+query 2728
+add 17 23094 2998 1 16
+query 2729
+fee 3 -17952
+query 2730
+fee 11 43896
+query 2731
+start
+query 2732
+add 18 39308 1303 1 14
+query 2733
+commit
+query 2734
+add 19 3947 589 3 15 16 18
+query 2735
+start
+query 2736
+add 20 7231 2037 2 14 17
+query 2737
+add 21 26088 1011 1 13
+query 2738
+add 22 4143 3512 0 
+query 2739
+add 23 40829 2599 4 11 19 21 22
+query 2740
+add 24 -3642 1193 2 14 21
+query 2741
+add 25 28646 1342 2 13 23
+query 2742
+commit
+query 2743
+start
+query 2744
+add 26 43564 2189 3 3 11 20
+query 2745
+add 27 -240 839 2 16 18
+query 2746
+add 28 26500 2580 6 11 13 14 15 19 26
+query 2747
+add 29 26867 2238 5 11 13 18 25 27
+query 2748
+remove 14
+query 2749
+add 30 20919 2659 3 13 15 28
+query 2750
+commit
+query 2751
+add 31 256 2651 3 17 20 30
+query 2752
+remove 3
+remove 11
+remove 13
+remove 15
+remove 16
+remove 17
+remove 18
+remove 19
+remove 20
+remove 26
+remove 28
+remove 30
+query 2753
+add 32 30115 1071 1 31
+query 2754
+add 33 -8585 2753 1 25
+query 2755
+remove 21
+query 2756
+add 34 -4548 2532 1 33
+query 2757
+remove 31
+query 2758
+add 35 27210 2937 1 24
+query 2759
+add 36 3866 3289 0 
+query 2760
+start
+query 2761
+abort
+query 2762
+add 37 8586 1659 1 27
+query 2763
+start
+query 2764
+remove 33
+remove 34
+query 2765
+add 38 14471 775 1 35
+query 2766
+fee 22 -5929
+query 2767
+remove 32
+query 2768
+add 39 12430 497 2 22 29
+query 2769
+add 40 7527 2570 1 39
+query 2770
+add 41 32573 2654 1 38
+query 2771
+add 42 21546 763 3 24 25 40
+query 2772
+remove 40
+remove 42
+query 2773
+fee 29 17602
+query 2774
+add 43 49213 1977 2 25 27
+query 2775
+add 44 31267 1564 3 23 29 41
+query 2776
+add 45 -2815 2202 1 23
+query 2777
+fee 23 2645
+query 2778
+add 46 32821 2556 1 37
+query 2779
+fee 38 41897
+query 2780
+remove 36
+query 2781
+add 47 -7066 1329 0 
+query 2782
+remove 41
+remove 44
+query 2783
+remove 22
+remove 23
+remove 25
+remove 27
+remove 29
+query 2784
+abort
+query 2785
+add 48 33733 1024 3 25 29 37
+query 2786
+start
+query 2787
+abort
+query 2788
+remove 22
+remove 23
+remove 25
+remove 27
+remove 29
+remove 37
+remove 48
+query 2789
+remove 32
+query 2790
+add 49 26711 2397 0 
+query 2791
+add 50 14033 3061 1 49
+query 2792
+start
+query 2793
+commit
+query 2794
+add 51 29808 2603 0 
+query 2795
+remove 51
+query 2796
+remove 49
+remove 50
+query 2797
+start
+query 2798
+add 52 22036 744 0 
+query 2799
+add 53 25657 3808 0 
+query 2800
+add 54 45533 2013 1 53
+query 2801
+remove 33
+remove 34
+query 2802
+commit
+query 2803
+add 55 -6724 1045 0 
+query 2804
+remove 52
+query 2805
+add 56 19662 3738 1 36
+query 2806
+add 57 -9226 2086 2 36 56
+query 2807
+add 58 42106 367 0 
+query 2808
+remove 36
+query 2809
+add 59 8916 3911 1 54
+query 2810
+start
+query 2811
+remove 55
+query 2812
+add 60 41849 1857 2 54 59
+query 2813
+abort
+query 2814
+add 61 3235 2488 2 54 59
+query 2815
+add 62 17260 1350 0 
+query 2816
+remove 55
+query 2817
+remove 53
+remove 54
+remove 59
+remove 61
+query 2818
+start
+query 2819
+remove 57
+query 2820
+fee 35 11478
+query 2821
+fee 35 27780
+query 2822
+commit
+query 2823
+add 63 -5644 111 0 
+query 2824
+add 64 2412 2944 2 24 56
+query 2825
+fee 56 43461
+query 2826
+add 65 18776 337 0 
+query 2827
+start
+query 2828
+add 66 15939 250 1 63
+query 2829
+remove 63
+remove 66
+query 2830
+fee 24 -16844
+query 2831
+add 67 46532 1876 1 64
+query 2832
+add 68 1722 3239 3 24 56 67
+query 2833
+add 69 48756 808 1 67
+query 2834
+remove 24
+remove 56
+remove 64
+remove 67
+remove 68
+query 2835
+add 70 -2893 1067 2 62 69
+query 2836
+add 71 22131 1574 0 
+query 2837
+add 72 -6996 199 0 
+query 2838
+add 73 3499 3728 1 71
+query 2839
+abort
+query 2840
+add 74 4199 2445 1 65
+query 2841
+add 75 -9963 2304 1 62
+query 2842
+add 76 17684 1988 3 35 56 75
+query 2843
+start
+query 2844
+abort
+query 2845
+start
+query 2846
+remove 74
+query 2847
+remove 35
+remove 76
+query 2848
+remove 24
+remove 64
+query 2849
+abort
+new
+add 1 -8526 3789 0 
+query 2850
+start
+query 2851
+remove 1
+query 2852
+add 2 45549 311 0 
+query 2853
+remove 2
+query 2854
+add 3 18718 3712 0 
+query 2855
+add 4 32424 1263 0 
+query 2856
+add 5 14763 707 0 
+query 2857
+commit
+query 2858
+add 6 22960 1489 1 3
+query 2859
+remove 3
+remove 6
+query 2860
+add 7 36147 1002 0 
+query 2861
+start
+query 2862
+abort
+query 2863
+remove 7
+query 2864
+start
+query 2865
+add 8 38687 3188 0 
+query 2866
+add 9 21977 3191 1 5
+query 2867
+fee 4 37663
+query 2868
+remove 5
+remove 9
+query 2869
+abort
+query 2870
+start
+query 2871
+add 10 29213 391 0 
+query 2872
+commit
+query 2873
+add 11 3579 1969 0 
+query 2874
+remove 4
+query 2875
+start
+query 2876
+remove 10
+query 2877
+fee 5 12047
+query 2878
+abort
+query 2879
+add 12 9175 3945 0 
+query 2880
+remove 12
+query 2881
+start
+query 2882
+fee 10 38267
+query 2883
+fee 10 -19765
+query 2884
+remove 11
+query 2885
+remove 10
+query 2886
+abort
+query 2887
+start
+query 2888
+remove 11
+query 2889
+add 13 -9970 2945 0 
+query 2890
+abort
+query 2891
+remove 5
+query 2892
+add 14 40260 3967 0 
+query 2893
+start
+query 2894
+fee 14 -14644
+query 2895
+abort
+query 2896
+add 15 6810 650 1 11
+query 2897
+start
+query 2898
+fee 10 -2613
+query 2899
+fee 10 9227
+query 2900
+add 16 43170 3226 0 
+query 2901
+add 17 33709 854 2 10 16
+query 2902
+abort
+query 2903
+add 18 -7266 2370 0 
+query 2904
+add 19 34951 2868 0 
+query 2905
+start
+query 2906
+add 20 48527 2345 0 
+query 2907
+abort
+query 2908
+fee 10 -8529
+query 2909
+add 21 1581 732 0 
+query 2910
+add 22 38565 792 2 10 11
+query 2911
+add 23 28929 229 2 11 15
+query 2912
+remove 23
+query 2913
+add 24 22490 1539 0 
+query 2914
+add 25 -6070 1612 2 14 18
+query 2915
+add 26 19723 2786 2 15 21
+query 2916
+remove 14
+remove 25
+query 2917
+start
+query 2918
+remove 18
+query 2919
+remove 15
+remove 26
+query 2920
+add 27 14432 1056 0 
+query 2921
+add 28 6841 1709 1 11
+query 2922
+remove 27
+query 2923
+add 29 37522 3628 1 24
+query 2924
+add 30 34332 1205 2 22 29
+query 2925
+add 31 25440 2902 2 19 29
+query 2926
+add 32 46108 876 3 19 24 29
+query 2927
+commit
+query 2928
+add 33 28331 175 1 31
+query 2929
+remove 31
+remove 33
+query 2930
+remove 30
+query 2931
+remove 22
+query 2932
+remove 10
+query 2933
+add 34 28967 1595 1 24
+query 2934
+fee 28 -16457
+query 2935
+remove 11
+remove 28
+query 2936
+add 35 27711 1138 0 
+query 2937
+remove 24
+query 2938
+remove 34
+query 2939
+start
+query 2940
+remove 19
+query 2941
+fee 35 -9357
+query 2942
+add 36 -2627 313 0 
+query 2943
+fee 36 47494
+query 2944
+remove 32
+query 2945
+abort
+query 2946
+add 37 2386 3601 0 
+query 2947
+start
+query 2948
+add 38 21421 1256 0 
+query 2949
+abort
+query 2950
+add 39 -6972 3157 1 37
+query 2951
+start
+query 2952
+add 40 37420 3353 0 
+query 2953
+add 41 19919 3823 2 21 39
+query 2954
+abort
+query 2955
+remove 29
+query 2956
+add 42 -8423 3764 2 32 39
+query 2957
+add 43 -3821 1988 1 32
+query 2958
+remove 19
+remove 32
+remove 37
+remove 39
+remove 42
+query 2959
+start
+query 2960
+add 44 7105 3265 0 
+query 2961
+remove 43
+query 2962
+add 45 -2624 664 1 35
+query 2963
+add 46 43234 2646 0 
+query 2964
+add 47 25777 3834 1 35
+query 2965
+add 48 47932 3332 0 
+query 2966
+add 49 4009 1509 2 44 46
+query 2967
+add 50 -4665 3734 2 35 46
+query 2968
+add 51 40393 3769 4 21 45 47 48
+query 2969
+remove 47
+remove 51
+query 2970
+fee 35 47603
+query 2971
+fee 35 47638
+query 2972
+add 52 35896 2273 3 45 46 50
+query 2973
+abort
+query 2974
+add 53 14034 1234 0 
+query 2975
+start
+query 2976
+add 54 21053 2489 0 
+query 2977
+add 55 47934 3411 0 
+query 2978
+add 56 11951 856 0 
+query 2979
+add 57 16188 1261 2 43 54
+query 2980
+fee 54 25893
+query 2981
+add 58 45085 3732 0 
+query 2982
+add 59 43925 2335 0 
+query 2983
+commit
+query 2984
+remove 21
+query 2985
+start
+query 2986
+remove 56
+query 2987
+add 60 43050 2764 0 
+query 2988
+add 61 -5384 1844 2 53 59
+query 2989
+remove 35
+query 2990
+remove 43
+query 2991
+remove 55
+query 2992
+add 62 20712 1680 2 54 60
+query 2993
+remove 54
+query 2994
+remove 61
+query 2995
+add 63 4046 3609 1 62
+query 2996
+add 64 26259 3567 0 
+query 2997
+add 65 18756 579 1 53
+query 2998
+add 66 15543 2468 0 
+query 2999
+abort
+new
+add 1 47963 652 0 
+query 3000
+add 2 34623 600 0 
+query 3001
+add 3 22289 3853 0 
+query 3002
+add 4 40123 1522 1 3
+query 3003
+add 5 -9542 300 0 
+query 3004
+start
+query 3005
+add 6 29902 3877 1 1
+query 3006
+commit
+query 3007
+start
+query 3008
+add 7 2265 3471 1 4
+query 3009
+commit
+query 3010
+start
+query 3011
+remove 3
+query 3012
+add 8 -9673 2666 1 6
+query 3013
+add 9 45103 1058 1 6
+query 3014
+fee 7 24073
+query 3015
+add 10 -4570 3992 3 6 8 9
+query 3016
+add 11 11729 1606 3 1 8 10
+query 3017
+fee 8 -18195
+query 3018
+remove 9
+remove 10
+remove 11
+query 3019
+commit
+query 3020
+remove 2
+query 3021
+remove 8
+query 3022
+add 12 28423 2241 2 4 5
+query 3023
+add 13 40660 1328 1 1
+query 3024
+remove 1
+remove 6
+query 3025
+start
+query 3026
+abort
+query 3027
+remove 12
+query 3028
+add 14 7519 3616 1 5
+query 3029
+fee 14 4713
+query 3030
+start
+query 3031
+remove 13
+query 3032
+fee 14 -11097
+query 3033
+commit
+query 3034
+fee 14 4296
+query 3035
+fee 7 40012
+query 3036
+start
+query 3037
+abort
+query 3038
+add 15 27 3417 0 
+query 3039
+start
+query 3040
+add 16 11680 913 3 4 5 15
+query 3041
+add 17 37583 1898 0 
+query 3042
+remove 5
+remove 14
+remove 16
+query 3043
+add 18 46289 2572 0 
+query 3044
+add 19 44055 143 0 
+query 3045
+add 20 32722 341 1 15
+query 3046
+remove 19
+query 3047
+remove 4
+remove 7
+query 3048
+commit
+query 3049
+remove 17
+query 3050
+remove 18
+query 3051
+remove 15
+remove 20
+query 3052
+add 21 14542 2840 0 
+query 3053
+start
+query 3054
+remove 21
+query 3055
+add 22 32734 1292 0 
+query 3056
+add 23 29800 3246 0 
+query 3057
+remove 23
+query 3058
+add 24 18822 891 0 
+query 3059
+fee 22 4941
+query 3060
+remove 22
+query 3061
+add 25 -4139 2255 0 
+query 3062
+remove 24
+query 3063
+fee 25 -19335
+query 3064
+add 26 14953 3428 0 
+query 3065
+abort
+query 3066
+remove 21
+query 3067
+add 27 5092 1059 0 
+query 3068
+remove 27
+query 3069
+add 28 28800 1302 0 
+query 3070
+remove 28
+query 3071
+add 29 2327 1885 0 
+query 3072
+remove 29
+query 3073
+add 30 48741 1164 0 
+query 3074
+add 31 15285 3655 1 30
+query 3075
+add 32 27631 1628 0 
+query 3076
+start
+query 3077
+remove 32
+query 3078
+remove 31
+query 3079
+commit
+query 3080
+fee 30 44142
+query 3081
+add 33 34756 2687 0 
+query 3082
+fee 30 47082
+query 3083
+add 34 32095 2413 1 30
+query 3084
+add 35 31452 2925 0 
+query 3085
+remove 30
+remove 34
+query 3086
+start
+query 3087
+remove 35
+query 3088
+add 36 4705 2498 0 
+query 3089
+add 37 48338 1491 1 36
+query 3090
+add 38 13657 2390 0 
+query 3091
+commit
+query 3092
+fee 36 41802
+query 3093
+add 39 1695 2378 2 36 37
+query 3094
+add 40 -3916 2127 0 
+query 3095
+start
+query 3096
+fee 39 10315
+query 3097
+abort
+query 3098
+remove 39
+query 3099
+add 41 35527 894 1 36
+query 3100
+fee 40 5937
+query 3101
+start
+query 3102
+commit
+query 3103
+remove 33
+query 3104
+start
+query 3105
+fee 36 35804
+query 3106
+add 42 20540 1191 1 40
+query 3107
+add 43 35126 1091 0 
+query 3108
+add 44 500 2034 3 37 38 41
+query 3109
+add 45 7772 1876 2 38 43
+query 3110
+add 46 30127 1266 0 
+query 3111
+remove 36
+remove 37
+remove 38
+remove 41
+remove 44
+query 3112
+add 47 15839 2401 0 
+query 3113
+add 48 33311 1911 1 40
+query 3114
+remove 45
+query 3115
+fee 46 -12016
+query 3116
+add 49 -5029 2462 1 47
+query 3117
+abort
+query 3118
+start
+query 3119
+add 50 1967 3709 1 41
+query 3120
+add 51 2263 3389 0 
+query 3121
+fee 50 16060
+query 3122
+remove 36
+remove 41
+query 3123
+add 52 38898 1645 0 
+query 3124
+remove 40
+query 3125
+add 53 18095 3856 1 50
+query 3126
+add 54 8676 1035 1 38
+query 3127
+abort
+query 3128
+add 55 33031 669 0 
+query 3129
+remove 55
+query 3130
+add 56 21039 1144 0 
+query 3131
+start
+query 3132
+add 57 40392 1549 1 56
+query 3133
+add 58 33086 862 0 
+query 3134
+add 59 10974 2569 0 
+query 3135
+remove 58
+query 3136
+abort
+query 3137
+add 60 36471 1173 1 56
+query 3138
+remove 41
+query 3139
+add 61 -9853 2827 1 60
+query 3140
+add 62 34269 2845 0 
+query 3141
+remove 61
+query 3142
+add 63 24576 989 2 38 60
+query 3143
+add 64 47418 3635 0 
+query 3144
+add 65 -8046 1209 1 60
+query 3145
+add 66 16364 2705 1 36
+query 3146
+remove 56
+remove 60
+remove 63
+remove 65
+query 3147
+add 67 41448 1265 2 38 62
+query 3148
+add 68 35580 3961 1 40
+query 3149
+new
+add 1 29487 4000 0 
+query 3150
+add 2 -7536 1742 1 1
+query 3151
+add 3 -7906 514 0 
+query 3152
+fee 1 13939
+query 3153
+fee 1 31896
+query 3154
+add 4 33711 921 1 3
+query 3155
+add 5 3860 1605 2 2 4
+query 3156
+remove 2
+remove 5
+query 3157
+add 6 19473 156 0 
+query 3158
+start
+query 3159
+add 7 48167 3111 1 1
+query 3160
+remove 4
+query 3161
+remove 6
+query 3162
+add 8 739 3444 0 
+query 3163
+abort
+query 3164
+start
+query 3165
+remove 3
+remove 4
+query 3166
+commit
+query 3167
+start
+query 3168
+add 9 5009 693 0 
+query 3169
+remove 9
+query 3170
+add 10 3513 1252 0 
+query 3171
+add 11 35323 3798 0 
+query 3172
+add 12 28038 258 0 
+query 3173
+commit
+query 3174
+remove 6
+query 3175
+remove 10
+query 3176
+remove 1
+query 3177
+add 13 46951 3905 0 
+query 3178
+remove 11
+query 3179
+fee 12 37021
+query 3180
+remove 13
+query 3181
+fee 12 35626
+query 3182
+remove 12
+query 3183
+add 14 26971 535 0 
+query 3184
+remove 14
+query 3185
+add 15 3265 1761 0 
+query 3186
+add 16 23750 1170 0 
+query 3187
+add 17 827 1429 1 15
+query 3188
+add 18 -9884 1512 0 
+query 3189
+add 19 27012 451 2 17 18
+query 3190
+add 20 -1046 3208 0 
+query 3191
+fee 16 20905
+query 3192
+start
+query 3193
+add 21 30305 1870 1 19
+query 3194
+add 22 43484 1570 0 
+query 3195
+add 23 -8127 2222 2 17 19
+query 3196
+remove 22
+query 3197
+add 24 28178 3828 2 15 20
+query 3198
+add 25 -7082 260 1 17
+query 3199
+add 26 36365 3625 2 15 19
+query 3200
+fee 21 37095
+query 3201
+add 27 -2577 3373 0 
+query 3202
+add 28 1929 1966 1 15
+query 3203
+remove 15
+remove 17
+query 3204
+add 29 10278 1257 0 
+query 3205
+abort
+query 3206
+fee 19 33642
+query 3207
+add 30 23568 3562 0 
+query 3208
+start
+query 3209
+remove 20
+query 3210
+fee 18 -5077
+query 3211
+remove 17
+remove 19
+query 3212
+abort
+query 3213
+add 31 46427 1681 4 16 18 20 30
+query 3214
+remove 30
+remove 31
+query 3215
+start
+query 3216
+remove 20
+query 3217
+add 32 18801 3898 1 19
+query 3218
+fee 19 32196
+query 3219
+add 33 31246 2856 0 
+query 3220
+fee 15 2050
+query 3221
+add 34 -1447 1123 1 19
+query 3222
+add 35 12775 2206 0 
+query 3223
+add 36 21436 3805 1 19
+query 3224
+add 37 49277 1464 2 15 33
+query 3225
+fee 15 32342
+query 3226
+add 38 14002 3276 2 17 32
+query 3227
+add 39 30490 501 3 16 32 34
+query 3228
+fee 33 37247
+query 3229
+commit
+query 3230
+fee 16 17143
+query 3231
+remove 15
+remove 17
+remove 19
+remove 32
+remove 34
+remove 36
+remove 37
+remove 38
+remove 39
+query 3232
+start
+query 3233
+remove 18
+query 3234
+add 40 3371 3233 1 33
+query 3235
+add 41 735 1078 1 16
+query 3236
+add 42 25290 418 0 
+query 3237
+remove 16
+query 3238
+add 43 34445 2742 1 41
+query 3239
+abort
+query 3240
+add 44 7981 1866 0 
+query 3241
+add 45 8230 788 0 
+query 3242
+add 46 46055 3090 0 
+query 3243
+add 47 13217 2772 1 35
+query 3244
+start
+query 3245
+remove 44
+query 3246
+commit
+query 3247
+add 48 -4236 3558 0 
+query 3248
+start
+query 3249
+add 49 49043 2021 1 18
+query 3250
+add 50 24740 2815 2 33 35
+query 3251
+remove 18
+remove 49
+query 3252
+add 51 1431 1369 3 16 35 46
+query 3253
+abort
+query 3254
+fee 46 29317
+query 3255
+add 52 32136 1867 1 46
+query 3256
+remove 35
+remove 47
+query 3257
+add 53 41125 2551 1 46
+query 3258
+add 54 29513 868 0 
+query 3259
+remove 48
+query 3260
+add 55 41174 607 0 
+query 3261
+start
+query 3262
+add 56 19726 2932 2 45 46
+query 3263
+commit
+query 3264
+add 57 4884 1015 0 
+query 3265
+remove 57
+query 3266
+add 58 46241 3223 3 45 53 55
+query 3267
+add 59 22601 3098 1 16
+query 3268
+remove 56
+query 3269
+start
+query 3270
+abort
+query 3271
+add 60 24633 3887 2 58 59
+query 3272
+start
+query 3273
+fee 55 11722
+query 3274
+remove 16
+remove 59
+query 3275
+add 61 -4022 645 3 54 55 58
+query 3276
+remove 45
+query 3277
+fee 53 6039
+query 3278
+add 62 -5847 1859 1 61
+query 3279
+commit
+query 3280
+add 63 16241 2161 2 18 52
+query 3281
+add 64 6687 2134 4 53 54 58 60
+query 3282
+add 65 41686 2340 1 33
+query 3283
+remove 46
+remove 53
+remove 55
+remove 58
+query 3284
+fee 64 -9998
+query 3285
+add 66 -8639 464 1 52
+query 3286
+add 67 4093 1070 0 
+query 3287
+remove 54
+remove 61
+query 3288
+fee 52 8923
+query 3289
+add 68 -9336 2169 2 62 65
+query 3290
+add 69 26690 2102 1 62
+query 3291
+add 70 683 2652 0 
+query 3292
+add 71 38003 3047 4 18 66 68 70
+query 3293
+start
+query 3294
+abort
+query 3295
+remove 52
+query 3296
+remove 33
+remove 65
+remove 68
+remove 71
+query 3297
+start
+query 3298
+add 72 37835 2102 1 63
+query 3299
+abort
+new
+add 1 17112 2205 0 
+query 3300
+start
+query 3301
+commit
+query 3302
+remove 1
+query 3303
+add 2 27577 3055 0 
+query 3304
+start
+query 3305
+fee 2 27984
+query 3306
+add 3 4011 996 0 
+query 3307
+add 4 24736 1766 0 
+query 3308
+add 5 -2316 1632 0 
+query 3309
+add 6 47175 2459 0 
+query 3310
+add 7 19731 2086 1 2
+query 3311
+remove 5
+query 3312
+abort
+query 3313
+start
+query 3314
+add 8 -4325 1159 0 
+query 3315
+remove 8
+query 3316
+remove 2
+query 3317
+add 9 22275 1752 0 
+query 3318
+add 10 33470 1441 0 
+query 3319
+remove 10
+query 3320
+remove 9
+query 3321
+add 11 47279 2096 0 
+query 3322
+add 12 30990 1065 0 
+query 3323
+add 13 17010 826 0 
+query 3324
+add 14 49531 839 1 12
+query 3325
+abort
+query 3326
+remove 2
+query 3327
+add 15 4735 2869 0 
+query 3328
+start
+query 3329
+add 16 415 127 0 
+query 3330
+remove 15
+query 3331
+commit
+query 3332
+add 17 19839 3743 0 
+query 3333
+add 18 -8881 3897 1 17
+query 3334
+add 19 24553 2988 0 
+query 3335
+add 20 4260 2319 1 19
+query 3336
+start
+query 3337
+add 21 45817 595 1 16
+query 3338
+add 22 2789 2058 1 19
+query 3339
+add 23 15991 2420 0 
+query 3340
+commit
+query 3341
+remove 19
+remove 22
+query 3342
+remove 17
+query 3343
+add 24 46211 1220 2 18 23
+query 3344
+add 25 4573 3878 0 
+query 3345
+remove 21
+query 3346
+start
+query 3347
+remove 16
+query 3348
+fee 23 -17539
+query 3349
+fee 20 8329
+query 3350
+remove 18
+query 3351
+add 26 1508 3712 0 
+query 3352
+add 27 42488 624 2 24 25
+query 3353
+add 28 27352 104 0 
+query 3354
+commit
+query 3355
+remove 23
+remove 24
+query 3356
+fee 25 -19638
+query 3357
+add 29 23589 1455 1 20
+query 3358
+fee 26 42449
+query 3359
+remove 20
+remove 29
+query 3360
+start
+query 3361
+add 30 -5126 1888 0 
+query 3362
+fee 27 -11549
+query 3363
+commit
+query 3364
+add 31 2555 2775 1 30
+query 3365
+add 32 3165 3893 1 26
+query 3366
+remove 27
+query 3367
+start
+query 3368
+add 33 45335 3448 1 28
+query 3369
+add 34 24130 1820 0 
+query 3370
+commit
+query 3371
+fee 25 34859
+query 3372
+start
+query 3373
+commit
+query 3374
+start
+query 3375
+add 35 7181 3789 2 28 32
+query 3376
+fee 28 33451
+query 3377
+add 36 30331 725 2 25 30
+query 3378
+remove 30
+query 3379
+add 37 34871 3492 3 25 28 32
+query 3380
+fee 36 -9361
+query 3381
+remove 34
+query 3382
+fee 28 -4387
+query 3383
+remove 32
+remove 35
+remove 37
+query 3384
+add 38 603 3435 0 
+query 3385
+commit
+query 3386
+remove 25
+remove 36
+query 3387
+add 39 9810 1119 1 33
+query 3388
+fee 38 6746
+query 3389
+add 40 -5408 2910 0 
+query 3390
+start
+query 3391
+remove 39
+query 3392
+add 41 28004 831 1 40
+query 3393
+add 42 41568 2766 0 
+query 3394
+add 43 16524 2890 0 
+query 3395
+remove 31
+query 3396
+add 44 -3356 3048 2 42 43
+query 3397
+add 45 -990 3399 2 28 43
+query 3398
+add 46 31516 1613 0 
+query 3399
+remove 42
+remove 44
+query 3400
+remove 43
+query 3401
+add 47 17255 1795 2 40 45
+query 3402
+fee 38 -9036
+query 3403
+remove 47
+query 3404
+remove 46
+query 3405
+add 48 -5620 1783 0 
+query 3406
+remove 38
+query 3407
+remove 33
+query 3408
+remove 28
+remove 45
+query 3409
+commit
+query 3410
+remove 48
+query 3411
+add 49 43664 3311 0 
+query 3412
+start
+query 3413
+add 50 23697 2021 1 40
+query 3414
+add 51 43618 3639 1 49
+query 3415
+remove 26
+query 3416
+commit
+query 3417
+add 52 27228 3998 2 41 49
+query 3418
+start
+query 3419
+abort
+query 3420
+start
+query 3421
+add 53 -4957 100 0 
+query 3422
+add 54 15051 3257 2 50 51
+query 3423
+remove 52
+query 3424
+fee 51 25780
+query 3425
+add 55 19332 3517 2 40 54
+query 3426
+add 56 32774 887 2 40 53
+query 3427
+commit
+query 3428
+remove 50
+remove 54
+remove 55
+query 3429
+remove 40
+remove 41
+query 3430
+start
+query 3431
+remove 53
+remove 56
+query 3432
+add 57 34486 657 1 49
+query 3433
+remove 49
+query 3434
+abort
+query 3435
+remove 53
+remove 56
+query 3436
+add 58 -9312 1203 0 
+query 3437
+remove 58
+query 3438
+remove 49
+remove 51
+query 3439
+add 59 16704 3016 0 
+query 3440
+start
+query 3441
+add 60 32347 1311 0 
+query 3442
+fee 60 44534
+query 3443
+add 61 27253 2567 0 
+query 3444
+fee 59 7528
+query 3445
+add 62 24777 1212 0 
+query 3446
+commit
+query 3447
+remove 59
+query 3448
+start
+query 3449
+abort
+new
+add 1 42536 3479 0 
+query 3450
+remove 1
+query 3451
+add 2 12021 1061 0 
+query 3452
+start
+query 3453
+add 3 47837 1052 1 2
+query 3454
+commit
+query 3455
+add 4 7615 2844 0 
+query 3456
+add 5 26128 755 1 2
+query 3457
+remove 2
+remove 3
+query 3458
+add 6 40083 913 0 
+query 3459
+add 7 42392 1523 1 6
+query 3460
+start
+query 3461
+add 8 10126 1261 0 
+query 3462
+add 9 29271 3188 1 4
+query 3463
+add 10 36799 3726 3 6 7 8
+query 3464
+add 11 45726 3402 4 6 7 8 10
+query 3465
+abort
+query 3466
+add 12 43070 3657 0 
+query 3467
+add 13 49985 1035 0 
+query 3468
+start
+query 3469
+add 14 34986 1269 0 
+query 3470
+remove 6
+remove 7
+query 3471
+add 15 44210 1877 1 4
+query 3472
+add 16 30943 1837 0 
+query 3473
+remove 16
+query 3474
+abort
+query 3475
+fee 6 -15630
+query 3476
+start
+query 3477
+remove 4
+query 3478
+abort
+query 3479
+fee 12 32607
+query 3480
+add 17 37049 1873 2 7 13
+query 3481
+remove 6
+remove 7
+remove 17
+query 3482
+fee 13 47717
+query 3483
+add 18 12848 833 0 
+query 3484
+add 19 26174 1657 0 
+query 3485
+add 20 -6037 2713 0 
+query 3486
+remove 20
+query 3487
+remove 4
+query 3488
+remove 19
+query 3489
+remove 18
+query 3490
+fee 5 -10708
+query 3491
+add 21 -1752 3961 1 5
+query 3492
+add 22 12086 1029 1 13
+query 3493
+add 23 37448 1808 0 
+query 3494
+add 24 49065 3184 2 5 23
+query 3495
+fee 5 15753
+query 3496
+add 25 27434 3276 3 5 22 24
+query 3497
+add 26 24019 2035 0 
+query 3498
+fee 26 4397
+query 3499
+fee 12 5346
+query 3500
+add 27 19711 620 2 21 25
+query 3501
+add 28 40384 1022 2 13 27
+query 3502
+add 29 15417 395 3 5 13 24
+query 3503
+add 30 24957 849 4 21 25 26 29
+query 3504
+start
+query 3505
+remove 13
+remove 22
+remove 25
+remove 27
+remove 28
+remove 29
+remove 30
+query 3506
+add 31 12912 2254 3 21 24 26
+query 3507
+fee 24 26167
+query 3508
+commit
+query 3509
+add 32 687 3395 1 21
+query 3510
+start
+query 3511
+fee 26 28891
+query 3512
+remove 12
+query 3513
+fee 5 -8766
+query 3514
+add 33 42108 1574 2 5 24
+query 3515
+commit
+query 3516
+add 34 10298 3408 0 
+query 3517
+start
+query 3518
+abort
+query 3519
+add 35 30666 1605 0 
+query 3520
+remove 23
+query 3521
+start
+query 3522
+abort
+query 3523
+start
+query 3524
+fee 35 11740
+query 3525
+abort
+query 3526
+fee 33 -12885
+query 3527
+add 36 32319 1607 0 
+query 3528
+remove 5
+remove 24
+query 3529
+add 37 -7125 587 0 
+query 3530
+add 38 46803 110 1 31
+query 3531
+add 39 -6149 1557 0 
+query 3532
+add 40 -38 2056 1 34
+query 3533
+add 41 -1068 2573 0 
+query 3534
+start
+query 3535
+fee 31 33510
+query 3536
+add 42 -9729 315 2 32 34
+query 3537
+fee 42 34925
+query 3538
+add 43 -2372 2465 1 38
+query 3539
+commit
+query 3540
+fee 33 43898
+query 3541
+add 44 -1975 618 3 31 36 39
+query 3542
+fee 41 25886
+query 3543
+add 45 -6979 837 6 32 33 39 42 43 44
+query 3544
+start
+query 3545
+remove 41
+query 3546
+remove 26
+remove 31
+remove 38
+remove 43
+remove 44
+remove 45
+query 3547
+fee 42 -7529
+query 3548
+commit
+query 3549
+start
+query 3550
+commit
+query 3551
+add 46 11343 3254 0 
+query 3552
+remove 37
+query 3553
+add 47 12657 957 1 40
+query 3554
+add 48 30103 1292 0 
+query 3555
+add 49 31109 941 3 34 47 48
+query 3556
+start
+query 3557
+add 50 45523 1919 0 
+query 3558
+remove 21
+remove 32
+remove 42
+query 3559
+add 51 -7341 1351 2 35 49
+query 3560
+abort
+query 3561
+remove 39
+query 3562
+remove 46
+query 3563
+add 52 39193 2852 3 32 33 40
+query 3564
+fee 40 48771
+query 3565
+add 53 15827 3287 3 21 47 52
+query 3566
+remove 32
+remove 42
+remove 52
+remove 53
+query 3567
+remove 48
+query 3568
+add 54 7148 1054 1 33
+query 3569
+add 55 23194 1691 1 54
+query 3570
+add 56 40585 1180 4 33 34 36 49
+query 3571
+add 57 15233 2900 1 49
+query 3572
+add 58 9041 1642 3 33 40 57
+query 3573
+add 59 43603 1298 5 33 34 35 36 58
+query 3574
+remove 58
+remove 59
+query 3575
+add 60 29833 2062 2 21 54
+query 3576
+remove 34
+query 3577
+remove 21
+remove 33
+remove 54
+remove 60
+query 3578
+add 61 38701 2413 2 40 57
+query 3579
+fee 61 -4192
+query 3580
+fee 57 41520
+query 3581
+start
+query 3582
+add 62 -5545 906 2 35 56
+query 3583
+add 63 35150 2416 2 40 57
+query 3584
+fee 47 10001
+query 3585
+commit
+query 3586
+start
+query 3587
+abort
+query 3588
+add 64 14776 2184 1 57
+query 3589
+remove 61
+query 3590
+add 65 25717 1933 1 57
+query 3591
+add 66 35827 3640 1 62
+query 3592
+add 67 22061 350 5 35 36 40 55 63
+query 3593
+fee 35 38970
+query 3594
+start
+query 3595
+fee 40 4627
+query 3596
+abort
+query 3597
+start
+query 3598
+add 68 184 1463 0 
+query 3599
+abort

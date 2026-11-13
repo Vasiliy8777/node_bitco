@@ -12,8 +12,10 @@ class PackageScriptResultsTest {
         var result = pool.testAccept(List.of(transaction), CONTEXT, COINS);
         assertEquals(0, result.failedTransactionIndex());
         assertEquals("mempool-script-verify-flag-failed (Witness program hash mismatch)", result.rejectReason());
-        assertThrows(ru.bitcoin.node.consensus.transaction.TransactionValidationException.class,
+        var failure = assertThrows(ru.bitcoin.node.script.ScriptVerificationException.class,
                 () -> pool.admit(transaction, CONTEXT, COINS));
+        assertEquals(ru.bitcoin.node.script.ScriptError.WITNESS_PROGRAM_MISMATCH, failure.code());
+        assertTrue(failure.getMessage().startsWith(result.rejectReason() + ", input 0 of "));
         assertTrue(pool.isEmpty());
     }
     @Test void scriptFailurePreservesOnlySuccessfulPrefixAtEveryPosition() {

@@ -15,7 +15,7 @@ public final class TaprootValidator {
     public static void validate(Transaction tx, int input, List<TxOut> coins, byte[] outputKey, int flags) {
         Witness witness = tx.inputs().get(input).witness();
         int size = witness.size();
-        if (size == 0) throw new ScriptExecutionException("Empty Taproot witness");
+        if (size == 0) throw new ScriptExecutionException(ScriptError.WITNESS_PROGRAM_WITNESS_EMPTY, "Empty Taproot witness");
         byte[] annex = null;
         byte[] last = witness.item(size - 1);
         if (size >= 2 && last.length > 0 && last[0] == 0x50) {
@@ -29,7 +29,7 @@ public final class TaprootValidator {
         byte[] control = witness.item(size - 1);
         byte[] script = witness.item(size - 2);
         if (control.length < 33 || control.length > 33 + 32 * 128 || (control.length - 33) % 32 != 0) {
-            throw new ScriptExecutionException("Invalid Taproot control block size");
+            throw new ScriptExecutionException(ScriptError.TAPROOT_WRONG_CONTROL_SIZE, "Invalid Taproot control block size");
         }
         int leafVersion = control[0] & 0xfe;
         byte[] leaf = TaggedHash.hash("TapLeaf", new byte[]{(byte) leafVersion}, CompactSize.encode(script.length), script);
@@ -41,32 +41,32 @@ public final class TaprootValidator {
         }
         byte[] internalKey = Arrays.copyOfRange(control, 1, 33);
         BigInteger tweak = new BigInteger(1, TaggedHash.hash("TapTweak", internalKey, root));
-        if (tweak.compareTo(Secp256k1.N) >= 0) throw new ScriptExecutionException("Taproot tweak out of range");
+        if (tweak.compareTo(Secp256k1.N) >= 0) throw new ScriptExecutionException(ScriptError.WITNESS_PROGRAM_MISMATCH, "Taproot tweak out of range");
         try {
             var point = SchnorrSignature.liftX(internalKey).add(Secp256k1.DOMAIN.getG().multiply(tweak)).normalize();
             if (point.isInfinity() || !point.getAffineXCoord().toBigInteger().equals(new BigInteger(1, outputKey))
                     || point.getAffineYCoord().toBigInteger().testBit(0) != ((control[0] & 1) != 0)) {
-                throw new ScriptExecutionException("Taproot control block does not commit to output key");
+                throw new ScriptExecutionException(ScriptError.WITNESS_PROGRAM_MISMATCH, "Taproot control block does not commit to output key");
             }
         } catch (IllegalArgumentException e) {
-            throw new ScriptExecutionException("Invalid Taproot internal key");
+            throw new ScriptExecutionException(ScriptError.WITNESS_PROGRAM_MISMATCH, "Invalid Taproot internal key");
         }
         if (leafVersion != 0xc0) {
             if (ScriptVerifyFlags.has(flags, ScriptVerifyFlags.DISCOURAGE_UPGRADABLE_TAPROOT_VERSION)) {
-                throw new ScriptExecutionException("Discouraged Taproot leaf version");
+                throw new ScriptExecutionException(ScriptError.DISCOURAGE_UPGRADABLE_TAPROOT_VERSION, "Discouraged Taproot leaf version");
             }
             return;
         }
         if (hasOpSuccess(script)) {
             if (ScriptVerifyFlags.has(flags, ScriptVerifyFlags.DISCOURAGE_OP_SUCCESS)) {
-                throw new ScriptExecutionException("Discouraged OP_SUCCESS");
+                throw new ScriptExecutionException(ScriptError.DISCOURAGE_OP_SUCCESS, "Discouraged OP_SUCCESS");
             }
             return;
         }
         var machine = new ScriptMachine();
         for (int i = 0; i < size - 2; i++) {
             byte[] item = witness.item(i);
-            if (item.length > 520) throw new ScriptExecutionException("Tapscript initial element exceeds 520 bytes");
+            if (item.length > 520) throw new ScriptExecutionException(ScriptError.PUSH_SIZE, "Tapscript initial element exceeds 520 bytes");
             machine.push(item);
         }
         machine.validateStackSize();
@@ -79,7 +79,7 @@ public final class TaprootValidator {
         ScriptInterpreter.execute(script, machine, new ScriptExecutionContext(tx, input, script, flags,
                 coins.get(input).value(), SignatureVersion.TAPSCRIPT, data));
         if (machine.size() != 1 || !ScriptNumber.castToBool(machine.peek())) {
-            throw new ScriptExecutionException("Tapscript must finish with exactly one true element");
+            throw new ScriptExecutionException((machine.size() != 1 ? ScriptError.CLEANSTACK : ScriptError.EVAL_FALSE), "Tapscript must finish with exactly one true element");
         }
     }
 
@@ -93,10 +93,10 @@ public final class TaprootValidator {
             long length = opcode <= 75 ? opcode : 0;
             if (opcode >= 76 && opcode <= 78) {
                 int bytes = 1 << (opcode - 76);
-                if (script.length - pos < bytes) throw new ScriptExecutionException("Truncated tapscript push length");
+                if (script.length - pos < bytes) throw new ScriptExecutionException(ScriptError.BAD_OPCODE, "Truncated tapscript push length");
                 for (int i = 0; i < bytes; i++) length |= (script[pos++] & 0xffL) << (8 * i);
             }
-            if (length > script.length - pos) throw new ScriptExecutionException("Truncated tapscript push");
+            if (length > script.length - pos) throw new ScriptExecutionException(ScriptError.BAD_OPCODE, "Truncated tapscript push");
             pos += (int) length;
         }
         return false;

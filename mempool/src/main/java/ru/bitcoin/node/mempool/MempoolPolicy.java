@@ -81,16 +81,20 @@ public final class MempoolPolicy {
         if (version < TX_MIN_STANDARD_VERSION
                 || version > TX_MAX_STANDARD_VERSION) {
 
-            throw new MempoolAdmissionException(
+            throw new MempoolPolicyException(
                     "Non-standard transaction version: "
                             + version
                             + ", allowed range: "
                             + TX_MIN_STANDARD_VERSION
                             + ".."
-                            + TX_MAX_STANDARD_VERSION
+                            + TX_MAX_STANDARD_VERSION, "version", null
             );
         }
 
+        if (weight > MAX_STANDARD_TX_WEIGHT) {
+            throw new MempoolPolicyException("Transaction exceeds maximum standard weight: "
+                    + weight + " > " + MAX_STANDARD_TX_WEIGHT, "tx-size", null);
+        }
         for (int i = 0;
              i < transaction.inputs().size();
              i++) {
@@ -104,34 +108,19 @@ public final class MempoolPolicy {
             if (scriptSigSize
                     > MAX_STANDARD_SCRIPTSIG_SIZE) {
 
-                throw new MempoolAdmissionException(
+                throw new MempoolPolicyException(
                         "Input "
                                 + i
                                 + " scriptSig exceeds maximum standard size: "
                                 + scriptSigSize
                                 + " > "
-                                + MAX_STANDARD_SCRIPTSIG_SIZE
+                                + MAX_STANDARD_SCRIPTSIG_SIZE, "scriptsig-size", null
                 );
             }
+            ru.bitcoin.node.mempool.policy.StandardTransactionPolicy.validateScriptSig(transaction.inputs().get(i).scriptSig());
         }
 
-        /*
-         * Bitcoin Core policy:
-         *
-         * MAX_STANDARD_TX_WEIGHT = 400,000 WU.
-         *
-         * Это policy, а не block-consensus limit.
-         * Consensus block limit остаётся 4,000,000 WU.
-         */
-        if (weight > MAX_STANDARD_TX_WEIGHT) {
-            throw new MempoolAdmissionException(
-                    "Transaction exceeds maximum standard weight: "
-                            + weight
-                            + " > "
-                            + MAX_STANDARD_TX_WEIGHT
-            );
-        }
-
+        ru.bitcoin.node.mempool.policy.StandardTransactionPolicy.validateStructure(transaction, maxDataCarrierBytes, dustRelaySatPerKvB);
         /*
          * Важно: проверяется именно размер
          * non-witness serialization.
@@ -148,14 +137,13 @@ public final class MempoolPolicy {
         if (nonWitnessSize
                 < MIN_STANDARD_TX_NONWITNESS_SIZE) {
 
-            throw new MempoolAdmissionException(
+            throw new MempoolPolicyException(
                     "Transaction non-witness size is below standard minimum: "
                             + nonWitnessSize
                             + " < "
-                            + MIN_STANDARD_TX_NONWITNESS_SIZE
+                            + MIN_STANDARD_TX_NONWITNESS_SIZE, "tx-size-small", null
             );
         }
-        ru.bitcoin.node.mempool.policy.StandardTransactionPolicy.validateStructure(transaction, maxDataCarrierBytes, dustRelaySatPerKvB);
     }
     /**
      * Проверяет fee транзакции относительно

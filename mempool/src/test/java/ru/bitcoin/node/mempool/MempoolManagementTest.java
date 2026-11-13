@@ -44,7 +44,7 @@ class MempoolManagementTest {
         var replacement = tx(FUND, 80_000, 2);
         var bad = new Transaction(2, List.of(new TxIn(FUND, new byte[0], TxIn.FINAL_SEQUENCE,
                 new Witness(List.of(new byte[]{0})))), replacement.outputs(), new UInt32(0));
-        assertThrows(TransactionValidationException.class, () -> pool.admit(bad, CONTEXT, COINS));
+        assertThrows(ru.bitcoin.node.script.ScriptVerificationException.class, () -> pool.admit(bad, CONTEXT, COINS));
         assertTrue(pool.contains(original.txId()));
     }
 
@@ -105,16 +105,18 @@ class MempoolManagementTest {
         var pool = new Mempool(new MempoolPolicy(),
                 new MempoolLimits(64, 101_000, 1_000_000, 100, 100), clock);
         var transaction = tx(FUND, 90_000, 2);
-        var restored = pool.admitRestored(transaction, 1_899L, CONTEXT, COINS);
-        assertEquals(1_899L, restored.arrivalTime());
-        assertEquals(1, pool.expire());
+        assertEquals("mempool-full",assertThrows(MempoolAdmissionException.class,
+                ()->pool.admitRestored(transaction,1_899L,CONTEXT,COINS)).getMessage());
         assertTrue(pool.isEmpty());
+        var restored=pool.admitRestored(transaction,1_900L,CONTEXT,COINS);
+        assertEquals(1_900L,restored.arrivalTime());
+        assertEquals(0,pool.expire(),"The exact expiry boundary is strict");
     }
 
     @Test
     void capacityEvictsLowerFeePackageAndRejectsLowFeeArrival() {
         var first = tx(FUND, 90_000, 2);
-        long size = TransactionWeight.virtualSize(TransactionWeight.calculate(first));
+        long size = 1100; // Core memory budget: one entry, including index allocation.
         var pool = new Mempool(new MempoolPolicy(), new MempoolLimits(64, 101_000, size, 1000, 100), Clock.systemUTC());
         OutPoint other = new OutPoint(Hash256.fromDisplayHex("22".repeat(32)), new UInt32(0));
         UtxoView coins = out -> Optional.of(new UtxoEntry(100_000, SCRIPT, 100, false));

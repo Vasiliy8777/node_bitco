@@ -72,8 +72,8 @@ class BitcoinCoreHeadersTimingWireTest {
             }
         }
     }
-    @ParameterizedTest @ValueSource(booleans={false,true})
-    void actualCoreDeadlineRequiresAlternativeAndResetsNoban(boolean noBan) throws Exception {
+    @ParameterizedTest @org.junit.jupiter.params.provider.CsvSource({"false,false", "true,false", "false,true", "true,true"})
+    void actualCoreDeadlineRequiresAlternativeAndResetsNoban(boolean noBan, boolean delayVerack) throws Exception {
         int rpcPort=freePort(),p2pPort=freePort();while(p2pPort==rpcPort)p2pPort=freePort();
         var data=Files.createDirectory(directory.resolve("core"));endpoint=URI.create("http://127.0.0.1:"+rpcPort);
         var command=new ArrayList<>(List.of(System.getProperty("bitcoin.core.binary"),"-regtest","-datadir="+data,"-server",
@@ -82,7 +82,8 @@ class BitcoinCoreHeadersTimingWireTest {
         if(noBan)command.add("-whitelist=noban@127.0.0.1");
         var core=new ProcessBuilder(command).redirectErrorStream(true).redirectOutput(directory.resolve("core.log").toFile()).start();
         try(var client=HttpClient.newHttpClient();var local=new PeerManager();var alternatives=new PeerManager();
-            var server=new BitcoinServer(NetworkParametersRegistry.regtest(),alternatives)) {
+            var server=new BitcoinServer(NetworkParametersRegistry.regtest(),alternatives);
+            var delayed = new VersionOnlyAlternative()) {
             http=client;long end=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);
             while(true){try{rpc("getblockcount");break;}catch(Exception error){if(!core.isAlive()||System.nanoTime()>end)throw error;Thread.sleep(100);}}
             long now=1_800_000_000L;rpc("setmocktime",now);
@@ -102,8 +103,16 @@ class BitcoinCoreHeadersTimingWireTest {
             for(long clock=now+300;clock<after;clock+=300)tick(peer,pongs,clock);
             tick(peer,pongs,after);assertTrue(peer.isReady(),"No alternative: Core must keep the source after deadline");
             // Freeze just before the fractional-microsecond deadline, then add a preferred outbound source.
-            tick(peer,pongs,before);server.start(0,0);rpc("addnode","127.0.0.1:"+server.localPort(),"onetry",false);
-            await(()->!alternatives.readyPeers().isEmpty(),"Alternative handshake did not complete");
+            tick(peer,pongs,before);
+            if (delayVerack) {
+                delayed.start();
+                rpc("addnode", "127.0.0.1:" + delayed.port(), "onetry", false);
+                delayed.versionAccepted.get(5, TimeUnit.SECONDS);
+                assertTrue(alternatives.readyPeers().isEmpty());
+            } else {
+                server.start(0,0);rpc("addnode","127.0.0.1:"+server.localPort(),"onetry",false);
+                await(()->!alternatives.readyPeers().isEmpty(),"Alternative handshake did not complete");
+            }
             Thread.sleep(250);assertTrue(peer.isReady(),"Core expired headers before its computed deadline");
             assertEquals(1,requests.get());rpc("setmocktime",after);
             if(noBan){await(()->requests.get()>=2||alternativeRequests.get()>=1,"Core did not reset the NoBan sync state");assertTrue(peer.isReady());}
@@ -114,6 +123,45 @@ class BitcoinCoreHeadersTimingWireTest {
                 try(var cleanup=HttpClient.newHttpClient()){http=cleanup;rpc("stop");}catch(Exception ignored){}
                 if(!core.waitFor(15,TimeUnit.SECONDS)){core.destroyForcibly();core.waitFor(5,TimeUnit.SECONDS);}
             }
+        }
+    }
+    /** Replies to VERSION but deliberately never sends VERACK. */
+    private static final class VersionOnlyAlternative implements AutoCloseable {
+        private final ServerSocket listener = new ServerSocket(0);
+        private volatile Socket socket;
+        private CompletableFuture<Void> task;
+        final CompletableFuture<Void> versionAccepted = new CompletableFuture<>();
+        VersionOnlyAlternative() throws java.io.IOException { }
+        int port() { return listener.getLocalPort(); }
+        void start() {
+            task = CompletableFuture.runAsync(() -> {
+                try (var accepted = listener.accept()) {
+                    socket = accepted; accepted.setSoTimeout(30000);
+                    var parameters = NetworkParametersRegistry.regtest();
+                    var reader = new ru.bitcoin.node.p2p.codec.BitcoinMessageStreamReader(
+                            new ru.bitcoin.node.p2p.codec.BitcoinMessageDecoder(parameters));
+                    var encoder = new ru.bitcoin.node.p2p.codec.BitcoinMessageEncoder(parameters);
+                    var input = new java.io.BufferedInputStream(accepted.getInputStream());
+                    assertEquals("version", reader.read(input).orElseThrow().command());
+                    var version = new VersionMessage(VersionMessage.CURRENT_PROTOCOL_VERSION,
+                            VersionMessage.DEFAULT_SERVICES, 1_800_000_000L,
+                            NetworkAddress.unspecified(), NetworkAddress.unspecified(), 0x12345678L,
+                            "/version-only/", 0, true);
+                    accepted.getOutputStream().write(encoder.encode(BitcoinMessages.version(version)));
+                    accepted.getOutputStream().flush();
+                    while (!reader.read(input).orElseThrow().command().equals("verack")) { }
+                    versionAccepted.complete(null);
+                    while (reader.read(input).isPresent()) { } // Core may send GETADDR before our VERACK.
+                } catch (Exception failure) {
+                    versionAccepted.completeExceptionally(failure);
+                    throw new CompletionException(failure);
+                }
+            });
+        }
+        @Override public void close() throws Exception {
+            listener.close();
+            if (socket != null) socket.close();
+            if (task != null) task.get(5, TimeUnit.SECONDS);
         }
     }
     private void tick(Peer peer,BlockingQueue<Long> pongs,long clock) throws Exception {

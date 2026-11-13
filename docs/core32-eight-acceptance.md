@@ -8,10 +8,10 @@
 
 | № | Направление | Состояние и критерий завершения |
 | --- | --- | --- |
-| 1 | Сроки синхронизации / предпочтительные пиры | Формула, строгие условия срока, NoBan reset и учёт предпочтительных готовых пиров реализованы в стандартном режиме. Независимые задачи пиров заменяют последовательное ожидание. Управляемые часы и нативный двухпировый Core wire-тест подтверждают границы. Окно VERSION/VERACK, полный scheduler и import/reindex остаются открытыми. [Проверки и границы](header-sync-timing-core32.md). |
+| 1 | Сроки синхронизации / предпочтительные пиры | Формула, строгие условия срока, NoBan reset и учёт предпочтительных пиров после VERSION реализованы в стандартном режиме. Независимые задачи пиров заменяют последовательное ожидание. Управляемые часы и нативный двухпировый Core wire-тест подтверждают границы. Учёт VERSION/VERACK исправлен отдельным набором handshake-пиров. Полный scheduler и import/reindex остаются открытыми. [Проверки и границы](header-sync-timing-core32.md). |
 | 2 | Начальная синхронизация только через ручные подключения | Реализовано для `maxconnections=0` с явным `manual-peers`: ожидание соединения, загрузка заголовков/блока, минимальная работа, live-sync и готовность майнинга без автоматических слотов. Настоящий P2P regtest-блок принят; отмена ожидания проверена. Полная сборка и рабочий перезапуск фиксируются отдельно. |
 | 3 | Остальные разрешения пиров | Частично. [Addr](addr-permission-core32.md), [Relay/ForceRelay](relay-permissions-core32.md) и [Mempool/BIP35](mempool-permission-core32.md) имеют реальные обработчики и проверки. Для Mempool реализованы доступ, trickle, feefilter по базовой комиссии, MSG_TX/MSG_WTX и INV ≤50 000. Bloom, upload-target/GETDATA sequence и полная нативная wire-матрица остаются открытыми. |
-| 4 | Оптимизатор mempool | Открыто. Требуются независимые сравнения промежуточных результатов при ограниченном бюджете Core, вставках/удалениях/reorg/изменении fees и равных ставках; действующие unlimited-reference случаи не закрывают этот пункт. |
+| 4 | Оптимизатор mempool | Реализован бюджетный SFL с CostModel, PostLinearize, continuation и сохранёнными main/staging состояниями. 9600 точных бюджетных векторов, 3600 снимков графа, 383 пары диаграмм и 512 Trim-сценариев; дополнительно нативные pressure/reorg/expiry. [Реализация и приёмка всего пункта mempool](mempool-core32-completion.md). |
 | 5 | RPC | Частично. Добавлен `getpeerinfo.presynced_headers` с реальными PRESYNC/REDOWNLOAD/завершением. Нативная проверка выгружает точный список методов Core и ноды; схемы и семантика каждого отсутствующего node-метода остаются отдельной работой. Инвентарь включает wallet-методы и сам по себе не задаёт объём кошелька. |
 | 6 | Дополнительные сети | Открыто. Нужны SOCKS/Tor, I2P SAM, private broadcast и внешний ASMap с локальными протокольными/интеграционными фикстурами. Подключение реальных внешних сервисов не требуется для завершения реализации и не включается автоматически. |
 | 7 | Compact blocks | Открыто. Сначала нужен точный разбор условий оптимистичного кеша/объявлений и авторизации запросов относительно Core, затем независимые wire-сценарии для найденных отличий. Уже работающий кеш последнего принятого блока не подменяет этот объём. |
@@ -52,7 +52,174 @@ Its native fixture uses submitpackage. The subsequent
 removes CPFP aggregation from probes and reports individual effective fees.
 Full RPC reason/partial-result shape parity remains open under direction 5.
 
-Latest availability ownership batch: 5,364 full-reactor cases (5,352 passed,
+Latest full indexed-graph-queries batch: 5,430 complete-reactor cases, 5,418 passed,
+12 skipped, zero failures/errors; both applications packaged November 12,
+22:19:51 Bangkok (`core32-indexed-graph-queries-full-build.log`). Queries and
+admission conflict closures use persistent adjacency; batch graph views solve
+each requested component once. Both native Core scenarios passed (129.4 seconds).
+Full shared staging, incremental linearization and budgeted optimization remain
+open. [Evidence and limits](indexed-graph-queries-core32.md).
+Original IDEA GPU PID 20332: one process, RUNNING, blocks=headers=975567,
+IBD=false, six peers (two block relay), 35,727 mempool entries, zero privileged
+peers and accepted CUDA shares (`core32-indexed-graph-queries-live.json`).
+
+Previous full spent-commit-delta batch: 5,422 complete-reactor cases, 5,410 passed,
+12 skipped, zero failures/errors; both applications packaged November 12,
+21:25:37 Bangkok (`core32-spent-commit-delta-full-build.log`). Spent publication
+now reads inputs only for changed txids; metadata/overflow/replacement and 160
+random commit cases pass. Both native Core scenarios passed (112.8 seconds).
+Full shared staging and budgeted optimization remain open.
+[Evidence and limits](spent-commit-delta-core32.md).
+Original IDEA GPU PID 36316: one process, RUNNING, blocks=headers=975562,
+IBD=false, eight peers (two block relay), 35,345 mempool entries, zero privileged
+peers and accepted CUDA shares (`core32-spent-commit-delta-live.json`).
+
+Previous full stage-graph-copy batch: 5,417 complete-reactor cases, 5,405 passed,
+12 skipped, zero failures/errors; both applications packaged November 12,
+19:33:48 Bangkok (`core32-stage-graph-copy-full-build.log`). Initial staging
+copies ready graph/spent indexes without repeated input scans. Isolation and
+known-transaction probe regressions passed; both native Core scenarios passed
+(97.39 seconds). Full shared staging, incremental linearization and budgeted
+optimization remain open. [Evidence and limits](stage-graph-copy-core32.md).
+Original IDEA GPU PID 72420: one process, RUNNING, blocks=headers=975552,
+IBD=false, nine peers (two block relay), 33,837 mempool entries, zero privileged
+peers and accepted CUDA shares (`core32-stage-graph-copy-live.json`).
+
+Previous full graph-commit-delta batch: 5,413 complete-reactor cases, 5,401 passed,
+12 skipped, zero failures/errors; both applications packaged November 12,
+18:48:22 Bangkok (`core32-graph-commit-delta-full-build.log`). Bulk commits
+preserve unchanged main-pool adjacency and components. Both native Core
+scenarios passed (118.7 seconds). Full staging and budgeted optimization remain
+open. [Implementation and checks](graph-commit-delta-core32.md).
+Original IDEA GPU PID 141460: one process, RUNNING, blocks=headers=975545,
+IBD=false, six peers (two block relay), 37,797 mempool entries, zero privileged
+peers and accepted CUDA shares (`core32-graph-commit-delta-live.json`).
+
+Previous full persistent-main-graph batch: 5,410 complete-reactor cases, 5,398 passed,
+12 skipped, zero failures/errors; both applications packaged November 12,
+17:22:17 Bangkok (`core32-persistent-graph-full-build.log`). Main-pool adjacency
+and components persist between ordinary mutations; unchanged reads use a bounded
+revision cache. Bulk staging/reorg and the budgeted optimizer remain open.
+[Implementation and evidence](persistent-main-graph-core32.md).
+Original IDEA GPU PID 67116: one process, RUNNING, blocks=headers=975536,
+IBD=false, eight peers (two block relay), 43,615 mempool entries, zero privileged
+peers and accepted CUDA shares (`core32-persistent-graph-live.json`).
+
+Previous full equal-eviction batch: 5,406 complete-reactor cases, 5,394 passed,
+12 skipped, zero failures/errors; both applications packaged November 12,
+16:12:06 Bangkok. Reverse Core chunk keys replace insertion-order eviction.
+Seven regressions cover prefix/max-txid ties and rounded removed rates. Native
+memory-pressure/staging and budgeted optimizer comparisons remain open.
+Original IDEA GPU PID 47076: one process, RUNNING, blocks=headers=975534,
+IBD=false, ten peers (two block relay), 35,438 mempool entries, zero privileged
+peers, accepted CUDA shares. [Evidence and limits](equal-rate-eviction-core32.md).
+
+Previous full chunk-fallback batch: 5,399 complete-reactor cases, 5,387 passed,
+12 skipped, zero failures/errors; both applications packaged November 12,
+15:48:59 Bangkok. Core GBT, Java graph and Java GBT agree on signed equal-fee/
+weight transactions. Shared keys cover fee rate, equal-rate prefix weight and
+maximum serialized txid, including tight-budget selection. Optimizer budget,
+persistent TxGraph and equal-rate eviction remain open.
+Original IDEA GPU PID 117012: one process, RUNNING, blocks=headers=975533,
+IBD=false, eight peers (two block relay), 34,357 mempool entries, zero privileged
+peers and accepted CUDA shares. [Evidence and limits](equal-rate-fallback-core32.md).
+
+Previous accepted-dust priority follow-up: 67 selected cases passed without skips
+or failures, including three red/green unit regressions and a new native strict
+policy fixture. Both applications packaged with tests skipped afterward.
+Original IDEA GPU PID 37916: one process, RUNNING, blocks=headers=975530,
+IBD=false, seven peers (two block relay), 36,511 mempool entries, zero privileged
+peers, accepted CUDA shares. Targeted validation, not a new full-reactor run.
+[Evidence and remaining scope](dust-priority-core32.md).
+
+Previous priority-argument follow-up: 59 selected cases passed without skips or
+failures, including 35 new native argument/error comparisons. Both applications
+packaged with tests skipped afterward. Original IDEA GPU PID 33472: one process,
+RUNNING, blocks=headers=975530, IBD=false, six peers (two block relay), 36,004
+mempool entries, zero privileged peers, accepted CUDA shares. Targeted validation,
+not a new full-reactor run. [Evidence and scope](rpc-priority-arguments-core32.md).
+
+Previous broadcast-expiry follow-up: 59 selected cases passed without skips or
+failures, including four controlled-clock regressions reproduced before the
+fix and the existing native RPC/package matrix. Both applications packaged
+with tests skipped afterward. Original IDEA GPU PID 82088: one process, RUNNING,
+blocks=headers=975528, IBD=false, seven peers (two block relay), 36,850 mempool
+entries, zero privileged peers, accepted CUDA shares. Targeted validation;
+no new full-reactor claim. [Evidence and scope](broadcast-expiry-core32.md).
+
+Previous broadcast-preflight follow-up: 55 selected cases passed without skips or
+failures, including typed failure/no-admission checks, isolated successful probe,
+monitor contention and the native RPC/package matrix. Both applications packaged
+with tests skipped afterward. One original IDEA GPU PID 94528: RUNNING,
+blocks=headers=975489, IBD=false, seven peers (two block relay), 32,457 mempool
+entries, zero privileged peers, accepted CUDA shares. This is targeted validation,
+not a new full-reactor run. [Evidence and limits](broadcast-preflight-core32.md).
+
+Previous atomic-broadcast follow-up: 52 selected cases passed without skips or
+failures, including a deterministic monitor-contention regression and the native
+RPC/package matrix. Both applications packaged with tests skipped afterward.
+One original IDEA GPU PID 77932: RUNNING, blocks=headers=975472, IBD=false,
+three peers (two block relay), 42,889 mempool entries, zero privileged peers,
+accepted CUDA shares. Targeted validation, not a new full-reactor run.
+[Evidence and remaining limits](atomic-broadcast-core32.md).
+
+Previous broadcast-classification follow-up: 38 selected cases passed without
+skips or failures, including nine new native missing-input/confirmed error
+comparisons. Both applications packaged with tests skipped afterward; this is
+targeted validation, not a new full-reactor run. Original IDEA GPU PID 8660:
+one process, RUNNING, blocks=headers=975466, IBD=false, seven peers (two block
+relay), 41,518 mempool entries, zero privileged peers and accepted CUDA shares.
+[Evidence and remaining scope](rpc-broadcast-classification-core32.md).
+
+Previous sendraw fee-cap/rebroadcast follow-up: 39 selected cases passed without
+skips or failures; native comparisons cover base fee vs deltas, ceil boundaries
+and known txids with alternate witness. Both applications packaged with tests
+skipped afterward. Original IDEA GPU PID 84280: one process, RUNNING,
+blocks=headers=975464, IBD=false, nine peers (two block relay), 41,280 mempool
+entries, zero privileged peers and accepted CUDA shares. This is targeted
+validation, not a new full-reactor run. [Evidence](rpc-sendraw-fee-cap-core32.md).
+
+Previous money-argument/early-send follow-up: 17 selected cases passed without
+skips or failures, including 159 additional native comparisons. Both applications
+packaged with tests skipped afterward; no new full-reactor claim. Original IDEA
+GPU PID 114048: one process, RUNNING, blocks=headers=975461, IBD=false, five peers
+(two block relay), 39,937 mempool entries, zero privileged peers, accepted CUDA
+shares. [Evidence and remaining limits](rpc-amount-limits-core32.md).
+
+Previous package-element type follow-up: 17 selected cases passed without skips
+or failures; 50 additional native comparisons cover non-string array elements
+and count/decode precedence. Both applications packaged afterward with tests
+skipped. This is targeted validation, not another complete-reactor run.
+Original IDEA GPU PID 139888: one process, RUNNING, blocks=headers=975453,
+IBD=false, four peers (two block relay), 42,379 mempool entries, zero privileged
+peers, accepted CUDA shares. [Evidence and limits](package-rpc-decoding-core32.md).
+
+Previous package-RPC decoding batch: 5,378 full-reactor cases (5,366 passed,
+12 skipped), zero failures/errors; both applications packaged November 11,
+22:31:37 Bangkok. Native comparison adds 26 malformed/count/error-order cases.
+TRUC fixture uses a wallet-notification barrier and a live unspent-coin check.
+One original IDEA GPU PID 90688: RUNNING, blocks=headers=975450, IBD=false,
+eight peers (two block relay), 36,577 mempool entries, zero privileged peers,
+accepted CUDA shares. [Evidence and remaining scope](package-rpc-decoding-core32.md).
+
+Previous handshake-preference batch: 5,378 full-reactor cases (5,366 passed,
+12 skipped), zero failures/errors; both applications packaged November 11,
+22:09:58 Bangkok. VERSION-only alternatives count before READY; native Core
+wire cases verify the delayed-VERACK timeout behavior for ordinary/NoBan sources.
+One original IDEA GPU process PID 78900: RUNNING, blocks=headers=975447,
+IBD=false, five peers (two block relay), 39,667 mempool entries, zero privileged
+peers, accepted CUDA shares. [Evidence](preferred-peer-handshake-gap-core32.md).
+[All requested areas and remaining work](core32-user-checklist.md).
+
+Previous availability failure-boundary batch: 5,373 full-reactor cases (5,361 passed,
+12 skipped), zero failures/errors; both applications packaged on November 8,
+21:13:45 Bangkok. Local locator/state failures propagate; transport-close races
+remain retryable and release GETHEADERS admission. Live recheck on November 11,
+21:46 Bangkok: one Bitcoin process, PID 51816, blocks=headers=975447, IBD=false,
+eleven peers (three block relay), 37,799 mempool entries, zero privileged peers
+and accepted CUDA shares. [Evidence and limits](availability-failure-boundary-core32.md).
+
+Previous availability ownership batch: 5,364 full-reactor cases (5,352 passed,
 12 skipped), zero failures/errors; both applications packaged. Availability
 GETHEADERS shares initial/live admission, locator and timeout state. Deferred
 attempts do not add cooldown, and nonblocking send ownership prevents rollback

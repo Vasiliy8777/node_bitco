@@ -36,7 +36,7 @@ public record MempoolEntry(
 
     /** Bitcoin Core-style sigops-adjusted weight used by cluster feerate calculations. */
     public long adjustedWeight() {
-        return Math.max(weight, Math.multiplyExact(sigOpCost, 80));
+        return Math.max(weight, Math.multiplyExact(sigOpCost, 20));
     }
 
     public long virtualSize() {

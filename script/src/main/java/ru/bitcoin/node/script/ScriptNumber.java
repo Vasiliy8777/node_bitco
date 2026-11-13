@@ -125,7 +125,7 @@ public final class ScriptNumber {
 
         if (value.length > maxNumSize) {
             throw new ScriptExecutionException(
-                    "Script number exceeds maximum size of "
+                    ScriptError.SCRIPTNUM, "Script number exceeds maximum size of "
                             + maxNumSize
                             + " byte(s)"
             );
@@ -142,7 +142,7 @@ public final class ScriptNumber {
          */
         if (value.length > 8) {
             throw new ScriptExecutionException(
-                    "Script number is too large for long"
+                    ScriptError.SCRIPTNUM, "Script number is too large for long"
             );
         }
 
@@ -252,7 +252,7 @@ public final class ScriptNumber {
                 && !isMinimallyEncoded(value)) {
 
             throw new ScriptExecutionException(
-                    "Non-minimally encoded Script number"
+                    ScriptError.SCRIPTNUM, "Non-minimally encoded Script number"
             );
         }
 

@@ -33,9 +33,14 @@ final class PackagePolicy {
             later.remove(tx.txId());
         }
         Set<OutPoint> spends = new HashSet<>();
-        for (var tx : txs)
-            for (var in : tx.inputs())
-                if (!spends.add(in.previousOutput())) fail("conflict-in-package");
+        for (var tx : txs) {
+            var ownSpends = new HashSet<OutPoint>();
+            for (var in : tx.inputs()) {
+                if (spends.contains(in.previousOutput())) fail("conflict-in-package");
+                ownSpends.add(in.previousOutput());
+            }
+            spends.addAll(ownSpends);
+        }
         // PackageTestAccept checks general topological consistency; only actual
         // child-with-parents submission imposes this additional shape.
         if (!requireChildWithParents || txs.size() < 2) return;
@@ -86,6 +91,11 @@ final class PackagePolicy {
     static void replacement(List<Transaction> txs, Map<Hash256, MempoolEntry> before,
                             Map<Hash256, MempoolEntry> after, Set<Hash256> conflicts,
                             Set<Hash256> removed, MempoolLimits limits) {
+        replacement(txs,before,after,conflicts,removed,limits,null);
+    }
+    static void replacement(List<Transaction> txs, Map<Hash256, MempoolEntry> before,
+                            Map<Hash256, MempoolEntry> after, Set<Hash256> conflicts,
+                            Set<Hash256> removed, MempoolLimits limits, java.util.function.IntSupplier diagrams) {
         if (conflicts.isEmpty()) return;
         replacementContext(txs, before, conflicts);
         Set<Hash256> proposed = Set.of(txs.getFirst().txId(), txs.getLast().txId());
@@ -97,6 +107,9 @@ final class PackagePolicy {
         var parent = after.get(txs.getFirst().txId());
         if (ClusterLinearization.compareRate(newFee, newSize, parent.modifiedFee(), parent.virtualSize()) <= 0)
             fail("package-rbf-child-must-improve-parent-rate");
+        int diagram;
+        if (diagrams != null) diagram=diagrams.getAsInt();
+        else {
         Set<Hash256> oldAffected = ClusterLinearization.connected(before, conflicts);
         List<ClusterLinearization.Chunk> oldCurve = ClusterLinearization.chunks(before, oldAffected);
         Set<Hash256> newRoots = new HashSet<>(oldAffected);
@@ -104,7 +117,8 @@ final class PackagePolicy {
         newRoots.addAll(proposed);
         Set<Hash256> newAffected = ClusterLinearization.connected(after, newRoots);
         List<ClusterLinearization.Chunk> newCurve = ClusterLinearization.chunks(after, newAffected);
-        int diagram = ClusterLinearization.compareDiagrams(newCurve, oldCurve);
+        diagram = ClusterLinearization.compareDiagrams(newCurve, oldCurve);
+        }
         if (diagram < 0) fail("package-rbf-worse-feerate-diagram");
         if (diagram == 0) fail("package-rbf-unchanged-feerate-diagram");
     }

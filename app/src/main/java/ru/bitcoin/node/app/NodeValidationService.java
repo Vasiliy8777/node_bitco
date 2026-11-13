@@ -1051,18 +1051,49 @@ public final class NodeValidationService implements AutoCloseable {
             synchronizePool();
             var before = mempool.entries();
             try {
-                mempool.expire();
                 var entry = mempool.admit(transaction, context(), coins);
                 var parents = before.stream().map(candidate -> candidate.transaction().txId()).collect(java.util.stream.Collectors.toSet());
                 boolean independent = transaction.inputs().stream().noneMatch(input -> parents.contains(input.previousOutput().transactionId()));
                 blockPolicyFeeEstimator.added(transaction.txId(), entry.admissionHeight(), entry.fee(), entry.virtualSize(),
                         !initialBlockDownload.isInitialBlockDownload() && independent);
-                revision++;
-                chain.notifyAll();
                 return entry;
             } finally {
+                publishMempoolChanges(before);
                 markMempoolPersistenceDirty(before);
             }
+        }
+    }
+
+    public record BroadcastAdmission(MempoolEntry entry, boolean newlyAccepted) { }
+    public enum BroadcastRejectionReason { CONFIRMED, MAX_FEE }
+    public static final class BroadcastRejection extends MempoolAdmissionException {
+        private final BroadcastRejectionReason reason;
+        private BroadcastRejection(BroadcastRejectionReason reason) {
+            super(reason == BroadcastRejectionReason.CONFIRMED ? "Transaction outputs already in utxo set"
+                    : "Fee exceeds maximum configured by user (e.g. -maxtxfee, maxfeerate)");
+            this.reason = reason;
+        }
+        public BroadcastRejectionReason reason() { return reason; }
+    }
+
+    /** One chain/mempool snapshot from client checks through admission and unbroadcast registration. */
+    public BroadcastAdmission admitForBroadcast(Transaction transaction, long maxFeeRate) {
+        Objects.requireNonNull(transaction, "transaction");
+        if (maxFeeRate < 0) throw new IllegalArgumentException("Negative maximum fee rate");
+        synchronized (chain) {
+            synchronizePool();
+            if (hasConfirmedUnspentOutput(transaction)) throw new BroadcastRejection(BroadcastRejectionReason.CONFIRMED);
+            var known = mempool.find(transaction.txId());
+            if (known.isPresent()) return new BroadcastAdmission(known.get(), false);
+            if (maxFeeRate != 0) {
+                var probe = testBroadcastTransaction(transaction);
+                if (probe.fee()
+                        > new FeeRate(maxFeeRate).feeForVSize(TransactionWeight.virtualSize(transaction)))
+                    throw new BroadcastRejection(BroadcastRejectionReason.MAX_FEE);
+            }
+            var entry = admit(transaction);
+            markMempoolUnbroadcast(transaction.txId());
+            return new BroadcastAdmission(entry, true);
         }
     }
 
@@ -1071,6 +1102,14 @@ public final class NodeValidationService implements AutoCloseable {
             synchronizePool();
             mempool.markUnbroadcast(txid);
             if (persistMempool) mempoolPersistenceDirty = true;
+        }
+    }
+
+    /** Non-mutating ordinary admission probe with its original typed failure. */
+    public MempoolEntry testBroadcastTransaction(Transaction transaction) {
+        synchronized (chain) {
+            synchronizePool();
+            return mempool.testBroadcast(transaction, context(), coins);
         }
     }
 
@@ -1096,7 +1135,6 @@ public final class NodeValidationService implements AutoCloseable {
             throw new IllegalArgumentException("vout out of range");
         synchronized (chain) {
             synchronizePool();
-            expirePersistent();
             OutPoint outPoint = new OutPoint(txid, new UInt32(outputIndex));
             if (includeMempool) {
                 boolean spent = mempool.entries().stream().flatMap(entry -> entry.transaction().inputs().stream())
@@ -1114,6 +1152,18 @@ public final class NodeValidationService implements AutoCloseable {
             return utxos.find(outPoint).map(coin -> new TxOutInfo(
                     coin.amount(), coin.scriptPubKey(), coin.height(), coin.coinbase(),
                     Math.addExact(Math.subtractExact(chain.activeTip().height(), coin.height()), 1L)));
+        }
+    }
+
+    /** Core broadcast's chain-only UTXO test, including coins spent by the mempool. */
+    public boolean hasConfirmedUnspentOutput(Transaction transaction) {
+        Objects.requireNonNull(transaction, "transaction");
+        synchronized (chain) {
+            synchronizePool();
+            Hash256 txid = transaction.txId();
+            for (int index = 0; index < transaction.outputs().size(); index++)
+                if (utxos.find(new OutPoint(txid, new UInt32(index))).isPresent()) return true;
+            return false;
         }
     }
 
@@ -1241,7 +1291,6 @@ public final class NodeValidationService implements AutoCloseable {
         Objects.requireNonNull(txid, "txid");
         synchronized (chain) {
             synchronizePool();
-            expirePersistent();
             return mempool.find(txid);
         }
     }
@@ -1456,7 +1505,6 @@ public final class NodeValidationService implements AutoCloseable {
     public List<MempoolEntry> mempoolEntries() {
         synchronized (chain) {
             synchronizePool();
-            expirePersistent();
             return mempool.entries();
         }
     }
@@ -1464,7 +1512,6 @@ public final class NodeValidationService implements AutoCloseable {
     public Mempool.Snapshot mempoolSnapshot() {
         synchronized (chain) {
             synchronizePool();
-            expirePersistent();
             return mempool.snapshot();
         }
     }
@@ -1472,7 +1519,6 @@ public final class NodeValidationService implements AutoCloseable {
     public Mempool.DetailedSnapshot detailedMempoolSnapshot() {
         synchronized (chain) {
             synchronizePool();
-            expirePersistent();
             return mempool.detailedSnapshot();
         }
     }
@@ -1481,7 +1527,6 @@ public final class NodeValidationService implements AutoCloseable {
         Objects.requireNonNull(txid, "txid");
         synchronized (chain) {
             synchronizePool();
-            expirePersistent();
             return mempool.ancestorQuery(txid);
         }
     }
@@ -1490,7 +1535,6 @@ public final class NodeValidationService implements AutoCloseable {
         Objects.requireNonNull(txid, "txid");
         synchronized (chain) {
             synchronizePool();
-            expirePersistent();
             return mempool.descendantQuery(txid);
         }
     }
@@ -1499,7 +1543,6 @@ public final class NodeValidationService implements AutoCloseable {
         Objects.requireNonNull(txids, "txids");
         synchronized (chain) {
             synchronizePool();
-            expirePersistent();
             return mempool.graphViews(txids);
         }
     }
@@ -1508,7 +1551,6 @@ public final class NodeValidationService implements AutoCloseable {
         Objects.requireNonNull(txid, "txid");
         synchronized (chain) {
             synchronizePool();
-            expirePersistent();
             return mempool.cluster(txid);
         }
     }
@@ -1517,7 +1559,6 @@ public final class NodeValidationService implements AutoCloseable {
         Objects.requireNonNull(txid, "txid");
         synchronized (chain) {
             synchronizePool();
-            expirePersistent();
             return mempool.graphView(txid);
         }
     }
@@ -1525,9 +1566,16 @@ public final class NodeValidationService implements AutoCloseable {
     public List<ClusterLinearization.Chunk> mempoolFeeRateDiagram() {
         synchronized (chain) {
             synchronizePool();
-            expirePersistent();
             return mempool.feeRateDiagram();
         }
+    }
+
+    /** Core DoWork(0): inspect known optimality without performing optimization. */
+    public boolean mempoolOptimal() {
+        synchronized (chain) { return mempool.optimal(); }
+    }
+    public long mempoolMemoryUsage() {
+        synchronized (chain) { return mempool.dynamicMemoryUsage(); }
     }
 
     /** One coherent snapshot for Core 32.1 global relay scheduling. */
@@ -1607,7 +1655,6 @@ public final class NodeValidationService implements AutoCloseable {
     public long feeFilterRate() {
         synchronized (chain) {
             synchronizePool();
-            expirePersistent();
             return mempool.feeFilterRate();
         }
     }
@@ -1623,12 +1670,10 @@ public final class NodeValidationService implements AutoCloseable {
             synchronizePool();
             var before = mempool.entries();
             try {
-                mempool.expire();
                 var entries = mempool.admitPackage(transactions, context(), coins);
-                revision++;
-                chain.notifyAll();
                 return entries;
             } finally {
+                publishMempoolChanges(before);
                 markMempoolPersistenceDirty(before);
             }
         }
@@ -1640,12 +1685,9 @@ public final class NodeValidationService implements AutoCloseable {
             synchronizePool();
             var before = mempool.entries();
             try {
-                mempool.expire();
                 var result = mempool.submitPackage(transactions, context(), coins, clientMaxFeeRate);
-                revision++;
-                chain.notifyAll();
                 return result;
-            } finally { markMempoolPersistenceDirty(before); }
+            } finally { publishMempoolChanges(before); markMempoolPersistenceDirty(before); }
         }
     }
 
@@ -1918,7 +1960,6 @@ public final class NodeValidationService implements AutoCloseable {
             byte[] payout, byte[] extraNonce, long maximumWeight, FeeRate minimumRate, Set<String> supportedRules) {
         synchronized (chain) {
             synchronizePool();
-            expirePersistent();
             var parent = chain.activeTip();
             long now = time.currentTimeSeconds();
             long timestamp = Math.max(now, ChainHeaderValidator.minimumTimestamp(
@@ -1994,12 +2035,6 @@ public final class NodeValidationService implements AutoCloseable {
                 .toList();
     }
 
-    private void expirePersistent() {
-        var before = mempool.entries();
-        mempool.expire();
-        markMempoolPersistenceDirty(before);
-    }
-
     /**
      * Writes one coherent durable mempool snapshot. Normal mempool mutation does
      * not perform RocksDB I/O; persistence is flushed explicitly during clean
@@ -2034,6 +2069,9 @@ public final class NodeValidationService implements AutoCloseable {
         if (!before.equals(mempool.entries())) {
             mempoolPersistenceDirty = true;
         }
+    }
+    private void publishMempoolChanges(List<MempoolEntry> before) {
+        if (!before.equals(mempool.entries())) { revision++; chain.notifyAll(); }
     }
 
     /**

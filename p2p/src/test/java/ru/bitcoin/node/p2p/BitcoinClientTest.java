@@ -22,6 +22,54 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class BitcoinClientTest {
 
+    @Test
+    void managedVersionCountsBeforeVerackAndPromotesWithoutDoubleCounting() throws Exception {
+        try (var manager = new PeerManager(); var listener = new ServerSocket(0)) {
+            var versionProcessed = new CompletableFuture<Void>();
+            var allowVerack = new CompletableFuture<Void>();
+            var server = CompletableFuture.runAsync(() -> {
+                try (var socket = listener.accept()) {
+                    socket.setSoTimeout(5000);
+                    var io = peerIo(socket);
+                    assertEquals("version", io.reader().read(io.input()).orElseThrow().command());
+                    var version = new VersionMessage(VersionMessage.CURRENT_PROTOCOL_VERSION,
+                            VersionMessage.DEFAULT_SERVICES, 1_700_000_000L,
+                            NetworkAddress.unspecified(), NetworkAddress.unspecified(), REMOTE_NONCE,
+                            "/delayed-verack/", 321, true);
+                    io.output().write(io.encoder().encode(BitcoinMessages.version(version)));
+                    io.output().flush();
+                    while (!io.reader().read(io.input()).orElseThrow().command().equals("verack")) { }
+                    versionProcessed.complete(null);
+                    allowVerack.get(5, TimeUnit.SECONDS);
+                    io.output().write(io.encoder().encode(BitcoinMessages.verack()));
+                    io.output().flush();
+                    assertEquals(-1, io.input().read());
+                } catch (Exception failure) {
+                    versionProcessed.completeExceptionally(failure);
+                    throw new RuntimeException(failure);
+                }
+            });
+            var client = new BitcoinClient(PARAMETERS).trackHandshakes(manager).independentClient();
+            var connecting = CompletableFuture.supplyAsync(() -> {
+                try { return client.connectManaged("127.0.0.1", listener.getLocalPort(), 100, PeerConnectionRole.MANUAL); }
+                catch (Exception failure) { throw new RuntimeException(failure); }
+            });
+            try {
+                versionProcessed.get(5, TimeUnit.SECONDS);
+                assertFalse(connecting.isDone());
+                assertEquals(1, manager.preferredDownloadPeerCount());
+                assertTrue(manager.readyPeers().isEmpty());
+            } finally { allowVerack.complete(null); }
+            try (var peer = connecting.get(5, TimeUnit.SECONDS)) {
+                manager.add(peer, PeerConnectionRole.MANUAL);
+                assertEquals(1, manager.preferredDownloadPeerCount());
+                assertEquals(1, manager.readyPeers().size());
+            }
+            server.get(5, TimeUnit.SECONDS);
+            assertEquals(0, manager.preferredDownloadPeerCount());
+        }
+    }
+
     private static final long REMOTE_NONCE =
             0x1112131415161718L;
 

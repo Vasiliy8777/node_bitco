@@ -20,11 +20,11 @@ public final class TaprootExecutionData {
     }
 
     public boolean check(byte[] signature, byte[] key, long codeSeparator, int flags) {
-        if (key.length == 0) throw new ScriptExecutionException("Empty tapscript public key");
-        if (signature.length != 0 && (budget -= 50) < 0) throw new ScriptExecutionException("Tapscript signature budget exhausted");
+        if (key.length == 0) throw new ScriptExecutionException(ScriptError.TAPSCRIPT_EMPTY_PUBKEY, "Empty tapscript public key");
+        if (signature.length != 0 && (budget -= 50) < 0) throw new ScriptExecutionException(ScriptError.TAPSCRIPT_VALIDATION_WEIGHT, "Tapscript signature budget exhausted");
         if (key.length != 32) {
             if (ScriptVerifyFlags.has(flags, ScriptVerifyFlags.DISCOURAGE_UPGRADABLE_PUBKEYTYPE)) {
-                throw new ScriptExecutionException("Discouraged tapscript key type");
+                throw new ScriptExecutionException(ScriptError.DISCOURAGE_UPGRADABLE_PUBKEYTYPE, "Discouraged tapscript key type");
             }
             return signature.length != 0;
         }
@@ -34,12 +34,12 @@ public final class TaprootExecutionData {
     }
 
     public void verify(byte[] signature, byte[] key, long codeSeparator) {
-        if (signature.length != 64 && signature.length != 65) throw new ScriptExecutionException("Invalid Schnorr signature size");
+        if (signature.length != 64 && signature.length != 65) throw new ScriptExecutionException(ScriptError.SCHNORR_SIG_SIZE, "Invalid Schnorr signature size");
         int type = signature.length == 64 ? 0 : signature[64] & 0xff;
-        if (signature.length == 65 && type == 0) throw new ScriptExecutionException("Explicit SIGHASH_DEFAULT is invalid");
+        if (signature.length == 65 && type == 0) throw new ScriptExecutionException(ScriptError.SCHNORR_SIG_HASHTYPE, "Explicit SIGHASH_DEFAULT is invalid");
         byte[] hash = TaprootSignatureHash.calculate(tx, input, coins, type, annex, leaf, codeSeparator);
         if (!SchnorrSignature.verify(hash, key, Arrays.copyOf(signature, 64))) {
-            throw new ScriptExecutionException("Invalid Schnorr signature");
+            throw new ScriptExecutionException(ScriptError.SCHNORR_SIG, "Invalid Schnorr signature");
         }
     }
 }

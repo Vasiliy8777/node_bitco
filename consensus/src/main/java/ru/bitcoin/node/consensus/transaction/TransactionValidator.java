@@ -45,13 +45,13 @@ public final class TransactionValidator {
 
         if (transaction.inputs().isEmpty()) {
             throw new TransactionValidationException(
-                    "Transaction must contain at least one input"
+                    "Transaction must contain at least one input", "bad-txns-vin-empty", null
             );
         }
 
         if (transaction.outputs().isEmpty()) {
             throw new TransactionValidationException(
-                    "Transaction must contain at least one output"
+                    "Transaction must contain at least one output", "bad-txns-vout-empty", null
             );
         }
 
@@ -94,7 +94,7 @@ public final class TransactionValidator {
                 > MAX_BLOCK_WEIGHT) {
 
             throw new TransactionValidationException(
-                    "Transaction size exceeds maximum allowed size"
+                    "Transaction size exceeds maximum allowed size", "bad-txns-oversize", null
             );
         }
     }
@@ -111,13 +111,13 @@ public final class TransactionValidator {
 
             if (value < 0) {
                 throw new TransactionValidationException(
-                        "Transaction output value must not be negative"
+                        "Transaction output value must not be negative", "bad-txns-vout-negative", null
                 );
             }
 
             if (value > Money.MAX_MONEY) {
                 throw new TransactionValidationException(
-                        "Transaction output value exceeds MAX_MONEY"
+                        "Transaction output value exceeds MAX_MONEY", "bad-txns-vout-toolarge", null
                 );
             }
 
@@ -128,13 +128,13 @@ public final class TransactionValidator {
                 );
             } catch (ArithmeticException e) {
                 throw new TransactionValidationException(
-                        "Transaction output total overflow"
+                        "Transaction output total overflow", "bad-txns-txouttotal-toolarge", null
                 );
             }
 
             if (total > Money.MAX_MONEY) {
                 throw new TransactionValidationException(
-                        "Transaction output total exceeds MAX_MONEY"
+                        "Transaction output total exceeds MAX_MONEY", "bad-txns-txouttotal-toolarge", null
                 );
             }
         }
@@ -153,7 +153,7 @@ public final class TransactionValidator {
                     input.previousOutput()
             )) {
                 throw new TransactionValidationException(
-                        "Transaction contains duplicate inputs"
+                        "Transaction contains duplicate inputs", "bad-txns-inputs-duplicate", null
                 );
             }
         }
@@ -182,7 +182,7 @@ public final class TransactionValidator {
                 || scriptLength > 100) {
 
             throw new TransactionValidationException(
-                    "Coinbase scriptSig size must be between 2 and 100 bytes"
+                    "Coinbase scriptSig size must be between 2 and 100 bytes", "bad-cb-length", null
             );
         }
     }
@@ -197,7 +197,7 @@ public final class TransactionValidator {
                     .isCoinbase()) {
 
                 throw new TransactionValidationException(
-                        "Non-coinbase transaction contains null previous output"
+                        "Non-coinbase transaction contains null previous output", "bad-txns-prevout-null", null
                 );
             }
         }
@@ -348,7 +348,7 @@ public final class TransactionValidator {
                         );
             } catch (ArithmeticException e) {
                 throw new TransactionValidationException(
-                        "Transaction output total overflow"
+                        "Transaction output total overflow", "bad-txns-txouttotal-toolarge", null
                 );
             }
         }

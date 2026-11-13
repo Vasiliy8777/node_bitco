@@ -33,6 +33,16 @@ public final class LegacyScriptVerifier {
     }
     public static boolean verify(Transaction transaction, int inputIndex, byte[] scriptSig, byte[] scriptPubKey,
                                  int flags, ScriptDialect dialect) {
+        return verify(transaction, inputIndex, scriptSig, scriptPubKey, flags, dialect, false);
+    }
+    public static boolean verifyDetailed(Transaction transaction, int inputIndex, byte[] scriptSig, byte[] scriptPubKey, int flags) {
+        return verify(transaction, inputIndex, scriptSig, scriptPubKey, flags, ScriptDialect.BITCOIN, true);
+    }
+    public static boolean verify(Transaction transaction, int inputIndex, byte[] scriptSig, byte[] scriptPubKey, int flags, boolean detailed) {
+        return verify(transaction, inputIndex, scriptSig, scriptPubKey, flags, ScriptDialect.BITCOIN, detailed);
+    }
+    private static boolean verify(Transaction transaction, int inputIndex, byte[] scriptSig, byte[] scriptPubKey,
+                                  int flags, ScriptDialect dialect, boolean detailed) {
         java.util.Objects.requireNonNull(dialect);
         if (transaction == null) {
             throw new IllegalArgumentException(
@@ -64,7 +74,7 @@ public final class LegacyScriptVerifier {
         try {
             if (ScriptVerifyFlags.has(flags, ScriptVerifyFlags.SIGPUSHONLY)
                     && !P2shScript.isPushOnly(scriptSig)) {
-                return false;
+                return failed(ScriptError.SIG_PUSHONLY, detailed);
             }
 
             boolean verifyP2sh =
@@ -88,7 +98,7 @@ public final class LegacyScriptVerifier {
                     scriptSig
             )) {
 
-                return false;
+                return failed(ScriptError.SIG_PUSHONLY, detailed);
             }
 
             /*
@@ -143,7 +153,7 @@ public final class LegacyScriptVerifier {
              * scriptPubKey обязан завершиться true.
              */
             if (!isTrueTop(machine)) {
-                return false;
+                return failed(ScriptError.EVAL_FALSE, detailed);
             }
 
             /*
@@ -160,7 +170,7 @@ public final class LegacyScriptVerifier {
 
                 return isValidFinalStack(
                         machine,
-                        flags
+                        flags, detailed
                 );
             }
 
@@ -175,7 +185,7 @@ public final class LegacyScriptVerifier {
             if (stackAfterScriptSig == null
                     || stackAfterScriptSig.isEmpty()) {
 
-                return false;
+                return failed(ScriptError.EVAL_FALSE, detailed);
             }
 
             byte[] redeemScript =
@@ -207,19 +217,19 @@ public final class LegacyScriptVerifier {
              */
             return isValidFinalStack(
                     stackAfterScriptSig,
-                    flags
+                    flags, detailed
             );
 
         } catch (ScriptExecutionException
                  | ScriptParseException e) {
-
+            if (detailed) throw e;
             return false;
         }
     }
 
     private static boolean isValidFinalStack(
             ScriptMachine machine,
-            int flags
+            int flags, boolean detailed
     ) {
 
         /*
@@ -229,7 +239,7 @@ public final class LegacyScriptVerifier {
          * и верхний элемент == true.
          */
         if (!isTrueTop(machine)) {
-            return false;
+            return failed(ScriptError.EVAL_FALSE, detailed);
         }
 
         /*
@@ -252,7 +262,7 @@ public final class LegacyScriptVerifier {
          *
          * Его true уже проверен выше.
          */
-        return machine.size() == 1;
+        return machine.size() == 1 || failed(ScriptError.CLEANSTACK, detailed);
     }
 
     public static boolean verifyP2shOuter(
@@ -266,6 +276,16 @@ public final class LegacyScriptVerifier {
     }
     public static boolean verifyP2shOuter(Transaction transaction, int inputIndex, byte[] scriptSig, byte[] scriptPubKey,
                                           int flags, ScriptDialect dialect) {
+        return verifyP2shOuter(transaction, inputIndex, scriptSig, scriptPubKey, flags, dialect, false);
+    }
+    public static boolean verifyP2shOuterDetailed(Transaction transaction, int inputIndex, byte[] scriptSig, byte[] scriptPubKey, int flags) {
+        return verifyP2shOuter(transaction, inputIndex, scriptSig, scriptPubKey, flags, ScriptDialect.BITCOIN, true);
+    }
+    public static boolean verifyP2shOuter(Transaction transaction, int inputIndex, byte[] scriptSig, byte[] scriptPubKey, int flags, boolean detailed) {
+        return verifyP2shOuter(transaction, inputIndex, scriptSig, scriptPubKey, flags, ScriptDialect.BITCOIN, detailed);
+    }
+    private static boolean verifyP2shOuter(Transaction transaction, int inputIndex, byte[] scriptSig, byte[] scriptPubKey,
+                                           int flags, ScriptDialect dialect, boolean detailed) {
         java.util.Objects.requireNonNull(dialect);
         if (transaction == null) {
             throw new IllegalArgumentException(
@@ -320,7 +340,7 @@ public final class LegacyScriptVerifier {
             if (!P2shScript.isPushOnly(
                     scriptSig
             )) {
-                return false;
+                return failed(ScriptError.SIG_PUSHONLY, detailed);
             }
 
             /*
@@ -348,7 +368,7 @@ public final class LegacyScriptVerifier {
              * хотя бы redeemScript.
              */
             if (machine.isEmpty()) {
-                return false;
+                return failed(ScriptError.EVAL_FALSE, detailed);
             }
 
             /*
@@ -379,15 +399,17 @@ public final class LegacyScriptVerifier {
              * ==
              * hash из scriptPubKey.
              */
-            return isTrueTop(
-                    machine
-            );
+            return isTrueTop(machine) || failed(ScriptError.EVAL_FALSE, detailed);
 
         } catch (ScriptExecutionException
                  | ScriptParseException e) {
-
+            if (detailed) throw e;
             return false;
         }
+    }
+    private static boolean failed(ScriptError error, boolean detailed) {
+        if (detailed) throw new ScriptVerificationException(error);
+        return false;
     }
     private static boolean isTrueTop(
             ScriptMachine machine

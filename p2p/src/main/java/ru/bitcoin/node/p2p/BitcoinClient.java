@@ -19,10 +19,19 @@ public final class BitcoinClient
     private final boolean relay;
     private final PeerTransportPolicy transportPolicy;
     private final Set<Peer> pendingConnections = ConcurrentHashMap.newKeySet();
+    private PeerManager handshakeManager;
+
+    /** Configure before connection attempts start. */
+    public BitcoinClient trackHandshakes(PeerManager manager) {
+        handshakeManager = Objects.requireNonNull(manager);
+        return this;
+    }
 
     /** Same configuration, separate ownership/cancellation of connection attempts. */
     public BitcoinClient independentClient() {
-        return new BitcoinClient(networkParameters, localServices, relay, transportPolicy != PeerTransportPolicy.V1_ONLY);
+        var client = new BitcoinClient(networkParameters, localServices, relay, transportPolicy != PeerTransportPolicy.V1_ONLY);
+        client.handshakeManager = handshakeManager;
+        return client;
     }
 
     public BitcoinClient(
@@ -78,7 +87,7 @@ public final class BitcoinClient
         Objects.requireNonNull(role, "role");
         boolean connectionRelay = role == PeerConnectionRole.BLOCK_RELAY_ONLY ? false : relay;
         return connect(host, port, startHeight, false, connectionRelay, transportPolicy,
-                role == PeerConnectionRole.MANUAL ? PeerAccess.manualConnection() : PeerAccess.ordinary());
+                role == PeerConnectionRole.MANUAL ? PeerAccess.manualConnection() : PeerAccess.ordinary(), role);
     }
 
     private Peer connect(String host, int port, int startHeight, boolean startReader) throws IOException {
@@ -101,6 +110,12 @@ public final class BitcoinClient
 
     private Peer connect(String host, int port, int startHeight, boolean startReader, boolean connectionRelay,
                          PeerTransportPolicy policy, PeerAccess access) throws IOException {
+        return connect(host, port, startHeight, startReader, connectionRelay, policy, access,
+                startReader ? null : PeerConnectionRole.FULL_RELAY);
+    }
+
+    private Peer connect(String host, int port, int startHeight, boolean startReader, boolean connectionRelay,
+                         PeerTransportPolicy policy, PeerAccess access, PeerConnectionRole role) throws IOException {
 
         if (host == null || host.isBlank()) {
             throw new IllegalArgumentException(
@@ -124,6 +139,7 @@ public final class BitcoinClient
         pendingConnections.add(peer);
 
         try {
+            if (handshakeManager != null && role != null) handshakeManager.trackHandshake(peer, role);
             if (policy == PeerTransportPolicy.V1_ONLY) {
                 peer.connect(host, port);
             } else {
@@ -143,6 +159,7 @@ public final class BitcoinClient
                     pendingConnections.remove(peer);
                     peer = newPeer(startHeight, connectionRelay, access);
                     pendingConnections.add(peer);
+                    if (handshakeManager != null && role != null) handshakeManager.trackHandshake(peer, role);
                     peer.markV2Fallback();
                     peer.connect(host, port);
                 }

@@ -27,8 +27,7 @@ class EvictionChunkWeightTest {
 
     @Test void evictingZeroFeeEntryStillRaisesRollingFloorByIncrementalRelayFee() {
         var zero = tx(List.of(FUND), 2, 100000);
-        long size = ru.bitcoin.node.consensus.transaction.TransactionWeight.virtualSize(
-                ru.bitcoin.node.consensus.transaction.TransactionWeight.calculate(zero));
+        long size = 1100; // Fits one entry plus the retained two-slot randomized array.
         var pool = new Mempool(new MempoolPolicy(),
                 new MempoolLimits(64, 101000, size, 1000, 1000), java.time.Clock.systemUTC());
         pool.reconcile(CONTEXT, COINS, Set.of(), List.of(zero));
@@ -63,9 +62,9 @@ class EvictionChunkWeightTest {
         var parent = tx(List.of(FUND), 2, 100000);
         var child = tx(List.of(point(parent, 0)), 2, 99999);
         var entries = new LinkedHashMap<ru.bitcoin.node.common.types.Hash256, MempoolEntry>();
-        // The child's 80*6 sigop weight dominates its 401 serialized weight.
+        // The child's 20*24 sigop weight dominates its 401 serialized weight.
         entries.put(parent.txId(), new MempoolEntry(parent, 0, 401, 0));
-        entries.put(child.txId(), new MempoolEntry(child, 1, 401, 0, 6, 220));
+        entries.put(child.txId(), new MempoolEntry(child, 1, 401, 0, 24, 220));
         assertEquals(1000, MempoolGraphPolicy.trim(entries, 0, null)); // 221 / ceil(881/4)
         assertTrue(entries.isEmpty());
     }

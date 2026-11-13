@@ -11,6 +11,18 @@ import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class TransactionSelectorTest {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void equalRateSelectionUsesCoreFallbackInsteadOfSnapshotInsertionOrder(boolean tightBudget) {
+        var a = entry(tx(Hash256.fromDisplayHex("81".repeat(32)), 1), 1000, 0);
+        var b = entry(tx(Hash256.fromDisplayHex("82".repeat(32)), 2), 1000, 0);
+        assertEquals(a.weight(), b.weight());
+        var sorted = new ArrayList<>(List.of(a, b));
+        sorted.sort((left, right) -> left.transaction().txId().compareRawBytes(right.transaction().txId()));
+        var reverse = new ArrayList<>(sorted); Collections.reverse(reverse);
+        var expected = (tightBudget ? sorted.subList(0, 1) : sorted).stream().map(MempoolEntry::transaction).toList();
+        assertEquals(expected, TransactionSelector.select(reverse, tightBudget ? a.weight() : 4_000_000, 80_000, new FeeRate(0)));
+    }
     private static Transaction tx(Hash256 parent, int tag) {
         return new Transaction(2, List.of(new TxIn(new OutPoint(parent, new UInt32(0)), new byte[0], TxIn.FINAL_SEQUENCE)),
                 List.of(new TxOut(tag, new byte[]{0x51})), new UInt32(0));

@@ -34,7 +34,11 @@ class OptimalClusterLinearizerTest {
                     entries.put(id(i), new MempoolEntry(transaction, Long.parseLong(rate[0]), Long.parseLong(rate[1]), 0));
                 }
             }
-            var order = ClusterLinearization.linearize(entries, entries.keySet());
+            // This saved oracle is raw Linearize at unlimited budget, before PostLinearize.
+            // Production now uses the Core budgeted path and its postprocessing.
+            var order = ClusterOptimization.standalone(entries, entries.keySet(), 1_000_000_000L, 0, false);
+            assertEquals(OptimalClusterLinearizer.linearize(entries, entries.keySet()), order,
+                    "Independent maximum-closure test oracle");
             assertEquals(fields[2], order.stream().map(OptimalClusterLinearizerTest::index)
                     .map(Object::toString).collect(java.util.stream.Collectors.joining(",")), "linearization");
             var chunks = ClusterLinearization.chunks(entries, order);

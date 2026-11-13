@@ -506,8 +506,9 @@ class MempoolTest {
         long rawWeight = 400;
         long sigOpCost = 40;
         MempoolEntry entry = new MempoolEntry(fixture.transaction(), 10_000, rawWeight, 0, sigOpCost);
-        assertEquals(3_200, entry.adjustedWeight());
-        assertEquals(800, entry.virtualSize());
+        // Core DEFAULT_BYTES_PER_SIGOP=20 multiplies the already weighted sigop cost.
+        assertEquals(800, entry.adjustedWeight());
+        assertEquals(200, entry.virtualSize());
     }
 
 

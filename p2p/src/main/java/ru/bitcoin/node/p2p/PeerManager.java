@@ -14,6 +14,15 @@ public final class PeerManager
             new ArrayList<>();
     private final List<java.util.function.Consumer<Peer>> listeners = new ArrayList<>();
     private final Map<Peer, PeerConnectionRole> roles = new IdentityHashMap<>();
+    private final Map<Peer, PeerConnectionRole> handshakes = new IdentityHashMap<>();
+
+    /** Accounting only: the handshake retains exclusive ownership of reads. */
+    public synchronized void trackHandshake(Peer peer, PeerConnectionRole role) {
+        Objects.requireNonNull(peer); Objects.requireNonNull(role);
+        if (roles.containsKey(peer) || handshakes.putIfAbsent(peer, role) != null) return;
+        peer.addCloseListener((closed, cause) -> forgetHandshake(closed));
+    }
+    private synchronized void forgetHandshake(Peer peer) { handshakes.remove(peer); }
     private final Map<Peer, ru.bitcoin.node.p2p.sync.HeadersSyncTimeoutPolicy.State> headerSync = new IdentityHashMap<>();
     private final java.util.Set<Peer> headersSending = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
 
@@ -32,7 +41,20 @@ public final class PeerManager
                 peer.isInboundConnection(), peer.hasPermission(PeerPermission.NOBAN),
                 roles.get(peer) == PeerConnectionRole.ADDR_FETCH, canServeBlocks(peer));
     }
-    public synchronized int preferredDownloadPeerCount() { return (int) peers.stream().filter(this::preferred).count(); }
+    public synchronized int preferredDownloadPeerCount() {
+        int count = (int) peers.stream().filter(this::preferred).count();
+        for (var entry : handshakes.entrySet()) {
+            Peer peer = entry.getKey();
+            var version = peer.evictionVersion();
+            if (peer.state() != PeerState.CLOSED && version != null
+                    && ru.bitcoin.node.p2p.sync.HeadersSyncTimeoutPolicy.preferred(
+                    peer.isInboundConnection(), peer.hasPermission(PeerPermission.NOBAN),
+                    entry.getValue() == PeerConnectionRole.ADDR_FETCH,
+                    (version.services() & (ru.bitcoin.node.p2p.message.VersionMessage.NODE_NETWORK
+                            | ru.bitcoin.node.p2p.message.VersionMessage.NODE_NETWORK_LIMITED)) != 0)) count++;
+        }
+        return count;
+    }
     public synchronized boolean canSyncFrom(Peer peer, boolean blocksInFlight) {
         return roles.containsKey(peer) && canServeBlocks(peer)
                 && ru.bitcoin.node.p2p.sync.HeadersSyncTimeoutPolicy.mayFetch(true, preferred(peer),
@@ -154,6 +176,7 @@ public final class PeerManager
                 peer
         );
         roles.put(peer, role);
+        handshakes.remove(peer);
 
         peer.addCloseListener(
                 this::onPeerClosed
@@ -222,6 +245,7 @@ public final class PeerManager
                 peer
         );
         roles.remove(peer);
+        handshakes.remove(peer);
         headerSync.remove(peer);
         headersSending.remove(peer);
         chainSyncProtected.remove(peer);
@@ -289,13 +313,13 @@ public final class PeerManager
 
         synchronized (this) {
 
-            snapshot =
-                    List.copyOf(
-                            peers
-                    );
+            var owned = new ArrayList<>(peers);
+            for (Peer pending : handshakes.keySet()) if (!owned.contains(pending)) owned.add(pending);
+            snapshot = List.copyOf(owned);
 
             peers.clear();
             roles.clear();
+            handshakes.clear();
             headerSync.clear();
             headersSending.clear();
             chainSyncProtected.clear();

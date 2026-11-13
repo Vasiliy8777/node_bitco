@@ -1,4 +1,4 @@
-# Bitcoin Core 32.1 compatibility — 2026-11-01
+# Bitcoin Core 32.1 compatibility — 2026-11-12
 
 Reference: [Bitcoin Core v32.1](https://github.com/bitcoin/bitcoin/releases/tag/v32.1),
 released October 28, 2026. This is a Java implementation with its own identity,
@@ -142,10 +142,230 @@ buffered UTXO mutations, estimator history gaps/reorgs, disk corruption and cold
 RPC error cases. Full reactor and reference-run logs are in
 `target/core-update-audit/`.
 
-The latest full Bitcoin/RVN reactor completed 5,364 test cases: 5,352 passed,
+Latest complete Bitcoin/RVN reactor: 5,430 cases, 5,418 passed, 12 skipped,
+zero failures/errors; both applications packaged November 12, 22:19:51 Bangkok
+(`core32-indexed-graph-queries-full-build.log`). Graph queries and admission
+conflict closures now use persistent adjacency; batch views linearize each
+requested component once. Seven public query regressions, multi-root checks,
+160 random full graph-view comparisons and all eleven NodeLifecycleServiceTest
+cases passed. Both native Core scenarios passed (129.4 seconds). Shared staging,
+incremental linearization and budgeted optimizer remain open.
+[Implementation and evidence](indexed-graph-queries-core32.md).
+Original IDEA GPU PID 20332: one process, RUNNING, blocks=headers=975567,
+IBD=false, six peers (two block relay), 35,727 mempool entries, zero privileged
+peers and accepted CUDA shares (`core32-indexed-graph-queries-live.json`).
+
+Previous complete Bitcoin/RVN reactor: 5,422 cases, 5,410 passed, 12 skipped,
+zero failures/errors; both applications packaged November 12, 21:25:37 Bangkok
+(`core32-spent-commit-delta-full-build.log`). Bulk commits update spent/byte
+indexes by delta; reorg insertion-order sorting no longer rebuilds unchanged
+indexes. The public known-package regression, four publication-boundary tests
+and all eleven NodeLifecycleServiceTest cases passed. Both native Core scenarios
+passed (112.8 seconds). Full shared staging and budgeted optimization remain open.
+[Implementation and evidence](spent-commit-delta-core32.md).
+Original IDEA GPU PID 36316: one process, RUNNING, blocks=headers=975562,
+IBD=false, eight peers (two block relay), 35,345 mempool entries, zero privileged
+peers and accepted CUDA shares (`core32-spent-commit-delta-live.json`).
+
+Previous complete Bitcoin/RVN reactor: 5,417 cases, 5,405 passed, 12 skipped,
+zero failures/errors; both applications packaged November 12, 19:33:48 Bangkok
+(`core32-stage-graph-copy-full-build.log`). Staging seeds copy ready graph/spent
+indexes into independent mutable structures instead of rescanning inputs.
+The public known-transaction regression reproduced the old scans and now passes;
+three graph-copy isolation cases and all eleven NodeLifecycleServiceTest cases
+passed. Both native Core scenarios passed (97.39 seconds). Full shared staging,
+incremental linearization and budgeted optimizer remain open.
+[Implementation and evidence](stage-graph-copy-core32.md).
+Original IDEA GPU PID 72420: one process, RUNNING, blocks=headers=975552,
+IBD=false, nine peers (two block relay), 33,837 mempool entries, zero privileged
+peers and accepted CUDA shares (`core32-stage-graph-copy-live.json`).
+
+Previous complete Bitcoin/RVN reactor: 5,413 cases, 5,401 passed, 12 skipped,
+zero failures/errors; both applications packaged November 12, 18:48:22 Bangkok
+(`core32-graph-commit-delta-full-build.log`). Bulk commits now reconcile main-pool
+adjacency/components by txid delta, preserving unchanged component snapshots.
+Three regressions cover unchanged-entry access, late parents and 200 random
+commit/fee/order cases. Both native Core scenarios passed (118.7 seconds).
+Full staging TxGraph and budgeted optimization remain open.
+[Implementation and evidence](graph-commit-delta-core32.md).
+Original IDEA GPU PID 141460: one process, RUNNING, blocks=headers=975545,
+IBD=false, six peers (two block relay), 37,797 mempool entries, zero privileged
+peers, accepted CUDA shares (`core32-graph-commit-delta-live.json`).
+
+Previous complete Bitcoin/RVN reactor: 5,410 cases, 5,398 passed, 12 skipped,
+zero failures/errors; both applications packaged November 12, 17:22:17 Bangkok
+(`core32-persistent-graph-full-build.log`). Persistent main-pool adjacency and
+components now support indexed descendant deletion and a bounded revision cache.
+Both native Core scenarios passed (105.6 seconds). Bulk staging/reorg rebuilds,
+Core's full TxGraph and budgeted optimizer remain open.
+[Implementation and evidence](persistent-main-graph-core32.md).
+Original IDEA GPU PID 67116: one process, RUNNING, blocks=headers=975536,
+IBD=false, eight peers (two block relay), 43,615 mempool entries, zero privileged
+peers; accepted CUDA shares. Live snapshot: `core32-persistent-graph-live.json`.
+
+Previous complete Bitcoin/RVN reactor: 5,406 cases, 5,394 passed, 12 skipped,
+zero failures/errors; both applications packaged November 12, 16:12:06 Bangkok
+(`core32-equal-eviction-full-build.log`). Eviction now selects the reverse Core
+chunk key, including equal-rate prefix weight and maximum serialized txid.
+Seven regressions cover insertion order, rounded positive/negative removed rate,
+dependencies and rejecting a newly added worst chunk. Native RPC/mining-order
+checks also pass; this is not a native memory-pressure eviction comparison.
+[Implementation and remaining limits](equal-rate-eviction-core32.md).
+One original IDEA GPU PID 47076 verified RUNNING, blocks=headers=975534,
+IBD=false, ten peers (two block relay), 35,438 mempool entries, zero privileged
+peers and accepted CUDA shares (`core32-equal-eviction-live.json`).
+
+Previous complete Bitcoin/RVN reactor: 5,399 cases, 5,387 passed, 12 skipped,
+zero failures/errors; both applications packaged November 12, 15:48:59 Bangkok
+(`core32-chunk-fallback-full-build-final.log`). This run covers the cumulative
+production changes and the new shared graph/mining tie keys. Native signed
+equal-fee/weight transactions match Core GBT, Java graph order and Java GBT;
+the seven red/green regressions, 384 optimal oracle cases and tight-budget
+selector checks also pass. [Implementation and remaining limits](equal-rate-fallback-core32.md).
+One original IDEA GPU PID 117012 verified RUNNING, blocks=headers=975533,
+IBD=false, eight peers (two block relay), 34,357 mempool entries, zero privileged
+peers and accepted CUDA shares (`core32-chunk-fallback-live.json`). The historical
+targeted batches below retain their original validation scope and timestamps.
+
+Previous accepted-dust priority follow-up: 67 selected cases passed without skips
+or failures (`core32-dust-priority-focused.log`, November 12, 15:10:27 Bangkok).
+Accepted dust parents now reject zero as well as positive/negative fee deltas.
+Three unit regressions first reproduced the mismatch; an isolated native Core
+with acceptnonstdtxn=0 verifies parent rejection, unchanged state and an ordinary
+child positive control. Both applications packaged with tests skipped at 15:12:42
+(`core32-dust-priority-package.log`). [Evidence and limits](dust-priority-core32.md).
+One original IDEA GPU PID 37916: RUNNING, blocks=headers=975530, IBD=false,
+seven peers (two block relay), 36,511 mempool entries, zero privileged peers,
+accepted CUDA shares (`core32-dust-priority-live.json`). Targeted validation;
+the complete-reactor baseline below predates this change.
+
+Previous priority-argument follow-up: 59 selected cases passed without skips or
+failures (`core32-priority-arguments-focused-complete.log`, November 12, 14:58:22
+Bangkok), including 35 new native comparisons of exact int64/type/hash/dummy
+errors and named arguments. Rejected calls preserve priority tables. Dummy is
+an optional number in the registry. Both applications packaged with tests skipped
+at 14:59:04 (`core32-priority-arguments-package.log`).
+[Evidence and remaining scope](rpc-priority-arguments-core32.md).
+One original IDEA GPU PID 33472: RUNNING, blocks=headers=975530, IBD=false,
+six peers (two block relay), 36,004 mempool entries, zero privileged peers,
+accepted CUDA shares (`core32-priority-arguments-live.json`). Targeted validation;
+the complete-reactor baseline below predates this change.
+
+Previous broadcast-expiry follow-up: 59 selected cases passed without skips or
+failures (`core32-broadcast-expiry-focused.log`, November 12, 14:26:41 Bangkok).
+Four controlled-clock regressions first reproduced early expiry of the real
+pool, then passed after removing it from broadcast prechecks. Cap/confirmed/
+missing exits and known repeats preserve graph/sequence/spent/unbroadcast state;
+explicit expiry still works. The native RPC/package matrix also passes.
+Both applications packaged with tests skipped at 14:27:44
+(`core32-broadcast-expiry-package.log`). [Evidence and scope](broadcast-expiry-core32.md).
+One original IDEA GPU PID 82088: RUNNING, blocks=headers=975528, IBD=false,
+seven peers (two block relay), 36,850 mempool entries, zero privileged peers,
+accepted CUDA shares (`core32-broadcast-expiry-live.json`). Targeted validation;
+the complete-reactor baseline below predates this change.
+
+Previous broadcast-preflight follow-up: 55 selected cases passed without skips or
+failures (`core32-broadcast-preflight-focused.log`, November 12, 06:17:30 Bangkok).
+Failed preflight now preserves its original exception and stops before admission;
+successful probes use an isolated pool. Native RPC/package and monitor-contention
+checks also pass. Both applications packaged with tests skipped at 06:18:13
+(`core32-broadcast-preflight-package.log`). [Evidence and limits](broadcast-preflight-core32.md).
+One original IDEA GPU PID 94528: RUNNING, blocks=headers=975489, IBD=false,
+seven peers (two block relay), 32,457 mempool entries, zero privileged peers,
+accepted CUDA shares (`core32-broadcast-preflight-live.json`). Targeted validation;
+the complete-reactor baseline below predates this change.
+
+Previous atomic-broadcast follow-up: 52 selected cases passed without skips or
+failures (`core32-atomic-broadcast-focused-final.log`, November 12, 03:41:52
+Bangkok). Chain UTXO/known/cap/admission/unbroadcast share one monitor; a
+deterministic competing fee-delta test checks monitor identity/owner and the
+admission/unbroadcast boundaries. The native RPC/package matrix also passes.
+Both applications packaged with tests skipped at 03:42:34
+(`core32-atomic-broadcast-package.log`). [Evidence and limits](atomic-broadcast-core32.md).
+One original IDEA GPU PID 77932: RUNNING, blocks=headers=975472, IBD=false,
+three peers (two block relay), 42,889 mempool entries, zero privileged peers,
+accepted CUDA shares (`core32-atomic-broadcast-live.json`). Targeted validation;
+the complete-reactor baseline below predates this change.
+
+Previous broadcast-classification follow-up: 38 selected cases passed without
+skips or failures (`core32-sendraw-classification-focused-final.log`, November 12,
+02:12:47 Bangkok). Native comparisons cover missing prevouts, invalid output
+indexes and confirmed coinbase with three fee caps. Missing inputs return -25;
+chain UTXO detection returns -27 before admission. Both applications packaged
+with tests skipped at 02:13:34 (`core32-sendraw-classification-package.log`).
+[Evidence and limits](rpc-broadcast-classification-core32.md).
+One original IDEA GPU PID 8660: RUNNING, blocks=headers=975466, IBD=false,
+seven peers (two block relay), 41,518 mempool entries, zero privileged peers,
+accepted CUDA shares (`core32-sendraw-classification-live.json`). This is
+targeted validation; the complete-reactor baseline below predates this change.
+
+Previous sendraw fee-cap/rebroadcast follow-up: 39 selected cases passed without
+skips or failures (`core32-sendraw-feecap-focused.log`, November 12, 01:37:17
+Bangkok), including native checks of base-fee/delta/ceil boundaries and repeated
+known txids with an alternate witness. Both applications packaged with tests
+skipped at 01:37:58 (`core32-sendraw-feecap-package.log`).
+[Evidence and limits](rpc-sendraw-fee-cap-core32.md).
+One original IDEA GPU PID 84280: RUNNING, blocks=headers=975464, IBD=false,
+nine peers (two block relay), 41,280 mempool entries, zero privileged peers,
+accepted CUDA shares (`core32-sendraw-feecap-live.json`). Targeted validation;
+the complete-reactor baseline below predates this change.
+
+Previous amount/early-send follow-up: 17 selected cases passed without skips or
+failures, including 159 additional native comparisons for money arguments and
+burn/decode/fee precedence (`core32-rpc-amount-focused-final.log`, November 12,
+01:03:47 Bangkok). Both applications packaged with tests skipped at 01:04:33
+(`core32-rpc-amount-package.log`). [Implementation and limits](rpc-amount-limits-core32.md).
+One original IDEA GPU process PID 114048 verified RUNNING, blocks=headers=975461,
+IBD=false, five peers (two block relay), 39,937 mempool entries, zero privileged
+peers and accepted CUDA shares (`core32-rpc-amount-live.json`). This is targeted
+validation; the complete-reactor baseline below predates these follow-ups.
+
+Previous package-element type follow-up: 17 selected cases passed without skips
+or failures, including the native RPC/package matrix with 50 new combinations
+(`core32-package-rpc-element-types-focused-final.log`, November 11, 23:47:21).
+Both applications then packaged with tests skipped (23:48:06,
+`core32-package-rpc-element-types-package.log`). Non-string array elements now
+return Core's -3 diagnostic, including the exact `bool` type name and sequential
+decode/type/count precedence. [Evidence and limits](package-rpc-decoding-core32.md).
+One original IDEA GPU process PID 139888 verified RUNNING, blocks=headers=975453,
+IBD=false, four peers (two block relay), 42,379 mempool entries, zero privileged
+peers, accepted CUDA shares (`core32-package-rpc-element-types-live.json`).
+This follow-up has targeted validation; the complete-reactor baseline below
+predates this specific change.
+
+The preceding complete-reactor baseline completed 5,378 test cases: 5,366 passed,
+12 opt-in cases skipped, zero failures/errors; both applications packaged
+(`core32-package-rpc-decode-full-build-final.log`, November 11, 22:31:37 Bangkok).
+The native RPC comparison now includes 26 additional malformed/count/error-order
+cases for testmempoolaccept and submitpackage. TRUC fixture coin selection waits
+for Core wallet notifications and checks the live mempool UTXO view.
+[Implementation and evidence](package-rpc-decoding-core32.md).
+Original IDEA GPU PID 90688 verified RUNNING, blocks=headers=975450, IBD=false,
+eight peers (two block relay), 36,577 mempool entries, zero privileged peers,
+accepted CUDA shares and one Bitcoin process (`core32-package-rpc-decode-live.json`).
+
+The preceding full Bitcoin/RVN reactor completed 5,378 test cases: 5,366 passed,
+12 opt-in cases skipped, zero failures/errors; both applications packaged
+(`core32-handshake-preference-full-build.log`, November 11, 22:09:58 Bangkok).
+VERSION-only managed peers now count as preferred alternatives without becoming
+download sources until READY. Native Core comparisons cover both ordinary and
+NoBan timeouts with delayed VERACK. [Implementation and evidence](preferred-peer-handshake-gap-core32.md).
+One original IDEA GPU process PID 78900 verified RUNNING at blocks=headers=975447,
+IBD=false, five peers (two block relay), 39,667 mempool entries, zero privileged
+peers and accepted CUDA shares (`core32-handshake-preference-live.json`).
+The [complete requested checklist](core32-user-checklist.md) retains remaining work.
+
+The preceding full Bitcoin/RVN reactor completed 5,373 test cases: 5,361 passed,
 12 opt-in cases skipped, zero failures/errors. Both applications packaged
-successfully (`core32-availability-owner-full-build.log`, November 8
-20:02:26 Bangkok). Availability GETHEADERS now shares initial/live admission,
+successfully (`core32-availability-failure-boundary-full-build.log`, November 8
+21:13:45 Bangkok). Availability locator/state failures now propagate separately
+from transport failures; closed-socket GETHEADERS failures release the gate and
+remain retryable. [Tests and runtime evidence](availability-failure-boundary-core32.md).
+Live recheck on November 11 at 21:46 Bangkok: one Bitcoin application process,
+PID 51816, blocks=headers=975447, IBD=false, eleven peers (three block relay),
+37,799 mempool entries, zero privileged peers and accepted CUDA shares.
+Evidence: `core32-availability-failure-boundary-live-current.json`.
+Availability GETHEADERS shares initial/live admission,
 locator and timeout state. Nonblocking send ownership prevents reservation
 rollback races; deferred attempts do not add a cooldown. Real P2P ownership
 and block-IBD reconnection cases pass. [Implementation and limits](availability-headers-owner-core32.md).
@@ -501,8 +721,10 @@ see [header reception](header-reception-core32.md) for scope and verification.
 - Cluster linearization uses an exact maximum-closure solver rather than Core's
   budgeted spanning-forest optimizer. The 384 reference cases require Core to
   finish optimization and minimization. They do not compare its budget-limited
-  intermediate outputs. Equal-rate fallback uses transaction hashes locally,
-  which may differ from Core's internal transaction index order. Regeneration
+  intermediate outputs. Core's production fallback uses txids, not the integer
+  comparator supplied by the standalone oracle. Shared Java graph/mining keys
+  now use serialized txid order, equal-rate prefix weight and maximum chunk txid;
+  [checks and remaining eviction/budget limits](equal-rate-fallback-core32.md). Regeneration
   and the standalone reference RNG shim are documented in
   `mempool/reference/README.md`.
 - Prevout work uses parallel bounded MultiGet partitions and a Java overlay; it

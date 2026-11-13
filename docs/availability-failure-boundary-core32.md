@@ -35,3 +35,16 @@ async путь переводят IllegalStateException закрывшегося
 Это уточнение границы ошибок в availability-пути и отправке GETHEADERS, а не
 завершение полной классификации ошибок блоков/транзакций;
 [остальной объём](header-sync-timing-core32.md).
+
+Полный Bitcoin/RVN reactor завершён 8 ноября 2026, 21:13:45 Bangkok:
+5373 случая, 5361 успешный, 12 пропущенных, без failures/errors; обе программы
+упакованы. Журнал: `target/core-update-audit/core32-availability-failure-boundary-full-build.log`.
+Выборочная проверка: 89 случаев, все успешны.
+
+После сборки исходная IDEA GPU-нода PID 44408 проверена на высоте 975071,
+IBD=false. При продолжении 11 ноября в 21:46 Bangkok текущий единственный
+Bitcoin-процесс имеет PID 51816: blocks=headers=975447, IBD=false,
+11 подключений (3 block relay), 37799 транзакций mempool, 0 привилегированных
+пиров; в журнале CUDA accepted=79. Это отдельная текущая эксплуатационная
+проверка, не повторный запуск тестов. Снимок:
+`target/core-update-audit/core32-availability-failure-boundary-live-current.json`.

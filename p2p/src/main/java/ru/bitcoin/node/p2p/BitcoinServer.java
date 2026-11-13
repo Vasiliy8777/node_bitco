@@ -416,6 +416,7 @@ public final class BitcoinServer
 
             peer.acceptNegotiated(socket, v2Transport);
 
+            peerManager.trackHandshake(peer, PeerConnectionRole.INBOUND);
             peer.handshake(false);
 
             if (!peer.isReady()) {

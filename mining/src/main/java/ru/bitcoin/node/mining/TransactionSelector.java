@@ -32,17 +32,10 @@ public final class TransactionSelector {
             if (pool.put(entry.transaction().txId(), entry) != null) throw new IllegalArgumentException("Duplicate txid");
         }
 
-        PriorityQueue<Cursor> cursors = new PriorityQueue<>((a, b) -> {
-            var left = a.peek();
-            var right = b.peek();
-            int rate = ClusterLinearization.compareRate(right.fee(), right.adjustedWeight(),
-                    left.fee(), left.adjustedWeight());
-            return rate != 0 ? rate : Integer.compare(a.ordinal, b.ordinal);
-        });
-        int ordinal = 0;
+        PriorityQueue<Cursor> cursors = new PriorityQueue<>(Comparator.comparing(cursor -> cursor.key));
         if (orderedClusters == null)
             orderedClusters = ClusterLinearization.clusters(pool).stream().map(cluster -> ClusterLinearization.chunks(pool, cluster)).toList();
-        for (var cluster : orderedClusters) cursors.add(new Cursor(cluster, ordinal++));
+        for (var cluster : orderedClusters) if (!cluster.isEmpty()) cursors.add(new Cursor(cluster));
 
         List<Transaction> result = new ArrayList<>();
         while (!cursors.isEmpty()) {
@@ -67,10 +60,22 @@ public final class TransactionSelector {
 
     private static final class Cursor {
         private final List<ClusterLinearization.Chunk> chunks;
-        private final int ordinal;
         private int index;
-        private Cursor(List<ClusterLinearization.Chunk> chunks, int ordinal) { this.chunks = chunks; this.ordinal = ordinal; }
+        private ClusterLinearization.ChunkOrderKey key;
+        private Cursor(List<ClusterLinearization.Chunk> chunks) {
+            this.chunks = chunks;
+            key = ClusterLinearization.chunkOrderKey(chunks.getFirst(), chunks.getFirst().adjustedWeight());
+        }
         private ClusterLinearization.Chunk peek() { return index >= chunks.size() ? null : chunks.get(index); }
-        private ClusterLinearization.Chunk take() { return chunks.get(index++); }
+        private ClusterLinearization.Chunk take() {
+            var chosen = chunks.get(index++);
+            var next = peek();
+            if (next != null) {
+                long prefix = ClusterLinearization.compareRate(chosen.fee(), chosen.adjustedWeight(), next.fee(), next.adjustedWeight()) == 0
+                        ? Math.addExact(key.equalRatePrefixWeight(), next.adjustedWeight()) : next.adjustedWeight();
+                key = ClusterLinearization.chunkOrderKey(next, prefix);
+            }
+            return chosen;
+        }
     }
 }

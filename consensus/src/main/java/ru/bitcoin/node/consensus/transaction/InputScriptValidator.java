@@ -57,7 +57,7 @@ public final class InputScriptValidator {
 
         if (ScriptVerifyFlags.has(scriptVerifyFlags, ScriptVerifyFlags.SIGPUSHONLY)
                 && !P2shScript.isPushOnly(input.scriptSig())) {
-            throw new TransactionValidationException("scriptSig is not push-only");
+            throw scriptFailure(ScriptError.SIG_PUSHONLY, "scriptSig is not push-only", detailed);
         }
 
         UtxoEntry utxo =
@@ -96,16 +96,16 @@ public final class InputScriptValidator {
 
                 var program = witnessProgram.get();
                 if (!ScriptNumber.castToBool(program.program())) {
-                    throw new TransactionValidationException("Witness program evaluates to false before witness execution");
+                    throw scriptFailure(ScriptError.EVAL_FALSE, "Witness program evaluates to false before witness execution", detailed);
                 }
                 if (ScriptPubKeyClassifier.classify(scriptPubKey) == ScriptPubKeyType.ANCHOR) {
-                    if (input.scriptSig().length != 0) throw new TransactionValidationException("Native anchor requires empty scriptSig");
+                    if (input.scriptSig().length != 0) throw scriptFailure(ScriptError.WITNESS_MALLEATED, "Native anchor requires empty scriptSig", detailed);
                     return;
                 }
                 if (program.version() == 1 && program.programLength() == 32
                         && ScriptVerifyFlags.has(scriptVerifyFlags, ScriptVerifyFlags.TAPROOT)) {
                     if (input.scriptSig().length != 0) {
-                        throw new TransactionValidationException("Native Taproot requires empty scriptSig");
+                        throw scriptFailure(ScriptError.WITNESS_MALLEATED, "Native Taproot requires empty scriptSig", detailed);
                     }
                     var coins = transaction.inputs().stream().map(txIn -> {
                         var coin = utxoView.find(txIn.previousOutput()).orElseThrow(
@@ -161,12 +161,12 @@ public final class InputScriptValidator {
             byte[] lastPush = SigOpCounter.lastPush(input.scriptSig());
             if (lastPush != null && WitnessProgram.parse(lastPush).isPresent()
                     && wrappedWitnessProgram.isEmpty()) {
-                throw new TransactionValidationException("Non-canonical P2SH witness scriptSig");
+                throw scriptFailure(ScriptError.WITNESS_MALLEATED_P2SH, "Non-canonical P2SH witness scriptSig", detailed);
             }
 
             if (wrappedWitnessProgram.isPresent()) {
                 if (!ScriptNumber.castToBool(wrappedWitnessProgram.get().program())) {
-                    throw new TransactionValidationException("Witness redeemScript evaluates to false");
+                    throw scriptFailure(ScriptError.EVAL_FALSE, "Witness redeemScript evaluates to false", detailed);
                 }
 
                 /*
@@ -186,13 +186,13 @@ public final class InputScriptValidator {
                                         inputIndex,
                                         input.scriptSig(),
                                         scriptPubKey,
-                                        scriptVerifyFlags
+                                        scriptVerifyFlags, detailed
                                 );
 
                 if (!outerValid) {
                     throw scriptValidationFailed(
                             inputIndex,
-                            input
+                            input, detailed
                     );
                 }
 
@@ -218,13 +218,13 @@ public final class InputScriptValidator {
                         inputIndex,
                         input.scriptSig(),
                         scriptPubKey,
-                        scriptVerifyFlags
+                        scriptVerifyFlags, detailed
                 );
 
         if (!valid) {
             throw scriptValidationFailed(
                     inputIndex,
-                    input
+                    input, detailed
             );
         }
 
@@ -242,11 +242,11 @@ public final class InputScriptValidator {
         )
                 && !input.witness().isEmpty()) {
 
-            throw new TransactionValidationException(
+            throw scriptFailure(ScriptError.WITNESS_UNEXPECTED,
                     "Unexpected witness data for non-witness input "
                             + inputIndex
                             + ": "
-                            + input.previousOutput()
+                            + input.previousOutput(), detailed
             );
         }
     }
@@ -296,7 +296,7 @@ public final class InputScriptValidator {
                 if (!valid) {
                     throw scriptValidationFailed(
                             inputIndex,
-                            input
+                            input, detailed
                     );
                 }
 
@@ -320,7 +320,7 @@ public final class InputScriptValidator {
                 if (!valid) {
                     throw scriptValidationFailed(
                             inputIndex,
-                            input
+                            input, detailed
                     );
                 }
 
@@ -331,11 +331,11 @@ public final class InputScriptValidator {
              * Witness v0 допускает только
              * program length 20 или 32.
              */
-            throw new TransactionValidationException(
+            throw scriptFailure(ScriptError.WITNESS_PROGRAM_WRONG_LENGTH,
                     "Invalid wrapped witness v0 program length for input "
                             + inputIndex
                             + ": "
-                            + witnessProgram.programLength()
+                            + witnessProgram.programLength(), detailed
             );
         }
 
@@ -354,9 +354,8 @@ public final class InputScriptValidator {
                 ScriptVerifyFlags.DISCOURAGE_UPGRADABLE_WITNESS_PROGRAM
         )) {
 
-            throw new ScriptExecutionException(
-                    "Discouraged upgradable witness program"
-            );
+            if (detailed) throw new ScriptVerificationException(ScriptError.DISCOURAGE_UPGRADABLE_WITNESS_PROGRAM);
+            throw new ScriptExecutionException("Discouraged upgradable witness program");
         }
 
         /*
@@ -383,9 +382,9 @@ public final class InputScriptValidator {
          */
         if (input.scriptSig().length != 0) {
 
-            throw new TransactionValidationException(
+            throw scriptFailure(ScriptError.WITNESS_MALLEATED,
                     "Native witness program requires empty scriptSig for input "
-                            + inputIndex
+                            + inputIndex, detailed
             );
         }
 
@@ -417,7 +416,7 @@ public final class InputScriptValidator {
                 if (!valid) {
                     throw scriptValidationFailed(
                             inputIndex,
-                            input
+                            input, detailed
                     );
                 }
 
@@ -441,18 +440,18 @@ public final class InputScriptValidator {
                 if (!valid) {
                     throw scriptValidationFailed(
                             inputIndex,
-                            input
+                            input, detailed
                     );
                 }
 
                 return;
             }
 
-            throw new TransactionValidationException(
+            throw scriptFailure(ScriptError.WITNESS_PROGRAM_WRONG_LENGTH,
                     "Invalid witness v0 program length for input "
                             + inputIndex
                             + ": "
-                            + witnessProgram.programLength()
+                            + witnessProgram.programLength(), detailed
             );
         }
 
@@ -471,9 +470,8 @@ public final class InputScriptValidator {
                 ScriptVerifyFlags.DISCOURAGE_UPGRADABLE_WITNESS_PROGRAM
         )) {
 
-            throw new ScriptExecutionException(
-                    "Discouraged upgradable witness program"
-            );
+            if (detailed) throw new ScriptVerificationException(ScriptError.DISCOURAGE_UPGRADABLE_WITNESS_PROGRAM);
+            throw new ScriptExecutionException("Discouraged upgradable witness program");
         }
 
         /*
@@ -485,17 +483,21 @@ public final class InputScriptValidator {
          */
     }
 
-    private static TransactionValidationException
+    private static RuntimeException
     scriptValidationFailed(
             int inputIndex,
-            TxIn input
+            TxIn input, boolean detailed
     ) {
-        return new TransactionValidationException(
+        return scriptFailure(ScriptError.EVAL_FALSE,
                 "Script validation failed for input "
                         + inputIndex
                         + ": "
-                        + input.previousOutput()
+                        + input.previousOutput(), detailed
         );
+    }
+
+    private static RuntimeException scriptFailure(ScriptError error, String message, boolean detailed) {
+        return detailed ? new ScriptVerificationException(error, message) : new TransactionValidationException(message);
     }
 
     public static void validateAll(
@@ -503,6 +505,9 @@ public final class InputScriptValidator {
             UtxoView utxoView,
             int scriptVerifyFlags
     ) {
+        validateAll(transaction, utxoView, scriptVerifyFlags, false);
+    }
+    public static void validateAll(Transaction transaction, UtxoView utxoView, int scriptVerifyFlags, boolean detailed) {
         if (transaction == null) {
             throw new IllegalArgumentException(
                     "transaction must not be null"
@@ -533,7 +538,16 @@ public final class InputScriptValidator {
         java.util.List<Runnable> checks = new java.util.ArrayList<>(transaction.inputs().size());
         for (int inputIndex = 0; inputIndex < transaction.inputs().size(); inputIndex++) {
             final int index = inputIndex;
-            checks.add(() -> validate(transaction, index, immutableView, scriptVerifyFlags));
+            checks.add(() -> {
+                try { validate(transaction, index, immutableView, scriptVerifyFlags, detailed); }
+                catch (ScriptExecutionException error) {
+                    if (detailed) throw new InputScriptValidationException(index, error.code(), error.error());
+                    throw error;
+                } catch (ScriptParseException error) {
+                    if (detailed) throw new InputScriptValidationException(index, error.code(), error.error());
+                    throw error;
+                }
+            });
         }
         ScriptCheckQueue.run(checks);
     }

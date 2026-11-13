@@ -262,7 +262,9 @@ class MiningRpcTest {
                     var discovery = (Map<?, ?>) call(client, uri, "getopenrpcinfo", List.of()).get("result");
                     assertEquals("1.4.1", discovery.get("openrpc"));
                     assertEquals(discovery, call(client, uri, "rpc.discover", List.of()).get("result"));
-                    assertEquals(discovery, call(client, uri, "getopenrpcinfo", Map.of("show_hidden", true)).get("result"));
+                    var withHidden = (Map<?, ?>) call(client, uri, "getopenrpcinfo", Map.of("show_hidden", true)).get("result");
+                    assertTrue(((List<?>) withHidden.get("methods")).containsAll((List<?>) discovery.get("methods")));
+                    assertTrue(((List<?>) withHidden.get("methods")).size() > ((List<?>) discovery.get("methods")).size());
                     assertEquals(call(client, uri, "getblockhash", List.of(0)).get("result"),
                             call(client, uri, "getblockhash", Map.of("height", 0)).get("result"));
                     assertEquals(-8, error(call(client, uri, "getblockhash", Map.of("unknown", 0))));
@@ -361,7 +363,8 @@ class MiningRpcTest {
                     assertEquals(64, ((Number) mempoolInfo.get("limitclustercount")).intValue());
                     assertEquals(101_000L, ((Number) mempoolInfo.get("limitclustersize")).longValue());
                     assertEquals(true, mempoolInfo.get("optimal"));
-                    assertFalse(mempoolInfo.containsKey("usage"), "Unmeasured JVM memory must not be reported as virtual size");
+                assertEquals(validation.mempoolMemoryUsage(), ((Number)mempoolInfo.get("usage")).longValue(),
+                        "usage must report Core's allocator estimate independently of virtual size");
                     assertFalse(mempoolInfo.containsKey("fullrbf"));
                     assertEquals(List.of(Map.of("weight", 0, "fee", 0.0)),
                             call(client, uri, "getmempoolfeeratediagram", List.of()).get("result"));

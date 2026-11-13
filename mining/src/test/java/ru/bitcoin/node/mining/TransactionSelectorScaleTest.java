@@ -29,13 +29,15 @@ class TransactionSelectorScaleTest {
     }
 
     @Test
-    void equalRatesKeepSnapshotOrderAndOversizedBestDoesNotBlockOtherClusters() {
+    void equalRatesUseCoreFallbackAndOversizedBestDoesNotBlockOtherClusters() {
         var a = tx(1);
         var b = tx(2);
         var c = tx(3);
         var entries = List.of(new MempoolEntry(a, 1000, 400, 0, 0), new MempoolEntry(b, 1000, 400, 0, 0),
                 new MempoolEntry(c, 10000, 800, 0, 0));
-        assertEquals(List.of(a), TransactionSelector.select(entries, 400, 0, new FeeRate(0)));
-        assertEquals(List.of(c, a, b), TransactionSelector.select(entries, 1600, 0, new FeeRate(0)));
+        var equal = new ArrayList<>(List.of(a, b));
+        equal.sort((left, right) -> left.txId().compareRawBytes(right.txId()));
+        assertEquals(List.of(equal.getFirst()), TransactionSelector.select(entries, 400, 0, new FeeRate(0)));
+        assertEquals(List.of(c, equal.get(0), equal.get(1)), TransactionSelector.select(entries, 1600, 0, new FeeRate(0)));
     }
 }

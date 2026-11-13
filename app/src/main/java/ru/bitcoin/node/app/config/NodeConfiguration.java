@@ -318,6 +318,7 @@ public class NodeConfiguration {
     @Bean
     public BitcoinClient bitcoinClient(
             NetworkParameters parameters,
+            PeerManager peerManager,
             @Value("${bitcoin.prune:0}") long pruneMiB,
             @Value("${bitcoin.blockfilterindex:false}") boolean blockFilterIndex,
             @Value("${bitcoin.p2p.peer-block-filters:false}") boolean peerBlockFilters,
@@ -332,7 +333,7 @@ public class NodeConfiguration {
             services |= ru.bitcoin.node.p2p.message.VersionMessage.NODE_COMPACT_FILTERS;
         }
         if (v2Transport) services |= ru.bitcoin.node.p2p.message.VersionMessage.NODE_P2P_V2;
-        return new BitcoinClient(parameters, services, !blocksOnly, v2Transport);
+        return new BitcoinClient(parameters, services, !blocksOnly, v2Transport).trackHandshakes(peerManager);
     }
 
     @Bean(destroyMethod = "close")

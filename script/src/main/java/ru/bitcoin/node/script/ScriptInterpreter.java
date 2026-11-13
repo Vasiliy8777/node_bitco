@@ -77,7 +77,7 @@ public final class ScriptInterpreter {
         if (requiredSequence < 0) {
 
             throw new ScriptExecutionException(
-                    "OP_CHECKSEQUENCEVERIFY requires non-negative sequence"
+                    ScriptError.NEGATIVE_LOCKTIME, "OP_CHECKSEQUENCEVERIFY requires non-negative sequence"
             );
         }
 
@@ -100,7 +100,7 @@ public final class ScriptInterpreter {
         if (Integer.toUnsignedLong(context.transaction().version()) < 2) {
 
             throw new ScriptExecutionException(
-                    "OP_CHECKSEQUENCEVERIFY requires transaction version >= 2"
+                    ScriptError.UNSATISFIED_LOCKTIME, "OP_CHECKSEQUENCEVERIFY requires transaction version >= 2"
             );
         }
 
@@ -119,7 +119,7 @@ public final class ScriptInterpreter {
                 & SEQUENCE_LOCKTIME_DISABLE_FLAG) != 0) {
 
             throw new ScriptExecutionException(
-                    "OP_CHECKSEQUENCEVERIFY input sequence disables relative lock-time"
+                    ScriptError.UNSATISFIED_LOCKTIME, "OP_CHECKSEQUENCEVERIFY input sequence disables relative lock-time"
             );
         }
 
@@ -134,7 +134,7 @@ public final class ScriptInterpreter {
                 != (transactionSequence & typeMask)) {
 
             throw new ScriptExecutionException(
-                    "OP_CHECKSEQUENCEVERIFY sequence type mismatch"
+                    ScriptError.UNSATISFIED_LOCKTIME, "OP_CHECKSEQUENCEVERIFY sequence type mismatch"
             );
         }
 
@@ -162,7 +162,7 @@ public final class ScriptInterpreter {
                 > transactionMasked) {
 
             throw new ScriptExecutionException(
-                    "OP_CHECKSEQUENCEVERIFY sequence requirement not satisfied"
+                    ScriptError.UNSATISFIED_LOCKTIME, "OP_CHECKSEQUENCEVERIFY sequence requirement not satisfied"
             );
         }
     }
@@ -199,7 +199,7 @@ public final class ScriptInterpreter {
         if (requiredLockTime < 0) {
 
             throw new ScriptExecutionException(
-                    "OP_CHECKLOCKTIMEVERIFY requires non-negative locktime"
+                    ScriptError.NEGATIVE_LOCKTIME, "OP_CHECKLOCKTIMEVERIFY requires non-negative locktime"
             );
         }
 
@@ -224,7 +224,7 @@ public final class ScriptInterpreter {
                 != transactionIsHeight) {
 
             throw new ScriptExecutionException(
-                    "OP_CHECKLOCKTIMEVERIFY locktime type mismatch"
+                    ScriptError.UNSATISFIED_LOCKTIME, "OP_CHECKLOCKTIMEVERIFY locktime type mismatch"
             );
         }
 
@@ -237,7 +237,7 @@ public final class ScriptInterpreter {
                 > transactionLockTime) {
 
             throw new ScriptExecutionException(
-                    "OP_CHECKLOCKTIMEVERIFY locktime requirement not satisfied"
+                    ScriptError.UNSATISFIED_LOCKTIME, "OP_CHECKLOCKTIMEVERIFY locktime requirement not satisfied"
             );
         }
 
@@ -257,7 +257,7 @@ public final class ScriptInterpreter {
                 == 0xffff_ffffL) {
 
             throw new ScriptExecutionException(
-                    "OP_CHECKLOCKTIMEVERIFY requires non-final input sequence"
+                    ScriptError.UNSATISFIED_LOCKTIME, "OP_CHECKLOCKTIMEVERIFY requires non-final input sequence"
             );
         }
     }
@@ -294,7 +294,7 @@ public final class ScriptInterpreter {
                 > ScriptLimits.MAX_SCRIPT_SIZE) {
 
             throw new ScriptExecutionException(
-                    "Script size exceeds consensus limit: "
+                    ScriptError.SCRIPT_SIZE, "Script size exceeds consensus limit: "
                             + script.length
                             + " > "
                             + ScriptLimits.MAX_SCRIPT_SIZE
@@ -348,7 +348,7 @@ public final class ScriptInterpreter {
                     > ScriptLimits.MAX_SCRIPT_ELEMENT_SIZE) {
 
                 throw new ScriptExecutionException(
-                        "Pushed element exceeds consensus limit: "
+                        ScriptError.PUSH_SIZE, "Pushed element exceeds consensus limit: "
                                 + instruction.dataLength()
                                 + " > "
                                 + ScriptLimits.MAX_SCRIPT_ELEMENT_SIZE
@@ -361,7 +361,7 @@ public final class ScriptInterpreter {
             if (opcode == Opcode.OP_CODESEPARATOR && context != null
                     && context.signatureVersion() == SignatureVersion.LEGACY
                     && ScriptVerifyFlags.has(context.flags(), ScriptVerifyFlags.CONST_SCRIPTCODE)) {
-                throw new ScriptExecutionException("CONST_SCRIPTCODE: legacy OP_CODESEPARATOR");
+                throw new ScriptExecutionException(ScriptError.OP_CODESEPARATOR, "CONST_SCRIPTCODE: legacy OP_CODESEPARATOR");
             }
 
             boolean executing =
@@ -383,7 +383,7 @@ public final class ScriptInterpreter {
                         > ScriptLimits.MAX_OPS_PER_SCRIPT) {
 
                     throw new ScriptExecutionException(
-                            "Script operation count exceeds consensus limit of "
+                            ScriptError.OP_COUNT, "Script operation count exceeds consensus limit of "
                                     + ScriptLimits.MAX_OPS_PER_SCRIPT
                     );
                 }
@@ -399,7 +399,7 @@ public final class ScriptInterpreter {
                     && isDisabledOpcode(opcode)) {
 
                 throw new ScriptExecutionException(
-                        "Disabled opcode: 0x"
+                        ScriptError.DISABLED_OPCODE, "Disabled opcode: 0x"
                                 + String.format(
                                 "%02x",
                                 opcode
@@ -417,7 +417,7 @@ public final class ScriptInterpreter {
                     || opcode == Opcode.OP_VERNOTIF)) {
 
                 throw new ScriptExecutionException(
-                        "Reserved conditional opcode: 0x"
+                        ScriptError.BAD_OPCODE, "Reserved conditional opcode: 0x"
                                 + String.format(
                                 "%02x",
                                 opcode
@@ -455,7 +455,7 @@ public final class ScriptInterpreter {
                                 && !isMinimalIfValue(conditionValue)) {
 
                             throw new ScriptExecutionException(
-                                    "OP_IF/OP_NOTIF requires minimal boolean"
+                                    (tapscript ? ScriptError.TAPSCRIPT_MINIMALIF : ScriptError.MINIMALIF), "OP_IF/OP_NOTIF requires minimal boolean"
                             );
                         }
 
@@ -486,7 +486,7 @@ public final class ScriptInterpreter {
                     if (executionConditions.isEmpty()) {
 
                         throw new ScriptExecutionException(
-                                "OP_ELSE without matching OP_IF/OP_NOTIF"
+                                ScriptError.UNBALANCED_CONDITIONAL, "OP_ELSE without matching OP_IF/OP_NOTIF"
                         );
                     }
 
@@ -507,7 +507,7 @@ public final class ScriptInterpreter {
                     if (executionConditions.isEmpty()) {
 
                         throw new ScriptExecutionException(
-                                "OP_ENDIF without matching OP_IF/OP_NOTIF"
+                                ScriptError.UNBALANCED_CONDITIONAL, "OP_ENDIF without matching OP_IF/OP_NOTIF"
                         );
                     }
 
@@ -551,7 +551,7 @@ public final class ScriptInterpreter {
 
             if (tapscript && !instruction.isPushData()) {
                 if (opcode == Opcode.OP_CHECKMULTISIG || opcode == Opcode.OP_CHECKMULTISIGVERIFY) {
-                    throw new ScriptExecutionException("CHECKMULTISIG is disabled in tapscript");
+                    throw new ScriptExecutionException(ScriptError.TAPSCRIPT_CHECKMULTISIG, "CHECKMULTISIG is disabled in tapscript");
                 }
                 if (opcode == Opcode.OP_CHECKSIG || opcode == Opcode.OP_CHECKSIGVERIFY || opcode == 0xba) {
                     machine.requireStackSize(opcode == 0xba ? 3 : 2);
@@ -560,7 +560,7 @@ public final class ScriptInterpreter {
                     byte[] signature = machine.pop();
                     boolean valid = context.taprootData().check(signature, key, tapCodeSeparator, context.flags());
                     if (opcode == Opcode.OP_CHECKSIGVERIFY) {
-                        if (!valid) throw new ScriptExecutionException("Tapscript CHECKSIGVERIFY failed");
+                        if (!valid) throw new ScriptExecutionException(ScriptError.CHECKSIGVERIFY, "Tapscript CHECKSIGVERIFY failed");
                     } else {
                         machine.push(ScriptNumber.encode(n + (valid ? 1 : 0)));
                     }
@@ -591,7 +591,7 @@ public final class ScriptInterpreter {
                     > ScriptLimits.MAX_OPS_PER_SCRIPT) {
 
                 throw new ScriptExecutionException(
-                        "Script operation count exceeds consensus limit of "
+                        ScriptError.OP_COUNT, "Script operation count exceeds consensus limit of "
                                 + ScriptLimits.MAX_OPS_PER_SCRIPT
                 );
             }
@@ -600,7 +600,7 @@ public final class ScriptInterpreter {
         if (!executionConditions.isEmpty()) {
 
             throw new ScriptExecutionException(
-                    "Unbalanced conditional: missing OP_ENDIF"
+                    ScriptError.UNBALANCED_CONDITIONAL, "Unbalanced conditional: missing OP_ENDIF"
             );
         }
 
@@ -608,7 +608,7 @@ public final class ScriptInterpreter {
                 != script.length) {
 
             throw new ScriptExecutionException(
-                    "Script instruction offsets do not match script length"
+                    ScriptError.BAD_OPCODE, "Script instruction offsets do not match script length"
             );
         }
     }
@@ -647,7 +647,7 @@ public final class ScriptInterpreter {
             )) {
 
                 throw new ScriptExecutionException(
-                        "Non-minimal data push"
+                        ScriptError.MINIMALDATA, "Non-minimal data push"
                 );
             }
 
@@ -726,7 +726,7 @@ public final class ScriptInterpreter {
                 )) {
 
                     throw new ScriptExecutionException(
-                            "Discouraged upgradable NOP: 0x"
+                            ScriptError.DISCOURAGE_UPGRADABLE_NOPS, "Discouraged upgradable NOP: 0x"
                                     + String.format(
                                     "%02x",
                                     opcode
@@ -737,7 +737,7 @@ public final class ScriptInterpreter {
 
             case Opcode.OP_RETURN ->
                     throw new ScriptExecutionException(
-                            "OP_RETURN encountered"
+                            ScriptError.OP_RETURN, "OP_RETURN encountered"
                     );
 
             case Opcode.OP_RESERVED,
@@ -745,7 +745,7 @@ public final class ScriptInterpreter {
                  Opcode.OP_RESERVED1,
                  Opcode.OP_RESERVED2 ->
                     throw new ScriptExecutionException(
-                            "Reserved opcode: 0x"
+                            ScriptError.BAD_OPCODE, "Reserved opcode: 0x"
                                     + String.format(
                                     "%02x",
                                     opcode
@@ -1065,7 +1065,7 @@ public final class ScriptInterpreter {
 
             default ->
                     throw new ScriptExecutionException(
-                            "Unsupported opcode: 0x"
+                            ScriptError.BAD_OPCODE, "Unsupported opcode: 0x"
                                     + String.format(
                                     "%02x",
                                     opcode
@@ -1338,7 +1338,7 @@ public final class ScriptInterpreter {
                 || depthLong > Integer.MAX_VALUE) {
 
             throw new ScriptExecutionException(
-                    "OP_PICK/OP_ROLL invalid stack depth: "
+                    ScriptError.INVALID_STACK_OPERATION, "OP_PICK/OP_ROLL invalid stack depth: "
                             + depthLong
             );
         }
@@ -1467,7 +1467,7 @@ public final class ScriptInterpreter {
     }
 
     private static void executeCheckSig(ScriptMachine machine, ScriptExecutionContext context, int lastCodeSeparatorOffset) {
-        if (context == null) throw new ScriptExecutionException("OP_CHECKSIG requires transaction context");
+        if (context == null) throw new ScriptExecutionException(ScriptError.UNKNOWN_ERROR, "OP_CHECKSIG requires transaction context");
         machine.requireStackSize(2);
         byte[] key = machine.pop();
         byte[] signature = machine.pop();
@@ -1476,7 +1476,7 @@ public final class ScriptInterpreter {
             byte[] filtered = LegacyScriptCode.findAndDeleteSignature(scriptCode, signature, context.dialect());
             if (ScriptVerifyFlags.has(context.flags(), ScriptVerifyFlags.CONST_SCRIPTCODE)
                     && !Arrays.equals(scriptCode, filtered)) {
-                throw new ScriptExecutionException("CONST_SCRIPTCODE: signature found in scriptCode");
+                throw new ScriptExecutionException(ScriptError.SIG_FINDANDDELETE, "CONST_SCRIPTCODE: signature found in scriptCode");
             }
             scriptCode = filtered;
         }
@@ -1495,7 +1495,7 @@ public final class ScriptInterpreter {
     ) {
         if (context == null) {
             throw new ScriptExecutionException(
-                    "OP_CHECKMULTISIG requires transaction context"
+                    ScriptError.UNKNOWN_ERROR, "OP_CHECKMULTISIG requires transaction context"
             );
         }
 
@@ -1524,7 +1524,7 @@ public final class ScriptInterpreter {
                 > ScriptLimits.MAX_PUBKEYS_PER_MULTISIG) {
 
             throw new ScriptExecutionException(
-                    "OP_CHECKMULTISIG public key count out of range: "
+                    ScriptError.PUBKEY_COUNT, "OP_CHECKMULTISIG public key count out of range: "
                             + publicKeyCountLong
             );
         }
@@ -1542,7 +1542,7 @@ public final class ScriptInterpreter {
                 > ScriptLimits.MAX_OPS_PER_SCRIPT) {
 
             throw new ScriptExecutionException(
-                    "Script operation count exceeds consensus limit of "
+                    ScriptError.OP_COUNT, "Script operation count exceeds consensus limit of "
                             + ScriptLimits.MAX_OPS_PER_SCRIPT
             );
         }
@@ -1583,7 +1583,7 @@ public final class ScriptInterpreter {
                 || signatureCountLong > publicKeyCount) {
 
             throw new ScriptExecutionException(
-                    "OP_CHECKMULTISIG signature count out of range: "
+                    ScriptError.SIG_COUNT, "OP_CHECKMULTISIG signature count out of range: "
                             + signatureCountLong
             );
         }
@@ -1618,17 +1618,6 @@ public final class ScriptInterpreter {
          */
         byte[] dummy =
                 machine.pop();
-
-        if (ScriptVerifyFlags.has(
-                context.flags(),
-                ScriptVerifyFlags.NULLDUMMY
-        )
-                && dummy.length != 0) {
-
-            throw new ScriptExecutionException(
-                    "OP_CHECKMULTISIG dummy argument must be empty"
-            );
-        }
 
         /*
          * scriptCode определяется один раз для
@@ -1670,7 +1659,7 @@ public final class ScriptInterpreter {
                 )) {
 
                     throw new ScriptExecutionException(
-                            "CONST_SCRIPTCODE: signature found in scriptCode"
+                            ScriptError.SIG_FINDANDDELETE, "CONST_SCRIPTCODE: signature found in scriptCode"
                     );
                 }
 
@@ -1702,6 +1691,10 @@ public final class ScriptInterpreter {
                 }
             }
         }
+
+        // Core checks FindAndDelete/encodings/NULLFAIL before the historical dummy.
+        if (ScriptVerifyFlags.has(context.flags(), ScriptVerifyFlags.NULLDUMMY) && dummy.length != 0)
+            throw new ScriptExecutionException(ScriptError.SIG_NULLDUMMY, "OP_CHECKMULTISIG dummy argument must be empty");
 
         machine.push(
                 success
@@ -1878,7 +1871,7 @@ public final class ScriptInterpreter {
         }
 
         throw new ScriptExecutionException(
-                "Unsupported push opcode: 0x"
+                ScriptError.BAD_OPCODE, "Unsupported push opcode: 0x"
                         + String.format(
                         "%02x",
                         opcode

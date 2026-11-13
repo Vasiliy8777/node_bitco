@@ -3,7 +3,6 @@ package ru.bitcoin.node.app.rpc;
 import ru.bitcoin.node.mempool.FeeRate;
 
 import com.sun.net.httpserver.HttpExchange;
-import com.sun.net.httpserver.HttpServer;
 import tools.jackson.databind.json.JsonMapper;
 import ru.bitcoin.node.app.NodeValidationService;
 import ru.bitcoin.node.app.service.NodeRelayService;
@@ -34,24 +33,18 @@ import java.util.function.BooleanSupplier;
  * Local authenticated JSON-RPC endpoint, opt-in through bitcoin.rpc.enabled.
  */
 public final class NodeRpcServer implements AutoCloseable {
-    private static final int MAX_REQUEST = 8_100_000;
+    private static final int MAX_REQUEST = 32 * 1024 * 1024;
     private static final long DEFAULT_MAX_RAW_TX_FEE_RATE = 10_000_000L; // 0.10 BTC/kvB
     private static final long MAX_RAW_TX_FEE_RATE = 100_000_000L; // 1 BTC/kvB
-    private static Integer installedConnectionLimit;
-
-    private static synchronized void configureConnectionLimit(int maximum) {
-        if (maximum < 1) throw new IllegalArgumentException("rpcmaxconnections must be positive");
-        if (installedConnectionLimit != null && installedConnectionLimit != maximum)
-            throw new IllegalStateException("The JDK HTTP connection limit is JVM-wide and must be configured before the first RPC server");
-        System.setProperty("jdk.httpserver.maxConnections", Integer.toString(maximum));
-        installedConnectionLimit = maximum;
-    }
     private static final long DEFAULT_MAX_BURN_AMOUNT = 0L;
-    private final HttpServer server;
+    private final CoreHttpServer server;
     private final ThreadPoolExecutor executor = new ThreadPoolExecutor(8, 8, 0, TimeUnit.SECONDS,
             new ArrayBlockingQueue<>(16), Thread.ofPlatform().daemon().name("bitcoin-rpc-", 0).factory());
     private final Semaphore longPolls = new Semaphore(4);
-    private final JsonMapper mapper = JsonMapper.builder().build();
+    private final JsonMapper mapper = JsonMapper.builder(tools.jackson.core.json.JsonFactory.builder()
+            .streamReadConstraints(tools.jackson.core.StreamReadConstraints.builder()
+                    .maxNestingDepth(512).maxStringLength(MAX_REQUEST).maxNameLength(MAX_REQUEST)
+                    .maxNumberLength(MAX_REQUEST).build()).build()).build();
     private final byte[] authorization;
     private final MiningController mining;
     private final NodeValidationService validation;
@@ -99,11 +92,7 @@ public final class NodeRpcServer implements AutoCloseable {
         this.ready = ready;
         this.peerManager = peerManager;
         this.localServices = localServices;
-        configureConnectionLimit(maximumConnections);
-        server = HttpServer.create(address, maximumConnections);
-        server.createContext("/", this::handle);
-        server.setExecutor(executor);
-        server.start();
+        server = new CoreHttpServer(address, maximumConnections, executor, this::handle);
     }
 
     public int port() {
@@ -112,129 +101,84 @@ public final class NodeRpcServer implements AutoCloseable {
 
     private void handle(HttpExchange exchange) throws IOException {
         try (exchange) {
-            String auth = exchange.getRequestHeaders().getFirst("Authorization");
-            if (auth == null || !MessageDigest.isEqual(authorization, auth.getBytes(StandardCharsets.US_ASCII))) {
-                exchange.getResponseHeaders().set("WWW-Authenticate", "Basic realm=bitcoin-node");
-                respond(exchange, 401, Map.of("error", "Unauthorized"));
+            if (!Set.of("POST", "GET", "PUT", "HEAD").contains(exchange.getRequestMethod())) {
+                exchange.getResponseHeaders().set("Cache-Control", "no-store");
+                respondText(exchange, 405, "");
+                return;
+            }
+            if (!exchange.getRequestURI().toString().equals("/") && !exchange.getRequestURI().toString().startsWith("/wallet/")) {
+                exchange.getResponseHeaders().set("Cache-Control", "no-store");
+                respondText(exchange, 404, "");
                 return;
             }
             if (!exchange.getRequestMethod().equals("POST")) {
-                respond(exchange, 405, Map.of("error", "POST required"));
+                respondText(exchange, 405, "JSONRPC server handles only POST requests");
+                return;
+            }
+            String auth = exchange.getRequestHeaders().getFirst("Authorization");
+            byte[] supplied = null;
+            if (auth != null && auth.startsWith("Basic ")) {
+                try { supplied = Base64.getDecoder().decode(auth.substring(6).trim()); }
+                catch (IllegalArgumentException ignored) { }
+            }
+            byte[] expected = Base64.getDecoder().decode(new String(authorization, StandardCharsets.US_ASCII).substring(6));
+            if (supplied == null || !MessageDigest.isEqual(expected, supplied)) {
+                if (auth != null) java.util.concurrent.locks.LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(250));
+                exchange.getResponseHeaders().set("WWW-Authenticate", "Basic realm=\"jsonrpc\"");
+                respondText(exchange, 401, "");
                 return;
             }
             byte[] body = exchange.getRequestBody().readNBytes(MAX_REQUEST + 1);
             if (body.length > MAX_REQUEST) {
-                respond(exchange, 413, Map.of("error", "Request too large"));
+                respondText(exchange, 413, "");
                 return;
             }
-
-            final Object root;
-            try {
-                root = mapper.readValue(body, Object.class);
-            } catch (RuntimeException exception) {
-                respond(exchange, 200, rpcError(null, null, -32700, "Parse error"));
-                return;
-            }
-
-            if (root instanceof Map<?, ?> request) {
-                RpcReply reply = executeRequest(request);
-                if (reply.notification()) {
-                    respondNoContent(exchange);
-                } else {
-                    respond(exchange, 200, reply.body());
-                }
-                return;
-            }
-            if (root instanceof List<?> batch) {
-                if (batch.isEmpty()) {
-                    // Bitcoin Core preserves the historical empty-batch response.
-                    respond(exchange, 200, List.of());
-                    return;
-                }
-                List<Object> replies = new ArrayList<>();
-                for (Object item : batch) {
-                    if (!(item instanceof Map<?, ?> request)) {
-                        replies.add(rpcError(null, "2.0", -32600, "Invalid Request object"));
-                        continue;
-                    }
-                    RpcReply reply = executeRequest(request);
-                    if (!reply.notification()) replies.add(reply.body());
-                }
-                if (replies.isEmpty()) respondNoContent(exchange);
-                else respond(exchange, 200, replies);
-                return;
-            }
-            respond(exchange, 200, rpcError(null, null, -32700, "Top-level object parse error"));
+            var reply = RpcProtocol.execute(body, mapper, this::executeCommand);
+            if (reply.status() == 204) respondNoContent(exchange);
+            else respond(exchange, reply.status(), reply.body());
         }
     }
 
-    private RpcReply executeRequest(Map<?, ?> request) {
-        Object id = request.get("id");
-        String jsonVersion = request.get("jsonrpc") instanceof String value ? value : null;
-        boolean v2 = "2.0".equals(jsonVersion);
-        boolean notification = v2 && !request.containsKey("id");
-        Object result = null;
-        Object error = null;
+    private void respondText(HttpExchange exchange, int status, String text) throws IOException {
+        exchange.getResponseHeaders().set("Content-Type", "text/html; charset=ISO-8859-1");
+        byte[] bytes = text.getBytes(StandardCharsets.ISO_8859_1);
+        if (exchange.getRequestMethod().equals("HEAD") || bytes.length == 0) exchange.sendResponseHeaders(status, -1);
+        else {
+            exchange.sendResponseHeaders(status, bytes.length);
+            exchange.getResponseBody().write(bytes);
+        }
+    }
+
+    private Object executeCommand(String method, Object rawParams) {
         boolean acquired = false;
-        String method = null;
         long started = System.nanoTime();
         try {
-            if (request.containsKey("jsonrpc") && !v2)
-                throw new RpcException(-32600, "Invalid JSON-RPC version");
-            if (!(request.get("method") instanceof String value))
-                throw new RpcException(-32600, "Invalid request");
-            method = value;
-            if (id != null && !(id instanceof String) && !(id instanceof Number))
-                throw new RpcException(-32600, "Invalid request id");
-            Object rawParams = request.get("params");
-            if (rawParams != null && !(rawParams instanceof List<?>) && !(rawParams instanceof Map<?, ?>))
-                throw new RpcException(-32602, "Expected positional or named parameters");
             List<?> params = rawParams == null ? List.of()
                     : rawParams instanceof Map<?, ?> named ? RpcMethods.positional(method, named) : (List<?>) rawParams;
+            RpcMethods.validateRequest(method, params);
             if (method.equals("getblocktemplate") && !params.isEmpty() && params.getFirst() instanceof Map<?, ?> options
                     && options.containsKey("longpollid")) {
                 acquired = longPolls.tryAcquire();
                 if (!acquired) throw new RpcException(-8, "Too many long-poll requests");
             }
             activeCommands.put(Thread.currentThread().threadId(), new ActiveCommand(method, started));
-            result = dispatch(method, params);
+            return dispatch(method, params);
         } catch (RpcException exception) {
-            error = Map.of("code", exception.code(), "message", exception.getMessage());
+            throw exception;
         } catch (IllegalArgumentException exception) {
-            error = Map.of("code", -32602, "message", "Invalid parameters");
+            throw new RpcException(-32602, "Invalid parameters");
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
-            error = Map.of("code", -32603, "message", "Server stopping");
+            throw new RpcException(-32603, "Server stopping");
         } catch (RuntimeException exception) {
             org.slf4j.LoggerFactory.getLogger(NodeRpcServer.class).error("RPC failed", exception);
-            error = Map.of("code", -32603, "message", "Internal error");
+            throw new RpcException(-32603, "Internal error");
         } finally {
             activeCommands.remove(Thread.currentThread().threadId());
             if (acquired) longPolls.release();
         }
-        if (notification) return new RpcReply(null, true);
-        return new RpcReply(rpcResponse(id, jsonVersion, result, error), false);
     }
 
-    private static Map<String, Object> rpcResponse(Object id, String jsonVersion, Object result, Object error) {
-        var response = new LinkedHashMap<String, Object>();
-        if ("2.0".equals(jsonVersion)) {
-            response.put("jsonrpc", "2.0");
-            if (error == null) response.put("result", result);
-            else response.put("error", error);
-        } else {
-            response.put("result", result);
-            response.put("error", error);
-        }
-        response.put("id", id);
-        return response;
-    }
-
-    private static Map<String, Object> rpcError(Object id, String jsonVersion, int code, String message) {
-        return rpcResponse(id, jsonVersion, null, Map.of("code", code, "message", message));
-    }
-
-    private record RpcReply(Object body, boolean notification) { }
     private record ActiveCommand(String method, long startedNanos) { }
 
     private Map<String, Object> estimateSmartFee(List<?> params) {
@@ -292,8 +236,7 @@ public final class NodeRpcServer implements AutoCloseable {
             case "estimatesmartfee" -> estimateSmartFee(params);
             case "getopenrpcinfo" -> {
                 if (params.size() > 1) throw new RpcException(-32602, "Expected optional show_hidden boolean");
-                booleanParam(params, 0, false);
-                yield RpcMethods.discovery();
+                yield RpcMethods.discovery(booleanParam(params, 0, false));
             }
             case "rpc.discover" -> {
                 requireNoParams(method, params);
@@ -333,40 +276,37 @@ public final class NodeRpcServer implements AutoCloseable {
             case "sendrawtransaction" -> {
                 if (params.isEmpty() || params.size() > 3 || !(params.getFirst() instanceof String raw))
                     throw new RpcException(-32602, "Expected raw transaction and optional maxfeerate/maxburnamount");
-                long maxFeeRate = parseMaxFeeRate(params, 1);
                 long maxBurnAmount = parseMoneyParam(params, 2, DEFAULT_MAX_BURN_AMOUNT, "maxburnamount");
                 try {
-                    Transaction transaction = TransactionParser.parse(HexFormat.of().parseHex(raw));
-                    var probe = validation.testMempoolAccept(List.of(transaction));
-                    if (probe.allowed()) {
-                        var entry = probe.entries().getFirst();
-                        if (maxFeeRate != 0 && entry.modifiedFee() * 1000L > maxFeeRate * entry.virtualSize())
-                            throw new RpcException(-25, "Fee exceeds maximum configured by user (e.g. -maxtxfee, maxfeerate)");
-                        if (burnAmount(transaction) > maxBurnAmount)
+                    Transaction transaction = parseRpcTransaction(raw, "TX decode failed. Make sure the tx has at least one input.");
+                    for (var output : transaction.outputs())
+                        if (packageBurnOutput(output.scriptPubKey()) && output.value() > maxBurnAmount)
                             throw new RpcException(-25, "Unspendable output exceeds maximum configured by user (maxburnamount)");
-                    }
-                    yield relay.submitTransaction(transaction).toDisplayHex();
-                } catch (ru.bitcoin.node.mempool.MempoolAdmissionException
-                         | ru.bitcoin.node.consensus.transaction.TransactionValidationException
+                    long maxFeeRate = parseMaxFeeRate(params, 1);
+                    yield relay.submitTransaction(transaction, maxFeeRate).toDisplayHex();
+                } catch (ru.bitcoin.node.mempool.MempoolAdmissionException exception) {
+                    if (exception instanceof NodeValidationService.BroadcastRejection rejected)
+                        throw new RpcException(rejected.reason() == NodeValidationService.BroadcastRejectionReason.CONFIRMED
+                                ? -27 : -25, rejected.getMessage());
+                    if (exception.isMissingInputs()) throw new RpcException(-25, "bad-txns-inputs-missingorspent");
+                    if (exception instanceof ru.bitcoin.node.mempool.MempoolPolicyException policy) throw new RpcException(-26, policy.details());
+                    throw new RpcException(-26, exception.getMessage());
+                } catch (ru.bitcoin.node.consensus.transaction.TransactionValidationException
                          | ru.bitcoin.node.script.ScriptExecutionException |
                          ru.bitcoin.node.script.ScriptParseException exception) {
-                    throw new RpcException(-26, exception.getMessage());
+                    throw new RpcException(-26, exception instanceof ru.bitcoin.node.consensus.transaction.TransactionValidationException invalid
+                            ? invalid.details() : exception.getMessage());
                 }
             }
             case "testmempoolaccept" -> {
                 if (params.isEmpty() || params.size() > 2 || !(params.getFirst() instanceof List<?> rawTransactions))
                     throw new RpcException(-32602, "Expected rawtxs array and optional maxfeerate");
-                long maxFeeRate = parseMaxFeeRate(params, 1);
                 if (rawTransactions.isEmpty() || rawTransactions.size() > 25)
-                    throw new RpcException(-8, "Array must contain between 1 and 25 transactions");
+                    throw new RpcException(-8, "Array must contain between 1 and 25 transactions.");
+                long maxFeeRate = parseMaxFeeRate(params, 1);
                 List<Transaction> transactions = new ArrayList<>(rawTransactions.size());
-                try {
-                    for (Object raw : rawTransactions) {
-                        if (!(raw instanceof String hex)) throw new RpcException(-32602, "Transactions must be hex strings");
-                        transactions.add(TransactionParser.parse(HexFormat.of().parseHex(hex)));
-                    }
-                } catch (IllegalArgumentException | java.nio.BufferUnderflowException exception) {
-                    throw new RpcException(-22, "TX decode failed");
+                for (Object raw : rawTransactions) {
+                    transactions.add(parsePackageTransaction(raw));
                 }
                 var probe = validation.testMempoolAccept(transactions);
                 List<Map<String, Object>> results = new ArrayList<>(transactions.size());
@@ -448,21 +388,16 @@ public final class NodeRpcServer implements AutoCloseable {
             case "submitpackage" -> {
                 if (params.isEmpty() || params.size() > 3 || !(params.getFirst() instanceof List<?> rawPackage))
                     throw new RpcException(-32602, "Expected package array and optional maxfeerate/maxburnamount");
+                if (rawPackage.isEmpty() || rawPackage.size() > 25)
+                    throw new RpcException(-8, "Array must contain between 1 and 25 transactions.");
                 long maxFeeRate = parseMaxFeeRate(params, 1);
                 long maxBurnAmount = parseMoneyParam(params, 2, DEFAULT_MAX_BURN_AMOUNT, "maxburnamount");
-                if (rawPackage.isEmpty() || rawPackage.size() > 25)
-                    throw new RpcException(-8, "Array must contain between 1 and 25 transactions");
                 List<Transaction> transactions = new ArrayList<>(rawPackage.size());
-                try {
-                    for (Object raw : rawPackage) {
-                        if (!(raw instanceof String hex)) throw new RpcException(-32602, "Package transactions must be hex strings");
-                        var transaction = TransactionParser.parse(HexFormat.of().parseHex(hex));
-                        for (var output : transaction.outputs()) if (packageBurnOutput(output.scriptPubKey()) && output.value() > maxBurnAmount)
-                            throw new RpcException(-25, "Unspendable output exceeds maximum configured by user (maxburnamount)");
-                        transactions.add(transaction);
-                    }
-                } catch (IllegalArgumentException | java.nio.BufferUnderflowException exception) {
-                    throw new RpcException(-22, "TX decode failed");
+                for (Object raw : rawPackage) {
+                    var transaction = parsePackageTransaction(raw);
+                    for (var output : transaction.outputs()) if (packageBurnOutput(output.scriptPubKey()) && output.value() > maxBurnAmount)
+                        throw new RpcException(-25, "Unspendable output exceeds maximum configured by user (maxburnamount)");
+                    transactions.add(transaction);
                 }
                 try {
                     if (!ru.bitcoin.node.mempool.Mempool.isSubmissionTopologyAllowed(transactions))
@@ -568,13 +503,17 @@ public final class NodeRpcServer implements AutoCloseable {
                 yield json;
             }
             case "prioritisetransaction" -> {
-                if (params.size() != 3 || !(params.getFirst() instanceof String txidText))
+                if (params.size() != 3)
                     throw new RpcException(-32602, "Expected txid, dummy and fee_delta");
-                if (params.get(1) != null && (!(params.get(1) instanceof Number n) || n.longValue() != 0L))
-                    throw new RpcException(-8, "Priority is no longer supported, dummy argument must be 0 or null");
-                if (!(params.get(2) instanceof Number deltaNumber)) throw new RpcException(-32602, "fee_delta must be numeric");
-                long delta = deltaNumber.longValue();
-                try { validation.prioritiseTransaction(parseHash(txidText), delta); }
+                RpcMethods.validateParameterTypes(method, params);
+                String txidText = (String) params.getFirst();
+                Hash256 txid = waitHash(txidText, "txid");
+                long delta;
+                try { delta = Long.parseLong(params.get(2).toString()); }
+                catch (NumberFormatException error) { throw new RpcException(-1, "JSON integer out of range"); }
+                if (params.get(1) != null && ((Number) params.get(1)).doubleValue() != 0.0)
+                    throw new RpcException(-8, "Priority is no longer supported, dummy argument to prioritisetransaction must be 0.");
+                try { validation.prioritiseTransaction(txid, delta); }
                 catch (ru.bitcoin.node.mempool.MempoolAdmissionException e) { throw new RpcException(-8, e.getMessage()); }
                 yield true;
             }
@@ -728,9 +667,7 @@ public final class NodeRpcServer implements AutoCloseable {
                 yield result;
             }
             case "gettxoutsetinfo" -> {
-                if (params.size() > 3 || (!params.isEmpty() && !(params.getFirst() instanceof String)))
-                    throw new RpcException(-32602, "Expected optional hash_type, hash_or_height and use_index");
-                String hashType = params.isEmpty() ? "hash_serialized_3" : (String) params.getFirst();
+                String hashType = params.isEmpty() || params.getFirst() == null ? "hash_serialized_3" : (String) params.getFirst();
                 if (!hashType.equals("hash_serialized_3") && !hashType.equals("muhash") && !hashType.equals("none"))
                     throw new RpcException(-8, "'" + hashType + "' is not a supported hash_type");
                 Object hashOrHeight = params.size() > 1 ? params.get(1) : null;
@@ -739,12 +676,15 @@ public final class NodeRpcServer implements AutoCloseable {
                 NodeValidationService.UtxoSetInfo stats;
                 boolean usedIndex = false;
                 if (hashOrHeight != null) {
-                    if (!(hashOrHeight instanceof String) && !(hashOrHeight instanceof Number))
-                        throw new RpcException(-32602, "hash_or_height must be a block hash or height");
-                    if (hashType.equals("hash_serialized_3"))
-                        throw new RpcException(-8, "hash_serialized_3 cannot be queried for a specific block");
-                    if (!useIndex || !validation.coinStatsIndexEnabled())
+                    if (!validation.coinStatsIndexEnabled())
                         throw new RpcException(-8, "Querying specific block heights requires coinstatsindex");
+                    if (hashType.equals("hash_serialized_3"))
+                        throw new RpcException(-8, "hash_serialized_3 hash type cannot be queried for a specific block");
+                    if (!useIndex)
+                        throw new RpcException(-8, "Cannot set use_index to false when querying for a specific block");
+                    if (!(hashOrHeight instanceof String) && !(hashOrHeight instanceof Number))
+                        throw new RpcException(-3, "JSON value of type " + (hashOrHeight instanceof Boolean ? "bool" : hashOrHeight instanceof List<?> ? "array" : "object")
+                                + " is not of expected type string");
                     usedIndex = true;
                     if (hashOrHeight instanceof Number number) {
                         long height = number.longValue();
@@ -1058,17 +998,16 @@ public final class NodeRpcServer implements AutoCloseable {
                 info.put("loaded", true);
                 info.put("size", entries.size());
                 info.put("bytes", bytes);
-                // JVM retained memory is not measured; virtual size is reported as bytes only.
+                info.put("usage", validation.mempoolMemoryUsage());
                 info.put("total_fee", satoshisToBtc(entries.stream().mapToLong(ru.bitcoin.node.mempool.MempoolEntry::fee).sum()));
-                info.put("maxmempool", MempoolLimits.DEFAULT.maxPoolVirtualBytes());
+                info.put("maxmempool", MempoolLimits.DEFAULT.maxPoolMemoryBytes());
                 info.put("mempoolminfee", satoshisPerKvBToBtcPerKvB(validation.feeFilterRate()));
                 info.put("minrelaytxfee", satoshisPerKvBToBtcPerKvB(validation.minimumRelayFeeRate()));
                 info.put("incrementalrelayfee", satoshisPerKvBToBtcPerKvB(MempoolLimits.DEFAULT.incrementalRelaySatPerKvB()));
                 info.put("unbroadcastcount", validation.unbroadcastMempoolCount());
                 info.put("limitclustercount", MempoolLimits.DEFAULT.clusterCount());
                 info.put("limitclustersize", MempoolLimits.DEFAULT.clusterVirtualBytes());
-                // Cluster ordering is computed by an exact maximum-closure solver.
-                info.put("optimal", true);
+                info.put("optimal", validation.mempoolOptimal());
                 yield info;
             }
             case "getnetworkinfo" -> {
@@ -1354,37 +1293,54 @@ public final class NodeRpcServer implements AutoCloseable {
         return result;
     }
 
+    private static Transaction parsePackageTransaction(Object value) {
+        if (!(value instanceof String hex)) {
+            String type = value == null ? "null" : value instanceof Number ? "number"
+                    : value instanceof Boolean ? "bool" : value instanceof List<?> ? "array" : "object";
+            throw new RpcException(-3, "JSON value of type " + type + " is not of expected type string");
+        }
+        return parseRpcTransaction(hex, "TX decode failed: " + hex + " Make sure the tx has at least one input.");
+    }
+
+    private static Transaction parseRpcTransaction(String hex, String decodeError) {
+        try {
+            var transaction = TransactionParser.parse(HexFormat.of().parseHex(hex));
+            if (transaction.inputs().isEmpty()) throw new IllegalArgumentException("Transaction has no inputs");
+            return transaction;
+        } catch (IllegalArgumentException | java.nio.BufferUnderflowException failure) {
+            throw new RpcException(-22, decodeError);
+        }
+    }
+
     private static long parseMaxFeeRate(List<?> params, int index) {
         long rate = parseMoneyParam(params, index, DEFAULT_MAX_RAW_TX_FEE_RATE, "maxfeerate");
-        if (rate > MAX_RAW_TX_FEE_RATE) throw new RpcException(-3, "Fee rate (" + satoshisToBtc(rate) + ") is greater than the maximum allowed (1.00 BTC/kvB)");
+        if (rate >= MAX_RAW_TX_FEE_RATE) throw new RpcException(-8, "Fee rates larger than or equal to 1BTC/kvB are not accepted");
         return rate;
     }
 
     private static long parseMoneyParam(List<?> params, int index, long defaultValue, String name) {
         if (params.size() <= index || params.get(index) == null) return defaultValue;
         Object value = params.get(index);
-        final java.math.BigDecimal decimal;
+        if (!(value instanceof Number) && !(value instanceof String))
+            throw new RpcException(-3, "Amount is not a number or string");
+        String text = value.toString();
+        if (!text.matches("-?(0|[1-9][0-9]*)(\\.[0-9]+)?([eE][+-]?[0-9]+)?"))
+            throw new RpcException(-3, "Invalid amount");
+        final long amount;
         try {
-            decimal = value instanceof Number || value instanceof String
-                    ? new java.math.BigDecimal(value.toString()) : null;
-        } catch (NumberFormatException e) {
-            throw new RpcException(-3, name + " must be numeric");
+            var satoshis = new java.math.BigDecimal(text).scaleByPowerOfTen(8);
+            // ParseFixedPoint bounds the absolute scaled value below 10^18,
+            // independently of the narrower consensus money range.
+            if (satoshis.abs().compareTo(java.math.BigDecimal.valueOf(1_000_000_000_000_000_000L)) >= 0
+                    || satoshis.stripTrailingZeros().scale() > 0)
+                throw new ArithmeticException("Invalid fixed-point amount");
+            amount = satoshis.longValueExact();
+        } catch (NumberFormatException | ArithmeticException e) {
+            throw new RpcException(-3, "Invalid amount");
         }
-        if (decimal == null) throw new RpcException(-3, name + " must be numeric");
-        if (decimal.signum() < 0) throw new RpcException(-3, name + " must be non-negative");
-        try {
-            return decimal.movePointRight(8).setScale(0, java.math.RoundingMode.UNNECESSARY).longValueExact();
-        } catch (ArithmeticException e) {
-            throw new RpcException(-3, "Invalid amount for " + name);
-        }
-    }
-
-    private static long burnAmount(Transaction transaction) {
-        long burn = 0;
-        for (var output : transaction.outputs()) {
-            if (UnspendableScript.isUnspendable(output.scriptPubKey())) burn = Math.addExact(burn, output.value());
-        }
-        return burn;
+        if (amount < 0 || amount > ru.bitcoin.node.consensus.money.Money.MAX_MONEY)
+            throw new RpcException(-3, "Amount out of range");
+        return amount;
     }
 
     private static boolean packageBurnOutput(byte[] script) {
@@ -1494,8 +1450,8 @@ public final class NodeRpcServer implements AutoCloseable {
 
     private String rpcHelp(String command) {
         var methods = RpcMethods.names();
-        if (command == null) return String.join("\n", methods);
-        if (!methods.contains(command)) throw new RpcException(-32601, "Method not found");
+        if (command == null || command.isEmpty()) return RpcMethods.helpList();
+        if (!methods.contains(command)) return "help: unknown command: " + command;
         String canonical = RpcMethods.canonicalHelp(command);
         if (canonical != null) return canonical;
         return command + " - supported by java-bitcoin-node RPC";
@@ -1543,7 +1499,7 @@ public final class NodeRpcServer implements AutoCloseable {
     }
 
     private void respond(HttpExchange exchange, int status, Object value) throws IOException {
-        byte[] bytes = mapper.writeValueAsBytes(value);
+        byte[] bytes = (mapper.writeValueAsString(value) + "\n").getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().set("Content-Type", "application/json");
         exchange.sendResponseHeaders(status, bytes.length);
         exchange.getResponseBody().write(bytes);

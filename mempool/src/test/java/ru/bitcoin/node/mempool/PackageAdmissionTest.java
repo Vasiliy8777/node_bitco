@@ -24,7 +24,7 @@ class PackageAdmissionTest {
     @Test void invalidChildDoesNotInsertParent() {
         var pool=new Mempool(); var parent=tx(List.of(FUND),2,100_000); var child=tx(List.of(point(parent,0)),2,90_000);
         var bad=new Transaction(2,List.of(new TxIn(point(parent,0),new byte[0],TxIn.FINAL_SEQUENCE,new Witness(List.of(new byte[]{0})))),child.outputs(),new UInt32(0));
-        assertThrows(TransactionValidationException.class,()->pool.admitPackage(List.of(parent,bad),CONTEXT,COINS));
+        assertThrows(ru.bitcoin.node.script.ScriptVerificationException.class,()->pool.admitPackage(List.of(parent,bad),CONTEXT,COINS));
         assertTrue(pool.isEmpty());
     }
     @Test void packageCannotDoubleCountKnownParentFee() {

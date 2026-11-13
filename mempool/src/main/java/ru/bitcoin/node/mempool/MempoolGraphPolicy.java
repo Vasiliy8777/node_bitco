@@ -47,6 +47,12 @@ final class MempoolGraphPolicy {
 
     static void replacement(Map<Hash256, MempoolEntry> entries, Set<Hash256> conflicts,
                             Set<Hash256> evicted, MempoolEntry replacement, MempoolLimits limits) {
+        replacement(entries,conflicts,evicted,replacement,limits,
+                after -> compareReplacementDiagrams(entries,after,conflicts,replacement));
+    }
+    static void replacement(Map<Hash256, MempoolEntry> entries, Set<Hash256> conflicts,
+                            Set<Hash256> evicted, MempoolEntry replacement, MempoolLimits limits,
+                            java.util.function.ToIntFunction<Map<Hash256,MempoolEntry>> diagrams) {
         if (conflicts.isEmpty()) return;
 
         // Core v31 Rule #5 limits directly conflicting *clusters*, not the number of
@@ -67,7 +73,7 @@ final class MempoolGraphPolicy {
         // Core's CalculateChunksForRBF checks prospective graph limits before
         // optimizing any chunks. Do not run the solver on an oversized cluster.
         checkClusterLimits(after, replacement.transaction().txId(), limits);
-        int diagram = compareReplacementDiagrams(entries, after, conflicts, replacement);
+        int diagram = diagrams.applyAsInt(after);
         if (diagram < 0) fail("replacement-worse-feerate-diagram");
         if (diagram == 0) fail("replacement-unchanged-feerate-diagram");
     }
@@ -163,12 +169,16 @@ final class MempoolGraphPolicy {
         for (var input : tx.inputs()) {
             var parent = entries.get(input.previousOutput().transactionId());
             if (parent == null) continue;
-            if ((tx.version() == 3) != (parent.transaction().version() == 3)) throw new TrucPolicyException(tx, parent.transaction());
             parents.add(parent.transaction().txId());
         }
+        if (tx.version() == 3) {
+            if (entry.virtualSize()>10000) throw TrucPolicyException.size(entry,false);
+            if (ancestors(entries,added).size()>2) throw TrucPolicyException.ancestors(tx);
+            if (!parents.isEmpty() && entry.virtualSize()>1000) throw TrucPolicyException.size(entry,true);
+        }
+        for(var parent : parents) if((tx.version()==3)!=(entries.get(parent).transaction().version()==3))
+            throw new TrucPolicyException(tx,entries.get(parent).transaction());
         if (tx.version() != 3) return;
-        if (entry.virtualSize() > 10_000 || ancestors(entries, added).size() > 2) fail("truc-topology");
-        if (!parents.isEmpty() && entry.virtualSize() > 1000) fail("truc-child-size");
         for (Hash256 parent : parents) {
             Set<Hash256> previousDescendants = previous.containsKey(parent)
                     ? descendants(previous, Set.of(parent)) : null;
@@ -185,7 +195,7 @@ final class MempoolGraphPolicy {
                 previousDescendants.remove(parent);
                 if (!Collections.disjoint(previousDescendants, directConflicts)) continue;
             }
-            fail("truc-topology");
+            throw TrucPolicyException.descendants(entries.get(parent).transaction());
         }
     }
 
@@ -195,39 +205,84 @@ final class MempoolGraphPolicy {
                                MempoolEntry added) {
         checkSingleTruc(original, spent, added, Map.of(), Set.of());
     }
+    /** Core PackageTRUCChecks uses original mempool ancestry and ordered package edges. */
+    static void checkPackageTruc(Map<Hash256,MempoolEntry> original,List<Transaction> transactions,
+                                 Map<Hash256,MempoolEntry> staged) {
+        for(var tx : transactions) {
+            var parentIds=new LinkedHashSet<Hash256>();
+            for(var input : tx.inputs()) parentIds.add(input.previousOutput().transactionId());
+            var poolParents=parentIds.stream().filter(original::containsKey).map(id->original.get(id).transaction()).toList();
+            var packageParents=transactions.stream().filter(parent->parentIds.contains(parent.txId())).toList();
+            var entry=staged.get(tx.txId());
+            if(tx.version()!=3) {
+                for(var parent : poolParents) if(parent.version()==3) throw new TrucPolicyException(tx,parent);
+                for(var parent : packageParents) if(parent.version()==3) throw new TrucPolicyException(tx,parent);
+                continue;
+            }
+            if(entry.virtualSize()>10000) throw TrucPolicyException.size(entry,false);
+            if(poolParents.size()+packageParents.size()+1>2) throw TrucPolicyException.ancestors(tx);
+            if(!poolParents.isEmpty() && ancestors(original,poolParents.getFirst().txId()).size()+packageParents.size()+1>2)
+                throw TrucPolicyException.ancestors(tx);
+            if(poolParents.isEmpty() && packageParents.isEmpty()) continue;
+            if(entry.virtualSize()>1000) throw TrucPolicyException.size(entry,true);
+            var parent=poolParents.isEmpty()?packageParents.getFirst():poolParents.getFirst();
+            if(parent.version()!=3) throw new TrucPolicyException(tx,parent);
+            for(var other : transactions) {
+                if(other==tx) continue;
+                for(var input : other.inputs()) {
+                    if(input.previousOutput().transactionId().equals(parent.txId())) throw TrucPolicyException.descendants(parent);
+                    if(input.previousOutput().transactionId().equals(tx.txId())) throw TrucPolicyException.ancestors(other);
+                }
+            }
+            if(!poolParents.isEmpty() && descendants(original,Set.of(parent.txId())).size()>1)
+                throw TrucPolicyException.descendants(parent);
+        }
+    }
     static void checkSingleTruc(Map<Hash256, MempoolEntry> original, Map<OutPoint, Hash256> spent,
                                 MempoolEntry added, Map<Hash256, MempoolEntry> previous, Set<Hash256> conflicts) {
-        if (added.transaction().version() != 3) {
-            for (var input : added.transaction().inputs()) {
-                var parent = original.get(input.previousOutput().transactionId());
-                if (parent != null && parent.transaction().version() == 3)
-                    throw new TrucPolicyException(added.transaction(), parent.transaction());
-            }
-            return;
+        for (var input : added.transaction().inputs()) {
+            var parent = original.get(input.previousOutput().transactionId());
+            if (parent != null && (parent.transaction().version()==3)!=(added.transaction().version()==3))
+                throw new TrucPolicyException(added.transaction(),parent.transaction());
         }
+        if (added.transaction().version()!=3) return;
         var cluster = additionCluster(original, spent, added, Integer.MAX_VALUE);
         checkTrucLimits(cluster, added.transaction().txId(), previous, conflicts);
     }
 
     static long trim(Map<Hash256, MempoolEntry> entries, long maximumSize, Hash256 added) {
+        return trim(entries, maximumSize, added, () -> size(entries, entries.keySet()),
+                () -> ClusterLinearization.clusters(entries).stream()
+                        .map(cluster -> ClusterLinearization.chunks(entries, cluster)).toList());
+    }
+    static long trim(Map<Hash256, MempoolEntry> entries, long maximumSize, Hash256 added,
+                     java.util.function.LongSupplier usage,
+                     java.util.function.Supplier<List<List<ClusterLinearization.Chunk>>> linearizations) {
         long removedRate = 0;
         boolean removed = false;
-        while (size(entries, entries.keySet()) > maximumSize) {
+        while (!entries.isEmpty() && usage.getAsLong() > maximumSize) {
             Set<Hash256> worst = null;
-            long worstFee = 0, worstSize = 1, worstVsize = 1;
-            for (Set<Hash256> cluster : ClusterLinearization.clusters(entries)) {
-                List<ClusterLinearization.Chunk> chunks = ClusterLinearization.chunks(entries, cluster);
+            long worstFee = 0, worstVsize = 1;
+            ClusterLinearization.ChunkOrderKey worstKey = null;
+            for (List<ClusterLinearization.Chunk> chunks : linearizations.get()) {
                 ClusterLinearization.Chunk tail = chunks.getLast();
                 // The final chunk is a suffix of a topological linearization:
                 // all descendants are already in it. Core evicts this chunk;
                 // rebuilding whole-pool child edges per cluster is redundant.
-                Set<Hash256> candidate = new HashSet<>(tail.transactions());
                 long fee = tail.fee();
                 long bytes = tail.adjustedWeight();
-                if (worst == null || ClusterLinearization.compareRate(fee, bytes, worstFee, worstSize) < 0) {
-                    worst = candidate;
+                long prefixWeight = bytes;
+                for (int i = chunks.size() - 2; i >= 0; i--) {
+                    var previous = chunks.get(i);
+                    if (ClusterLinearization.compareRate(previous.fee(), previous.adjustedWeight(), fee, bytes) != 0) break;
+                    prefixWeight = Math.addExact(prefixWeight, previous.adjustedWeight());
+                }
+                var key = ClusterLinearization.chunkOrderKey(tail, prefixWeight);
+                // Core GetWorstMainChunk uses rbegin() of its mining chunk index.
+                if (worst == null || key.compareTo(worstKey) > 0) {
+                    worst = new HashSet<>(tail.transactions());
+                    worstKey = key;
                     worstFee = fee;
-                    worstSize = bytes;
                     // Core converts the chunk's aggregate adjusted weight to
                     // vsize once, rather than summing individually rounded sizes.
                     worstVsize = Math.ceilDiv(bytes, 4L);
@@ -284,6 +339,9 @@ final class MempoolGraphPolicy {
     }
 
     private static void fail(String reason) {
+        if(reason.equals("cluster-count-limit") || reason.equals("cluster-size-limit"))
+            throw new MempoolPolicyException(reason,"too-large-cluster",null);
+        if(reason.equals("mempool-full")) throw new MempoolPolicyException(reason,"mempool full",null);
         throw new MempoolAdmissionException(reason);
     }
 }

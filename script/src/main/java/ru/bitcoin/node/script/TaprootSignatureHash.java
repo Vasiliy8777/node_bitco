@@ -18,11 +18,11 @@ public final class TaprootSignatureHash {
         }
         if (hashType != 0 && hashType != 1 && hashType != 2 && hashType != 3
                 && hashType != 0x81 && hashType != 0x82 && hashType != 0x83) {
-            throw new ScriptExecutionException("Invalid Taproot sighash type");
+            throw new ScriptExecutionException(ScriptError.SCHNORR_SIG_HASHTYPE, "Invalid Taproot sighash type");
         }
         int base = hashType == 0 ? 1 : hashType & 3;
         boolean anyone = (hashType & 0x80) != 0;
-        if (base == 3 && input >= tx.outputs().size()) throw new ScriptExecutionException("Taproot SINGLE without output");
+        if (base == 3 && input >= tx.outputs().size()) throw new ScriptExecutionException(ScriptError.SCHNORR_SIG_HASHTYPE, "Taproot SINGLE without output");
         var msg = new ByteArrayOutputStream();
         msg.write(0); // epoch
         msg.write(hashType);

@@ -33,6 +33,11 @@ public final class Hash256 {
         return bytes.clone();
     }
 
+    /** Unsigned lexicographic order of serialized bytes, independent of display hex. */
+    public int compareRawBytes(Hash256 other) {
+        return Arrays.compareUnsigned(bytes, other.bytes);
+    }
+
     public String toHex() {
         return HexUtils.encode(bytes);
     }

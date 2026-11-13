@@ -6,7 +6,7 @@ import java.math.BigInteger;
 import java.util.*;
 
 /**
- * Exact maximum-density ancestor-closed sets, followed by minimal-chunk ordering.
+ * Test-only independent exact maximum-closure oracle. Never used by production.
  * Core 32.1 uses a budgeted spanning-forest optimizer for the same feerate diagram.
  * This solver uses fractional maximum closure (min-cut), with exact arithmetic.
  * Residual sink components at the optimal rate are the minimal optimal chunks.
@@ -18,7 +18,7 @@ final class OptimalClusterLinearizer {
     private final BitSet remaining;
 
     private OptimalClusterLinearizer(Map<Hash256, MempoolEntry> entries, Set<Hash256> cluster) {
-        ids = cluster.stream().sorted(Comparator.comparing(Hash256::toDisplayHex)).toList();
+        ids = cluster.stream().sorted(Hash256::compareRawBytes).toList();
         int n = ids.size();
         fees = new long[n]; weights = new long[n]; parents = new BitSet[n];
         var positions = new HashMap<Hash256, Integer>();

@@ -57,6 +57,15 @@ class BitcoinCoreScriptVectorsTest {
                 accepted = false;
             }
             assertEquals(fields[3].equals("OK"), accepted, String.join(" | ", fields));
+            ScriptError actual = ScriptError.OK;
+            try {
+                InputScriptValidator.validate(spend, 0, point -> Optional.of(new UtxoEntry(amount, pub, 1, true)),
+                        ScriptVerifyFlags.parseNames(fields[2]), true);
+            } catch (ScriptExecutionException error) { actual = error.code(); }
+            catch (ScriptParseException error) { actual = error.code(); }
+            // Core's script-test name table spells SCRIPT_ERR_SIG_NULLFAIL as NULLFAIL.
+            String expectedError = fields[3].equals("NULLFAIL") ? "SIG_NULLFAIL" : fields[3];
+            assertEquals(expectedError, actual.name(), "Diagnostic ScriptError: " + String.join(" | ", fields));
         }));
     }
     static byte[] assemble(String text) throws Exception {

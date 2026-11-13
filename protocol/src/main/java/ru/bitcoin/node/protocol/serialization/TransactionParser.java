@@ -193,12 +193,6 @@ public final class TransactionParser {
         long value =
                 reader.readInt64LE();
 
-        if (value < 0) {
-            throw new IllegalArgumentException(
-                    "Negative transaction output value"
-            );
-        }
-
         byte[] scriptPubKey =
                 reader.readCompactBytes();
 

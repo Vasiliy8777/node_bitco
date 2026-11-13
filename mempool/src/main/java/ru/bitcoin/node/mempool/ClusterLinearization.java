@@ -6,12 +6,12 @@ import java.math.BigInteger;
 import java.util.*;
 
 /**
- * Deterministic dependency-respecting cluster linearization and feerate diagram.
+ * Core v32.1 dependency-respecting cluster linearization and feerate diagram.
  * <p>
- * The linearization repeatedly appends a minimal highest-feerate ancestor-closed
- * set, including sets shared by multiple descendants. Chunks are the maximum-feerate
- * prefixes of the remaining linearization, yielding a monotonically non-increasing
- * feerate diagram.
+ * Uses the budgeted spanning-forest optimizer followed by Core's PostLinearize.
+ * Chunks are maximum-feerate prefixes of the resulting order. Persistent pool
+ * quality and continuation are owned by MempoolGraphIndex; a standalone call
+ * performs ACCEPTABLE_COST work and need not reach full optimality.
  * Arithmetic comparisons are exact; no floating point is used.
  */
 public final class ClusterLinearization {
@@ -24,6 +24,21 @@ public final class ClusterLinearization {
             if (transactions.isEmpty()) throw new IllegalArgumentException("chunk must not be empty");
             if (virtualSize <= 0 || adjustedWeight <= 0) throw new IllegalArgumentException("invalid chunk totals");
         }
+    }
+
+    /** Core TxGraph ordering key, shared by diagrams and block selection. */
+    public record ChunkOrderKey(long fee, long weight, long equalRatePrefixWeight, Hash256 maximumId)
+            implements Comparable<ChunkOrderKey> {
+        @Override public int compareTo(ChunkOrderKey other) {
+            int rate = compareRate(other.fee, other.weight, fee, weight);
+            if (rate != 0) return rate;
+            int prefix = Long.compare(equalRatePrefixWeight, other.equalRatePrefixWeight);
+            return prefix != 0 ? prefix : maximumId.compareRawBytes(other.maximumId);
+        }
+    }
+
+    public static ChunkOrderKey chunkOrderKey(Chunk chunk, long equalRatePrefixWeight) {
+        return new ChunkOrderKey(chunk.fee(), chunk.adjustedWeight(), equalRatePrefixWeight, maximumFallback(chunk));
     }
 
     public static List<Set<Hash256>> clusters(Map<Hash256, MempoolEntry> entries) {
@@ -52,7 +67,7 @@ public final class ClusterLinearization {
                 throw new IllegalArgumentException("Cyclic mempool dependencies");
             return List.of(id);
         }
-        return OptimalClusterLinearizer.linearize(entries, cluster);
+        return ClusterOptimization.standalone(entries, cluster, ClusterOptimization.ACCEPTABLE_COST, 0, true);
     }
 
     public static List<Chunk> chunks(Map<Hash256, MempoolEntry> entries, Set<Hash256> cluster) {
@@ -98,20 +113,22 @@ public final class ClusterLinearization {
     /** Merge already linearized clusters without losing intra-cluster dependencies. */
     public static List<Chunk> mergeChunks(List<List<Chunk>> clusters) {
         List<Chunk> result = new ArrayList<>();
-        record Cursor(List<Chunk> chunks, int position) {
+        record Cursor(List<Chunk> chunks, int position, ChunkOrderKey key) {
             Chunk head() { return chunks.get(position); }
+            Cursor next() {
+                var current = head(); var next = chunks.get(position + 1);
+                long prefix = compareRate(current.fee(), current.adjustedWeight(), next.fee(), next.adjustedWeight()) == 0
+                        ? Math.addExact(key.equalRatePrefixWeight(), next.adjustedWeight()) : next.adjustedWeight();
+                return new Cursor(chunks, position + 1, chunkOrderKey(next, prefix));
+            }
         }
-        var queue = new PriorityQueue<Cursor>((left, right) -> {
-            var a = left.head(); var b = right.head();
-            int rate = compareRate(b.fee(), b.adjustedWeight(), a.fee(), a.adjustedWeight());
-            if (rate != 0) return rate;
-            return comparePackage(a.transactions(), b.transactions());
-        });
-        for (var cluster : clusters) if (!cluster.isEmpty()) queue.add(new Cursor(cluster, 0));
+        var queue = new PriorityQueue<Cursor>(Comparator.comparing(Cursor::key));
+        for (var cluster : clusters) if (!cluster.isEmpty())
+            queue.add(new Cursor(cluster, 0, chunkOrderKey(cluster.getFirst(), cluster.getFirst().adjustedWeight())));
         while (!queue.isEmpty()) {
             var cursor = queue.remove(); result.add(cursor.head());
             if (cursor.position() + 1 < cursor.chunks().size())
-                queue.add(new Cursor(cursor.chunks(), cursor.position() + 1));
+                queue.add(cursor.next());
         }
         return List.copyOf(result);
     }
@@ -188,13 +205,8 @@ public final class ClusterLinearization {
         return Set.copyOf(result);
     }
 
-    private static int comparePackage(Collection<Hash256> a, Collection<Hash256> b) {
-        Iterator<Hash256> ai = a.iterator(), bi = b.iterator();
-        while (ai.hasNext() && bi.hasNext()) {
-            int c = ai.next().toDisplayHex().compareTo(bi.next().toDisplayHex());
-            if (c != 0) return c;
-        }
-        return Integer.compare(a.size(), b.size());
+    private static Hash256 maximumFallback(Chunk chunk) {
+        return chunk.transactions().stream().max(Hash256::compareRawBytes).orElseThrow();
     }
 
     private static MempoolEntry require(Map<Hash256, MempoolEntry> entries, Hash256 id) {

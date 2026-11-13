@@ -17,6 +17,7 @@ public final class Mempool {
     /** Keeps missing-input classification independent of diagnostic text. */
     private static final class MissingInput extends MempoolAdmissionException {
         MissingInput(String message) { super(message); }
+        @Override public boolean isMissingInputs() { return true; }
     }
     private static final class ProbeScriptFailure extends MempoolAdmissionException {
         final String details;
@@ -24,14 +25,26 @@ public final class Mempool {
     }
     /** Enabled only on an isolated testmempoolaccept clone. */
     private boolean probeScriptDiagnostics;
+    private boolean admissionProbe;
     private final MempoolPolicy policy;
     private final MempoolLimits limits;
     private final java.time.Clock clock;
     private final RollingMinimumFee rollingFee = new RollingMinimumFee();
     private final Map<Hash256, MempoolEntry> entries = new LinkedHashMap<>();
-    private final ClusterDiagramCache clusterDiagramCache = new ClusterDiagramCache();
+    private final MempoolGraphIndex graphIndex = new MempoolGraphIndex();
     private final Map<OutPoint, Hash256> spent = new HashMap<>();
     private long totalVirtualBytes;
+    private long randomizedCapacity;
+    private long totalEntryMemory;
+    private record Arrival(long time, Hash256 id) implements Comparable<Arrival> {
+        public int compareTo(Arrival other) {
+            int timeOrder=Long.compare(time,other.time);
+            return timeOrder!=0?timeOrder:id.compareRawBytes(other.id);
+        }
+    }
+    private final NavigableSet<Arrival> arrivalIndex = new TreeSet<>();
+    /** Successful admission's RBF removals, excluding memory/expiry eviction. */
+    private Set<Hash256> lastReplacedTransactions = Set.of();
     private final Map<Hash256, Long> feeDeltas = new LinkedHashMap<>();
     private final Set<Hash256> unbroadcast = new LinkedHashSet<>();
     /** Monotonic transaction-set mutation sequence used by getrawmempool. */
@@ -108,14 +121,25 @@ public final class Mempool {
         Objects.requireNonNull(transaction, "transaction");
         Objects.requireNonNull(context, "context");
         Objects.requireNonNull(chainUtxos, "chainUtxos");
+        lastReplacedTransactions = Set.of();
         Hash256 txId = transaction.txId();
         var existing = entries.get(txId);
+        // Identical immutable serialization already passed structural validation.
+        // Finality is contextual and must still precede the known-entry result.
+        if (existing != null && existing.transaction().wtxId().equals(transaction.wtxId())) {
+            if (!ru.bitcoin.node.consensus.transaction.TransactionFinality.isFinal(transaction,context.nextBlockHeight(),context.tipMedianTimePast()))
+                throw new ru.bitcoin.node.consensus.transaction.TransactionValidationException("Transaction is non-final","non-final",null);
+            throw new MempoolAdmissionException("txn-already-in-mempool");
+        }
+        ru.bitcoin.node.consensus.transaction.TransactionValidator.validateBasic(transaction);
+        if (transaction.isCoinbase()) throw new MempoolPolicyException("Coinbase cannot enter mempool","coinbase",null);
+        long weight = TransactionWeight.calculate(transaction);
+        policy.validateStandardStructure(transaction, weight);
+        if (!ru.bitcoin.node.consensus.transaction.TransactionFinality.isFinal(transaction,context.nextBlockHeight(),context.tipMedianTimePast()))
+            throw new ru.bitcoin.node.consensus.transaction.TransactionValidationException("Transaction is non-final","non-final",null);
         if (existing != null) throw new MempoolAdmissionException(
                 existing.transaction().wtxId().equals(transaction.wtxId())
                         ? "txn-already-in-mempool" : "txn-same-nonwitness-data-in-mempool");
-        if (transaction.isCoinbase()) throw new MempoolAdmissionException("Coinbase cannot enter mempool");
-        long weight = TransactionWeight.calculate(transaction);
-        policy.validateStandardStructure(transaction, weight);
         Set<Hash256> conflicts = new HashSet<>();
         for (var input : transaction.inputs()) {
             Hash256 conflict = spent.get(input.previousOutput());
@@ -125,7 +149,7 @@ public final class Mempool {
             MempoolGraphPolicy.addSiblingConflict(entries, spent, transaction, conflicts);
             MempoolGraphPolicy.checkConflictClusterLimit(entries, conflicts, "too-many-conflicting-clusters");
         }
-        Set<Hash256> evicted = MempoolGraphPolicy.descendants(entries, conflicts);
+        Set<Hash256> evicted = graphIndex.descendants(conflicts);
         Map<OutPoint, UtxoEntry> coins = new HashMap<>();
         for (var input : transaction.inputs()) {
             OutPoint point = input.previousOutput();
@@ -147,6 +171,7 @@ public final class Mempool {
         long feeDelta = feeDeltas.getOrDefault(txId, 0L);
         long modifiedFee = Math.addExact(fee, feeDelta);
         ru.bitcoin.node.mempool.policy.StandardTransactionPolicy.validateDustFee(transaction, fee, modifiedFee, policy.dustRelaySatPerKvB());
+        if (sigops > 16_000) throw new MempoolPolicyException("too-many-sigops", "bad-txns-too-many-sigops", Long.toString(sigops));
         if (deferred == null) PackagePolicy.ephemeralSpends(transaction, entries, policy.dustRelaySatPerKvB());
         long arrivalTime = restoredArrivalTime != null ? restoredArrivalTime : clock.instant().getEpochSecond();
         long admissionHeight = restoredAdmissionHeight != null ? restoredAdmissionHeight : Math.max(0L, context.nextBlockHeight() - 1L);
@@ -161,7 +186,11 @@ public final class Mempool {
         }
         // Core's individual TRUC precheck precedes economic RBF evaluation.
         if (!bypassLimits && deferred == null) MempoolGraphPolicy.checkSingleTruc(entries, spent, entry, entries, conflicts);
-        MempoolGraphPolicy.replacement(entries, conflicts, evicted, entry, limits);
+        var replacementGraph = new MempoolGraphIndex[1];
+        MempoolGraphPolicy.replacement(entries, conflicts, evicted, entry, limits, after -> {
+            var diagram = replacementDiagrams(after,conflicts,List.of(transaction),null);
+            replacementGraph[0]=diagram.graph(); return diagram.comparison();
+        });
         // Conflict-free additions only affect their connected component.
         // Preserve staged RBF/eviction and the package capacity boundary.
         if (conflicts.isEmpty()) {
@@ -170,12 +199,22 @@ public final class Mempool {
             long proposedSize = Math.addExact(totalVirtualBytes, entry.virtualSize());
             // No removal or eviction is needed. All validation precedes commit;
             // package admission retains its existing deferred-capacity boundary.
-            if (packageMode || proposedSize <= limits.maxPoolVirtualBytes()) {
+            long proposedCapacity = CoreMemoryUsage.randomizedCapacity(randomizedCapacity, entries.size(), 0, 1);
+            long memoryUpperBound = totalEntryMemory + CoreMemoryUsage.entry(entry)
+                    + CoreMemoryUsage.allocation(40 * proposedCapacity) + 96L * feeDeltas.size()
+                    + 400L * (entries.size() + 1);
+            if (packageMode || admissionProbe || memoryUpperBound <= limits.maxPoolMemoryBytes()) {
                 validateOrDeferScripts(entry, view, deferred, clientMaxFeeRate);
                 entries.put(txId, entry);
                 for (var input : transaction.inputs()) spent.put(input.previousOutput(), txId);
+                indexAddition(entry);
                 totalVirtualBytes = proposedSize;
                 sequence++;
+                if (!packageMode && !admissionProbe) {
+                    finishGraphChange();
+                    expire();
+                    if (!entries.containsKey(txId)) throw new MempoolPolicyException("mempool-full","mempool full",null);
+                }
                 return entry;
             }
         }
@@ -186,15 +225,26 @@ public final class Mempool {
             if (packageMode) MempoolGraphPolicy.checkLimits(candidate, txId, limits);
             else MempoolGraphPolicy.checkLimits(candidate, txId, limits, entries, conflicts);
         }
-        int beforeTrim = candidate.size();
         validateOrDeferScripts(entry, view, deferred, clientMaxFeeRate);
-        long removedRate = packageMode ? 0 : MempoolGraphPolicy.trim(candidate, limits.maxPoolVirtualBytes(), txId);
-        entries.clear();
-        entries.putAll(candidate);
-        unbroadcast.retainAll(entries.keySet());
-        rebuildSpent();
+        MempoolGraphIndex prepared = replacementGraph[0];
+        MemoryTrim memoryTrim = null;
+        if (!packageMode && !admissionProbe) {
+            if (prepared == null) prepared = candidateGraph(candidate, graphIndex);
+            prepared.doWork(candidate,ClusterOptimization.POST_CHANGE_COST);
+            long capacity = capacityForCandidate(candidate);
+            int beforeExpiry = candidate.size();
+            expireCandidate(candidate);
+            capacity = CoreMemoryUsage.randomizedCapacity(capacity,beforeExpiry,beforeExpiry-candidate.size(),0);
+            memoryTrim = trimToMemory(candidate,null,prepared,capacity);
+        }
+        int beforeTrim = memoryTrim == null ? candidate.size() : memoryTrim.beforeTrim();
+        long removedRate = memoryTrim == null ? 0 : memoryTrim.removedRate();
+        commitEntries(candidate, memoryTrim == null ? prepared : memoryTrim.graph(), false);
+        if (memoryTrim != null) randomizedCapacity = memoryTrim.capacity();
+        lastReplacedTransactions = Set.copyOf(evicted);
         if (candidate.size() < beforeTrim) rollingFee.bump(removedRate, limits.incrementalRelaySatPerKvB(), clock.instant().getEpochSecond());
         sequence++;
+        if (!entries.containsKey(txId)) throw new MempoolPolicyException("mempool-full","mempool full",null);
         return entry;
     }
 
@@ -234,6 +284,7 @@ public final class Mempool {
                                                     MempoolValidationContext context, UtxoView chainUtxos,
                                                     boolean allowReplacement, boolean packageFeerates, Long clientMaxFeeRate) {
         List<Transaction> txs = List.copyOf(transactions);
+        lastReplacedTransactions = Set.of();
         Objects.requireNonNull(context); Objects.requireNonNull(chainUtxos);
         PackagePolicy.validate(txs, packageFeerates);
         if (txs.size() == 1 && !entries.containsKey(txs.getFirst().txId())) return List.of(
@@ -256,18 +307,18 @@ public final class Mempool {
         if (!allowReplacement && !conflicts.isEmpty())
             throw new MempoolAdmissionException("txn-mempool-conflict");
         if (allowReplacement) PackagePolicy.replacementContext(fresh, entries, conflicts);
-        Set<Hash256> removed = MempoolGraphPolicy.descendants(entries, conflicts);
+        Set<Hash256> removed = graphIndex.descendants(conflicts);
         for (var tx : txs) {
             if (removed.contains(tx.txId())) throw new MempoolAdmissionException("package-replaces-own-parent");
             for (var in : tx.inputs()) if (removed.contains(in.previousOutput().transactionId())) throw new MempoolAdmissionException("package-spends-removed-parent");
         }
         Mempool staged = new Mempool(policy, limits, clock);
-        staged.entries.putAll(entries);
+        staged.copyPoolStateFrom(this);
+        staged.admissionProbe = admissionProbe;
         staged.feeDeltas.putAll(feeDeltas);
         staged.rollingFee.restoreFrom(rollingFee);
         staged.unbroadcast.addAll(unbroadcast);
-        removed.forEach(staged.entries::remove);
-        staged.rebuildSpent();
+        staged.removeSeedEntries(removed);
         long fee = 0, size = 0;
         long floor = Math.max(minimumFeeRate(), policy.minRelayFeeRate().satoshisPerKiloByte());
         // RPC retry completes every PreCheck before shared policy and scripts.
@@ -289,7 +340,7 @@ public final class Mempool {
         }
         if (deferred != null) {
             try {
-                for (var tx : fresh) MempoolGraphPolicy.checkTrucLimits(staged.entries, tx.txId(), Map.of(), Set.of());
+                MempoolGraphPolicy.checkPackageTruc(entries,fresh,staged.entries);
             } catch (MempoolAdmissionException error) { throw new SharedPackageFailure(
                     error instanceof TrucPolicyException truc ? truc.rpcDetails() : "TRUC-violation"); }
         }
@@ -303,7 +354,8 @@ public final class Mempool {
             throw new MempoolAdmissionException("package-feerate");
         }
         if (allowReplacement)
-            PackagePolicy.replacement(fresh, entries, staged.entries, conflicts, removed, limits);
+            PackagePolicy.replacement(fresh, entries, staged.entries, conflicts, removed, limits,
+                    () -> replacementDiagrams(staged.entries,conflicts,fresh,staged.graphIndex).comparison());
         // Check limits again with the complete package; no carve-outs or sibling eviction.
         for (var tx : fresh) {
             if (deferred == null) MempoolGraphPolicy.checkLimits(staged.entries, tx.txId(), limits);
@@ -320,13 +372,18 @@ public final class Mempool {
                 if (failure != null) throw new SubmissionFailure(check.transaction().wtxId(), new ProbeScriptFailure(failure));
             }
         }
+        if (!admissionProbe) { staged.finishGraphChange(); staged.expire(); }
         int beforeTrim = staged.entries.size();
-        long removedRate = MempoolGraphPolicy.trim(staged.entries, limits.maxPoolVirtualBytes(), txs.getLast().txId());
+        var memoryTrim = admissionProbe ? new MemoryTrim(0,staged.randomizedCapacity,staged.graphIndex,beforeTrim) : staged.trimToMemory(staged.entries, null);
+        long removedRate = memoryTrim.removedRate();
         List<MempoolEntry> result = txs.stream().map(tx -> staged.entries.get(tx.txId())).toList();
-        if (result.stream().anyMatch(Objects::isNull)) throw new MempoolAdmissionException("package-evicted");
-        entries.clear(); entries.putAll(staged.entries); unbroadcast.retainAll(entries.keySet()); rebuildSpent();
+        commitEntries(staged.entries, memoryTrim.graph(), false);
+        randomizedCapacity = memoryTrim.capacity();
+        lastReplacedTransactions = Set.copyOf(removed);
         if (staged.entries.size() < beforeTrim) rollingFee.bump(removedRate, limits.incrementalRelaySatPerKvB(), clock.instant().getEpochSecond());
         if (!fresh.isEmpty() || !removed.isEmpty()) sequence++;
+        for(int i=0;i<result.size();i++) if(result.get(i)==null)
+            throw new SubmissionFailure(txs.get(i).wtxId(),new MempoolPolicyException("mempool-full","mempool full",null));
         return result;
     }
 
@@ -353,6 +410,7 @@ public final class Mempool {
                 : error instanceof MempoolFeeException fee ? fee.rpcDetails()
                 : error instanceof PackagePolicy.EphemeralSpendFailure ephemeral ? ephemeral.rpcDetails()
                 : error instanceof TrucPolicyException truc ? truc.rpcDetails()
+                : error instanceof MempoolPolicyException policy ? policy.details()
                 : error instanceof MissingInput ? "bad-txns-inputs-missingorspent" : error.getMessage();
         return new SubmissionTxResult(null, details, false, null, List.of());
     }
@@ -380,6 +438,7 @@ public final class Mempool {
             return new SubmissionResult(error.getMessage(), results, List.of());
         }
         var before = Set.copyOf(entries.keySet());
+        var replacedByRbf = new HashSet<Hash256>();
         var pending = new ArrayList<Transaction>();
         boolean hardFailure = false;
         String message = "success";
@@ -391,6 +450,7 @@ public final class Mempool {
             }
             try {
                 var entry = admitInternal(tx, context, chainUtxos, false, false, null, null, false, null, clientMaxFeeRate);
+                replacedByRbf.addAll(lastReplacedTransactions);
                 results.put(tx.wtxId(), new SubmissionTxResult(entry, null, false,
                         effectiveRate(entry.modifiedFee(), entry.virtualSize()), List.of(tx.wtxId())));
             } catch (MempoolAdmissionException error) {
@@ -399,13 +459,16 @@ public final class Mempool {
                 else { hardFailure = true; message = "transaction failed"; }
             } catch (ru.bitcoin.node.consensus.transaction.TransactionValidationException
                      | ru.bitcoin.node.script.ScriptExecutionException | ru.bitcoin.node.script.ScriptParseException error) {
-                results.put(tx.wtxId(), new SubmissionTxResult(null, error.getMessage(), false, null, List.of()));
+                results.put(tx.wtxId(), new SubmissionTxResult(null,
+                        error instanceof ru.bitcoin.node.consensus.transaction.TransactionValidationException invalid ? invalid.details() : error.getMessage(),
+                        false, null, List.of()));
                 hardFailure = true; message = "transaction failed";
             }
         }
         if (!hardFailure && !pending.isEmpty()) {
             try {
                 var accepted = admitPackageInternal(pending, context, chainUtxos, true, true, clientMaxFeeRate);
+                replacedByRbf.addAll(lastReplacedTransactions);
                 long fee = 0, size = 0;
                 for (var entry : accepted) { fee = Math.addExact(fee, entry.modifiedFee()); size = Math.addExact(size, entry.virtualSize()); }
                 var includes = pending.stream().map(Transaction::wtxId).toList();
@@ -431,7 +494,8 @@ public final class Mempool {
                 message = "transaction failed";
             }
         }
-        var replaced = before.stream().filter(id -> !entries.containsKey(id)).sorted(Comparator.comparing(Hash256::toDisplayHex)).toList();
+        var replaced = replacedByRbf.stream().filter(before::contains).filter(id -> !entries.containsKey(id))
+                .sorted(Comparator.comparing(Hash256::toDisplayHex)).toList();
         return new SubmissionResult(message, results, replaced);
     }
 
@@ -493,16 +557,27 @@ public final class Mempool {
         return testAcceptInternal(transactions, context, chainUtxos, true);
     }
 
+    /** Ordinary broadcast preflight: preserve the original rejection without changing this pool. */
+    public synchronized MempoolEntry testBroadcast(Transaction transaction,
+                                                  MempoolValidationContext context, UtxoView chainUtxos) {
+        return validationClone(false).admit(transaction, context, chainUtxos);
+    }
+
+    private Mempool validationClone(boolean scriptDiagnostics) {
+        Mempool staged = new Mempool(policy, limits, clock);
+        staged.probeScriptDiagnostics = scriptDiagnostics;
+        staged.admissionProbe = true;
+        staged.copyPoolStateFrom(this);
+        staged.feeDeltas.putAll(feeDeltas);
+        staged.rollingFee.restoreFrom(rollingFee);
+        return staged;
+    }
+
     private TestAcceptResult testAcceptInternal(List<Transaction> transactions,
                                                 MempoolValidationContext context, UtxoView chainUtxos,
                                                 boolean submission) {
         Objects.requireNonNull(transactions); Objects.requireNonNull(context); Objects.requireNonNull(chainUtxos);
-        Mempool staged = new Mempool(policy, limits, clock);
-        staged.probeScriptDiagnostics = !submission;
-        staged.entries.putAll(entries);
-        staged.feeDeltas.putAll(feeDeltas);
-        staged.rollingFee.restoreFrom(rollingFee);
-        staged.rebuildSpent();
+        Mempool staged = validationClone(!submission);
         try {
             if (!submission && transactions.size() > 1) {
                 PackagePolicy.validate(transactions, false);
@@ -523,23 +598,20 @@ public final class Mempool {
                         var entry = staged.admitInternal(tx, context, chainUtxos, true, false, null, null, false, deferred);
                         MempoolGraphPolicy.checkProbeTruc(entries, spent, entry);
                         accepted.add(entry);
+                    } catch (ru.bitcoin.node.consensus.transaction.TransactionValidationException invalid) {
+                        return new TestAcceptResult(List.of(),invalid.reason(),i,Set.of(),invalid.details());
                     } catch (MempoolAdmissionException e) {
                         if (e instanceof TrucPolicyException truc)
                             return new TestAcceptResult(List.of(), "TRUC-violation", i, Set.of(), truc.rpcDetails());
                         if (e instanceof MissingInput) return new TestAcceptResult(List.of(), "missing-inputs", i);
-                        boolean indexed = e instanceof MempoolFeeException || switch (e.getMessage()) {
-                            case "txn-already-in-mempool", "txn-same-nonwitness-data-in-mempool",
-                                    "bip125-replacement-disallowed" -> true;
-                            default -> false;
-                        };
-                        return new TestAcceptResult(List.of(), e.getMessage(), indexed ? i : -1, Set.of(),
-                                e instanceof MempoolFeeException feeError ? feeError.rpcDetails() : null);
+                        return new TestAcceptResult(List.of(), e instanceof MempoolPolicyException policy ? policy.reason() : e.getMessage(), i, Set.of(),
+                                e instanceof MempoolFeeException feeError ? feeError.rpcDetails()
+                                        : e instanceof MempoolPolicyException policy ? policy.details() : e.getMessage());
                     }
                 }
                 // Core's shared package checks follow all individual PreChecks.
                 try {
-                    for (var entry : accepted) MempoolGraphPolicy.checkTrucLimits(staged.entries,
-                            entry.transaction().txId(), Map.of(), Set.of());
+                    MempoolGraphPolicy.checkPackageTruc(entries,transactions,staged.entries);
                 } catch (MempoolAdmissionException error) {
                     return new TestAcceptResult(List.of(), error instanceof TrucPolicyException truc ? truc.rpcDetails() : "TRUC-violation");
                 }
@@ -572,13 +644,17 @@ public final class Mempool {
             Set<Hash256> known = submission ? transactions.stream().map(Transaction::txId)
                     .filter(entries::containsKey).collect(java.util.stream.Collectors.toSet()) : Set.of();
             return new TestAcceptResult(accepted, null, -1, known);
+        } catch (ru.bitcoin.node.consensus.transaction.TransactionValidationException invalid) {
+            return new TestAcceptResult(List.of(),invalid.reason(),transactions.size()==1?0:-1,Set.of(),invalid.details());
         } catch (MempoolAdmissionException e) {
             if (!submission && e instanceof TrucPolicyException truc) return new TestAcceptResult(List.of(), "TRUC-violation", 0, Set.of(), truc.rpcDetails());
             if (e instanceof ProbeScriptFailure script) return new TestAcceptResult(List.of(), e.getMessage(), 0, Set.of(), script.details);
             if (!submission && e instanceof MissingInput) return new TestAcceptResult(List.of(), "missing-inputs");
-            return new TestAcceptResult(List.of(), e.getMessage(), -1, Set.of(),
+            return new TestAcceptResult(List.of(), e instanceof MempoolPolicyException policy ? policy.reason() : e.getMessage(),
+                    !submission && transactions.size() == 1 ? 0 : -1, Set.of(),
                     e instanceof MempoolFeeException feeError ? feeError.rpcDetails()
-                            : e instanceof PackagePolicy.EphemeralSpendFailure ephemeral ? ephemeral.rpcDetails() : null);
+                            : e instanceof PackagePolicy.EphemeralSpendFailure ephemeral ? ephemeral.rpcDetails()
+                            : e instanceof MempoolPolicyException policy ? policy.details() : e.getMessage());
         }
     }
 
@@ -586,13 +662,15 @@ public final class Mempool {
     public synchronized long prioritise(Hash256 txId, long feeDelta) {
         Objects.requireNonNull(txId, "txId");
         MempoolEntry existing = entries.get(txId);
-        if (feeDelta != 0 && existing != null && existing.transaction().outputs().stream().anyMatch(out ->
+        if (existing != null && existing.transaction().outputs().stream().anyMatch(out ->
                 out.value() < ru.bitcoin.node.mempool.policy.StandardTransactionPolicy.dustThreshold(out, policy.dustRelaySatPerKvB())))
-            throw new MempoolAdmissionException("Priority is not supported for transactions with dust outputs");
+            throw new MempoolAdmissionException("Priority is not supported for transactions with dust outputs.");
         long updated = Math.addExact(feeDeltas.getOrDefault(txId, 0L), feeDelta);
         if (updated == 0) feeDeltas.remove(txId); else feeDeltas.put(txId, updated);
         MempoolEntry current = entries.get(txId);
-        if (current != null) entries.put(txId, current.withFeeDelta(updated));
+        if (current != null && current.feeDelta() != updated) {
+            entries.put(txId, current.withFeeDelta(updated)); graphIndex.entryChanged(txId);
+        }
         return updated;
     }
 
@@ -605,7 +683,9 @@ public final class Mempool {
         Objects.requireNonNull(txId, "txId");
         if (feeDelta == 0) feeDeltas.remove(txId); else feeDeltas.put(txId, feeDelta);
         MempoolEntry current = entries.get(txId);
-        if (current != null) entries.put(txId, current.withFeeDelta(feeDelta));
+        if (current != null && current.feeDelta() != feeDelta) {
+            entries.put(txId, current.withFeeDelta(feeDelta)); graphIndex.entryChanged(txId);
+        }
     }
 
     public synchronized boolean contains(Hash256 txId) { return entries.containsKey(Objects.requireNonNull(txId)); }
@@ -616,20 +696,17 @@ public final class Mempool {
         Objects.requireNonNull(txId);
         MempoolEntry root = entries.get(txId);
         if (root == null) return Optional.empty();
-        Set<Hash256> removed = new HashSet<>();
-        removed.add(txId);
-        // Insertion order is topological: parents must already exist when children enter.
-        for (var entry : entries.values()) {
-            if (entry.transaction().inputs().stream().anyMatch(in -> removed.contains(in.previousOutput().transactionId()))) {
-                removed.add(entry.transaction().txId());
-            }
-        }
+        Set<Hash256> removed = graphIndex.descendants(txId);
+        randomizedCapacity = CoreMemoryUsage.randomizedCapacity(randomizedCapacity, entries.size(), removed.size(), 0);
         for (Hash256 id : removed) {
             MempoolEntry entry = entries.remove(id);
+            arrivalIndex.remove(new Arrival(entry.arrivalTime(),id));
+            totalEntryMemory = Math.subtractExact(totalEntryMemory, CoreMemoryUsage.entry(entry));
             totalVirtualBytes = Math.subtractExact(totalVirtualBytes, entry.virtualSize());
             for (var input : entry.transaction().inputs()) spent.remove(input.previousOutput(), id);
         }
         unbroadcast.retainAll(entries.keySet());
+        graphIndex.removeAll(removed);
         sequence++;
         return Optional.of(root);
     }
@@ -642,6 +719,10 @@ public final class Mempool {
      */
     public synchronized List<Hash256> revalidate(MempoolValidationContext context, UtxoView chainUtxos,
                                                  Set<Hash256> confirmed) {
+        return revalidateInternal(context, chainUtxos, confirmed, true);
+    }
+    private List<Hash256> revalidateInternal(MempoolValidationContext context, UtxoView chainUtxos,
+                                             Set<Hash256> confirmed, boolean optimize) {
         Objects.requireNonNull(context);
         Objects.requireNonNull(chainUtxos);
         Objects.requireNonNull(confirmed);
@@ -665,12 +746,19 @@ public final class Mempool {
                 removed.add(id);
             }
         }
+        randomizedCapacity = CoreMemoryUsage.randomizedCapacity(randomizedCapacity, entries.size(),
+                entries.size() - replacement.entries.size(), 0);
         entries.clear();
         entries.putAll(replacement.entries);
+        arrivalIndex.clear();
+        entries.forEach((id,value)->arrivalIndex.add(new Arrival(value.arrivalTime(),id)));
+        totalEntryMemory = replacement.totalEntryMemory;
         unbroadcast.retainAll(entries.keySet());
         spent.clear();
         spent.putAll(replacement.spent);
+        graphIndex.reconcile(entries, spent);
         totalVirtualBytes = entries.values().stream().mapToLong(MempoolEntry::virtualSize).sum();
+        if (optimize) finishGraphChange();
         rollingFee.blockConnected(clock.instant().getEpochSecond());
         if (!removed.isEmpty()) sequence++;
         return List.copyOf(removed);
@@ -680,11 +768,10 @@ public final class Mempool {
                                        Set<Hash256> confirmed, List<Transaction> disconnected) {
         Set<Hash256> beforeIds = Set.copyOf(entries.keySet());
         Mempool staged = new Mempool(policy, limits, clock);
-        staged.entries.putAll(entries);
+        staged.copyPoolStateFrom(this);
         staged.feeDeltas.putAll(feeDeltas);
         staged.unbroadcast.addAll(unbroadcast);
-        confirmed.forEach(staged.entries::remove);
-        staged.rebuildSpent();
+        staged.removeSeedEntries(confirmed);
         for (var tx : disconnected) {
             if (confirmed.contains(tx.txId()) || staged.contains(tx.txId())) continue;
             try {
@@ -717,14 +804,17 @@ public final class Mempool {
             }
             if (pending.size() == before) throw new IllegalStateException("Cyclic mempool dependencies");
         }
-        staged.rebuildSpent();
-        staged.revalidate(context, chainUtxos, confirmed);
+        // Only insertion order changed; spent, byte accounting and graph are still valid.
+        staged.revalidateInternal(context, chainUtxos, confirmed, false);
+        trimReorgClusters(staged);
+        staged.finishGraphChange();
         staged.expire();
         int beforeTrim = staged.size();
-        long removedRate = MempoolGraphPolicy.trim(staged.entries, limits.maxPoolVirtualBytes(), null);
-        entries.clear(); entries.putAll(staged.entries);
+        var memoryTrim = staged.trimToMemory(staged.entries, null);
+        long removedRate = memoryTrim.removedRate();
+        commitEntries(staged.entries, memoryTrim.graph(), false);
+        randomizedCapacity = memoryTrim.capacity();
         unbroadcast.clear(); unbroadcast.addAll(staged.unbroadcast); unbroadcast.retainAll(entries.keySet());
-        rebuildSpent();
         rollingFee.blockConnected(clock.instant().getEpochSecond());
         if (staged.size() < beforeTrim) rollingFee.bump(removedRate, limits.incrementalRelaySatPerKvB(), clock.instant().getEpochSecond());
         if (!beforeIds.equals(entries.keySet())) sequence++;
@@ -747,7 +837,7 @@ public final class Mempool {
     public synchronized Optional<List<Hash256>> ancestors(Hash256 txId) {
         Objects.requireNonNull(txId, "txId");
         if (!entries.containsKey(txId)) return Optional.empty();
-        Set<Hash256> ids = new LinkedHashSet<>(MempoolGraphPolicy.ancestors(entries, txId));
+        Set<Hash256> ids = new LinkedHashSet<>(graphIndex.ancestors(txId));
         ids.remove(txId);
         return Optional.of(List.copyOf(ids));
     }
@@ -756,7 +846,7 @@ public final class Mempool {
     public synchronized Optional<List<Hash256>> descendants(Hash256 txId) {
         Objects.requireNonNull(txId, "txId");
         if (!entries.containsKey(txId)) return Optional.empty();
-        Set<Hash256> ids = new LinkedHashSet<>(MempoolGraphPolicy.descendants(entries, Set.of(txId)));
+        Set<Hash256> ids = new LinkedHashSet<>(graphIndex.descendants(txId));
         ids.remove(txId);
         return Optional.of(List.copyOf(ids));
     }
@@ -793,8 +883,9 @@ public final class Mempool {
     public synchronized Map<Hash256, EntryGraphView> graphViews(Collection<Hash256> txIds) {
         Objects.requireNonNull(txIds, "txIds");
         Map<Hash256, EntryGraphView> result = new LinkedHashMap<>();
+        Map<Hash256, ClusterLinearization.Chunk> chunks = new HashMap<>();
         for (Hash256 txId : txIds) {
-            EntryGraphView view = graphView(txId).orElse(null);
+            EntryGraphView view = graphView(txId, chunks).orElse(null);
             if (view != null) result.put(txId, view);
         }
         return Map.copyOf(result);
@@ -804,20 +895,20 @@ public final class Mempool {
     public synchronized Optional<ClusterView> cluster(Hash256 txId) {
         Objects.requireNonNull(txId, "txId");
         if (!entries.containsKey(txId)) return Optional.empty();
-        Set<Hash256> ids = ClusterLinearization.connected(entries, List.of(txId));
-        List<ClusterLinearization.Chunk> chunks = ClusterLinearization.chunks(entries, ids);
+        Set<Hash256> ids = graphIndex.component(txId);
+        List<ClusterLinearization.Chunk> chunks = graphIndex.chunks(entries, txId);
         long adjustedWeight = ids.stream().mapToLong(id -> entries.get(id).adjustedWeight()).sum();
         return Optional.of(new ClusterView(adjustedWeight, ids.size(), chunks));
     }
 
     /** Atomic whole-mempool feerate diagram, in descending mining order. */
     public synchronized List<ClusterLinearization.Chunk> feeRateDiagram() {
-        return ClusterLinearization.mergeChunks(clusterDiagramCache.clusters(entries));
+        return ClusterLinearization.mergeChunks(graphIndex.linearizations(entries));
     }
 
     /** Atomic immutable entries and matching cached cluster order, safe after releasing the monitor. */
     public synchronized MiningSnapshot miningSnapshot() {
-        return new MiningSnapshot(List.copyOf(entries.values()), clusterDiagramCache.clusters(entries));
+        return new MiningSnapshot(List.copyOf(entries.values()), graphIndex.linearizations(entries));
     }
 
     public static final class MiningSnapshot {
@@ -832,24 +923,24 @@ public final class Mempool {
 
     /** Atomic graph data used by getmempoolentry. Sets include the transaction itself. */
     public synchronized Optional<EntryGraphView> graphView(Hash256 txId) {
+        return graphView(txId, new HashMap<>());
+    }
+
+    /** Chunks live only for this atomic query; solve each requested component once. */
+    private Optional<EntryGraphView> graphView(Hash256 txId, Map<Hash256, ClusterLinearization.Chunk> chunks) {
         Objects.requireNonNull(txId, "txId");
         MempoolEntry entry = entries.get(txId);
         if (entry == null) return Optional.empty();
-        Set<Hash256> ancestors = MempoolGraphPolicy.ancestors(entries, txId);
-        Set<Hash256> descendants = MempoolGraphPolicy.descendants(entries, Set.of(txId));
-        Set<Hash256> parents = new LinkedHashSet<>();
-        for (var input : entry.transaction().inputs()) {
-            Hash256 parent = input.previousOutput().transactionId();
-            if (entries.containsKey(parent)) parents.add(parent);
+        Set<Hash256> ancestors = graphIndex.ancestors(txId);
+        Set<Hash256> descendants = graphIndex.descendants(txId);
+        Set<Hash256> parents = graphIndex.parents(txId);
+        Set<Hash256> children = graphIndex.children(txId);
+        var chunk = chunks.get(txId);
+        if (chunk == null) {
+            for (var value : graphIndex.chunks(entries, txId))
+                for (var member : value.transactions()) chunks.put(member, value);
+            chunk = Objects.requireNonNull(chunks.get(txId), "Missing graph chunk");
         }
-        Set<Hash256> children = new LinkedHashSet<>();
-        for (var candidate : entries.entrySet()) {
-            if (candidate.getValue().transaction().inputs().stream()
-                    .anyMatch(input -> input.previousOutput().transactionId().equals(txId))) children.add(candidate.getKey());
-        }
-        Set<Hash256> cluster = ClusterLinearization.connected(entries, List.of(txId));
-        ClusterLinearization.Chunk chunk = ClusterLinearization.chunks(entries, cluster).stream()
-                .filter(value -> value.transactions().contains(txId)).findFirst().orElseThrow();
         long ancestorVsize = ancestors.stream().mapToLong(id -> entries.get(id).virtualSize()).sum();
         long descendantVsize = descendants.stream().mapToLong(id -> entries.get(id).virtualSize()).sum();
         long ancestorFee = ancestors.stream().mapToLong(id -> entries.get(id).modifiedFee()).sum();
@@ -884,23 +975,249 @@ public final class Mempool {
     public synchronized int expire() {
         long cutoff = clock.instant().getEpochSecond() - limits.expirySeconds();
         int before = entries.size();
-        for (var entry : List.copyOf(entries.values())) {
-            if (entry.arrivalTime() < cutoff) remove(entry.transaction().txId());
+        while (!arrivalIndex.isEmpty() && arrivalIndex.first().time()<cutoff) {
+            var oldest=arrivalIndex.first();
+            if(remove(oldest.id()).isEmpty()) arrivalIndex.remove(oldest);
         }
         return before - entries.size();
     }
 
-    private void rebuildSpent() {
-        spent.clear();
-        totalVirtualBytes = 0;
-        for (var entry : entries.values()) {
-            totalVirtualBytes = Math.addExact(totalVirtualBytes, entry.virtualSize());
-            for (var input : entry.transaction().inputs()) spent.put(input.previousOutput(), entry.transaction().txId());
+    /** Caller holds the source monitor; destination is an unpublished staging pool. */
+    private void copyPoolStateFrom(Mempool source) {
+        entries.putAll(source.entries);
+        spent.putAll(source.spent);
+        totalVirtualBytes = source.totalVirtualBytes;
+        randomizedCapacity = source.randomizedCapacity;
+        totalEntryMemory = source.totalEntryMemory;
+        arrivalIndex.addAll(source.arrivalIndex);
+        graphIndex.copyFrom(source.graphIndex);
+    }
+
+    /** Seed filtering must retain children of confirmed parents; this is not descendant eviction. */
+    private void removeSeedEntries(Collection<Hash256> ids) {
+        for (var id : ids) {
+            var entry = entries.remove(id);
+            if (entry == null) continue;
+            arrivalIndex.remove(new Arrival(entry.arrivalTime(),id));
+            totalEntryMemory = Math.subtractExact(totalEntryMemory, CoreMemoryUsage.entry(entry));
+            randomizedCapacity = CoreMemoryUsage.randomizedCapacity(randomizedCapacity, entries.size() + 1, 1, 0);
+            totalVirtualBytes = Math.subtractExact(totalVirtualBytes, entry.virtualSize());
+            for (var input : entry.transaction().inputs()) spent.remove(input.previousOutput(), id);
         }
+        graphIndex.removeAll(ids);
+    }
+
+    /** Publish an already validated candidate. Read inputs only for changed txids. */
+    private void commitEntries(Map<Hash256, MempoolEntry> candidate) {
+        commitEntries(candidate, null, true);
+    }
+    private void commitEntries(Map<Hash256, MempoolEntry> candidate, MempoolGraphIndex stagedGraph, boolean optimize) {
+        var removed = new ArrayList<MempoolEntry>();
+        var added = new ArrayList<MempoolEntry>();
+        var changedScores = new ArrayList<Hash256>();
+        long proposedBytes = totalVirtualBytes;
+        long proposedMemory = totalEntryMemory;
+        for (var item : entries.entrySet()) {
+            if (!candidate.containsKey(item.getKey())) {
+                removed.add(item.getValue());
+                proposedMemory = Math.subtractExact(proposedMemory, CoreMemoryUsage.entry(item.getValue()));
+                proposedBytes = Math.subtractExact(proposedBytes, item.getValue().virtualSize());
+            }
+        }
+        for (var item : candidate.entrySet()) {
+            var previous = entries.get(item.getKey());
+            if (previous == null) {
+                added.add(item.getValue());
+                proposedMemory = Math.addExact(proposedMemory, CoreMemoryUsage.entry(item.getValue()));
+                proposedBytes = Math.addExact(proposedBytes, item.getValue().virtualSize());
+            } else {
+                if (previous.modifiedFee() != item.getValue().modifiedFee()
+                        || previous.adjustedWeight() != item.getValue().adjustedWeight()) changedScores.add(item.getKey());
+                // Same txid can carry updated sigops/weight metadata after revalidation.
+                proposedBytes = Math.addExact(Math.subtractExact(proposedBytes, previous.virtualSize()), item.getValue().virtualSize());
+            }
+        }
+        // Arithmetic checks above precede mutation. Remove old spenders before adding replacements.
+        for(var entry : removed) arrivalIndex.remove(new Arrival(entry.arrivalTime(),entry.transaction().txId()));
+        for(var item : candidate.entrySet()) {
+            var old=entries.get(item.getKey());
+            if(old==null || old.arrivalTime()!=item.getValue().arrivalTime()) {
+                if(old!=null) arrivalIndex.remove(new Arrival(old.arrivalTime(),item.getKey()));
+                arrivalIndex.add(new Arrival(item.getValue().arrivalTime(),item.getKey()));
+            }
+        }
+        for (var entry : removed)
+            for (var input : entry.transaction().inputs()) spent.remove(input.previousOutput(), entry.transaction().txId());
+        for (var entry : added)
+            for (var input : entry.transaction().inputs()) spent.put(input.previousOutput(), entry.transaction().txId());
+        randomizedCapacity = CoreMemoryUsage.randomizedCapacity(randomizedCapacity, entries.size(), removed.size(), added.size());
+        entries.clear(); entries.putAll(candidate);
+        totalVirtualBytes = proposedBytes;
+        totalEntryMemory = proposedMemory;
+        unbroadcast.retainAll(entries.keySet());
+        if (stagedGraph == null) {
+            graphIndex.reconcile(entries, spent);
+            changedScores.forEach(graphIndex::entryChanged);
+        } else {
+            // Preserve staging's linearizations/quality when committing. Trimming
+            // may have removed entries since staging's last graph update.
+            stagedGraph.reconcile(entries, spent);
+            graphIndex.copyFrom(stagedGraph);
+        }
+        if (optimize) finishGraphChange();
+    }
+
+    /** Core allocator estimate. This is deliberately separate from BIP141/policy vsize. */
+    public synchronized long dynamicMemoryUsage() {
+        return totalEntryMemory
+                + CoreMemoryUsage.allocation(40 * randomizedCapacity) + 96L * feeDeltas.size()
+                + graphIndex.memoryUsage(entries);
+    }
+
+    private record MemoryTrim(long removedRate, long capacity, MempoolGraphIndex graph, int beforeTrim) { }
+    private record ReplacementDiagram(int comparison, MempoolGraphIndex graph) { }
+    private ReplacementDiagram replacementDiagrams(Map<Hash256,MempoolEntry> after, Set<Hash256> conflicts,
+                                                    Collection<Transaction> replacements, MempoolGraphIndex prospective) {
+        var roots=new LinkedHashSet<>(conflicts);
+        for(var tx : replacements) for(var input : tx.inputs()) roots.add(input.previousOutput().transactionId());
+        var oldMembers=new LinkedHashSet<Hash256>();
+        for(var root : roots) oldMembers.addAll(graphIndex.component(root));
+        var oldChunks=affectedChunks(graphIndex,entries,oldMembers);
+        if(prospective==null) {
+            prospective=new MempoolGraphIndex(); prospective.copyFrom(graphIndex);
+            var nextSpent=new HashMap<>(spent);
+            for(var item : entries.entrySet()) if(!after.containsKey(item.getKey()))
+                for(var input : item.getValue().transaction().inputs()) nextSpent.remove(input.previousOutput(),item.getKey());
+            for(var item : after.entrySet()) if(!entries.containsKey(item.getKey()))
+                for(var input : item.getValue().transaction().inputs()) nextSpent.put(input.previousOutput(),item.getKey());
+            prospective.reconcile(after,nextSpent);
+        }
+        var newRoots=new LinkedHashSet<>(oldMembers);
+        replacements.forEach(tx -> newRoots.add(tx.txId()));
+        var newChunks=affectedChunks(prospective,after,newRoots);
+        return new ReplacementDiagram(ClusterLinearization.compareDiagrams(newChunks,oldChunks),prospective);
+    }
+    static List<ClusterLinearization.Chunk> affectedChunks(MempoolGraphIndex graph,
+            Map<Hash256,MempoolEntry> values, Collection<Hash256> roots) {
+        var seen=new HashSet<Hash256>(); var groups=new ArrayList<List<ClusterLinearization.Chunk>>();
+        for(var root : roots) {
+            if(seen.contains(root) || !values.containsKey(root)) continue;
+            var component=graph.component(root);
+            if(component.isEmpty()) continue;
+            seen.addAll(component); groups.add(graph.chunks(values,root));
+        }
+        return ClusterLinearization.mergeChunks(groups);
+    }
+    /** Reorg late-parent links can join formerly independent, valid clusters. */
+    private void trimReorgClusters(Mempool staged) {
+        long weightLimit = Math.multiplyExact(limits.clusterVirtualBytes(),4);
+        boolean oversized = staged.graphIndex.components().stream().anyMatch(group -> group.size()>limits.clusterCount()
+                || group.stream().mapToLong(id -> staged.entries.get(id).adjustedWeight()).sum()>weightLimit);
+        if (!oversized) return;
+        var retained = new LinkedHashMap<Hash256,MempoolEntry>();
+        var resurrected = new LinkedHashMap<Hash256,MempoolEntry>();
+        for (var item : staged.entries.entrySet()) {
+            if (entries.containsKey(item.getKey())) retained.put(item.getKey(),item.getValue());
+            else resurrected.put(item.getKey(),item.getValue());
+        }
+        var oldGraph = new MempoolGraphIndex(); oldGraph.copyFrom(graphIndex);
+        var gone = new HashSet<>(entries.keySet()); gone.removeAll(retained.keySet()); oldGraph.removeAll(gone);
+        var orders = new ArrayList<>(oldGraph.linearizations(retained));
+        for (var group : ClusterLinearization.clusters(resurrected))
+            orders.add(ClusterLinearization.chunks(resurrected,group));
+        var dependencies = new ArrayList<ClusterLimitTrimmer.Dependency>();
+        for (var item : staged.entries.entrySet()) for (var input : item.getValue().transaction().inputs()) {
+            var parent=input.previousOutput().transactionId();
+            if (staged.entries.containsKey(parent)) dependencies.add(new ClusterLimitTrimmer.Dependency(parent,item.getKey()));
+        }
+        staged.removeSeedEntries(ClusterLimitTrimmer.removed(staged.entries,orders,dependencies,
+                limits.clusterCount(),weightLimit));
+    }
+    private MemoryTrim trimToMemory(Map<Hash256, MempoolEntry> candidate, Hash256 added) {
+        return trimToMemory(candidate,added,graphIndex,capacityForCandidate(candidate));
+    }
+    private long capacityForCandidate(Map<Hash256,MempoolEntry> candidate) {
+        int removed = (int)entries.keySet().stream().filter(id -> !candidate.containsKey(id)).count();
+        int inserted = (int)candidate.keySet().stream().filter(id -> !entries.containsKey(id)).count();
+        return CoreMemoryUsage.randomizedCapacity(randomizedCapacity,entries.size(),removed,inserted);
+    }
+    private void expireCandidate(Map<Hash256,MempoolEntry> candidate) {
+        long cutoff=clock.instant().getEpochSecond()-limits.expirySeconds();
+        var expired=new HashSet<Hash256>();
+        for(var item : candidate.entrySet()) if(item.getValue().arrivalTime()<cutoff) expired.add(item.getKey());
+        if(!expired.isEmpty()) MempoolGraphPolicy.descendants(candidate,expired).forEach(candidate::remove);
+    }
+    private MempoolGraphIndex candidateGraph(Map<Hash256,MempoolEntry> candidate,MempoolGraphIndex base) {
+        var graph=new MempoolGraphIndex(); graph.copyFrom(base);
+        var prospectiveSpent=new HashMap<>(spent);
+        for(var item : entries.entrySet()) if(!candidate.containsKey(item.getKey()))
+            for(var input : item.getValue().transaction().inputs()) prospectiveSpent.remove(input.previousOutput(),item.getKey());
+        for(var item : candidate.entrySet()) if(!entries.containsKey(item.getKey()))
+            for(var input : item.getValue().transaction().inputs()) prospectiveSpent.put(input.previousOutput(),item.getKey());
+        graph.reconcile(candidate,prospectiveSpent);
+        if(base==graphIndex) for(var item : candidate.entrySet()) {
+            var old=entries.get(item.getKey());
+            if(old!=null && (old.modifiedFee()!=item.getValue().modifiedFee() || old.adjustedWeight()!=item.getValue().adjustedWeight()))
+                graph.entryChanged(item.getKey());
+        }
+        return graph;
+    }
+    private MemoryTrim trimToMemory(Map<Hash256,MempoolEntry> candidate,Hash256 added,MempoolGraphIndex base,long initialCapacity) {
+        int beforeTrim=candidate.size();
+        long[] capacity = {initialCapacity};
+        long inner = totalEntryMemory;
+        for (var item : entries.entrySet()) if (!candidate.containsKey(item.getKey()))
+            inner = Math.subtractExact(inner, CoreMemoryUsage.entry(item.getValue()));
+        for (var item : candidate.entrySet()) {
+            var old = entries.get(item.getKey());
+            if (old == item.getValue()) continue;
+            if (old != null) inner = Math.subtractExact(inner, CoreMemoryUsage.entry(old));
+            inner = Math.addExact(inner, CoreMemoryUsage.entry(item.getValue()));
+        }
+        if (inner + CoreMemoryUsage.allocation(40 * capacity[0]) + 96L * feeDeltas.size()
+                + 400L * candidate.size() <= limits.maxPoolMemoryBytes()) return new MemoryTrim(0, capacity[0],base,beforeTrim);
+        var previous = new LinkedHashSet<>(candidate.keySet());
+        var graph = candidateGraph(candidate,base);
+        java.util.function.LongSupplier usage = () -> {
+            var deleted = new HashSet<>(previous); deleted.removeAll(candidate.keySet());
+            if (!deleted.isEmpty()) {
+                capacity[0] = CoreMemoryUsage.randomizedCapacity(capacity[0], previous.size(), deleted.size(), 0);
+                graph.removeAll(deleted); previous.removeAll(deleted);
+            }
+            return candidate.values().stream().mapToLong(CoreMemoryUsage::entry).sum()
+                    + CoreMemoryUsage.allocation(40 * capacity[0]) + 96L * feeDeltas.size()
+                    + graph.memoryUsage(candidate);
+        };
+        long rate = MempoolGraphPolicy.trim(candidate, limits.maxPoolMemoryBytes(), added, usage,
+                () -> graph.linearizations(candidate));
+        // Update retained capacity even when the last removal emptied the pool.
+        usage.getAsLong();
+        return new MemoryTrim(rate, capacity[0],graph,beforeTrim);
+    }
+
+    private void finishGraphChange() { graphIndex.doWork(entries, ClusterOptimization.POST_CHANGE_COST); }
+    public synchronized boolean optimize(long budget) { return graphIndex.doWork(entries, budget); }
+    public synchronized boolean optimal() { return graphIndex.optimal(); }
+
+    private void indexAddition(MempoolEntry entry) {
+        arrivalIndex.add(new Arrival(entry.arrivalTime(),entry.transaction().txId()));
+        totalEntryMemory = Math.addExact(totalEntryMemory, CoreMemoryUsage.entry(entry));
+        randomizedCapacity = CoreMemoryUsage.randomizedCapacity(randomizedCapacity, entries.size() - 1, 0, 1);
+        var transaction = entry.transaction(); var id = transaction.txId();
+        var parents = new LinkedHashSet<Hash256>(); var children = new LinkedHashSet<Hash256>();
+        for (var input : transaction.inputs()) {
+            var parent = input.previousOutput().transactionId();
+            if (!parent.equals(id) && entries.containsKey(parent)) parents.add(parent);
+        }
+        for (int index = 0; index < transaction.outputs().size(); index++) {
+            var child = spent.get(new OutPoint(id, new ru.bitcoin.node.common.types.UInt32(index)));
+            if (child != null && !child.equals(id)) children.add(child);
+        }
+        graphIndex.add(id, parents, children);
     }
     public synchronized long minimumFeeRate() {
-        return rollingFee.get(clock.instant().getEpochSecond(), totalVirtualBytes,
-                limits.maxPoolVirtualBytes(), limits.incrementalRelaySatPerKvB());
+        return rollingFee.get(clock.instant().getEpochSecond(), this::dynamicMemoryUsage,
+                limits.maxPoolMemoryBytes(), limits.incrementalRelaySatPerKvB());
     }
 
     /**

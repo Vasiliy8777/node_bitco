@@ -8,6 +8,27 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ClusterDiagramCacheTest {
+    @Test void versionedViewTracksScoresMapIdentityAndCapacity() {
+        var calls = new AtomicInteger();
+        var cache = countingCache(2, calls);
+        var a = entry(10, 1, external(1));
+        var entries = map(a);
+        var index = new MempoolGraphIndex(); index.rebuild(entries);
+        var first = cache.clusters(entries, index.components(), index.revision());
+        assertSame(first, cache.clusters(entries, index.components(), index.revision()));
+        entries.put(a.transaction().txId(), a.withFeeDelta(100)); index.scoresChanged();
+        var changed = cache.clusters(entries, index.components(), index.revision());
+        assertNotEquals(first, changed);
+        var other = map(a);
+        assertNotEquals(changed, cache.clusters(other, index.components(), index.revision()));
+        assertEquals(3, calls.get());
+        var b = entry(20, 2, a.transaction().txId());
+        var c = entry(30, 3, b.transaction().txId());
+        entries = map(a, b, c); index.rebuild(entries);
+        cache.clusters(entries, index.components(), index.revision());
+        cache.clusters(entries, index.components(), index.revision());
+        assertEquals(5, calls.get(), "Oversized cluster must not be retained by the version cache");
+    }
     @Test void onlyChangedClustersAreRelinearizedAndRemovedGraphsAreForgotten() {
         var calls = new AtomicInteger();
         var cache = countingCache(100, calls);

@@ -6,6 +6,22 @@ import static org.junit.jupiter.api.Assertions.*;
 import static ru.bitcoin.node.mempool.PackageAdmissionTest.*;
 
 class EphemeralDustFeeDeltaTest {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(longs = {0, 1, -1})
+    void prioritisingAcceptedDustParentAlwaysRejectsWithoutMutation(long delta) {
+        var pool = new Mempool();
+        var parent = tx(List.of(FUND), 2, 100000, 0);
+        var child = tx(List.of(point(parent, 0), point(parent, 1)), 2, 90000);
+        pool.admitPackage(List.of(parent, child), CONTEXT, COINS);
+        var before = pool.detailedSnapshot();
+        var priorities = pool.prioritisedTransactions();
+        var error = assertThrows(MempoolAdmissionException.class, () -> pool.prioritise(parent.txId(), delta));
+        assertEquals("Priority is not supported for transactions with dust outputs.", error.getMessage());
+        assertEquals(before, pool.detailedSnapshot());
+        assertEquals(priorities, pool.prioritisedTransactions());
+        assertEquals(parent.txId(), pool.spendingTransaction(FUND).orElseThrow().txId());
+        assertEquals(child.txId(), pool.spendingTransaction(point(parent, 1)).orElseThrow().txId());
+    }
     @Test void negativeDeltaCannotHidePositiveBaseFeeOfDustParent() {
         var pool = new Mempool();
         var parent = tx(List.of(FUND), 2, 99999, 0);

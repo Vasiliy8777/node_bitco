@@ -24,7 +24,9 @@ class PackageSharedPolicyPhaseTest {
         var child = tx(List.of(point(parent, 0)), 3, 98000);
         var grandchild = tx(List.of(point(child, 0)), 3, 97000);
         var result = pool.testAccept(List.of(parent, child, grandchild), CONTEXT, COINS);
-        assertEquals("TRUC-violation", result.rejectReason()); assertTrue(result.packagePolicyFailure());
+        assertEquals("TRUC-violation, tx "+grandchild.txId().toDisplayHex()+" (wtxid="
+                +grandchild.wtxId().toDisplayHex()+") would have too many ancestors", result.rejectReason());
+        assertTrue(result.packagePolicyFailure());
         assertTrue(pool.isEmpty());
     }
     @Test void laterMissingInputPrecedesSharedClusterLimit() {

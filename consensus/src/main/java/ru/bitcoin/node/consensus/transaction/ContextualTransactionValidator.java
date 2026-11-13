@@ -97,13 +97,13 @@ public final class ContextualTransactionValidator {
                         );
             } catch (ArithmeticException e) {
                 throw new TransactionValidationException(
-                        "Transaction input value overflow"
+                        "Transaction input value overflow", "bad-txns-inputvalues-outofrange", null
                 );
             }
 
             if (inputValue > Money.MAX_MONEY) {
                 throw new TransactionValidationException(
-                        "Transaction input value exceeds MAX_MONEY"
+                        "Transaction input value exceeds MAX_MONEY", "bad-txns-inputvalues-outofrange", null
                 );
             }
         }
@@ -134,7 +134,8 @@ public final class ContextualTransactionValidator {
 
         if (inputValue < outputValue) {
             throw new TransactionValidationException(
-                    "Transaction spends more than its inputs"
+                    "Transaction spends more than its inputs", "bad-txns-in-belowout",
+                    "value in (" + money(inputValue) + ") < value out (" + money(outputValue) + ")"
             );
         }
 
@@ -166,8 +167,13 @@ public final class ContextualTransactionValidator {
                             + "created at height "
                             + utxo.height()
                             + ", spending height "
-                            + spendingHeight
+                            + spendingHeight, "bad-txns-premature-spend-of-coinbase",
+                    "tried to spend coinbase at depth " + confirmations
             );
         }
+    }
+    private static String money(long value) {
+        var amount=java.math.BigDecimal.valueOf(value,8).stripTrailingZeros();
+        return amount.setScale(Math.max(2,amount.scale())).toPlainString();
     }
 }

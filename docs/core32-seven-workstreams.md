@@ -1,6 +1,7 @@
 # Bitcoin Core 32.1: seven requested workstreams
 
 User request: resolve all seven previously listed compatibility workstreams.
+Latest explicit user checklist: [current status of all seven areas](core32-user-checklist.md).
 Current expanded eight-direction execution/acceptance:
 [core32-eight-acceptance.md](core32-eight-acceptance.md).
 These are project-sized workstreams, not seven individual defects. A workstream
@@ -10,10 +11,10 @@ the stated scope; successful packaging alone does not close it.
 | # | Workstream | Current acceptance work |
 | --- | --- | --- |
 | 1 | Low-work header protection | Production PRESYNC/REDOWNLOAD is connected to initial/live/async reception after explicit user approval. Dynamic threshold, salted commitments, bounded lookahead, reset and separate peer cursors are verified by state tests, real P2P tests and the native Core 32.1 wire comparison. Explicit NoBan exemption implemented under 4; RPC statistics remain under 6. See [behavior/evidence and remaining limits](headers-presync-core32.md). |
-| 2 | GETHEADERS response ownership and failover | Shared preflight release, missing-ancestry ownership, NoBan and future/cached-invalid policies are implemented. Initial validation/malformed failures select another source; internal state errors remain fatal. Default initial/live timing now uses Core's formula and preferred ready-peer conditions with independent peer workers. See [timing evidence and remaining scheduler limits](header-sync-timing-core32.md). Remaining block/transaction failover still needs comparison. |
+| 2 | GETHEADERS response ownership and failover | Shared preflight release, missing-ancestry ownership, NoBan and future/cached-invalid policies are implemented. Initial validation/malformed failures select another source; internal state errors remain fatal. Default initial/live timing now uses Core's formula and preferred-peer accounting from VERSION with independent peer workers. See [timing evidence and remaining scheduler limits](header-sync-timing-core32.md). Remaining block/transaction failover still needs comparison. |
 | 3 | Compact blocks | Negotiated-version guard before decoding and a one-block GETBLOCKTXN cache exemption implemented and tested. Cached requests still validate indexes; the next connected block replaces the cache. Full optimistic side-block cache/announcement and request-authorization behavior remain to compare. |
 | 4 | Peer permissions/manual connections | Immutable local CIDR permissions, NoBan inheritance, misbehavior/local-address rules, manual reconnect and RPC metadata implemented. NoBan PRESYNC/history and Download GETHEADERS exceptions implemented. Manual-only bootstrap now passes real P2P block acceptance and cancellation checks. Broader failover and additional permission flags remain open. See [peer access](peer-access-core32.md) and [manual bootstrap](manual-bootstrap-presync-rpc-core32.md). |
-| 5 | Mempool optimizer | Differential checks for bounded optimizer work and fallback ordering, including incremental mutations; optimal unlimited reference cases alone do not close this. |
+| 5 | Mempool optimizer | Budgeted SFL/CostModel/PostLinearize, retained main/staging graph and orders, fee changes, equal-rate keys, RBF diagrams, memory pressure, oversized reorg Trim and expiry implemented. Independent Core references and native RPC matrices are recorded in [the acceptance report](mempool-core32-completion.md). Historical cache-only notes below are superseded by that report. |
 | 6 | Node RPC | AssumeUTXO reporting, snapshot base hash and real PRESYNC height implemented and tested. Native Core method-name inventory is generated; remaining schemas/semantics and missing methods are open. The inventory separates categories, including wallet. See [execution/acceptance](core32-eight-acceptance.md). |
 | 7 | Additional networks | Configurable Tor/I2P transports, private broadcast and external ASMap with integration/protocol fixtures. Enabling external services is awaiting user preference and endpoint configuration. |
 
@@ -27,10 +28,12 @@ verify a single healthy restarted process after a completed implementation batch
 Текущий статус подтверждённых направлений:
 
 1. Синхронизация: в стандартном режиме реализованы формула начального срока,
-   условия тайм-аутов, NoBan reset и учёт предпочтительных готовых пиров.
+   условия тайм-аутов, NoBan reset и учёт предпочтительных пиров после VERSION.
    Начальный и live пути обслуживают пиры независимо. Нативный Core wire-тест
    проверяет срок и альтернативу для обоих вариантов NoBan.
-   Открыты окно VERSION/VERACK, полный scheduler и прочие ошибки источников;
+   Окно VERSION/VERACK исправлено отдельным учётом handshake;
+   [реализация и нативные сценарии](preferred-peer-handshake-gap-core32.md).
+   Открыты полный scheduler и прочие ошибки источников;
    [реализация, проверки и границы](header-sync-timing-core32.md).
    Предпочтение источников заданий блоков при IBD реализовано. Availability
    GETHEADERS в refresh block policy используют общее состояние координатора;

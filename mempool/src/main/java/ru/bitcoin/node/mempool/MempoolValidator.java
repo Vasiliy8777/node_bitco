@@ -23,7 +23,6 @@ public final class MempoolValidator {
         Objects.requireNonNull(context, "context");
         Objects.requireNonNull(utxoView, "utxoView");
         if (transaction.isCoinbase()) throw new MempoolAdmissionException("Coinbase cannot enter mempool");
-        var result = ContextualTransactionValidator.validateInputs(transaction, context.nextBlockHeight(), utxoView);
         TransactionFinality.validate(transaction, context.nextBlockHeight(), context.tipMedianTimePast());
         var confirmations = new ArrayList<InputConfirmation>();
         for (var input : transaction.inputs()) {
@@ -43,14 +42,19 @@ public final class MempoolValidator {
         }
         if (!SequenceLocks.evaluate(SequenceLocks.calculate(transaction, confirmations),
                 context.nextBlockHeight(), context.tipMedianTimePast())) {
-            throw new MempoolAdmissionException("Non-final BIP68 sequence locks");
+            throw new MempoolPolicyException("Non-final BIP68 sequence locks","non-BIP68-final",null);
         }
-        ru.bitcoin.node.mempool.policy.StandardTransactionPolicy.validateInputs(transaction, utxoView);
+        var result = ContextualTransactionValidator.validateInputs(transaction, context.nextBlockHeight(), utxoView);
+        ru.bitcoin.node.mempool.policy.StandardTransactionPolicy.validateInputs(transaction, utxoView, false);
         return result.fee();
     }
 
     static void validateScripts(Transaction transaction, UtxoView utxoView) {
-        InputScriptValidator.validateAll(transaction, utxoView, StandardScriptVerifyFlags.STANDARD);
+        try { InputScriptValidator.validateAll(transaction, utxoView, StandardScriptVerifyFlags.STANDARD, true); }
+        catch (InputScriptValidationException error) {
+            throw new ru.bitcoin.node.script.ScriptVerificationException(error.code(),
+                    failure(transaction, error.inputIndex(), error.description()).details());
+        }
     }
 
     record ScriptFailure(String reason, String details) {}
@@ -62,16 +66,19 @@ public final class MempoolValidator {
                 InputScriptValidator.validate(transaction, i, utxoView, StandardScriptVerifyFlags.STANDARD, true);
             } catch (ru.bitcoin.node.script.ScriptExecutionException
                      | ru.bitcoin.node.script.ScriptParseException | TransactionValidationException error) {
-                String description = error instanceof ru.bitcoin.node.script.ScriptVerificationException script
-                        ? script.error() : error.getMessage();
-                String reason = "mempool-script-verify-flag-failed (" + description + ")";
-                var prevout = transaction.inputs().get(i).previousOutput();
-                String debug = "input " + i + " of " + transaction.txId().toDisplayHex()
-                        + " (wtxid " + transaction.wtxId().toDisplayHex() + "), spending "
-                        + prevout.transactionId().toDisplayHex() + ":" + prevout.outputIndex().value();
-                return new ScriptFailure(reason, reason + ", " + debug);
+                String description = error instanceof ru.bitcoin.node.script.ScriptExecutionException script ? script.error()
+                        : error instanceof ru.bitcoin.node.script.ScriptParseException parse ? parse.error() : error.getMessage();
+                return failure(transaction, i, description);
             }
         }
         return null;
+    }
+    private static ScriptFailure failure(Transaction transaction, int inputIndex, String description) {
+        String reason = "mempool-script-verify-flag-failed (" + description + ")";
+        var prevout = transaction.inputs().get(inputIndex).previousOutput();
+        String debug = "input " + inputIndex + " of " + transaction.txId().toDisplayHex()
+                + " (wtxid " + transaction.wtxId().toDisplayHex() + "), spending "
+                + prevout.transactionId().toDisplayHex() + ":" + prevout.outputIndex().value();
+        return new ScriptFailure(reason, reason + ", " + debug);
     }
 }

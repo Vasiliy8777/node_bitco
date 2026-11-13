@@ -17,8 +17,9 @@ class PackageProbeFeeModeTest {
     }
     @Test void everyProbeEntryMustAlsoPayLiveRollingFloor() {
         var pool = new Mempool(new MempoolPolicy(),
-                new MempoolLimits(64, 101000, 200, 1000, 100), java.time.Clock.systemUTC());
-        var evicted = tx(List.of(FUND), 2, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000);
+                new MempoolLimits(64, 101000, 2200, 1000, 100), java.time.Clock.systemUTC());
+        long[] outputs = new long[32]; Arrays.fill(outputs,1000);
+        var evicted = tx(List.of(FUND), 2, outputs);
         pool.reconcile(CONTEXT, COINS, Set.of(), List.of(evicted));
         assertTrue(pool.isEmpty());
         long floor = pool.minimumFeeRate();

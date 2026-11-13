@@ -20,6 +20,251 @@ import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class NodeValidationServiceTest {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(ints = {0, 1, 2, 3, 4, 5, 6})
+    void graphQueriesDoNotReadUnrelatedTransactionInputs(int mode) {
+        var fund = new OutPoint(Hash256.fromDisplayHex("45".repeat(32)), new UInt32(0));
+        var otherFund = new OutPoint(Hash256.fromDisplayHex("46".repeat(32)), new UInt32(0));
+        var parent = org.mockito.Mockito.spy(spend(fund, 90_000));
+        var child = org.mockito.Mockito.spy(spend(new OutPoint(parent.txId(), new UInt32(0)), 80_000));
+        var unrelated = org.mockito.Mockito.spy(spend(otherFund, 90_000));
+        var pool = new Mempool();
+        var context = new ru.bitcoin.node.mempool.MempoolValidationContext(200, 1_800_000_000L, h -> 1_700_000_000L);
+        ru.bitcoin.node.consensus.transaction.UtxoView coins = point -> point.equals(fund) || point.equals(otherFund)
+                ? Optional.of(new ru.bitcoin.node.consensus.transaction.UtxoEntry(100_000, SCRIPT, 0, false)) : Optional.empty();
+        pool.admit(parent, context, coins); pool.admit(child, context, coins); pool.admit(unrelated, context, coins);
+        org.mockito.Mockito.clearInvocations(unrelated);
+        switch (mode) {
+            case 0 -> assertEquals(Set.of(parent.txId()), pool.graphView(child.txId()).orElseThrow().parents());
+            case 1 -> assertEquals(Set.of(parent.txId()), new HashSet<>(pool.ancestorQuery(child.txId()).orElseThrow().txIds()));
+            case 2 -> assertEquals(Set.of(child.txId()), new HashSet<>(pool.descendantQuery(parent.txId()).orElseThrow().txIds()));
+            case 3 -> assertEquals(2, pool.cluster(child.txId()).orElseThrow().transactionCount());
+            case 4 -> assertEquals(Set.of(parent.txId()), new HashSet<>(pool.ancestors(child.txId()).orElseThrow()));
+            case 5 -> assertEquals(Set.of(child.txId()), new HashSet<>(pool.descendants(parent.txId()).orElseThrow()));
+            case 6 -> {
+                org.mockito.Mockito.clearInvocations(parent, child);
+                pool.graphViews(List.of(parent.txId()));
+                long single = graphInputCalls(parent, child);
+                org.mockito.Mockito.clearInvocations(parent, child);
+                pool.graphViews(List.of(parent.txId(), child.txId()));
+                assertEquals(single, graphInputCalls(parent, child), "A component must be linearized once per batch");
+            }
+            default -> throw new AssertionError(mode);
+        }
+        org.mockito.Mockito.verify(unrelated, org.mockito.Mockito.never()).inputs();
+    }
+
+    private static long graphInputCalls(Transaction... transactions) {
+        return Arrays.stream(transactions).mapToLong(transaction -> org.mockito.Mockito.mockingDetails(transaction)
+                .getInvocations().stream().filter(call -> call.getMethod().getName().equals("inputs")).count()).sum();
+    }
+    @Test void knownPackageCommitDoesNotRescanUnrelatedTransactionInputs() {
+        var firstFund = new OutPoint(Hash256.fromDisplayHex("43".repeat(32)), new UInt32(0));
+        var otherFund = new OutPoint(Hash256.fromDisplayHex("44".repeat(32)), new UInt32(0));
+        var known = spend(firstFund, 90_000);
+        var unrelated = org.mockito.Mockito.spy(spend(otherFund, 90_000));
+        var pool = new Mempool();
+        var context = new ru.bitcoin.node.mempool.MempoolValidationContext(200, 1_800_000_000L, h -> 1_700_000_000L);
+        ru.bitcoin.node.consensus.transaction.UtxoView coins = point -> point.equals(firstFund) || point.equals(otherFund)
+                ? Optional.of(new ru.bitcoin.node.consensus.transaction.UtxoEntry(100_000, SCRIPT, 0, false)) : Optional.empty();
+        var accepted = pool.admit(known, context, coins); pool.admit(unrelated, context, coins);
+        var before = pool.detailedSnapshot();
+        org.mockito.Mockito.clearInvocations(unrelated);
+        assertEquals(List.of(accepted), pool.admitPackage(List.of(known), context, coins));
+        org.mockito.Mockito.verify(unrelated, org.mockito.Mockito.never()).inputs();
+        assertEquals(before, pool.detailedSnapshot());
+    }
+    @Test void knownTransactionProbeDoesNotRescanInputsWhileCloningPool() {
+        var fund = new OutPoint(Hash256.fromDisplayHex("42".repeat(32)), new UInt32(0));
+        var transaction = org.mockito.Mockito.spy(spend(fund, 90_000));
+        var pool = new Mempool();
+        var context = new ru.bitcoin.node.mempool.MempoolValidationContext(200, 1_800_000_000L, h -> 1_700_000_000L);
+        ru.bitcoin.node.consensus.transaction.UtxoView coins = point -> point.equals(fund)
+                ? Optional.of(new ru.bitcoin.node.consensus.transaction.UtxoEntry(100_000, SCRIPT, 0, false)) : Optional.empty();
+        pool.admit(transaction, context, coins);
+        transaction.wtxId();
+        var before = pool.detailedSnapshot();
+        org.mockito.Mockito.clearInvocations(transaction);
+        assertEquals("txn-already-in-mempool", pool.testAccept(List.of(transaction), context, coins).rejectReason());
+        org.mockito.Mockito.verify(transaction, org.mockito.Mockito.never()).inputs();
+        assertEquals(before, pool.detailedSnapshot());
+    }
+    @Test void unchangedGraphReadsDoNotRevisitTransactionInputs() {
+        var fund = new OutPoint(Hash256.fromDisplayHex("41".repeat(32)), new UInt32(0));
+        var transaction = org.mockito.Mockito.spy(spend(fund, 90_000));
+        var pool = new Mempool();
+        pool.admit(transaction, new ru.bitcoin.node.mempool.MempoolValidationContext(200, 1_800_000_000L, h -> 1_700_000_000L),
+                point -> point.equals(fund) ? Optional.of(new ru.bitcoin.node.consensus.transaction.UtxoEntry(100_000, SCRIPT, 0, false)) : Optional.empty());
+        var diagram = pool.feeRateDiagram();
+        org.mockito.Mockito.clearInvocations(transaction);
+        assertEquals(diagram, pool.feeRateDiagram());
+        pool.miningSnapshot();
+        org.mockito.Mockito.verify(transaction, org.mockito.Mockito.never()).inputs();
+    }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(ints = {0, 1, 2, 3, 4, 5, 6, 7, 8})
+    void broadcastEarlyExitDoesNotExpireExistingGraph(int mode) {
+        var seconds = new java.util.concurrent.atomic.AtomicLong(1000);
+        var clock = new java.time.Clock() {
+            @Override public java.time.ZoneId getZone() { return java.time.ZoneOffset.UTC; }
+            @Override public java.time.Clock withZone(java.time.ZoneId zone) { Objects.requireNonNull(zone); return this; }
+            @Override public java.time.Instant instant() { return java.time.Instant.ofEpochSecond(seconds.get()); }
+        };
+        var limits = new ru.bitcoin.node.mempool.MempoolLimits(64, 101000, 300000000, 10, 100);
+        var pool = new Mempool(new ru.bitcoin.node.mempool.MempoolPolicy(), limits, clock);
+        try (var db = new RocksDbDatabase(directory)) {
+            var service = new NodeValidationService(db, PARAMS, () -> 1_800_000_000L, pool);
+            var coins = new RocksDbUtxoStore(db);
+            var fund = new OutPoint(Hash256.fromDisplayHex("38".repeat(32)), new UInt32(0));
+            coins.save(fund, new StoredUtxo(100_000, SCRIPT, 0, false));
+            var parent = spend(fund, 90_000);
+            var parentOutput = new OutPoint(parent.txId(), new UInt32(0));
+            var child = spend(parentOutput, 80_000);
+            service.admitForBroadcast(parent, 0);
+            service.admitForBroadcast(child, 0);
+            var snapshot = pool.detailedSnapshot();
+            var unbroadcast = pool.unbroadcastTransactions();
+            long floor = pool.minimumFeeRate();
+            long revision = service.revision();
+            seconds.set(1020); // Both entries are old enough to expire, but no commit is requested.
+            if (mode == 0) {
+                var replacement = spend(fund, 70_000);
+                var rejected = assertThrows(NodeValidationService.BroadcastRejection.class,
+                        () -> service.admitForBroadcast(replacement, 1));
+                assertEquals(NodeValidationService.BroadcastRejectionReason.MAX_FEE, rejected.reason());
+            } else if (mode == 1) {
+                assertFalse(service.admitForBroadcast(parent, 1).newlyAccepted());
+            } else if (mode == 2) {
+                var confirmed = spend(new OutPoint(Hash256.fromDisplayHex("39".repeat(32)), new UInt32(0)), 90_000);
+                coins.save(new OutPoint(confirmed.txId(), new UInt32(0)), new StoredUtxo(90_000, SCRIPT, 0, false));
+                var rejected = assertThrows(NodeValidationService.BroadcastRejection.class,
+                        () -> service.admitForBroadcast(confirmed, 1));
+                assertEquals(NodeValidationService.BroadcastRejectionReason.CONFIRMED, rejected.reason());
+            } else if(mode==3 || mode==4) {
+                var missing = spend(new OutPoint(Hash256.fromDisplayHex("40".repeat(32)), new UInt32(0)), 90_000);
+                var rejected = assertThrows(ru.bitcoin.node.mempool.MempoolAdmissionException.class,
+                        () -> service.admitForBroadcast(missing, mode==3?1:0));
+                assertTrue(rejected.isMissingInputs());
+            } else if(mode==5) {
+                var bad=new Transaction(2,parent.inputs(),List.of(new TxOut(-1,SCRIPT)),parent.lockTime());
+                assertThrows(ru.bitcoin.node.consensus.transaction.TransactionValidationException.class,
+                        ()->service.admitForBroadcast(bad,0));
+            } else if(mode==6) {
+                var input=parent.inputs().getFirst();
+                var bad=new Transaction(2,List.of(new TxIn(input.previousOutput(),new byte[]{1,0},input.sequence())),List.of(new TxOut(70000,SCRIPT)),parent.lockTime());
+                assertThrows(ru.bitcoin.node.script.ScriptExecutionException.class,()->service.admitForBroadcast(bad,0));
+            } else if(mode==7) {
+                var bad=new Transaction(2,parent.inputs(),List.of(new TxOut(-1,SCRIPT)),parent.lockTime());
+                assertEquals("transaction failed",service.submitPackage(List.of(bad),0).packageMessage());
+            } else {
+                assertEquals(2,service.mempoolEntries().size());
+                service.mempoolSnapshot();service.detailedMempoolSnapshot();
+                service.mempoolEntry(parent.txId());service.mempoolAncestorQuery(child.txId());
+                service.mempoolDescendantQuery(parent.txId());service.mempoolGraphEntries(List.of(parent.txId(),child.txId()));
+                service.mempoolCluster(parent.txId());service.mempoolGraphEntry(child.txId());
+                service.mempoolFeeRateDiagram();service.feeFilterRate();
+            }
+            assertEquals(revision,service.revision(),"Read/early rejection must not publish a mempool change");
+            assertEquals(snapshot, pool.detailedSnapshot(), "Early broadcast result must preserve entries, graph and sequence");
+            assertEquals(unbroadcast, pool.unbroadcastTransactions());
+            assertEquals(floor, pool.minimumFeeRate());
+            assertEquals(parent.txId(), pool.spendingTransaction(fund).orElseThrow().txId());
+            assertEquals(child.txId(), pool.spendingTransaction(parentOutput).orElseThrow().txId());
+            assertEquals(2, pool.expire(), "Explicit expiry must still remove the old family");
+        }
+    }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void broadcastPreflightFailureStopsWithoutAdmissionOrUnbroadcast(boolean internalFailure) {
+        try (var db = new RocksDbDatabase(directory)) {
+            var service = org.mockito.Mockito.spy(new NodeValidationService(db, PARAMS, () -> 1_800_000_000L, new Mempool()));
+            var tx = spend(new OutPoint(Hash256.fromDisplayHex("36".repeat(32)), new UInt32(0)), 90_000);
+            RuntimeException failure = internalFailure ? new IllegalStateException("preflight storage failure")
+                    : new ru.bitcoin.node.mempool.MempoolAdmissionException("preflight policy failure");
+            org.mockito.Mockito.doThrow(failure).when(service).testBroadcastTransaction(tx);
+            assertSame(failure, assertThrows(RuntimeException.class, () -> service.admitForBroadcast(tx, 1_000_000)));
+            org.mockito.Mockito.verify(service, org.mockito.Mockito.never()).admit(org.mockito.ArgumentMatchers.any());
+            org.mockito.Mockito.verify(service, org.mockito.Mockito.never()).markMempoolUnbroadcast(org.mockito.ArgumentMatchers.any());
+            assertTrue(service.mempoolEntries().isEmpty());
+            assertEquals(0, service.unbroadcastMempoolCount());
+        }
+    }
+
+    @Test void broadcastProbePreservesPoolAndDoesNotRegisterUnbroadcast() {
+        try (var db = new RocksDbDatabase(directory)) {
+            var service = new NodeValidationService(db, PARAMS, () -> 1_800_000_000L, new Mempool());
+            var fund = new OutPoint(Hash256.fromDisplayHex("37".repeat(32)), new UInt32(0));
+            new RocksDbUtxoStore(db).save(fund, new StoredUtxo(100_000, SCRIPT, 0, false));
+            var tx = spend(fund, 90_000);
+            assertEquals(tx.txId(), service.testBroadcastTransaction(tx).transaction().txId());
+            assertTrue(service.mempoolEntries().isEmpty());
+            assertEquals(0, service.unbroadcastMempoolCount());
+            assertTrue(service.admitForBroadcast(tx, 1_000_000).newlyAccepted());
+        }
+    }
+    @Test
+    void broadcastKeepsChainMonitorFromFeeProbeThroughCommit() throws Exception {
+        try (var db = new RocksDbDatabase(directory)) {
+            var service = org.mockito.Mockito.spy(new NodeValidationService(db, PARAMS, () -> 1_800_000_000L, new Mempool()));
+            var fund = new OutPoint(Hash256.fromDisplayHex("35".repeat(32)), new UInt32(0));
+            new RocksDbUtxoStore(db).save(fund, new StoredUtxo(100_000, SCRIPT, 0, false));
+            var tx = spend(fund, 90_000);
+            var entered = new java.util.concurrent.CountDownLatch(1);
+            var release = new java.util.concurrent.CountDownLatch(1);
+            var monitorField = NodeValidationService.class.getDeclaredField("chain");
+            monitorField.setAccessible(true);
+            Object chainMonitor = monitorField.get(service);
+            org.mockito.Mockito.doAnswer(invocation -> {
+                assertTrue(Thread.holdsLock(chainMonitor), "Admission must retain the outer broadcast monitor");
+                return invocation.callRealMethod();
+            }).when(service).admit(org.mockito.ArgumentMatchers.any());
+            org.mockito.Mockito.doAnswer(invocation -> {
+                assertTrue(Thread.holdsLock(chainMonitor), "Unbroadcast registration must be in the same critical section");
+                return invocation.callRealMethod();
+            }).when(service).markMempoolUnbroadcast(org.mockito.ArgumentMatchers.any());
+            org.mockito.Mockito.doAnswer(invocation -> {
+                entered.countDown();
+                assertTrue(release.await(10, java.util.concurrent.TimeUnit.SECONDS));
+                return invocation.callRealMethod();
+            }).when(service).testBroadcastTransaction(org.mockito.ArgumentMatchers.any());
+            var result = new java.util.concurrent.CompletableFuture<NodeValidationService.BroadcastAdmission>();
+            Thread broadcaster = Thread.ofPlatform().start(() -> {
+                try { result.complete(service.admitForBroadcast(tx, 1_000_000)); }
+                catch (Throwable failure) { result.completeExceptionally(failure); }
+            });
+            var mutation = new java.util.concurrent.CompletableFuture<Void>();
+            Thread contender = null;
+            try {
+                assertTrue(entered.await(5, java.util.concurrent.TimeUnit.SECONDS));
+                contender = Thread.ofPlatform().start(() -> {
+                    try { service.prioritiseTransaction(tx.txId(), 123); mutation.complete(null); }
+                    catch (Throwable failure) { mutation.completeExceptionally(failure); }
+                });
+                int monitor = System.identityHashCode(chainMonitor);
+                var threads = java.lang.management.ManagementFactory.getThreadMXBean();
+                java.lang.management.ThreadInfo info;
+                long end = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+                do {
+                    info = threads.getThreadInfo(contender.threadId());
+                    if (info != null && info.getThreadState() == Thread.State.BLOCKED
+                            && info.getLockInfo().getIdentityHashCode() == monitor) break;
+                    Thread.sleep(1);
+                } while (System.nanoTime() < end && !mutation.isDone());
+                assertNotNull(info);
+                assertEquals(Thread.State.BLOCKED, info.getThreadState());
+                assertEquals(monitor, info.getLockInfo().getIdentityHashCode());
+                assertEquals(broadcaster.threadId(), info.getLockOwnerId());
+            } finally {
+                release.countDown();
+                broadcaster.join(5000);
+                if (contender != null) contender.join(5000);
+            }
+            assertTrue(result.get(5, java.util.concurrent.TimeUnit.SECONDS).newlyAccepted());
+            mutation.get(5, java.util.concurrent.TimeUnit.SECONDS);
+            assertEquals(10_123, service.mempoolEntry(tx.txId()).orElseThrow().modifiedFee());
+            assertFalse(service.admitForBroadcast(tx, 1).newlyAccepted(), "Known txid bypasses cap inside the same monitor");
+        }
+    }
 
     @Test void locatorUsesFirstMatchAndGenesisFallbackWithoutSortingPeerInput() {
         try (var db = new RocksDbDatabase(directory)) {
