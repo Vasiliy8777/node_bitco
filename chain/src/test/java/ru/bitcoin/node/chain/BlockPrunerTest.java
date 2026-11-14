@@ -35,7 +35,8 @@ class BlockPrunerTest {
                 blocks.save(chain[i]); indexes.save(BlockIndexStorageMapper.toStored(parent));
             }
             var result = new BlockPruner(db, 1L, 2).prune(idx[3]);
-            assertEquals(2, result.blocksPruned());
+            assertEquals(3, result.blocksPruned());
+            assertTrue(blocks.find(genesisBlock.hash()).isEmpty());
             assertTrue(blocks.find(chain[0].hash()).isEmpty());
             assertTrue(blocks.find(chain[1].hash()).isEmpty());
             assertTrue(blocks.find(chain[2].hash()).isPresent());

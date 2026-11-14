@@ -206,6 +206,13 @@ public final class NodeValidationService implements AutoCloseable {
         }
     }
 
+    public boolean isPrunedBlock(Hash256 hash) {
+        synchronized (chain) {
+            return pruneState.hasPruned() && lookup.find(hash) != null && blocks.find(hash).isEmpty()
+                    && (activeBlockInfo(hash).isPresent() || blocks.transactionCount(hash).orElse(0) > 0);
+        }
+    }
+
     private long lowestAvailableActiveHeight() {
         BlockIndex tip = chain.activeTip();
         long highestPruned = pruneState.highestPrunedHeight().orElse(-1L);
@@ -278,6 +285,19 @@ public final class NodeValidationService implements AutoCloseable {
             ));
         }
     }
+
+    /** Known headers and side branches are queryable even when they are not active. */
+    public Optional<ActiveBlockInfo> blockInfo(Hash256 hash) {
+        synchronized (chain) {
+            var active = activeBlockInfo(hash);
+            if (active.isPresent()) return active;
+            var known = lookup.find(hash);
+            return known == null ? Optional.empty() : Optional.of(new ActiveBlockInfo(known, null, -1));
+        }
+    }
+
+    public long blockMedianTimePast(BlockIndex index) { return MedianTimePast.calculate(index, lookup); }
+    public long blockTransactionCount(Hash256 hash) { synchronized (chain) { return blocks.transactionCount(hash).orElse(0); } }
 
     public Optional<ActiveBlockInfo> activeBlockInfo(long height) {
         synchronized (chain) {
@@ -561,7 +581,7 @@ public final class NodeValidationService implements AutoCloseable {
     public Optional<RpcBlockView> rpcBlockView(Hash256 hash, boolean includeUndo) {
         Objects.requireNonNull(hash, "hash");
         synchronized (chain) {
-            var info = activeBlockInfo(hash);
+            var info = blockInfo(hash);
             if (info.isEmpty()) return Optional.empty();
             var block = blocks.find(hash);
             var undo = includeUndo && block.isPresent() ? undos.find(hash)
@@ -1364,6 +1384,52 @@ public final class NodeValidationService implements AutoCloseable {
     }
 
     public record IndexedTransaction(Transaction transaction, ActiveBlockInfo blockInfo) {}
+
+    public enum ProofFailure { BLOCK_NOT_FOUND, TRANSACTION_NOT_IN_BLOCK, TRANSACTIONS_MISSING, PRUNED, NOT_DOWNLOADED }
+    public static final class TransactionProofException extends RuntimeException {
+        private final ProofFailure failure;
+        TransactionProofException(ProofFailure failure) { super(failure.name()); this.failure = failure; }
+        public ProofFailure failure() { return failure; }
+    }
+
+    /** Resolve, read and construct the proof within one coherent chain snapshot. */
+    public byte[] transactionProof(Set<Hash256> txids, Hash256 requestedBlock) {
+        if (txids.isEmpty()) throw new IllegalArgumentException("Empty transaction set");
+        synchronized (chain) {
+            var ordered = txids.stream().sorted(Hash256::compareRawBytes).toList();
+            BlockIndex index = requestedBlock == null ? null : lookup.find(requestedBlock);
+            if (requestedBlock != null && index == null) throw new TransactionProofException(ProofFailure.BLOCK_NOT_FOUND);
+            if (requestedBlock == null) {
+                for (var txid : ordered) {
+                    var coin = utxos.findAnyByTransaction(txid);
+                    if (coin.isPresent()) {
+                        index = activeAncestors.at(chain.activeTip(), coin.orElseThrow().height(), lookup);
+                        break;
+                    }
+                }
+                if (index == null) index = indexedTransaction(ordered.getFirst()).map(tx -> tx.blockInfo().index()).orElse(null);
+                if (index == null) throw new TransactionProofException(ProofFailure.TRANSACTION_NOT_IN_BLOCK);
+            }
+            var block = blocks.find(index.hash());
+            if (block.isEmpty()) throw new TransactionProofException(isPrunedActiveBlock(index.hash())
+                    || pruneState.hasPruned() && blocks.transactionCount(index.hash()).orElse(0) > 0 ? ProofFailure.PRUNED : ProofFailure.NOT_DOWNLOADED);
+            long matches = block.orElseThrow().transactions().stream().filter(tx -> txids.contains(tx.txId())).count();
+            if (matches != txids.size()) throw new TransactionProofException(ProofFailure.TRANSACTIONS_MISSING);
+            return ru.bitcoin.node.protocol.block.MerkleBlockProof.create(block.orElseThrow(), txids);
+        }
+    }
+
+    public List<Hash256> verifyTransactionProof(ru.bitcoin.node.protocol.block.MerkleBlockProof.Extracted proof) {
+        synchronized (chain) {
+            if (!proof.valid()) return List.of();
+            var info = activeBlockInfo(proof.header().hash());
+            if (info.isEmpty()) throw new TransactionProofException(ProofFailure.BLOCK_NOT_FOUND);
+            var count = blocks.transactionCount(proof.header().hash());
+            if (count.isEmpty()) throw new IllegalStateException("Transaction count unavailable for legacy pruned block");
+            if (count.getAsLong() == 0) throw new TransactionProofException(ProofFailure.BLOCK_NOT_FOUND);
+            return count.getAsLong() == proof.transactionCount() ? proof.matches() : List.of();
+        }
+    }
 
     public boolean txOutSpenderIndexEnabled() { return txOutSpenderIndexEnabled; }
 

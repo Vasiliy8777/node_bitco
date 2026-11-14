@@ -24,11 +24,6 @@ public final class ChainHeaderValidator {
         return minimum;
     }
 
-    private static void validateTimestamp(BlockHeader header, BlockIndex parent, long mtp, NetworkParameters parameters) {
-        if (header.timestamp().value() < minimumTimestamp(parent, mtp, parameters))
-            throw new BlockHeaderValidationException("Block timestamp violates MTP or BIP94 timewarp bound");
-    }
-
     /** Shared difficulty calculation for a candidate extending this parent. */
     public static UInt32 nextBits(BlockIndex parent, BlockIndexLookup lookup,
                                   NetworkParameters parameters, UInt32 timestamp) {
@@ -96,11 +91,6 @@ public final class ChainHeaderValidator {
                         parent.height(),
                         1L
                 );
-        validateBlockVersion(
-                header,
-                nextHeight,
-                parameters
-        );
 
         long medianTimePast =
                 MedianTimePast.calculate(
@@ -108,7 +98,6 @@ public final class ChainHeaderValidator {
                         lookup
                 );
 
-        validateTimestamp(header, parent, medianTimePast, parameters);
         UInt32 expectedBits =
                 calculateExpectedBits(
                         nextHeight,
@@ -123,8 +112,9 @@ public final class ChainHeaderValidator {
                 expectedBits,
                 medianTimePast,
                 adjustedTime.currentTimeSeconds(),
-                parameters
+                parameters, true, minimumTimestamp(parent, medianTimePast, parameters)
         );
+        validateBlockVersion(header, nextHeight, parameters);
     }
 
     /** Contextual BIP23 proposal check: identical to normal header validation except PoW. */
@@ -140,12 +130,11 @@ public final class ChainHeaderValidator {
         if (!header.previousBlockHash().equals(parent.hash()))
             throw new IllegalArgumentException("Header previous block hash does not match parent");
         long nextHeight = Math.addExact(parent.height(), 1L);
-        validateBlockVersion(header, nextHeight, parameters);
         long medianTimePast = MedianTimePast.calculate(parent, lookup);
-        validateTimestamp(header, parent, medianTimePast, parameters);
         UInt32 expectedBits = calculateExpectedBits(nextHeight, header, parent, lookup, parameters);
-        BlockHeaderValidator.validateWithoutProofOfWork(
-                header, expectedBits, medianTimePast, adjustedTime.currentTimeSeconds(), parameters);
+        BlockHeaderValidator.validate(
+                header, expectedBits, medianTimePast, adjustedTime.currentTimeSeconds(), parameters, false, minimumTimestamp(parent, medianTimePast, parameters));
+        validateBlockVersion(header, nextHeight, parameters);
     }
 
     static UInt32 calculateExpectedBits(
@@ -332,7 +321,7 @@ public final class ChainHeaderValidator {
                 && header.version() < 2) {
 
             throw new BlockHeaderValidationException(
-                    "Block version must be >= 2 after BIP34 activation"
+                    "Block version must be >= 2 after BIP34 activation", String.format(java.util.Locale.ROOT, "bad-version(0x%08x)", header.version())
             );
         }
 
@@ -345,7 +334,7 @@ public final class ChainHeaderValidator {
                 && header.version() < 3) {
 
             throw new BlockHeaderValidationException(
-                    "Block version must be >= 3 after BIP66 activation"
+                    "Block version must be >= 3 after BIP66 activation", String.format(java.util.Locale.ROOT, "bad-version(0x%08x)", header.version())
             );
         }
 
@@ -358,7 +347,7 @@ public final class ChainHeaderValidator {
                 && header.version() < 4) {
 
             throw new BlockHeaderValidationException(
-                    "Block version must be >= 4 after BIP65 activation"
+                    "Block version must be >= 4 after BIP65 activation", String.format(java.util.Locale.ROOT, "bad-version(0x%08x)", header.version())
             );
         }
     }

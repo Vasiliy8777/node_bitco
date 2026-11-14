@@ -273,6 +273,19 @@ public final class NodeRpcServer implements AutoCloseable {
                 yield mining.handleBlockTemplate((Map<String, Object>) params.getFirst());
             }
             case "submitblock" -> mining.submitBlock(stringParam(params));
+            case "submitheader" -> {
+                String hex = (String) params.getFirst();
+                final ru.bitcoin.node.protocol.block.BlockHeader header;
+                try {
+                    if (hex.length() < 160 || !hex.matches("(?:[0-9a-fA-F]{2})+")) throw new IllegalArgumentException();
+                    header = ru.bitcoin.node.protocol.serialization.BlockHeaderParser.parse(new ru.bitcoin.node.protocol.serialization.BitcoinReader(HexFormat.of().parseHex(hex)));
+                } catch (IllegalArgumentException | IndexOutOfBoundsException error) { throw new RpcException(-22, "Block header decode failed"); }
+                if (validation.storedBlockIndexLookup().find(header.previousBlockHash()) == null)
+                    throw new RpcException(-25, "Must submit previous header (" + header.previousBlockHash().toDisplayHex() + ") first");
+                try { validation.processHeaders(sync.headerSyncService(), new ru.bitcoin.node.p2p.message.HeadersMessage(List.of(header))); }
+                catch (ru.bitcoin.node.consensus.block.BlockHeaderValidationException error) { throw new RpcException(-25, error.rejectReason()); }
+                yield null;
+            }
             case "sendrawtransaction" -> {
                 if (params.isEmpty() || params.size() > 3 || !(params.getFirst() instanceof String raw))
                     throw new RpcException(-32602, "Expected raw transaction and optional maxfeerate/maxburnamount");
@@ -444,62 +457,103 @@ public final class NodeRpcServer implements AutoCloseable {
                     throw new RpcException(-26, exception.getMessage());
                 }
             }
+            case "createrawtransaction" -> HexFormat.of().formatHex(TransactionSerializer.serialize(
+                    TransactionCreation.construct(params, validation.networkParameters())));
+            case "createmultisig" -> MultisigCreation.create(params, validation.networkParameters());
+            case "signmessagewithprivkey" -> MessageSignatures.sign((String) params.get(0), (String) params.get(1), validation.networkParameters());
+            case "verifymessage" -> MessageSignatures.verify((String) params.get(0), (String) params.get(1), (String) params.get(2), validation.networkParameters());
+            case "decodepsbt" -> PsbtJson.decode(PsbtDocument.parse((String) params.getFirst()), validation.networkParameters());
+            case "combinepsbt" -> PsbtCodec.combine((List<?>) params.getFirst());
+            case "joinpsbts" -> PsbtCodec.join((List<?>) params.getFirst());
+            case "finalizepsbt" -> PsbtFinalizer.finish((String) params.getFirst(),
+                    !Boolean.FALSE.equals(TransactionCreation.optional(params,1)));
+            case "analyzepsbt" -> PsbtAnalyzer.analyze((String) params.getFirst());
+            case "utxoupdatepsbt" -> PsbtUpdater.update((String)params.getFirst(),
+                    TransactionCreation.optional(params,1) instanceof List<?> descriptors?descriptors:List.of(),
+                    validation.networkParameters(),new PsbtUpdater.Coins(){
+                        public java.util.Optional<Transaction> transaction(Hash256 txid){
+                            var indexed=validation.indexedTransaction(txid).map(ru.bitcoin.node.app.NodeValidationService.IndexedTransaction::transaction);
+                            return indexed.isPresent()?indexed:validation.mempoolEntry(txid).map(ru.bitcoin.node.mempool.MempoolEntry::transaction);
+                        }
+                        public java.util.Optional<ru.bitcoin.node.protocol.transaction.TxOut> coin(ru.bitcoin.node.protocol.transaction.OutPoint point){
+                            return validation.txOut(point.transactionId(),point.outputIndex().value(),true)
+                                    .map(coin->new ru.bitcoin.node.protocol.transaction.TxOut(coin.amount(),coin.scriptPubKey()));
+                        }
+                    });
+            case "getdescriptorinfo" -> DescriptorRpc.info((String) params.getFirst(),validation.networkParameters());
+            case "deriveaddresses" -> DescriptorRpc.derive(params,validation.networkParameters());
+            case "decodescript" -> ScriptDecoding.decode((String)params.getFirst(),validation.networkParameters());
+            case "validateaddress" -> AddressValidation.validate((String)params.getFirst(),validation.networkParameters());
+            case "createpsbt" -> PsbtCreator.create(TransactionCreation.construct(params, validation.networkParameters()),
+                    TransactionCreation.optional(params, 5));
+            case "converttopsbt" -> {
+                Transaction transaction;
+                try { transaction = decodeTransaction((String) params.getFirst(), (Boolean) TransactionCreation.optional(params, 2)); }
+                catch (IllegalArgumentException | java.nio.BufferUnderflowException invalid) { throw new RpcException(-22, "TX decode failed"); }
+                boolean permit = Boolean.TRUE.equals(TransactionCreation.optional(params, 1));
+                var inputs = new ArrayList<ru.bitcoin.node.protocol.transaction.TxIn>();
+                for (var input : transaction.inputs()) {
+                    if (!permit && (input.scriptSigLength() != 0 || input.witness().size() != 0))
+                        throw new RpcException(-22, "Inputs must not have scriptSigs and scriptWitnesses");
+                    inputs.add(new ru.bitcoin.node.protocol.transaction.TxIn(input.previousOutput(), new byte[0], input.sequence()));
+                }
+                transaction = new Transaction(transaction.version(), inputs, transaction.outputs(), transaction.lockTime());
+                yield PsbtCreator.create(transaction, TransactionCreation.optional(params, 3));
+            }
             case "decoderawtransaction" -> {
-                if (params.size() != 1 || !(params.getFirst() instanceof String raw))
-                    throw new RpcException(-32602, "Expected one raw transaction hex string");
+                String raw = (String) params.getFirst();
                 try {
-                    Transaction transaction = TransactionParser.parse(HexFormat.of().parseHex(raw));
-                    yield transactionJson(transaction, null, null);
+                    Boolean witness = params.size() < 2 || params.get(1) == null ? null : (Boolean) params.get(1);
+                    Transaction transaction = decodeTransaction(raw, witness);
+                    var json = transactionJson(transaction, null, null); json.remove("hex");
+                    yield json;
                 } catch (IllegalArgumentException | java.nio.BufferUnderflowException exception) {
                     throw new RpcException(-22, "TX decode failed");
                 }
             }
             case "getrawtransaction" -> {
-                if (params.isEmpty() || params.size() > 3 || !(params.getFirst() instanceof String txidText))
-                    throw new RpcException(-32602, "Expected txid, optional verbosity and optional blockhash");
-                Hash256 txid = parseHash(txidText);
+                Hash256 txid = waitHash((String) params.getFirst(), "parameter 1");
+                if (txid.equals(validation.storedBlockIndexLookup().find(validation.networkParameters().genesisBlockHash()).header().merkleRoot()))
+                    throw new RpcException(-5, "The genesis block coinbase is not considered an ordinary transaction and cannot be retrieved");
                 int verbosity = intOrBooleanVerbosity(params, 1, 0);
-                if (verbosity < 0 || verbosity > 1)
-                    throw new RpcException(-8, "Verbosity must be 0 or 1");
-
                 Transaction transaction;
                 NodeValidationService.ActiveBlockInfo blockInfo = null;
-
+                NodeValidationService.RpcBlockView view = null;
+                Boolean inActiveChain = null;
                 if (params.size() >= 3 && params.get(2) != null) {
-                    if (!(params.get(2) instanceof String blockHashText))
-                        throw new RpcException(-32602, "blockhash must be a string");
-                    Hash256 blockHash = parseHash(blockHashText);
-                    blockInfo = validation.activeBlockInfo(blockHash)
+                    Hash256 blockHash = waitHash((String) params.get(2), "parameter 3");
+                    view = validation.rpcBlockView(blockHash, verbosity > 1)
                             .orElseThrow(() -> new RpcException(-5, "Block hash not found"));
-                    if (validation.findBlock(blockHash).isEmpty()) {
-                        if (validation.isPrunedActiveBlock(blockHash))
-                            throw new RpcException(-1, "Block not available (pruned data)");
-                        throw new RpcException(-1, "Block not available");
-                    }
-                    transaction = validation.transactionInActiveBlock(txid, blockHash)
-                            .orElseThrow(() -> new RpcException(-5, "No such transaction found in the provided block"));
+                    blockInfo = view.info();
+                    if (view.block().isEmpty()) throw new RpcException(-1, "Block not available");
+                    transaction = view.block().orElseThrow().transactions().stream().filter(tx -> tx.txId().equals(txid)).findFirst()
+                            .orElseThrow(() -> new RpcException(-5, "No such transaction found in the provided block. Use gettransaction for wallet transactions."));
+                    inActiveChain = blockInfo.confirmations() >= 0;
                 } else {
                     var mempool = validation.mempoolEntry(txid);
-                    if (mempool.isPresent()) {
-                        transaction = mempool.orElseThrow().transaction();
-                    } else {
+                    if (mempool.isPresent()) transaction = mempool.orElseThrow().transaction();
+                    else {
                         var indexed = validation.indexedTransaction(txid);
                         if (indexed.isEmpty()) {
-                            String message = validation.txIndexEnabled()
-                                    ? "No such mempool or blockchain transaction"
-                                    : "No such mempool transaction. Use -txindex or provide a block hash to query blockchain transactions";
-                            throw new RpcException(-5, message);
+                            String message = validation.txIndexEnabled() ? "No such mempool or blockchain transaction"
+                                    : "No such mempool transaction. Use -txindex or provide a block hash to enable blockchain transaction queries";
+                            throw new RpcException(-5, message + ". Use gettransaction for wallet transactions.");
                         }
-                        transaction = indexed.orElseThrow().transaction();
-                        blockInfo = indexed.orElseThrow().blockInfo();
+                        transaction = indexed.orElseThrow().transaction(); blockInfo = indexed.orElseThrow().blockInfo();
                     }
                 }
-
-                if (verbosity == 0)
-                    yield HexFormat.of().formatHex(TransactionSerializer.serialize(transaction));
-                var json = transactionJson(transaction, blockInfo, null);
-                if (blockInfo == null) validation.mempoolEntry(txid)
-                        .ifPresent(entry -> json.put("vsize_adjusted", entry.virtualSize()));
+                if (verbosity <= 0) yield HexFormat.of().formatHex(TransactionSerializer.serialize(transaction));
+                var json = transactionJson(transaction, blockInfo, inActiveChain);
+                if (blockInfo == null) validation.mempoolEntry(txid).ifPresent(entry -> json.put("vsize_adjusted", entry.virtualSize()));
+                if (verbosity > 1 && !transaction.isCoinbase() && blockInfo != null) {
+                    if (view == null) view = validation.rpcBlockView(blockInfo.index().hash(), true).orElse(null);
+                    if (view != null && view.undo().isPresent() && view.block().isPresent()) {
+                        var transactions = view.block().orElseThrow().transactions();
+                        for (int i = 1; i < transactions.size(); i++) if (transactions.get(i).txId().equals(txid)) {
+                            addUndo(transaction, json, view.undo().orElseThrow().transactions().get(i - 1).spentOutputs(), true); break;
+                        }
+                    }
+                }
                 yield json;
             }
             case "prioritisetransaction" -> {
@@ -662,7 +716,7 @@ public final class NodeRpcServer implements AutoCloseable {
                 result.put("bestblock", validation.activeTip().hash().toDisplayHex());
                 result.put("confirmations", coin.confirmations());
                 result.put("value", satoshisToBtc(coin.amount()));
-                result.put("scriptPubKey", Map.of("hex", HexFormat.of().formatHex(coin.scriptPubKey())));
+                result.put("scriptPubKey", ScriptJson.output(coin.scriptPubKey(), validation.networkParameters()));
                 result.put("coinbase", coin.coinbase());
                 yield result;
             }
@@ -729,12 +783,71 @@ public final class NodeRpcServer implements AutoCloseable {
                         .orElseThrow(() -> new RpcException(-8, "Block height out of range"))
                         .index().hash().toDisplayHex();
             }
+            case "getblockstats" -> {
+                Object target = params.getFirst();
+                Hash256 hash;
+                if (target instanceof Number) {
+                    int height = waitInteger(params, 0, 0);
+                    if (height < 0) throw new RpcException(-8, "Target block height " + height + " is negative");
+                    var info = validation.activeBlockInfo(height);
+                    if (info.isEmpty()) throw new RpcException(-8, "Target block height " + height + " after current tip " + validation.activeTip().height());
+                    hash = info.orElseThrow().index().hash();
+                } else {
+                    if (!(target instanceof String text)) throw new RpcException(-3, "JSON value of type " + jsonType(target) + " is not of expected type string");
+                    hash = waitHash(text, "hash_or_height");
+                }
+                if (validation.blockInfo(hash).isEmpty()) throw new RpcException(-5, "Block not found");
+                var selected = new TreeSet<String>((left, right) -> Arrays.compareUnsigned(left.getBytes(StandardCharsets.UTF_8), right.getBytes(StandardCharsets.UTF_8)));
+                if (params.size() > 1 && params.get(1) != null) for (Object key : (List<?>) params.get(1)) {
+                    if (!(key instanceof String text)) throw new RpcException(-3, "JSON value of type " + jsonType(key) + " is not of expected type string");
+                    selected.add(text);
+                }
+                var view = validation.rpcBlockView(hash, true).orElseThrow(() -> new RpcException(-5, "Block not found"));
+                if (view.block().isEmpty()) throw new RpcException(-1, validation.isPrunedBlock(hash)
+                        ? "Block not available (pruned data)" : "Block not available (not fully downloaded)");
+                yield BlockStatistics.calculate(view, validation.blockMedianTimePast(view.info().index()), validation.networkParameters(), selected);
+            }
+            case "gettxoutproof" -> {
+                var ids = (List<?>) params.getFirst();
+                if (ids.isEmpty()) throw new RpcException(-8, "Parameter 'txids' cannot be empty");
+                var wanted = new HashSet<Hash256>();
+                for (Object id : ids) {
+                    if (!(id instanceof String text)) throw new RpcException(-3, "JSON value of type " + (id == null ? "null" : id instanceof Boolean ? "bool" : id instanceof Number ? "number" : id instanceof List<?> ? "array" : "object") + " is not of expected type string");
+                    var hash = waitHash(text, "txid");
+                    if (!wanted.add(hash)) throw new RpcException(-8, "Invalid parameter, duplicated txid: " + text);
+                }
+                Hash256 block = params.size() < 2 || params.get(1) == null ? null : waitHash((String) params.get(1), "blockhash");
+                try { yield HexFormat.of().formatHex(validation.transactionProof(wanted, block)); }
+                catch (NodeValidationService.TransactionProofException error) {
+                    throw switch (error.failure()) {
+                        case BLOCK_NOT_FOUND -> new RpcException(-5, "Block not found");
+                        case TRANSACTION_NOT_IN_BLOCK -> new RpcException(-5, "Transaction not yet in block");
+                        case TRANSACTIONS_MISSING -> new RpcException(-5, "Not all transactions found in specified or retrieved block");
+                        case PRUNED -> new RpcException(-1, "Block not available (pruned data)");
+                        case NOT_DOWNLOADED -> new RpcException(-1, "Block not available (not fully downloaded)");
+                    };
+                }
+            }
+            case "verifytxoutproof" -> {
+                String hex = (String) params.getFirst();
+                if (hex.isEmpty() || !hex.matches("(?:[0-9a-fA-F]{2})+")) throw new RpcException(-8, "proof must be hexadecimal string (not '" + hex + "')");
+                final ru.bitcoin.node.protocol.block.MerkleBlockProof.Extracted proof;
+                try { proof = ru.bitcoin.node.protocol.block.MerkleBlockProof.extract(HexFormat.of().parseHex(hex)); }
+                catch (IllegalArgumentException | IndexOutOfBoundsException error) {
+                    String message = error.getMessage() != null && error.getMessage().contains("Non-canonical")
+                            ? "non-canonical ReadCompactSize()" : error.getMessage() != null && error.getMessage().contains("size too large")
+                            ? "ReadCompactSize(): size too large" : "SpanReader::read(): end of data";
+                    throw new RpcException(-1, message + ": iostream error");
+                }
+                try { yield validation.verifyTransactionProof(proof).stream().map(Hash256::toDisplayHex).toList(); }
+                catch (NodeValidationService.TransactionProofException error) { throw new RpcException(-5, "Block not found in chain"); }
+            }
             case "getblockheader" -> {
                 if (params.isEmpty() || params.size() > 2 || !(params.getFirst() instanceof String hashText))
                     throw new RpcException(-32602, "Expected block hash and optional verbosity");
                 boolean verbose = booleanParam(params, 1, true);
-                Hash256 hash = parseHash(hashText);
-                var info = validation.activeBlockInfo(hash)
+                Hash256 hash = waitHash(hashText, "hash");
+                var info = validation.blockInfo(hash)
                         .orElseThrow(() -> new RpcException(-5, "Block not found"));
                 if (!verbose) {
                     yield HexFormat.of().formatHex(BlockHeaderSerializer.serialize(info.index().header()));
@@ -744,20 +857,18 @@ public final class NodeRpcServer implements AutoCloseable {
             case "getblock" -> {
                 if (params.isEmpty() || params.size() > 2 || !(params.getFirst() instanceof String hashText))
                     throw new RpcException(-32602, "Expected block hash and optional verbosity");
-                int verbosity = intParam(params, 1, 1);
-                if (verbosity < 0 || verbosity > 3)
-                    throw new RpcException(-8, "Verbosity must be 0, 1, 2 or 3");
-                Hash256 hash = parseHash(hashText);
+                Hash256 hash = waitHash(hashText, "blockhash");
+                int verbosity = intOrBooleanVerbosity(params, 1, 1);
                 var view = validation.rpcBlockView(hash, verbosity >= 2)
                         .orElseThrow(() -> new RpcException(-5, "Block not found"));
                 var info = view.info();
                 var block = view.block();
                 if (block.isEmpty()) {
-                    if (validation.isPrunedActiveBlock(hash))
+                    if (validation.isPrunedBlock(hash))
                         throw new RpcException(-1, "Block not available (pruned data)");
-                    throw new RpcException(-1, "Block not available");
+                    throw new RpcException(-1, "Block not available (not fully downloaded)");
                 }
-                if (verbosity == 0) {
+                if (verbosity <= 0) {
                     yield HexFormat.of().formatHex(BlockSerializer.serialize(block.get()));
                 }
                 var result = new LinkedHashMap<String, Object>(blockHeaderJson(info));
@@ -1123,12 +1234,11 @@ public final class NodeRpcServer implements AutoCloseable {
     private double difficulty() { return difficulty(validation.activeTip()); }
 
     private double difficulty(ru.bitcoin.node.chain.BlockIndex tip) {
-        var target = ru.bitcoin.node.consensus.pow.CompactTarget.decode(tip.header().bits().value());
-        if (target.signum() <= 0) return 0.0d;
-        var difficultyOne = ru.bitcoin.node.consensus.pow.CompactTarget.decode(0x1d00ffffL);
-        return new java.math.BigDecimal(difficultyOne)
-                .divide(new java.math.BigDecimal(target), java.math.MathContext.DECIMAL64)
-                .doubleValue();
+        long bits = tip.header().bits().value(); int shift = (int) (bits >>> 24);
+        double difficulty = 0x0000ffff / (double) (bits & 0x00ffffff);
+        while (shift < 29) { difficulty *= 256; shift++; }
+        while (shift > 29) { difficulty /= 256; shift--; }
+        return new java.math.BigDecimal(difficulty).round(java.math.MathContext.DECIMAL64).doubleValue();
     }
 
     private double networkHashPs(int lookup, long requestedHeight) {
@@ -1183,8 +1293,8 @@ public final class NodeRpcServer implements AutoCloseable {
         if (params.size() <= index || params.get(index) == null) return defaultValue;
         Object value = params.get(index);
         if (value instanceof Boolean bool) return bool ? 1 : 0;
-        if (value instanceof Number number) return number.intValue();
-        throw new RpcException(-32602, "verbosity must be numeric or boolean");
+        if (value instanceof Number) return waitInteger(params, index, defaultValue);
+        throw new RpcException(-3, "JSON value of type " + jsonType(value) + " is not of expected type number");
     }
 
     private List<Map<String, Object>> blockTransactionsJson(
@@ -1198,30 +1308,34 @@ public final class NodeRpcServer implements AutoCloseable {
             var transaction = transactions.get(i);
             var json = transactionJson(transaction, null, null);
             if (i > 0 && undo != null) {
-                var coins = undo.transactions().get(i - 1).spentOutputs();
-                if (coins.size() != transaction.inputs().size())
-                    throw new RpcException(-32603, "Block undo input count mismatch");
-                long totalIn = 0;
-                @SuppressWarnings("unchecked")
-                var inputs = (List<Map<String, Object>>) json.get("vin");
-                for (int j = 0; j < coins.size(); j++) {
-                    var coin = coins.get(j);
-                    totalIn = Math.addExact(totalIn, coin.amount());
-                    if (verbosity == 3) inputs.get(j).put("prevout", Map.of(
-                            "generated", coin.coinbase(), "height", coin.height(),
-                            "value", satoshisToBtc(coin.amount()),
-                            "scriptPubKey", Map.of("hex", HexFormat.of().formatHex(coin.scriptPubKey()))));
-                }
-                long totalOut = 0;
-                for (var output : transaction.outputs()) totalOut = Math.addExact(totalOut, output.value());
-                long fee = Math.subtractExact(totalIn, totalOut);
-                if (fee < 0 || fee > ru.bitcoin.node.storage.utxo.StoredUtxo.MAX_MONEY)
-                    throw new RpcException(-32603, "Block undo fee out of range");
-                json.put("fee", satoshisToBtc(fee));
+                addUndo(transaction, json, undo.transactions().get(i - 1).spentOutputs(), verbosity >= 3);
             }
             result.add(json);
         }
         return result;
+    }
+
+    private void addUndo(Transaction transaction, Map<String, Object> json,
+                         List<ru.bitcoin.node.storage.utxo.StoredUtxo> coins, boolean includePrevouts) {
+        if (coins.size() != transaction.inputs().size())
+            throw new RpcException(-32603, "Block undo input count mismatch");
+        long totalIn = 0;
+        @SuppressWarnings("unchecked")
+        var inputs = (List<Map<String, Object>>) json.get("vin");
+        for (int j = 0; j < coins.size(); j++) {
+            var coin = coins.get(j);
+            totalIn = Math.addExact(totalIn, coin.amount());
+            if (includePrevouts) inputs.get(j).put("prevout", Map.of(
+                    "generated", coin.coinbase(), "height", coin.height(),
+                    "value", satoshisToBtc(coin.amount()),
+                    "scriptPubKey", ScriptJson.output(coin.scriptPubKey(), validation.networkParameters())));
+        }
+        long totalOut = 0;
+        for (var output : transaction.outputs()) totalOut = Math.addExact(totalOut, output.value());
+        long fee = Math.subtractExact(totalIn, totalOut);
+        if (fee < 0 || fee > ru.bitcoin.node.storage.utxo.StoredUtxo.MAX_MONEY)
+            throw new RpcException(-32603, "Block undo fee out of range");
+        json.put("fee", satoshisToBtc(fee));
     }
 
     private static Map<String, Object> coinbaseJson(Transaction coinbase) {
@@ -1241,12 +1355,26 @@ public final class NodeRpcServer implements AutoCloseable {
             NodeValidationService.ActiveBlockInfo blockInfo,
             Boolean inActiveChain
     ) {
+        var result = transactionJson(transaction, validation.networkParameters());
+        if (blockInfo != null) {
+            if (inActiveChain != null) result.put("in_active_chain", inActiveChain);
+            result.put("blockhash", blockInfo.index().hash().toDisplayHex());
+            result.put("confirmations", Math.max(0L, blockInfo.confirmations()));
+            if (blockInfo.confirmations() >= 0) {
+                result.put("time", blockInfo.index().header().timestamp().value());
+                result.put("blocktime", blockInfo.index().header().timestamp().value());
+            }
+        }
+        return result;
+    }
+
+    static Map<String, Object> transactionJson(Transaction transaction, ru.bitcoin.node.protocol.network.NetworkParameters parameters) {
         byte[] serialized = TransactionSerializer.serialize(transaction);
         long weight = TransactionWeight.calculate(transaction);
         var result = new LinkedHashMap<String, Object>();
         result.put("txid", transaction.txId().toDisplayHex());
         result.put("hash", transaction.wtxId().toDisplayHex());
-        result.put("version", transaction.version());
+        result.put("version", Integer.toUnsignedLong(transaction.version()));
         result.put("size", serialized.length);
         result.put("vsize", TransactionWeight.virtualSize(weight));
         result.put("weight", weight);
@@ -1260,7 +1388,7 @@ public final class NodeRpcServer implements AutoCloseable {
             } else {
                 item.put("txid", input.previousOutput().transactionId().toDisplayHex());
                 item.put("vout", input.previousOutput().outputIndex().value());
-                item.put("scriptSig", Map.of("hex", HexFormat.of().formatHex(input.scriptSig())));
+                item.put("scriptSig", Map.of("asm", ScriptJson.assembly(input.scriptSig(), true), "hex", HexFormat.of().formatHex(input.scriptSig())));
             }
             item.put("sequence", input.sequence().value());
             if (!input.witness().isEmpty()) {
@@ -1277,20 +1405,42 @@ public final class NodeRpcServer implements AutoCloseable {
             var item = new LinkedHashMap<String, Object>();
             item.put("value", satoshisToBtc(output.value()));
             item.put("n", n);
-            item.put("scriptPubKey", Map.of("hex", HexFormat.of().formatHex(output.scriptPubKey())));
+            item.put("scriptPubKey", ScriptJson.output(output.scriptPubKey(), parameters));
             vout.add(item);
         }
         result.put("vout", vout);
         result.put("hex", HexFormat.of().formatHex(serialized));
 
-        if (blockInfo != null) {
-            if (inActiveChain != null) result.put("in_active_chain", inActiveChain);
-            result.put("blockhash", blockInfo.index().hash().toDisplayHex());
-            result.put("confirmations", blockInfo.confirmations());
-            result.put("time", blockInfo.index().header().timestamp().value());
-            result.put("blocktime", blockInfo.index().header().timestamp().value());
-        }
         return result;
+    }
+
+    private static Transaction decodeTransaction(String hex, Boolean witness) {
+        if (hex.isEmpty() || !hex.matches("(?:[0-9a-fA-F]{2})+")) throw new IllegalArgumentException("Transaction hex");
+        byte[] bytes = HexFormat.of().parseHex(hex); Transaction extended = null, legacy = null;
+        if (witness == null || witness) {
+            try { extended = TransactionParser.parse(bytes, true); if (saneTransactionScripts(extended)) return extended; }
+            catch (IllegalArgumentException | IndexOutOfBoundsException ignored) { }
+        }
+        if (witness == null || !witness) {
+            try { legacy = TransactionParser.parse(bytes, false); if (saneTransactionScripts(legacy)) return legacy; }
+            catch (IllegalArgumentException | IndexOutOfBoundsException ignored) { }
+        }
+        if (extended != null) return extended;
+        if (legacy != null) return legacy;
+        throw new IllegalArgumentException("Transaction decode failed");
+    }
+
+    private static boolean saneTransactionScripts(Transaction transaction) {
+        var scripts = new ArrayList<byte[]>();
+        if (!transaction.isCoinbase()) transaction.inputs().forEach(input -> scripts.add(input.scriptSig()));
+        transaction.outputs().forEach(output -> scripts.add(output.scriptPubKey()));
+        for (byte[] script : scripts) {
+            if (script.length > 10000) return false;
+            try { for (var op : ru.bitcoin.node.script.ScriptParser.parse(script))
+                if (op.opcode() > 0xba || op.isPushData() && op.data() != null && op.data().length > 520) return false;
+            } catch (ru.bitcoin.node.script.ScriptParseException error) { return false; }
+        }
+        return true;
     }
 
     private static Transaction parsePackageTransaction(Object value) {
@@ -1318,7 +1468,7 @@ public final class NodeRpcServer implements AutoCloseable {
         return rate;
     }
 
-    private static long parseMoneyParam(List<?> params, int index, long defaultValue, String name) {
+    static long parseMoneyParam(List<?> params, int index, long defaultValue, String name) {
         if (params.size() <= index || params.get(index) == null) return defaultValue;
         Object value = params.get(index);
         if (!(value instanceof Number) && !(value instanceof String))
@@ -1389,6 +1539,10 @@ public final class NodeRpcServer implements AutoCloseable {
         result.put("versionHex", String.format("%08x", header.version()));
         result.put("merkleroot", header.merkleRoot().toDisplayHex());
         result.put("time", header.timestamp().value());
+        result.put("mediantime", validation.blockMedianTimePast(index));
+        result.put("target", String.format("%064x", ru.bitcoin.node.consensus.pow.CompactTarget.decode(header.bits().value())));
+        result.put("difficulty", difficulty(index));
+        result.put("nTx", validation.blockTransactionCount(index.hash()));
         result.put("bits", String.format("%08x", header.bits().value()));
         result.put("nonce", header.nonce().value());
         result.put("chainwork", String.format("%064x", index.chainWork()));
@@ -1410,6 +1564,11 @@ public final class NodeRpcServer implements AutoCloseable {
         } catch (RuntimeException exception) {
             throw new RpcException(-8, "Invalid block hash");
         }
+    }
+
+    private static String jsonType(Object value) {
+        return value == null ? "null" : value instanceof Boolean ? "bool" : value instanceof Number ? "number"
+                : value instanceof String ? "string" : value instanceof List<?> ? "array" : "object";
     }
 
     private static boolean booleanParam(List<?> params, int index, boolean defaultValue) {

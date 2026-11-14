@@ -136,14 +136,15 @@ public final class HeaderBatchProcessor {
             // and new children of explicitly invalid parents must not be acknowledged.
             if (failureResolver != null) {
                 BlockIndex existing = effectiveLookup.find(header.hash());
-                if (existing != null && failureResolver.isDirectlyFailed(existing.hash())) {
+                if (existing != null && failureResolver.isFailed(existing, null, effectiveLookup)) {
                     throw new BlockHeaderValidationException(
                             "duplicate-invalid: block was previously marked invalid",
                             BlockHeaderValidationException.Reason.CACHED_INVALID);
                 }
-                if (existing == null && failureResolver.isDirectlyFailed(header.previousBlockHash())) {
+                BlockIndex parent = effectiveLookup.find(header.previousBlockHash());
+                if (existing == null && parent != null && failureResolver.isFailed(parent, null, effectiveLookup)) {
                     throw new BlockHeaderValidationException(
-                            "bad-prevblk: previous block was marked invalid");
+                            "bad-prevblk: previous block was marked invalid", "bad-prevblk");
                 }
             }
             HeaderProcessor.ProcessResult result;

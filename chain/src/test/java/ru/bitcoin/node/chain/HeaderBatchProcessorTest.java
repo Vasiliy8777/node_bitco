@@ -64,9 +64,15 @@ class HeaderBatchProcessorTest {
             assertEquals(1, callbacks.size());
             assertTrue(store.find(prefix.hash()).isEmpty());
             assertTrue(store.find(newChild.hash()).isEmpty());
-            assertEquals(knownChild.hash(), processor.process(List.of(knownChild)).getFirst().hash());
+            // Core 32.1 SetBlockFailureFlags marks descendants too; cached headers remain stored but are rejected.
+            var failedChild = org.junit.jupiter.api.Assertions.assertThrows(
+                    ru.bitcoin.node.consensus.block.BlockHeaderValidationException.class,
+                    () -> processor.process(List.of(knownChild)));
+            assertEquals("duplicate-invalid", failedChild.rejectReason());
+            assertTrue(store.find(knownChild.hash()).isPresent());
             failures.clearFailed(first.hash());
             assertEquals(first.hash(), processor.process(List.of(first)).getFirst().hash());
+            assertEquals(knownChild.hash(), processor.process(List.of(knownChild)).getFirst().hash());
             assertEquals(newChild.hash(), processor.process(List.of(newChild)).getFirst().hash());
         }
     }

@@ -72,9 +72,89 @@ public final class InputScriptValidator {
                                         )
                         );
 
-        byte[] scriptPubKey =
-                utxo.scriptPubKey();
+        validateScripts(transaction, inputIndex, utxo.amount(), utxo.scriptPubKey(),
+                scriptVerifyFlags, detailed, utxoView, null, null);
+    }
 
+    /** Stateless Script verification for offline transaction data, without transaction-level coin checks. */
+    public static void validateKnownInput(Transaction transaction, int inputIndex,
+                                          java.util.List<ru.bitcoin.node.protocol.transaction.TxOut> spentOutputs,
+                                          int scriptVerifyFlags) {
+        validateKnownInputData(transaction, inputIndex, spentOutputs, null, scriptVerifyFlags);
+    }
+
+    /** Verify supplied signature data against the immutable unsigned transaction. */
+    public static void validateKnownInputData(Transaction transaction, int inputIndex,
+                                              java.util.List<ru.bitcoin.node.protocol.transaction.TxOut> spentOutputs,
+                                              byte[] scriptSig, ru.bitcoin.node.protocol.transaction.Witness witness,
+                                              int scriptVerifyFlags) {
+        verifyKnownInputData(transaction,inputIndex,spentOutputs,scriptSig,witness,scriptVerifyFlags,SignatureCheckMode.VERIFY);
+    }
+
+    /** Offline size estimation with Core's dummy signature/timelock checker; never an admission check. */
+    public static void estimateKnownInputData(Transaction transaction,int inputIndex,
+                                             java.util.List<ru.bitcoin.node.protocol.transaction.TxOut> spentOutputs,
+                                             byte[] scriptSig,ru.bitcoin.node.protocol.transaction.Witness witness,int flags) {
+        verifyKnownInputData(transaction,inputIndex,spentOutputs,scriptSig,witness,flags,SignatureCheckMode.ESTIMATE);
+    }
+
+    /** Offline VerifyScript without BIP341 precomputed transaction data, matching Core's PSBT probe. */
+    public static void validateKnownInputWithoutPrecomputedData(Transaction transaction,int inputIndex,
+                                             java.util.List<ru.bitcoin.node.protocol.transaction.TxOut> spentOutputs,
+                                             byte[] scriptSig,ru.bitcoin.node.protocol.transaction.Witness witness,int flags) {
+        verifyKnownInputData(transaction,inputIndex,spentOutputs,scriptSig,witness,flags,SignatureCheckMode.VERIFY_WITHOUT_PRECOMPUTED);
+    }
+
+    private static void verifyKnownInputData(Transaction transaction,int inputIndex,
+                                             java.util.List<ru.bitcoin.node.protocol.transaction.TxOut> spentOutputs,
+                                             byte[] scriptSig,ru.bitcoin.node.protocol.transaction.Witness witness,int scriptVerifyFlags,
+                                             SignatureCheckMode mode) {
+        java.util.Objects.requireNonNull(transaction);
+        java.util.Objects.requireNonNull(scriptSig);
+        java.util.Objects.requireNonNull(witness);
+        if (inputIndex < 0 || inputIndex >= transaction.inputs().size())
+            throw new IllegalArgumentException("Input index out of range");
+        TxIn original = transaction.inputs().get(inputIndex);
+        TxIn supplied = new TxIn(original.previousOutput(), scriptSig, original.sequence(), witness);
+        validateKnownInputData(transaction, inputIndex, spentOutputs, supplied, scriptVerifyFlags,mode);
+    }
+
+    private static void validateKnownInputData(Transaction transaction, int inputIndex,
+                                               java.util.List<ru.bitcoin.node.protocol.transaction.TxOut> spentOutputs,
+                                               TxIn suppliedInput, int scriptVerifyFlags) {
+        validateKnownInputData(transaction,inputIndex,spentOutputs,suppliedInput,scriptVerifyFlags,SignatureCheckMode.VERIFY);
+    }
+    private static void validateKnownInputData(Transaction transaction,int inputIndex,
+                                               java.util.List<ru.bitcoin.node.protocol.transaction.TxOut> spentOutputs,
+                                               TxIn suppliedInput,int scriptVerifyFlags,SignatureCheckMode mode) {
+        java.util.Objects.requireNonNull(transaction);
+        java.util.Objects.requireNonNull(spentOutputs);
+        if (inputIndex < 0 || inputIndex >= transaction.inputs().size()
+                || spentOutputs.size() != transaction.inputs().size())
+            throw new IllegalArgumentException("Input and spent output counts do not match");
+        var coins = spentOutputs;
+        var coin = coins.get(inputIndex);
+        if (coin == null) throw new TransactionValidationException("Missing input UTXO");
+        validateScripts(transaction, inputIndex, coin.value(), coin.scriptPubKey(),
+                scriptVerifyFlags, false, null, coins, suppliedInput,mode);
+    }
+
+    private static void validateScripts(Transaction transaction, int inputIndex,
+                                        long amount, byte[] scriptPubKey,
+                                        int scriptVerifyFlags, boolean detailed,
+                                        UtxoView utxoView,
+                                        java.util.List<ru.bitcoin.node.protocol.transaction.TxOut> knownSpentOutputs,
+                                        TxIn suppliedInput) {
+        validateScripts(transaction,inputIndex,amount,scriptPubKey,scriptVerifyFlags,detailed,utxoView,knownSpentOutputs,suppliedInput,SignatureCheckMode.VERIFY);
+    }
+    private static void validateScripts(Transaction transaction,int inputIndex,long amount,byte[] scriptPubKey,
+                                        int scriptVerifyFlags,boolean detailed,UtxoView utxoView,
+                                        java.util.List<ru.bitcoin.node.protocol.transaction.TxOut> knownSpentOutputs,
+                                        TxIn suppliedInput,SignatureCheckMode mode) {
+        TxIn input = suppliedInput == null ? transaction.inputs().get(inputIndex) : suppliedInput;
+        if (ScriptVerifyFlags.has(scriptVerifyFlags, ScriptVerifyFlags.SIGPUSHONLY)
+                && !P2shScript.isPushOnly(input.scriptSig()))
+            throw scriptFailure(ScriptError.SIG_PUSHONLY, "scriptSig is not push-only", detailed);
         /*
          * SegWit validation применяется только
          * при активном consensus WITNESS flag.
@@ -107,13 +187,18 @@ public final class InputScriptValidator {
                     if (input.scriptSig().length != 0) {
                         throw scriptFailure(ScriptError.WITNESS_MALLEATED, "Native Taproot requires empty scriptSig", detailed);
                     }
-                    var coins = transaction.inputs().stream().map(txIn -> {
-                        var coin = utxoView.find(txIn.previousOutput()).orElseThrow(
-                                () -> new TransactionValidationException("Missing Taproot input UTXO"));
-                        return new ru.bitcoin.node.protocol.transaction.TxOut(coin.amount(), coin.scriptPubKey());
-                    }).toList();
+                    java.util.List<ru.bitcoin.node.protocol.transaction.TxOut> coins;
+                    if (knownSpentOutputs != null) {
+                        coins = knownSpentOutputs;
+                    } else {
+                        coins = transaction.inputs().stream().map(txIn -> {
+                            var coin = utxoView.find(txIn.previousOutput()).orElseThrow(
+                                    () -> new TransactionValidationException("Missing Taproot input UTXO"));
+                            return new ru.bitcoin.node.protocol.transaction.TxOut(coin.amount(), coin.scriptPubKey());
+                        }).toList();
+                    }
                     ru.bitcoin.node.script.validation.TaprootValidator.validate(
-                            transaction, inputIndex, coins, program.program(), scriptVerifyFlags);
+                            transaction, inputIndex, coins, program.program(), scriptVerifyFlags, input.witness(),mode);
                     return;
                 }
 
@@ -121,9 +206,9 @@ public final class InputScriptValidator {
                         transaction,
                         inputIndex,
                         input,
-                        utxo,
+                        amount,
                         witnessProgram.get(),
-                        scriptVerifyFlags, detailed
+                        scriptVerifyFlags, detailed,mode
                 );
 
                 return;
@@ -186,7 +271,7 @@ public final class InputScriptValidator {
                                         inputIndex,
                                         input.scriptSig(),
                                         scriptPubKey,
-                                        scriptVerifyFlags, detailed
+                                        scriptVerifyFlags, ScriptDialect.BITCOIN, detailed,mode
                                 );
 
                 if (!outerValid) {
@@ -200,9 +285,9 @@ public final class InputScriptValidator {
                         transaction,
                         inputIndex,
                         input,
-                        utxo,
+                        amount,
                         wrappedWitnessProgram.get(),
-                        scriptVerifyFlags, detailed
+                        scriptVerifyFlags, detailed,mode
                 );
 
                 return;
@@ -218,7 +303,7 @@ public final class InputScriptValidator {
                         inputIndex,
                         input.scriptSig(),
                         scriptPubKey,
-                        scriptVerifyFlags, detailed
+                        scriptVerifyFlags, ScriptDialect.BITCOIN, detailed,mode
                 );
 
         if (!valid) {
@@ -254,9 +339,9 @@ public final class InputScriptValidator {
             Transaction transaction,
             int inputIndex,
             TxIn input,
-            UtxoEntry utxo,
+            long amount,
             WitnessProgram witnessProgram,
-            int scriptVerifyFlags, boolean detailed
+            int scriptVerifyFlags, boolean detailed, SignatureCheckMode mode
     ) {
 
         /*
@@ -289,8 +374,8 @@ public final class InputScriptValidator {
                                         emptyScriptSig,
                                         input.witness(),
                                         witnessProgram,
-                                        utxo.amount(),
-                                        scriptVerifyFlags, detailed
+                                        amount,
+                                        scriptVerifyFlags, ScriptDialect.BITCOIN, detailed,mode
                                 );
 
                 if (!valid) {
@@ -313,8 +398,8 @@ public final class InputScriptValidator {
                                         emptyScriptSig,
                                         input.witness(),
                                         witnessProgram,
-                                        utxo.amount(),
-                                        scriptVerifyFlags, detailed
+                                        amount,
+                                        scriptVerifyFlags, ScriptDialect.BITCOIN, detailed,mode
                                 );
 
                 if (!valid) {
@@ -368,9 +453,9 @@ public final class InputScriptValidator {
             Transaction transaction,
             int inputIndex,
             TxIn input,
-            UtxoEntry utxo,
+            long amount,
             WitnessProgram witnessProgram,
-            int scriptVerifyFlags, boolean detailed
+            int scriptVerifyFlags, boolean detailed, SignatureCheckMode mode
     ) {
 
         /*
@@ -409,8 +494,8 @@ public final class InputScriptValidator {
                                         input.scriptSig(),
                                         input.witness(),
                                         witnessProgram,
-                                        utxo.amount(),
-                                        scriptVerifyFlags, detailed
+                                        amount,
+                                        scriptVerifyFlags, ScriptDialect.BITCOIN, detailed,mode
                                 );
 
                 if (!valid) {
@@ -433,8 +518,8 @@ public final class InputScriptValidator {
                                         input.scriptSig(),
                                         input.witness(),
                                         witnessProgram,
-                                        utxo.amount(),
-                                        scriptVerifyFlags, detailed
+                                        amount,
+                                        scriptVerifyFlags, ScriptDialect.BITCOIN, detailed,mode
                                 );
 
                 if (!valid) {

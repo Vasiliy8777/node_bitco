@@ -13,7 +13,14 @@ public final class TaprootValidator {
     private TaprootValidator() { }
 
     public static void validate(Transaction tx, int input, List<TxOut> coins, byte[] outputKey, int flags) {
-        Witness witness = tx.inputs().get(input).witness();
+        validate(tx, input, coins, outputKey, flags, tx.inputs().get(input).witness());
+    }
+
+    /** Also usable with an unsigned transaction and separately supplied PSBT witness. */
+    public static void validate(Transaction tx, int input, List<TxOut> coins, byte[] outputKey, int flags, Witness witness) {
+        validate(tx,input,coins,outputKey,flags,witness,SignatureCheckMode.VERIFY);
+    }
+    public static void validate(Transaction tx,int input,List<TxOut> coins,byte[] outputKey,int flags,Witness witness,SignatureCheckMode mode) {
         int size = witness.size();
         if (size == 0) throw new ScriptExecutionException(ScriptError.WITNESS_PROGRAM_WITNESS_EMPTY, "Empty Taproot witness");
         byte[] annex = null;
@@ -23,7 +30,7 @@ public final class TaprootValidator {
             size--;
         }
         if (size == 1) {
-            new TaprootExecutionData(tx, input, coins, annex, null, 0).verify(witness.item(0), outputKey, 0xffff_ffffL);
+            new TaprootExecutionData(tx, input, coins, annex, null, 0,mode).verify(witness.item(0), outputKey, 0xffff_ffffL);
             return;
         }
         byte[] control = witness.item(size - 1);
@@ -75,9 +82,9 @@ public final class TaprootValidator {
             int length = witness.item(i).length;
             budget += CompactSize.encode(length).length + (long) length;
         }
-        var data = new TaprootExecutionData(tx, input, coins, annex, leaf, budget);
+        var data = new TaprootExecutionData(tx, input, coins, annex, leaf, budget,mode);
         ScriptInterpreter.execute(script, machine, new ScriptExecutionContext(tx, input, script, flags,
-                coins.get(input).value(), SignatureVersion.TAPSCRIPT, data));
+                coins.get(input).value(), SignatureVersion.TAPSCRIPT, data).withSignatureCheckMode(mode));
         if (machine.size() != 1 || !ScriptNumber.castToBool(machine.peek())) {
             throw new ScriptExecutionException((machine.size() != 1 ? ScriptError.CLEANSTACK : ScriptError.EVAL_FALSE), "Tapscript must finish with exactly one true element");
         }

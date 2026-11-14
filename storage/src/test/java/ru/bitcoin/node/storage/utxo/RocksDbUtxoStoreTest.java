@@ -13,6 +13,21 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.*;
 
 class RocksDbUtxoStoreTest {
+    @Test void transactionPrefixLookupObservesBufferedSpendAndNamespace() {
+        try (var database = new RocksDbDatabase(tempDirectory.resolve("transaction-prefix"))) {
+            var store = new RocksDbUtxoStore(database);
+            var wanted = testOutPoint(1717);
+            store.save(wanted, testUtxo());
+            assertTrue(store.findAnyByTransaction(wanted.transactionId()).isPresent());
+            database.enableChainstateWriteBack();
+            store.delete(wanted);
+            assertTrue(store.findAnyByTransaction(wanted.transactionId()).isEmpty());
+            store.save(wanted, testUtxo());
+            assertTrue(store.findAnyByTransaction(wanted.transactionId()).isPresent());
+            var other = new RocksDbUtxoStore(database, (byte) 0x25, 0);
+            assertTrue(other.findAnyByTransaction(wanted.transactionId()).isEmpty());
+        }
+    }
     @Test void parallelPrevoutsPreserveOrderMissingCoinsAndBufferedMutations() {
         try (var db = new RocksDbDatabase(tempDirectory.resolve("parallel-prevouts"))) {
             var store = new RocksDbUtxoStore(db);

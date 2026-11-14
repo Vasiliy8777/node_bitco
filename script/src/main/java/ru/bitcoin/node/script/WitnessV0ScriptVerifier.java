@@ -32,6 +32,10 @@ public final class WitnessV0ScriptVerifier {
     }
     private static boolean verifyP2wpkh(Transaction transaction, int inputIndex, byte[] scriptSig, Witness witness,
                                        WitnessProgram witnessProgram, long amount, int flags, ScriptDialect dialect, boolean detailed) {
+        return verifyP2wpkh(transaction,inputIndex,scriptSig,witness,witnessProgram,amount,flags,dialect,detailed,SignatureCheckMode.VERIFY);
+    }
+    public static boolean verifyP2wpkh(Transaction transaction,int inputIndex,byte[] scriptSig,Witness witness,
+                               WitnessProgram witnessProgram,long amount,int flags,ScriptDialect dialect,boolean detailed,SignatureCheckMode mode) {
         java.util.Objects.requireNonNull(dialect);
         if (transaction == null) {
             throw new IllegalArgumentException(
@@ -66,11 +70,6 @@ public final class WitnessV0ScriptVerifier {
             );
         }
 
-        if (amount < 0) {
-            throw new IllegalArgumentException(
-                    "amount must not be negative"
-            );
-        }
         if (!ScriptVerifyFlags.has(
                 flags,
                 ScriptVerifyFlags.WITNESS
@@ -145,7 +144,7 @@ public final class WitnessV0ScriptVerifier {
                         flags,
                         amount,
                         SignatureVersion.WITNESS_V0
-                ).withDialect(dialect);
+                ).withDialect(dialect).withSignatureCheckMode(mode);
 
         try {
 
@@ -245,6 +244,10 @@ public final class WitnessV0ScriptVerifier {
     }
     private static boolean verifyP2wsh(Transaction transaction, int inputIndex, byte[] scriptSig, Witness witness,
                                       WitnessProgram witnessProgram, long amount, int flags, ScriptDialect dialect, boolean detailed) {
+        return verifyP2wsh(transaction,inputIndex,scriptSig,witness,witnessProgram,amount,flags,dialect,detailed,SignatureCheckMode.VERIFY);
+    }
+    public static boolean verifyP2wsh(Transaction transaction,int inputIndex,byte[] scriptSig,Witness witness,
+                               WitnessProgram witnessProgram,long amount,int flags,ScriptDialect dialect,boolean detailed,SignatureCheckMode mode) {
         java.util.Objects.requireNonNull(dialect);
         if (transaction == null) {
             throw new IllegalArgumentException(
@@ -276,12 +279,6 @@ public final class WitnessV0ScriptVerifier {
         if (witnessProgram == null) {
             throw new IllegalArgumentException(
                     "witnessProgram must not be null"
-            );
-        }
-
-        if (amount < 0) {
-            throw new IllegalArgumentException(
-                    "amount must not be negative"
             );
         }
 
@@ -376,7 +373,7 @@ public final class WitnessV0ScriptVerifier {
                         flags,
                         amount,
                         SignatureVersion.WITNESS_V0
-                ).withDialect(dialect);
+                ).withDialect(dialect).withSignatureCheckMode(mode);
 
         try {
 

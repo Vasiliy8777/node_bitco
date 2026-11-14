@@ -100,10 +100,27 @@ final class RpcMethods {
                 savemempool object
                 getblocktemplate object template_request:object
                 submitblock any hexdata:string
+                submitheader null hexdata:string
                 sendrawtransaction string hexstring:string maxfeerate:any? maxburnamount:any?
                 testmempoolaccept array rawtxs:array maxfeerate:any?
                 submitpackage object package:array maxfeerate:any? maxburnamount:any?
                 decoderawtransaction object hexstring:string
+                createrawtransaction string inputs:array outputs:any locktime:number? replaceable:boolean? version:number?
+                createpsbt string inputs:array outputs:any locktime:number? replaceable:boolean? version:number? psbt_version:number?
+                converttopsbt string hexstring:string permitsigdata:boolean? iswitness:boolean? psbt_version:number?
+                createmultisig object nrequired:number keys:array address_type:string?
+                signmessagewithprivkey string privkey:string message:string
+                verifymessage boolean address:string signature:string message:string
+                decodepsbt object psbt:string
+                combinepsbt string txs:array
+                joinpsbts string txs:array
+                finalizepsbt object psbt:string extract:boolean?=true
+                analyzepsbt object psbt:string
+                utxoupdatepsbt string psbt:string descriptors:array?
+                getdescriptorinfo object descriptor:string
+                deriveaddresses array descriptor:string range:any?
+                decodescript object hexstring:string
+                validateaddress object address:string
                 getrawtransaction any txid:string verbosity:any?=0 blockhash:string?
                 prioritisetransaction boolean txid:string dummy:number? fee_delta:number
                 getprioritisedtransactions object
@@ -116,6 +133,9 @@ final class RpcMethods {
                 gettxout any txid:string n:number include_mempool:boolean?=true
                 gettxoutsetinfo object hash_type:string?=hash_serialized_3 hash_or_height:any? use_index:boolean?=true
                 getblockhash string height:number
+                getblockstats object hash_or_height:any stats:array?
+                gettxoutproof string txids:array blockhash:string?
+                verifytxoutproof array proof:string
                 waitfornewblock object timeout:number?=0 current_tip:string?
                 waitforblock object blockhash:string timeout:number?=0
                 waitforblockheight object height:number timeout:number?=0

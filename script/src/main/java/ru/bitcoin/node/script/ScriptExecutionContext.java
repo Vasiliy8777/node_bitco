@@ -10,10 +10,12 @@ public record ScriptExecutionContext(
         long amount,
         SignatureVersion signatureVersion,
         TaprootExecutionData taprootData,
-        ScriptDialect dialect
+        ScriptDialect dialect,
+        SignatureCheckMode signatureCheckMode
 ) {
 
     public ScriptExecutionContext {
+        java.util.Objects.requireNonNull(signatureCheckMode, "signatureCheckMode");
         java.util.Objects.requireNonNull(dialect, "dialect");
         if (dialect == ScriptDialect.RAVENCOIN && signatureVersion == SignatureVersion.TAPSCRIPT)
             throw new IllegalArgumentException("RVN tapscript is not supported");
@@ -39,12 +41,8 @@ public record ScriptExecutionContext(
             );
         }
 
-        if (amount < 0) {
-            throw new IllegalArgumentException(
-                    "amount must not be negative"
-            );
-        }
-
+        // CAmount may carry Core's missing-data sentinel during offline verification.
+        // The signature checker tests availability when a signature opcode executes.
         if (signatureVersion == null) {
             throw new IllegalArgumentException(
                     "signatureVersion must not be null"
@@ -56,12 +54,23 @@ public record ScriptExecutionContext(
     }
 
     public ScriptExecutionContext(Transaction transaction, int inputIndex, byte[] scriptCode,
+                                  int flags, long amount, SignatureVersion signatureVersion, TaprootExecutionData taprootData,
+                                  ScriptDialect dialect) {
+        this(transaction,inputIndex,scriptCode,flags,amount,signatureVersion,taprootData,dialect,SignatureCheckMode.VERIFY);
+    }
+
+    public ScriptExecutionContext(Transaction transaction, int inputIndex, byte[] scriptCode,
                                   int flags, long amount, SignatureVersion signatureVersion, TaprootExecutionData taprootData) {
         this(transaction, inputIndex, scriptCode, flags, amount, signatureVersion, taprootData, ScriptDialect.BITCOIN);
     }
 
     public ScriptExecutionContext withDialect(ScriptDialect dialect) {
-        return new ScriptExecutionContext(transaction, inputIndex, scriptCode, flags, amount, signatureVersion, taprootData, dialect);
+        return new ScriptExecutionContext(transaction, inputIndex, scriptCode, flags, amount, signatureVersion, taprootData, dialect,signatureCheckMode);
+    }
+
+    public ScriptExecutionContext withSignatureCheckMode(SignatureCheckMode mode) {
+        if (mode == signatureCheckMode) return this;
+        return new ScriptExecutionContext(transaction,inputIndex,scriptCode,flags,amount,signatureVersion,taprootData,dialect,mode);
     }
 
     public ScriptExecutionContext(Transaction transaction, int inputIndex, byte[] scriptCode,

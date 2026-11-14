@@ -164,7 +164,7 @@ class MiningRpcTest {
                     assertEquals(1L, ((Number) prevout.get("height")).longValue());
                     assertEquals(50.0d, ((Number) prevout.get("value")).doubleValue());
                     assertEquals("51", ((Map<?, ?>) prevout.get("scriptPubKey")).get("hex"));
-                    assertEquals(-8, error(call(client, uri, "getblock", List.of(hash, 4))));
+                    assertEquals(json3, call(client, uri, "getblock", List.of(hash, 4)).get("result"));
 
                     var undos = new ru.bitcoin.node.storage.undo.RocksDbUndoStore(db);
                     var validUndo = undos.find(block.hash()).orElseThrow();

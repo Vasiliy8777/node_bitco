@@ -48,6 +48,10 @@ public final class RocksDbBlockStore implements BlockStore {
                 : database.get(metadataKey);
         if (existing != null) {
             FlatFileRecordStore.Position position = FlatFileRecordStore.Position.deserialize(existing);
+            var pendingCount = batch.pendingValue(countKey(hash));
+            byte[] count = pendingCount.touched() ? pendingCount.value() : database.get(countKey(hash));
+            if (count == null) count = ru.bitcoin.node.common.bytes.LittleEndian.uint32(BlockParser.parse(files.read(position)).transactions().size());
+            batch.put(countKey(hash), count);
             batch.put(metadataKey, existing);
             new RocksDbBlockAvailabilityStore(database).markData(batch, hash);
             pruneUsage.setBlockSize(batch, hash, position.payloadLength());
@@ -56,6 +60,7 @@ public final class RocksDbBlockStore implements BlockStore {
 
         byte[] serialized=BlockSerializer.serialize(block);
         FlatFileRecordStore.Position position=files.append(serialized);
+        batch.put(countKey(hash), ru.bitcoin.node.common.bytes.LittleEndian.uint32(block.transactions().size()));
         batch.put(metadataKey,position.serialize());
         new RocksDbBlockAvailabilityStore(database).markData(batch,hash);
         pruneUsage.setBlockSize(batch,hash,serialized.length);
@@ -80,11 +85,27 @@ public final class RocksDbBlockStore implements BlockStore {
     }
 
     public long serializedSize(Hash256 hash){ if(hash==null) throw new IllegalArgumentException("blockHash must not be null"); return pruneUsage.blockSize(hash); }
+    /** Transaction count survives pruning. Existing unpruned blocks are migrated lazily. */
+    public java.util.OptionalLong transactionCount(Hash256 hash) {
+        byte[] value = database.get(countKey(hash));
+        if (value != null) {
+            if (value.length != 4) throw new IllegalStateException("Invalid block transaction count");
+            return java.util.OptionalLong.of(ru.bitcoin.node.common.bytes.LittleEndian.readUInt32(value, 0));
+        }
+        var block = find(hash);
+        if (block.isEmpty()) return java.util.OptionalLong.empty();
+        long count = block.orElseThrow().transactions().size();
+        database.put(countKey(hash), ru.bitcoin.node.common.bytes.LittleEndian.uint32(count));
+        return java.util.OptionalLong.of(count);
+    }
     @Override public void delete(Hash256 hash){ if(hash==null) throw new IllegalArgumentException("blockHash must not be null"); try(var batch=new RocksDbWriteBatch()){delete(batch,hash);database.write(batch);} }
     public void delete(RocksDbWriteBatch batch,Hash256 hash){
         if(batch==null) throw new IllegalArgumentException("batch must not be null"); if(hash==null) throw new IllegalArgumentException("blockHash must not be null");
         // Core-style flat files are append-only. Pruning drops metadata; physical file compaction/deletion is file-granular.
+        if (!batch.pendingValue(countKey(hash)).touched() && database.get(countKey(hash)) == null)
+            find(hash).ifPresent(block -> batch.put(countKey(hash), ru.bitcoin.node.common.bytes.LittleEndian.uint32(block.transactions().size())));
         batch.delete(key(hash)); new RocksDbBlockAvailabilityStore(database).clearData(batch,hash); pruneUsage.setBlockSize(batch,hash,0L);
     }
+    private static byte[] countKey(Hash256 hash) { byte[] key = key(hash); key[0] = ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.BLOCK_TX_COUNT; return key; }
     private static byte[] key(Hash256 hash){ byte[] h=hash.bytes(); if(h.length!=HASH_SIZE) throw new IllegalStateException("Invalid block hash length: "+h.length); byte[] k=new byte[1+HASH_SIZE]; k[0]=BLOCK_PREFIX; System.arraycopy(h,0,k,1,HASH_SIZE); return k; }
 }

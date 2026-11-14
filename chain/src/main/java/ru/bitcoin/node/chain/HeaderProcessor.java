@@ -138,7 +138,7 @@ public final class HeaderProcessor {
 
     void validateClaimedProofOfWork(BlockHeader header) {
         if (!ru.bitcoin.node.consensus.pow.ProofOfWork.isValid(header, networkParameters))
-            throw new ru.bitcoin.node.consensus.block.BlockHeaderValidationException("Invalid announced proof of work");
+            throw new ru.bitcoin.node.consensus.block.BlockHeaderValidationException("Invalid announced proof of work", "high-hash");
     }
 
     record ProcessResult(BlockIndex index, boolean newlyCreated) {

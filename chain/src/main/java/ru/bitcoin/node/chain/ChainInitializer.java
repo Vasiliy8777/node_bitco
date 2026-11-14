@@ -40,9 +40,11 @@ public final class ChainInitializer {
                         new StoredBlockIndexLookup(indexes),
                         ChainstateConsistencyChecker.DEFAULT_REORG_SAFETY_DEPTH
                 );
-                Block storedGenesis = blocks.find(genesis.hash()).orElseThrow(
-                        () -> new IllegalStateException("Missing genesis block body"));
-                if (!Arrays.equals(serialize(genesis), serialize(storedGenesis))) {
+                var storedGenesis = blocks.find(genesis.hash());
+                boolean prunedGenesis = new ru.bitcoin.node.storage.chain.RocksDbPruneStateStore(database).hasPruned()
+                        && !new ru.bitcoin.node.storage.block.RocksDbBlockAvailabilityStore(database).hasData(genesis.hash());
+                if (storedGenesis.isEmpty() && !prunedGenesis) throw new IllegalStateException("Missing genesis block body");
+                if (storedGenesis.isPresent() && !Arrays.equals(serialize(genesis), serialize(storedGenesis.orElseThrow()))) {
                     throw new IllegalStateException("Invalid stored genesis block");
                 }
                 if (blocks.find(state.activeTip().hash()).isEmpty()) {

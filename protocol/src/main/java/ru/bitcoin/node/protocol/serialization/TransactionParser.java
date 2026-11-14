@@ -15,11 +15,15 @@ public final class TransactionParser {
     public static Transaction parse(
             byte[] bytes
     ) {
+        return parse(bytes, true);
+    }
+
+    public static Transaction parse(byte[] bytes, boolean allowWitness) {
         BitcoinReader reader =
                 new BitcoinReader(bytes);
 
         Transaction transaction =
-                parse(reader);
+                parse(reader, allowWitness);
 
         if (reader.hasRemaining()) {
             throw new IllegalArgumentException(
@@ -33,6 +37,10 @@ public final class TransactionParser {
     public static Transaction parse(
             BitcoinReader reader
     ) {
+        return parse(reader, true);
+    }
+
+    public static Transaction parse(BitcoinReader reader, boolean allowWitness) {
         int version =
                 reader.readInt32LE();
 
@@ -40,6 +48,7 @@ public final class TransactionParser {
                 reader.readCompactSize();
 
         boolean hasWitness = false;
+        boolean emptyOutputsRead = false;
 
         /*
          * SegWit marker:
@@ -48,31 +57,27 @@ public final class TransactionParser {
          *
          * Следующий байт является flag.
          */
-        if (inputCount == 0) {
+        if (inputCount == 0 && allowWitness) {
 
             int flag =
                     reader.readUnsignedByte();
 
             if (flag == 0) {
-                throw new IllegalArgumentException(
-                        "Invalid transaction witness flag"
-                );
+                emptyOutputsRead = true;
             }
 
             /*
              * Пока поддерживаем стандартный witness flag 0x01.
              */
-            if (flag != 0x01) {
+            if (flag != 0 && flag != 0x01) {
                 throw new IllegalArgumentException(
                         "Unsupported transaction witness flag: "
                                 + flag
                 );
             }
 
-            hasWitness = true;
-
-            inputCount =
-                    reader.readCompactSize();
+            hasWitness = flag != 0;
+            if (hasWitness) inputCount = reader.readCompactSize();
         }
 
         int inputsSize =
@@ -97,7 +102,7 @@ public final class TransactionParser {
         }
 
         long outputCount =
-                reader.readCompactSize();
+                emptyOutputsRead ? 0 : reader.readCompactSize();
 
         int outputsSize =
                 reader.checkedCollectionSize(

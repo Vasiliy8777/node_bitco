@@ -88,6 +88,7 @@ final class RpcProtocol {
                     if (parser.currentToken() != JsonToken.PROPERTY_NAME) throw new IllegalArgumentException("Invalid object");
                     String name = parser.getString();
                     Object value = read(parser, parser.nextToken());
+                    object.entries.add(new AbstractMap.SimpleImmutableEntry<>(name, value));
                     if (!object.containsKey(name)) object.put(name, value);
                     else object.duplicates.add(name);
                 }
@@ -109,6 +110,7 @@ final class RpcProtocol {
     }
     static final class JsonObject extends LinkedHashMap<String, Object> {
         final List<String> duplicates = new ArrayList<>();
+        final List<Map.Entry<String, Object>> entries = new ArrayList<>();
     }
     /** Keep the numeric token intact, including large IDs and exponent notation. */
     private static final class JsonNumber extends Number {

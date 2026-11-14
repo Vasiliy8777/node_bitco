@@ -97,6 +97,7 @@ public final class ScriptInterpreter {
          * Relative lock-time semantics существуют
          * только для transaction version >= 2.
          */
+        if (context.signatureCheckMode() == SignatureCheckMode.ESTIMATE) return;
         if (Integer.toUnsignedLong(context.transaction().version()) < 2) {
 
             throw new ScriptExecutionException(
@@ -203,6 +204,7 @@ public final class ScriptInterpreter {
             );
         }
 
+        if (context.signatureCheckMode() == SignatureCheckMode.ESTIMATE) return;
         long transactionLockTime =
                 context.transaction()
                         .lockTime()
@@ -1757,6 +1759,7 @@ public final class ScriptInterpreter {
         );
 
         if (signatureWithHashType.length == 0) return false;
+        if (context.signatureCheckMode() == SignatureCheckMode.ESTIMATE) return true;
 
         int hashType =
                 Byte.toUnsignedInt(
@@ -1777,6 +1780,9 @@ public final class ScriptInterpreter {
 
             if (context.signatureVersion()
                     == SignatureVersion.WITNESS_V0) {
+                // Core's checker treats negative amounts as missing BIP143 data.
+                // Scripts that execute no signature check may still be evaluated offline.
+                if (context.amount() < 0) return false;
 
                 digest =
                         WitnessV0SignatureHash.calculate(

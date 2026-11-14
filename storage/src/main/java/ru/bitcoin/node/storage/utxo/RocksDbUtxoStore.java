@@ -28,6 +28,19 @@ public final class RocksDbUtxoStore
     private static final int TXID_SIZE = 32;
     private static final int VOUT_SIZE = 4;
 
+    /** Prefix seek, including pending chainstate mutations, without scanning the UTXO set. */
+    public Optional<StoredUtxo> findAnyByTransaction(Hash256 txid) {
+        database.forceFlushChainstate();
+        byte[] wanted = new byte[33]; wanted[0] = prefix;
+        System.arraycopy(txid.bytes(), 0, wanted, 1, 32);
+        var result = new ArrayList<StoredUtxo>(1);
+        database.visitPrefixAscendingAfter(prefix, wanted, (key, value) -> {
+            if (key.length == 37 && Arrays.equals(wanted, Arrays.copyOf(key, 33))) result.add(StoredUtxoSerializer.deserialize(value));
+            return false;
+        });
+        return result.stream().findFirst();
+    }
+
     private final RocksDbDatabase database;
     private volatile byte prefix;
 

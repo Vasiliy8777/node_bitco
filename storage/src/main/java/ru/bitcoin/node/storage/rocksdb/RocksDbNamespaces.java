@@ -53,6 +53,7 @@ public final class RocksDbNamespaces {
     public static final byte MEMPOOL_FEE_DELTA = 0x2A;
     public static final byte BLOCK_SKIP_INDEX = 0x2B;
     public static final byte BLOCK_SKIP_INDEX_VERSION = 0x2C;
+    public static final byte BLOCK_TX_COUNT = 0x2D;
 
     /** Legacy v1 prune-usage marker that collided with BLOCK_HEIGHT_INDEX. */
     public static final byte[] LEGACY_PRUNE_USAGE_VERSION_KEY = {BLOCK_HEIGHT_INDEX, 0x01};
@@ -104,6 +105,7 @@ public final class RocksDbNamespaces {
             case MEMPOOL_FEE_DELTA -> "mempoolFeeDelta";
             case BLOCK_SKIP_INDEX -> "blockSkipIndex";
             case BLOCK_SKIP_INDEX_VERSION -> "blockSkipIndexVersion";
+            case BLOCK_TX_COUNT -> "blockTxCount";
             default -> String.format(java.util.Locale.ROOT, "0x%02x", Byte.toUnsignedInt(namespace));
         };
     }

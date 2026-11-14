@@ -114,7 +114,7 @@ public final class BlockPruner {
 
         indexes.visitByHeightAscending(candidate -> {
             if (candidate.height() > maxHeight) return false;
-            if (candidate.height() == 0 || !availability.hasData(candidate.hash())) return true;
+            if (!availability.hasData(candidate.hash())) return true;
             if (stopAtBytes > 0 && usage[0] <= stopAtBytes) return false;
 
             long blockBytes = blocks.serializedSize(candidate.hash());

@@ -333,30 +333,12 @@ class BlockFailureRecoveryTest {
                             0x31
                     );
 
-            List<BlockIndex> storedFailedDescendant =
-                    batchProcessor.process(
-                            List.of(
-                                    moreFailed
-                            )
-                    );
-
-            assertEquals(
-                    1,
-                    storedFailedDescendant.size()
-            );
-
-            assertTrue(
-                    indexes.find(
-                            moreFailed.hash()
-                    ).isPresent()
-            );
-
-            assertTrue(
-                    resolver.isFailed(
-                            storedFailedDescendant
-                                    .getFirst()
-                    )
-            );
+            // Core 32.1 SetBlockFailureFlags covers descendants of an invalid root.
+            var rejection = org.junit.jupiter.api.Assertions.assertThrows(
+                    ru.bitcoin.node.consensus.block.BlockHeaderValidationException.class,
+                    () -> batchProcessor.process(List.of(moreFailed)));
+            assertEquals("bad-prevblk", rejection.rejectReason());
+            assertTrue(indexes.find(moreFailed.hash()).isEmpty());
 
             assertEquals(
                     validTipHash,

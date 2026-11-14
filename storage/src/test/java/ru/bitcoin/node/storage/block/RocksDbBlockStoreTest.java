@@ -19,6 +19,48 @@ class RocksDbBlockStoreTest {
     @TempDir
     Path tempDirectory;
 
+    @Test void duplicateHeaderCannotReplaceCountWhileReusingOriginalPayload() {
+        var original = ru.bitcoin.node.protocol.block.GenesisBlockFactory.create(ru.bitcoin.node.protocol.network.NetworkParametersRegistry.regtest());
+        try (var database = new RocksDbDatabase(tempDirectory.resolve("duplicate-payload-count"))) {
+            var store = new RocksDbBlockStore(database); store.save(original);
+            store.save(new Block(original.header(), List.of()));
+            assertEquals(original, store.find(original.hash()).orElseThrow());
+            assertEquals(1, store.transactionCount(original.hash()).orElseThrow());
+        }
+    }
+
+    @Test void transactionCountSurvivesPruningAndReopen() {
+        var block = ru.bitcoin.node.protocol.block.GenesisBlockFactory.create(ru.bitcoin.node.protocol.network.NetworkParametersRegistry.regtest());
+        var path = tempDirectory.resolve("pruned-count");
+        try (var database = new RocksDbDatabase(path)) {
+            var store = new RocksDbBlockStore(database);
+            store.save(block);
+            assertEquals(1, store.transactionCount(block.hash()).orElseThrow());
+            store.delete(block.hash());
+            assertTrue(store.find(block.hash()).isEmpty());
+        }
+        try (var database = new RocksDbDatabase(path)) {
+            assertEquals(1, new RocksDbBlockStore(database).transactionCount(block.hash()).orElseThrow());
+        }
+    }
+
+    @Test void legacyCountIsMigratedAtomicallyBeforePayloadPruning() {
+        var block = ru.bitcoin.node.protocol.block.GenesisBlockFactory.create(ru.bitcoin.node.protocol.network.NetworkParametersRegistry.regtest());
+        try (var database = new RocksDbDatabase(tempDirectory.resolve("legacy-pruned-count"))) {
+            var store = new RocksDbBlockStore(database); store.save(block);
+            try (var migration = new RocksDbWriteBatch()) {
+                migration.deletePrefix(ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.BLOCK_TX_COUNT);
+                database.write(migration);
+            }
+            try (var abandoned = new RocksDbWriteBatch()) { store.delete(abandoned, block.hash()); }
+            assertTrue(store.find(block.hash()).isPresent());
+            assertEquals(0, database.countPrefix(ru.bitcoin.node.storage.rocksdb.RocksDbNamespaces.BLOCK_TX_COUNT));
+            store.delete(block.hash());
+            assertTrue(store.find(block.hash()).isEmpty());
+            assertEquals(1, store.transactionCount(block.hash()).orElseThrow());
+        }
+    }
+
     @Test
     void shouldSaveAndLoadBlock() {
 

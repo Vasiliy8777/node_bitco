@@ -18,7 +18,7 @@ public final class BlockHeaderValidator {
             long adjustedTimeSeconds,
             NetworkParameters parameters
     ) {
-        validate(header, expectedBits, medianTimePast, adjustedTimeSeconds, parameters, true);
+        validate(header, expectedBits, medianTimePast, adjustedTimeSeconds, parameters, true, 0);
     }
 
     /** BIP23 proposal validation uses all contextual header checks except proof of work. */
@@ -29,18 +29,20 @@ public final class BlockHeaderValidator {
             long adjustedTimeSeconds,
             NetworkParameters parameters
     ) {
-        validate(header, expectedBits, medianTimePast, adjustedTimeSeconds, parameters, false);
+        validate(header, expectedBits, medianTimePast, adjustedTimeSeconds, parameters, false, 0);
     }
 
-    private static void validate(
+    /** Full contextual ordering, including BIP94's lower timestamp bound before future-time rejection. */
+    public static void validate(
             BlockHeader header,
             UInt32 expectedBits,
             long medianTimePast,
             long adjustedTimeSeconds,
             NetworkParameters parameters,
-            boolean checkProofOfWork
+            boolean checkProofOfWork,
+            long minimumTimestamp
     ) {
-        if (medianTimePast < 0) {
+        if (medianTimePast < 0 || minimumTimestamp < 0) {
             throw new IllegalArgumentException(
                     "medianTimePast must not be negative"
             );
@@ -72,13 +74,13 @@ public final class BlockHeaderValidator {
         // Core checks PoW and required difficulty before contextual timestamp
         // rejection. Invalid work must not acquire the non-punishable future reason.
         if (checkProofOfWork && !ProofOfWork.isValid(header, parameters)) {
-            throw new BlockHeaderValidationException("Invalid proof of work");
+            throw new BlockHeaderValidationException("Invalid proof of work", "high-hash");
         }
         if (header.bits().value() != expectedBits.value()) {
             throw new BlockHeaderValidationException(
                     "Unexpected difficulty bits. Expected: 0x"
                             + Long.toHexString(expectedBits.value())
-                            + ", actual: 0x" + Long.toHexString(header.bits().value()));
+                            + ", actual: 0x" + Long.toHexString(header.bits().value()), "bad-diffbits");
         }
 
         /*
@@ -91,9 +93,11 @@ public final class BlockHeaderValidator {
 
             throw new BlockHeaderValidationException(
                     "Block timestamp must be greater than "
-                            + "median time past"
+                            + "median time past", "time-too-old"
             );
         }
+        if (header.timestamp().value() < minimumTimestamp)
+            throw new BlockHeaderValidationException("Block timestamp violates MTP or BIP94 timewarp bound", "time-timewarp-attack");
         long maximumAllowedTimestamp;
 
         try {

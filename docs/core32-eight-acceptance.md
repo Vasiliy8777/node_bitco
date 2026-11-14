@@ -22,8 +22,8 @@
 
 Оставшиеся отличия: [core32-seven-workstreams.md](core32-seven-workstreams.md).
 
-RPC inventory including hidden Core commands: 176 reference names, 55 local
-names, 121 missing names and zero additional names. Categories and complete
+RPC inventory including hidden Core commands: 176 reference names, 74 local
+names, 102 missing names and zero additional names. Categories and complete
 lists: [core32-rpc-method-inventory.md](core32-rpc-method-inventory.md).
 This is a name inventory, not schema/behavior verification.
 

@@ -43,6 +43,10 @@ public final class LegacyScriptVerifier {
     }
     private static boolean verify(Transaction transaction, int inputIndex, byte[] scriptSig, byte[] scriptPubKey,
                                   int flags, ScriptDialect dialect, boolean detailed) {
+        return verify(transaction,inputIndex,scriptSig,scriptPubKey,flags,dialect,detailed,SignatureCheckMode.VERIFY);
+    }
+    public static boolean verify(Transaction transaction,int inputIndex,byte[] scriptSig,byte[] scriptPubKey,
+                                  int flags,ScriptDialect dialect,boolean detailed,SignatureCheckMode mode) {
         java.util.Objects.requireNonNull(dialect);
         if (transaction == null) {
             throw new IllegalArgumentException(
@@ -113,7 +117,7 @@ public final class LegacyScriptVerifier {
                             inputIndex,
                             scriptSig,
                             flags
-                    ).withDialect(dialect);
+                    ).withDialect(dialect).withSignatureCheckMode(mode);
 
             ScriptInterpreter.execute(
                     scriptSig,
@@ -141,7 +145,7 @@ public final class LegacyScriptVerifier {
                             inputIndex,
                             scriptPubKey,
                             flags
-                    ).withDialect(dialect);
+                    ).withDialect(dialect).withSignatureCheckMode(mode);
 
             ScriptInterpreter.execute(
                     scriptPubKey,
@@ -201,7 +205,7 @@ public final class LegacyScriptVerifier {
                             inputIndex,
                             redeemScript,
                             flags
-                    ).withDialect(dialect);
+                    ).withDialect(dialect).withSignatureCheckMode(mode);
 
             ScriptInterpreter.execute(
                     redeemScript,
@@ -286,6 +290,10 @@ public final class LegacyScriptVerifier {
     }
     private static boolean verifyP2shOuter(Transaction transaction, int inputIndex, byte[] scriptSig, byte[] scriptPubKey,
                                            int flags, ScriptDialect dialect, boolean detailed) {
+        return verifyP2shOuter(transaction,inputIndex,scriptSig,scriptPubKey,flags,dialect,detailed,SignatureCheckMode.VERIFY);
+    }
+    public static boolean verifyP2shOuter(Transaction transaction,int inputIndex,byte[] scriptSig,byte[] scriptPubKey,
+                                  int flags,ScriptDialect dialect,boolean detailed,SignatureCheckMode mode) {
         java.util.Objects.requireNonNull(dialect);
         if (transaction == null) {
             throw new IllegalArgumentException(
@@ -355,7 +363,7 @@ public final class LegacyScriptVerifier {
                             inputIndex,
                             scriptSig,
                             flags
-                    ).withDialect(dialect);
+                    ).withDialect(dialect).withSignatureCheckMode(mode);
 
             ScriptInterpreter.execute(
                     scriptSig,
@@ -384,7 +392,7 @@ public final class LegacyScriptVerifier {
                             inputIndex,
                             scriptPubKey,
                             flags
-                    ).withDialect(dialect);
+                    ).withDialect(dialect).withSignatureCheckMode(mode);
 
             ScriptInterpreter.execute(
                     scriptPubKey,
